@@ -1,0 +1,41 @@
+name: ci
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No origin references and no handwritten Spanish
+        run: python3 scripts/check_repo_rules.py
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run pytest
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+        working-directory: dashboard
+      - run: npm run build
+        working-directory: dashboard
+      - name: Committed dashboard/dist must match a fresh build
+        run: git diff --exit-code -- dashboard/dist && test -z "$(git status --porcelain -- dashboard/dist)"
+  installer-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run pytest backend/tests/test_installer_e2e.py
+        env:
+          HOKMA_E2E: "1"

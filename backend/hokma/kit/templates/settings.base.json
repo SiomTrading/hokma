@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "deny": []
+  },
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "allowWrite": [],
+      "denyWrite": [],
+      "denyRead": []
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{GUARD_COMMAND}}"
+          }
+        ]
+      }
+    ]
+  }
+}

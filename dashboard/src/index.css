@@ -1,0 +1,17 @@
+@import "tailwindcss" source("./");
+
+@theme {
+  --color-brand-teal: #00cccc;
+  --color-brand-ink: #101516;
+  --color-brand-orange: #f26038;
+  --color-brand-mist: #f0f5f8;
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Playfair Display", serif;
+}
+
+body {
+  margin: 0;
+  background: var(--color-brand-ink);
+  color: var(--color-brand-mist);
+  font-family: var(--font-sans);
+}
