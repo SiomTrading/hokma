@@ -15,6 +15,7 @@ version and switched with one atomic file replace):
     <data>/claude-config                         isolated CLAUDE_CONFIG_DIR
     <data>/kit-baseline.json                     kit files as last installed (for kit updates)
     <data>/owner.json                            owner and fund names filled into the kit text
+    <data>/workdir                               working folder chosen in the app (wins over HOKMA_HOME)
 """
 import os
 import sys
@@ -26,8 +27,27 @@ SLOTS = ("a", "b")
 
 
 def hokma_home() -> Path:
-    """Working folder (HOKMA_HOME or ~/Hokma)."""
+    """Working folder: the one the owner chose in the app (`<data>/workdir`), else HOKMA_HOME, else ~/Hokma.
+
+    The installer exports HOKMA_HOME on every launch, so a folder chosen in the app has to win over it or the
+    choice would never take effect."""
+    chosen = chosen_workdir()
+    if chosen is not None:
+        return chosen
     return Path(os.environ.get("HOKMA_HOME", Path.home() / "Hokma"))
+
+
+def workdir_pointer() -> Path:
+    """Text file with the working folder chosen in the app. Lives in the protected data dir."""
+    return hokma_data_dir() / "workdir"
+
+
+def chosen_workdir() -> Path | None:
+    try:
+        value = workdir_pointer().read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return Path(value) if value and Path(value).is_absolute() else None
 
 
 def hokma_data_dir() -> Path:

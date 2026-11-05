@@ -90,3 +90,8 @@ def test_the_script_runs_as_a_command_and_fails_on_a_violation(tmp_path):
     spec2.loader.exec_module(mod)
     mod.ROOT = root
     assert mod.main() == 1
+
+
+def test_a_dev_notes_folder_fails_the_check(tmp_path):
+    problems = rules.check(repo(tmp_path, {"dev-notes/a/CONTRACT.md": "internal"}))
+    assert any(line.startswith("dev-notes/") for line in problems)

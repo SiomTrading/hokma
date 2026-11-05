@@ -1,0 +1,103 @@
+/* Design tokens. Dark is the default; `.hk.light` overrides the colors. */
+.hk {
+  --bg: #101516;
+  --blob1: #003f43;
+  --blob2: #3a1a10;
+  --glass: rgba(240, 245, 248, 0.04);
+  --glass-strong: rgba(240, 245, 248, 0.075);
+  --glass-subtle: rgba(240, 245, 248, 0.022);
+  --pop: rgba(20, 27, 29, 0.94);
+  --border: rgba(240, 245, 248, 0.09);
+  --hl: rgba(240, 245, 248, 0.13);
+  --t1: #f0f5f8;
+  --t2: #a8b3b8;
+  --t3: #8a969c;
+  --acc: #00cccc;
+  --acc-h: #33dada;
+  --acc-sub: rgba(0, 204, 204, 0.13);
+  --on-acc: #101516;
+  --org: #f26038;
+  --org-sub: rgba(242, 96, 56, 0.14);
+  --ok: #4fd69c;
+  --ok-sub: rgba(79, 214, 156, 0.13);
+  --warn: #f2a65a;
+  --warn-sub: rgba(242, 166, 90, 0.13);
+  --bad: #ff8a73;
+  --bad-sub: rgba(255, 138, 115, 0.14);
+  --b-user: rgba(0, 204, 204, 0.1);
+  --track: rgba(240, 245, 248, 0.09);
+  --term: rgba(0, 0, 0, 0.38);
+  --up: #00cccc;
+  --down: #f26038;
+  --grid: rgba(240, 245, 248, 0.05);
+  --wm: rgba(240, 245, 248, 0.025);
+  --ag-1: #00cccc;
+  --ag-2: #f26038;
+  --ag-3: #7fd6b4;
+  --ag-4: #f2a65a;
+  --ag-5: #9fb7c2;
+
+  --scrim: rgba(6, 9, 10, 0.55);
+  --shadow-menu: 0 18px 50px rgba(0, 0, 0, 0.35);
+  --shadow-modal: 0 30px 80px rgba(0, 0, 0, 0.45);
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --sbw: 236px;
+  --rpw: 300px;
+
+  --r-pane: 14px;
+  --r-modal: 20px;
+  --r-input: 10px;
+  --r-item: 9px;
+  --r-pill: 999px;
+  --r-card: 12px;
+
+  --font-sans: Montserrat, system-ui, sans-serif;
+  --font-disp: "Playfair Display", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.hk.light {
+  --bg: #f0f5f8;
+  --blob1: #bfeded;
+  --blob2: #fbd9cc;
+  --glass: rgba(255, 255, 255, 0.62);
+  --glass-strong: rgba(255, 255, 255, 0.88);
+  --glass-subtle: rgba(255, 255, 255, 0.42);
+  --pop: rgba(255, 255, 255, 0.97);
+  --border: rgba(16, 21, 22, 0.1);
+  --hl: rgba(255, 255, 255, 0.9);
+  --t1: #101516;
+  --t2: #3f4a4e;
+  --t3: #55636a;
+  --acc: #007a7a;
+  --acc-h: #006060;
+  --acc-sub: rgba(0, 122, 122, 0.1);
+  --on-acc: #ffffff;
+  --org: #b8401c;
+  --org-sub: rgba(184, 64, 28, 0.1);
+  --ok: #14774a;
+  --ok-sub: rgba(20, 119, 74, 0.1);
+  --warn: #8f5200;
+  --warn-sub: rgba(143, 82, 0, 0.1);
+  --bad: #b4321b;
+  --bad-sub: rgba(180, 50, 27, 0.1);
+  --b-user: rgba(0, 122, 122, 0.08);
+  --track: rgba(16, 21, 22, 0.1);
+  --term: rgba(16, 21, 22, 0.05);
+  --up: #007a7a;
+  --down: #b8401c;
+  --grid: rgba(16, 21, 22, 0.06);
+  --wm: rgba(16, 21, 22, 0.035);
+  --ag-1: #007a7a;
+  --ag-2: #b8401c;
+  --ag-3: #14774a;
+  --ag-4: #8f5200;
+  --ag-5: #4a6572;
+}
+
+/* Layout state tokens, driven by classes on the root. */
+.hk.sbc { --sbw: 60px; }
+.hk.sbx { --sbw: 0px; }
+.hk.rpoff { --rpw: 0px; }
+.hk.focus { --sbw: 0px; --rpw: 0px; }

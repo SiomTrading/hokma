@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.0.5
+
+The dashboard is now the full Hokma app, in a glass design with dark and light themes, in Spanish and English.
+
+- Database: the app keeps its state in SQLite (`hokma.db` in the protected data folder) with versioned migrations, and
+  can move to PostgreSQL and back with row counts verified. `owner.json` from 0.0.4 is imported on the first start.
+- First run in five steps: owner and fund names, working folder, Claude connection, database and a final review.
+- Chat: streaming conversations with the student's own `claude`, permission prompts, image and file attachments,
+  voice notes transcribed locally, slash commands, projects, archive and unarchive, and a history that restores
+  attachments and tool lines. A running turn keeps its text when the connection drops and comes back.
+- Projects: create, switch and drop files into the active project. The active project lives in the database.
+- Agents: list, create, edit, switch model and turn on or off. Choosing Opus asks for confirmation, and nothing
+  uses Opus by default. A bar shows the weekly usage limit and turns orange above 80 percent.
+- Routines: scheduled runs of an agent, created from the panel with human confirmation recorded in approvals.
+- Chart: market charts from a public data source, fetched by the backend, with a question box that opens a chat
+  with the chart image attached.
+- Integrated terminal: a real pseudo-terminal per tab, protected by the session token.
+- Learn, extensions, status and settings screens.
+- Onboarding progress (first conversation, first project, first image) is stored in the database.
+- One command runs every end-to-end suite: `npm run e2e` in `dashboard/`.
+- Message catalogs for the dashboard live in `dashboard/src/i18n/messages/`.
+
 ## 0.0.4
 
 - Updates work without a GitHub account; the repository is public. A GitHub login found on the PC is optional and a rejected one is ignored.

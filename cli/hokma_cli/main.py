@@ -25,16 +25,31 @@ def _open_when_ready(url: str, health: str) -> None:
             time.sleep(0.2)
 
 
-def _have_terminal() -> bool:
-    return sys.stdin.isatty() and sys.stdout.isatty()
-
-
 def _ask(prompt: str) -> str:
     """One answer; an empty answer, a closed input or no answer at all mean "not given"."""
     try:
         return input(prompt).strip()
     except EOFError:
         return ""
+
+
+def _mirror_owner_in_profile() -> None:
+    """Keep the profile row in step with owner.json (the database is where the dashboard reads the names)."""
+    from hokma.db.errors import DbError
+    from hokma.db.migrate import current_version, migrate
+    from hokma.db.database import get_database
+    from hokma.kit import owner
+
+    names = owner.load()
+    if not names["owner_name"]:
+        return
+    try:
+        if current_version() == 0:
+            migrate()
+        with get_database().write() as u:
+            u.profile.set_owner(names["owner_name"], names["fund_name"] or None)
+    except DbError as exc:
+        print(f"{t('cli.tag.warn')} {exc}", file=sys.stderr)
 
 
 def _store_owner(owner_name: str, fund_name: str) -> None:
@@ -44,25 +59,11 @@ def _store_owner(owner_name: str, fund_name: str) -> None:
     from hokma.kit.sync import sync_kit
 
     owner.save(owner_name, fund_name)
+    _mirror_owner_in_profile()
     try:
         sync_kit(app_root() / "kit" / "template", version=__version__)
     except (OSError, ValueError) as exc:
         print(f"{t('cli.tag.warn')} {t('cli.owner.sync_failed', error=exc)}", file=sys.stderr)
-
-
-def _first_run_owner() -> None:
-    """First start: with a terminal ask owner name and fund name; without one never wait."""
-    from hokma.kit import owner
-
-    if owner.exists():
-        return
-    if not _have_terminal():
-        _store_owner("", "")
-        return
-    owner_name = _ask(t("cli.owner.ask_name"))
-    fund_name = _ask(t("cli.owner.ask_fund"))
-    _store_owner(owner_name, fund_name)
-    print(t("cli.owner.saved"))
 
 
 def cmd_owner(_: argparse.Namespace) -> int:
@@ -75,17 +76,45 @@ def cmd_owner(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_start(args: argparse.Namespace) -> int:
-    from hokma.core.server import run
+EXIT_DB_MIGRATION = 4
+
+
+def _migrate_db() -> int:
+    """Bring the database to the latest schema (idempotent). 0 on success, 4 on failure with the catalog message."""
+    from hokma.db.errors import MigrationError
+    from hokma.db.migrate import migrate
 
     try:
-        _first_run_owner()
-    except KeyboardInterrupt:                           # nothing was saved: it is asked again next time
-        print()
-        return 130
-    url = f"http://{DEFAULT_HOST}:{args.port}/"
-    if not args.no_browser:
-        threading.Thread(target=_open_when_ready, args=(url, url + "health"), daemon=True).start()
+        migrate()
+    except MigrationError as exc:
+        print(f"{t('cli.tag.fail')} {exc}", file=sys.stderr)
+        return EXIT_DB_MIGRATION
+    return 0
+
+
+def cmd_db(_: argparse.Namespace) -> int:
+    code = _migrate_db()
+    if code == 0:
+        from hokma.db.migrate import current_version
+
+        print(t("db.migrate.done", version=current_version()))
+    return code
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    """Start the server. The first run (names, folder, database, Claude) happens in the app, not in the console."""
+    from hokma.core.server import run
+    from hokma.rpc.ws import SESSION_TOKEN
+
+    code = _migrate_db()
+    if code:
+        return code
+    base = f"http://{DEFAULT_HOST}:{args.port}/"
+    url = f"{base}#t={SESSION_TOKEN}"
+    if args.no_browser:
+        print(url, flush=True)
+    else:
+        threading.Thread(target=_open_when_ready, args=(url, base + "health"), daemon=True).start()
     run(port=args.port)
     return 0
 
@@ -151,6 +180,9 @@ def cmd_post_update(_: argparse.Namespace) -> int:
 
     report = sync_kit(app_root() / "kit" / "template", version=__version__)
     write_settings()
+    code = _migrate_db()                                  # after the kit sync: new agent files are seeded too
+    if code:
+        return code
     print(json.dumps(report.to_dict()))
     return 0
 
@@ -293,6 +325,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("owner", help="Change your name and your fund's name (needs an interactive terminal)"
                    ).set_defaults(fn=cmd_owner)
     sub.add_parser("version", help="Print the version").set_defaults(fn=cmd_version)
+    d = sub.add_parser("db", help="Database tools")
+    dsub = d.add_subparsers(dest="db_cmd", required=True)
+    dsub.add_parser("migrate", help="Apply pending database migrations").set_defaults(fn=cmd_db)
 
     u = sub.add_parser("update", help="Update Hokma (runtime only; your work is never touched)")
     u.add_argument("--from", dest="source", help="override: local manifest or https URL (tests)")

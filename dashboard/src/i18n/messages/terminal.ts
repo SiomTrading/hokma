@@ -1,0 +1,36 @@
+import { defineMessages } from "@/i18n";
+
+export default defineMessages({
+  es: {
+    "term.tabs": "Terminales abiertas",
+    "term.tab": "Terminal {n}",
+    "term.tabClose": "Cerrar terminal {n}",
+    "term.screen": "Terminal {n}",
+    "term.exited": "El proceso terminó (código {code}). Cierra esta pestaña o abre una nueva.",
+    "term.exitedNoCode": "El proceso terminó. Cierra esta pestaña o abre una nueva.",
+    "term.disconnected": "Se perdió la conexión con la terminal. Abre una nueva.",
+    "term.error.too_many_terminals": "Hay demasiadas terminales abiertas. Cierra alguna y vuelve a intentarlo.",
+    "term.error.pty_unavailable": "Esta computadora no tiene el componente de terminal necesario.",
+    "term.error.spawn_failed": "No se pudo iniciar la terminal.",
+    "term.error.unknown": "La terminal falló.",
+    "term.empty.title": "No hay terminales abiertas",
+    "term.empty.description": "Abre una terminal en tu carpeta de trabajo.",
+    "term.empty.action": "Nueva terminal",
+  },
+  en: {
+    "term.tabs": "Open terminals",
+    "term.tab": "Terminal {n}",
+    "term.tabClose": "Close terminal {n}",
+    "term.screen": "Terminal {n}",
+    "term.exited": "The process ended (code {code}). Close this tab or open a new one.",
+    "term.exitedNoCode": "The process ended. Close this tab or open a new one.",
+    "term.disconnected": "The connection to the terminal was lost. Open a new one.",
+    "term.error.too_many_terminals": "Too many terminals are open. Close one and try again.",
+    "term.error.pty_unavailable": "This computer is missing the terminal component.",
+    "term.error.spawn_failed": "The terminal could not be started.",
+    "term.error.unknown": "The terminal failed.",
+    "term.empty.title": "No terminals open",
+    "term.empty.description": "Open a terminal in your working folder.",
+    "term.empty.action": "New terminal",
+  },
+});

@@ -1,17 +1,43 @@
 @import "tailwindcss" source("./");
+@import "./design/fonts.css";
+@import "./design/tokens.css";
+@import "./design/design.css";
+@import "./shell/shell.css";
 
-@theme {
+@theme inline {
   --color-brand-teal: #00cccc;
   --color-brand-ink: #101516;
   --color-brand-orange: #f26038;
   --color-brand-mist: #f0f5f8;
-  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Playfair Display", serif;
+  --font-sans: Montserrat, system-ui, sans-serif;
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-bg: var(--bg);
+  --color-glass: var(--glass);
+  --color-glass-strong: var(--glass-strong);
+  --color-glass-subtle: var(--glass-subtle);
+  --color-pop: var(--pop);
+  --color-line: var(--border);
+  --color-t1: var(--t1);
+  --color-t2: var(--t2);
+  --color-t3: var(--t3);
+  --color-acc: var(--acc);
+  --color-acc-h: var(--acc-h);
+  --color-acc-sub: var(--acc-sub);
+  --color-on-acc: var(--on-acc);
+  --color-org: var(--org);
+  --color-org-sub: var(--org-sub);
+  --color-ok: var(--ok);
+  --color-ok-sub: var(--ok-sub);
+  --color-warn: var(--warn);
+  --color-warn-sub: var(--warn-sub);
+  --color-bad: var(--bad);
+  --color-bad-sub: var(--bad-sub);
+  --color-track: var(--track);
+  --color-up: var(--up);
+  --color-down: var(--down);
 }
 
-body {
-  margin: 0;
-  background: var(--color-brand-ink);
-  color: var(--color-brand-mist);
-  font-family: var(--font-sans);
-}
+html[data-theme="light"] body { background: #f0f5f8; }
+html[data-theme="dark"] body { background: #101516; }

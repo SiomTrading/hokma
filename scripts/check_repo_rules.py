@@ -8,6 +8,9 @@
    lives in the message catalogs (SPANISH_ALLOWED). Detected by accented letters, inverted punctuation and a
    list of common Spanish words.
 
+3. No internal developer notes in the repository: a `dev-notes/` folder fails the check, because the release
+   package is a `git archive` of the tree and would publish it.
+
 Exit code 1 and one line per violation (path:line: rule: text) when something is found.
 """
 import hashlib
@@ -46,6 +49,7 @@ SPANISH_ALLOWED = (
     "backend/hokma/catalog/",
     "installer/messages/",
     "dashboard/src/i18n/",
+    "kit/template/docs/learn/es/",
     "scripts/check_repo_rules.py",
     "backend/tests/test_repo_rules.py",
 )
@@ -110,6 +114,8 @@ def tracked_files(root: Path) -> list[str]:
 
 def check(root: Path, files: list[str] | None = None) -> list[str]:
     problems: list[str] = []
+    if (root / "dev-notes").exists():
+        problems.append("dev-notes/:0: internal notes must live outside the repository (the release archive would publish them)")
     for rel in files if files is not None else tracked_files(root):
         if not (root / rel).exists() or rel.startswith(SKIPPED) or Path(rel).suffix in BINARY_SUFFIXES:
             continue

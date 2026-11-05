@@ -4,6 +4,8 @@ import secrets
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from hokma.core.origin import token_matches
+
 router = APIRouter()
 
 SESSION_TOKEN = secrets.token_urlsafe(24)
@@ -11,7 +13,7 @@ SESSION_TOKEN = secrets.token_urlsafe(24)
 
 @router.websocket("/rpc")
 async def rpc(ws: WebSocket) -> None:
-    if not secrets.compare_digest(ws.query_params.get("token", ""), SESSION_TOKEN):
+    if not token_matches(ws.query_params.get("token", ""), SESSION_TOKEN):
         await ws.close(code=4401)
         return
     await ws.accept()

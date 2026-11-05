@@ -139,49 +139,14 @@ def test_bad_owner_file_means_defaults(env):
 
 # ---- first start and `hokma owner` --------------------------------------------------------
 
-def test_start_without_a_terminal_never_waits_and_saves_empty(env, monkeypatch):
-    monkeypatch.setattr(cli, "_have_terminal", lambda: False)
-    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("must not ask without a terminal"))
-    cli._first_run_owner()
-    assert json.loads((env / "data" / "owner.json").read_text()) == {"fund_name": "", "owner_name": ""}
-    assert "# Hokma: the fund" in (env / "work" / "HOKMA.md").read_text(encoding="utf-8")
+def test_start_never_asks_in_the_console_and_prints_the_token_url(env, monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("start must not ask anything"))
+    monkeypatch.setattr("hokma.core.server.run", lambda **_: None)
+    assert cli.main(["start", "--no-browser", "--port", "8799"]) == 0
+    from hokma.rpc.ws import SESSION_TOKEN
 
-
-@pytest.mark.parametrize("lang", ["es", "en"])
-def test_start_with_a_terminal_asks_owner_then_fund(env, monkeypatch, capsys, lang):
-    monkeypatch.setenv("HOKMA_LANG", lang)
-    monkeypatch.setattr(cli, "_have_terminal", lambda: True)
-    prompts, answers = [], iter(["Ana Torres", "Torres Capital"])
-
-    def fake_input(prompt=""):
-        prompts.append(prompt)
-        return next(answers)
-
-    monkeypatch.setattr("builtins.input", fake_input)
-    cli._first_run_owner()
-    out = capsys.readouterr().out
-    assert prompts == [t("cli.owner.ask_name"), t("cli.owner.ask_fund")]
-    assert t("cli.owner.saved") in out
-    assert owner.load() == NAMED
-    assert "Torres Capital" in (env / "work" / "HOKMA.md").read_text(encoding="utf-8")
-    prompts.clear()
-    cli._first_run_owner()                                              # already stored: asks nothing
-    assert prompts == []
-
-
-def test_empty_answers_and_closed_input_store_empty_names(env, monkeypatch):
-    monkeypatch.setattr(cli, "_have_terminal", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda *_: "")
-    cli._first_run_owner()
-    assert owner.load() == {"owner_name": "", "fund_name": ""} and owner.exists()
-
-    def closed(*_):
-        raise EOFError
-
-    (env / "data" / "owner.json").unlink()
-    monkeypatch.setattr("builtins.input", closed)
-    cli._first_run_owner()
-    assert owner.exists()
+    assert capsys.readouterr().out.strip() == f"http://127.0.0.1:8799/#t={SESSION_TOKEN}"
+    assert not owner.exists()
 
 
 def test_owner_command_needs_a_terminal_and_asks_again_with_one(env, monkeypatch):

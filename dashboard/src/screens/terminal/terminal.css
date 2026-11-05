@@ -1,0 +1,14 @@
+.term-panel { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.term-tabs { display: flex; gap: 4px; padding: 3px 8px; border-bottom: 1px solid var(--border); overflow-x: auto; flex: none; }
+.term-tabs .tab { height: 24px; border-radius: 7px; }
+.term-tabs .tab .tl { font-size: 11px; padding-left: 9px; }
+.term-area { flex: 1; min-height: 0; overflow: hidden; padding: 6px 0 4px 14px; }
+.term-host { width: 100%; height: 100%; }
+.term-host .xterm { height: 100%; }
+.term-host .xterm-viewport { background: transparent !important; }
+.term-host .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.term-host .xterm-viewport::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.term-host .xterm-cursor-layer, .term-host .xterm-rows { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.term-close-single { position: absolute; top: 4px; right: 8px; width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--t3); cursor: pointer; font-size: 14px; line-height: 1; opacity: 0; transition: opacity .15s; }
+.term-panel:hover .term-close-single, .term-close-single:focus-visible { opacity: 1; }
+.term-close-single:hover { background: var(--glass-subtle); color: var(--t1); }

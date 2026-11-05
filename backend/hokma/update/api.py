@@ -8,11 +8,11 @@
 """
 import asyncio
 import json
-import secrets
 import sys
 
 from fastapi import APIRouter, Header, HTTPException
 
+from hokma.core.origin import token_matches
 from hokma.i18n import t
 from hokma.rpc.ws import SESSION_TOKEN
 
@@ -22,7 +22,7 @@ UPDATE_TIMEOUT_SECONDS = 1800
 
 @router.post("/api/update")
 async def update(x_hokma_token: str = Header(default="")) -> dict:
-    if not secrets.compare_digest(x_hokma_token, SESSION_TOKEN):
+    if not token_matches(x_hokma_token, SESSION_TOKEN):
         raise HTTPException(status_code=401, detail=t("update.api.bad_token"))
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-I", "-m", "hokma_cli.main", "update", "--json",
