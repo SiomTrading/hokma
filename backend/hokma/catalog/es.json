@@ -67,6 +67,13 @@
   "doctor.extensions.mirror": "La copia de extensions.json en tu carpeta de trabajo difiere de la protegida (se usa la protegida). Cambia las extensiones con: hokma ext ...",
   "doctor.extensions.ok": "{plugins} plugins, {marketplaces} marketplaces, {servers} servidores MCP",
 
+  "shutdown.err.unauthorized": "La sesión no es válida. Entra de nuevo con el icono Hokma.",
+  "shutdown.err.nonce": "La orden de apagado no es válida o venció. Inténtalo de nuevo.",
+  "shutdown.err.origin": "Hokma solo se apaga desde su propio panel.",
+  "shutdown.err.in_use": "Hokma está abierto con tu sesión en otra pestaña o navegador. Sigue allí, o apágalo desde allí.",
+  "shutdown.err.too_soon": "Hokma ya recibió una orden de apagado hace poco. Espera unos segundos.",
+  "shutdown.journal.panel": "Hokma se apagó desde el panel",
+  "shutdown.journal.entry": "Hokma se apagó desde la pantalla de entrada",
   "update.invalid_version": "versión inválida: {version}",
   "update.manifest_not_object": "el manifiesto de versión no es un objeto JSON",
   "update.manifest_missing": "al manifiesto de versión le falta: {fields}",
@@ -102,6 +109,25 @@
   "update.api.bad_token": "token inválido",
   "update.api.timeout": "La actualización tardó demasiado; sigues con la versión anterior",
   "update.api.failed": "La actualización falló",
+  "cli.start.bad_handoff": "No se pudo continuar Hokma tras la actualización: falló el traspaso de la sesión. Vuelve a abrir Hokma con: hokma start",
+  "supervisor.restarting": "Reiniciando Hokma...",
+  "supervisor.crashed": "Hokma se detuvo de forma inesperada. Se inicia de nuevo en {seconds} s.",
+  "supervisor.gave_up": "Hokma no pudo iniciar. El motivo está en {path}",
+  "supervisor.port_busy": "El puerto {port} ya está en uso. Puede que Hokma ya esté abierto: busca su pestaña, o inícialo en otro puerto con: hokma start --port NUMERO",
+  "cli.start.running": "Hokma está abierto en segundo plano en el puerto {port}. Para cerrarlo: hokma stop",
+  "cli.start.already_running": "Hokma ya está abierto en el puerto {port}. Se abre en tu navegador.",
+  "cli.start.address_taken": "Otro programa está usando la dirección de Hokma (puerto {port}). No se abre el navegador. Ciérralo o reinicia el computador y vuelve a abrir Hokma.",
+  "cli.start.failed": "Hokma no pudo iniciar. El motivo está en {path}",
+  "cli.stop.done": "Hokma está cerrado.",
+  "cli.stop.not_running": "Hokma no está abierto.",
+  "cli.stop.unreachable": "Hokma está abierto pero no respondió a la orden de cerrar. Inténtalo de nuevo en unos segundos.",
+  "cli.stop.timeout": "Hokma no cerró a tiempo. Inténtalo de nuevo con: hokma stop",
+  "cli.shortcuts.created": "Acceso de Hokma creado.",
+  "cli.shortcuts.legacy_left": "No pude borrar estos accesos viejos; bórralos a mano: {paths}",
+  "cli.shortcuts.failed": "No pude crear el acceso de Hokma: {error}",
+  "supervisor.no_port": "No hay ningún puerto libre de {first} a {last}. Cierra los programas que los usan e inténtalo de nuevo.",
+  "supervisor.already_running": "Hokma ya está abierto en el puerto {port}.",
+  "supervisor.no_control": "Hokma no pudo abrir su canal de control local. El motivo está en {path}",
   "update.github.no_access": "No pude llegar al repositorio de Hokma en GitHub. Revisa tu conexión y repite la actualización.",
   "update.github.no_release": "Todavía no hay una versión publicada de Hokma.",
   "update.github.rate_limited": "GitHub limitó las consultas por ahora. Intenta en unos minutos.",
@@ -310,6 +336,30 @@
   "market.error.bad_timeframe": "Esa temporalidad no está disponible.",
   "market.error.bad_symbol": "Ese símbolo tiene caracteres que no se permiten.",
   "market.error.unauthorized": "Abre Hokma con hokma start.",
+  "market.error.limit": "Esta fuente llegó a su límite de símbolos. Cierra un gráfico o enciende otra fuente en Conexiones.",
+  "market.error.down": "El precio en vivo no está disponible ahora. Hokma sigue intentando.",
+  "market.error.bad_request": "El precio en vivo no entendió esa solicitud.",
+  "market.error.not_entitled": "Tu acceso a esta fuente no incluye ese símbolo. Abre Conexiones para revisarlo.",
+  "market.error.interval_months": "Los meses aún no están disponibles",
+  "market.error.interval_invalid": "Escribe un número y una unidad: 30s, 7m, 3h, 2D, 1W",
+  "market.error.interval_unavailable": "{interval} necesita barras de {base}, que {source} no tiene para {symbol}",
+  "market.error.seconds_need_ticks": "Esta fuente da barras de 1 minuto como máximo. Conecta una fuente en vivo para ver segundos",
+  "market.error.range_ticks_unknown": "Este activo no tiene un tamaño de tick conocido: usa el rango en precio, por ejemplo 2.5rp",
+  "connections.error.auth_failed": "El proveedor no aceptó la llave. Revísala e inténtalo de nuevo.",
+  "connections.error.no_key": "Guarda primero una llave para esta fuente.",
+  "connections.error.timeout": "No llegaron datos en 10 segundos. Inténtalo más tarde.",
+  "connections.error.unreachable": "No se pudo llegar al proveedor. Revisa tu conexión.",
+  "connections.error.rate_limited": "El proveedor está limitando las solicitudes. Espera un minuto e inténtalo de nuevo.",
+  "connections.error.connection_limit": "El proveedor permite una conexión por cuenta. Cierra la otra e inténtalo de nuevo.",
+  "connections.error.store_unavailable": "Almacén de credenciales del sistema no disponible",
+  "connections.error.unavailable": "Esta fuente no está disponible en esta versión.",
+  "connections.error.unknown_provider": "Esa fuente no existe.",
+  "connections.error.bad_key": "La llave está vacía o tiene caracteres no permitidos.",
+  "connections.error.bad_priority": "Ese orden no coincide con las fuentes de este grupo.",
+  "connections.error.token_invalid": "Token no válido",
+  "connections.error.access_revoked": "Acceso revocado",
+  "connections.error.other_device": "Conectado desde otro dispositivo",
+  "connections.error.bad_request": "Esa solicitud no es válida.",
 
   "agents.error.agent_not_found": "Ese agente no existe.",
   "agents.error.agent_invalid": "Los datos del agente no son válidos.",
@@ -358,5 +408,96 @@
   "voice.error.transcribe_failed": "No se pudo transcribir el audio. Intenta grabar de nuevo.",
   "voice.error.offline": "El modelo de voz se descarga una sola vez y no hay conexión a internet. Conéctate e intenta de nuevo.",
   "voice.error.disk": "No se pudo guardar el modelo de voz. Libera espacio en el disco e intenta de nuevo.",
-  "voice.error.download_failed": "Falló la descarga del modelo de voz. Intenta de nuevo en un momento."
+  "voice.error.download_failed": "Falló la descarga del modelo de voz. Intenta de nuevo en un momento.",
+
+  "hardblock.delete": "Hokma bloqueó esto: borrar archivos o carpetas ({target}).",
+
+  "hardblock.truncate": "Hokma bloqueó esto: vaciar un archivo que tiene contenido ({target}).",
+
+  "hardblock.hokma_internal": "Hokma bloqueó esto: los archivos y ajustes internos de Hokma no son para que el agente los lea o cambie ({target}).",
+
+  "hardblock.force_push": "Hokma bloqueó esto: forzar o borrar el historial remoto de Git ({target}).",
+
+  "hardblock.outside_workdir": "Hokma bloqueó esto: escribir fuera de la carpeta de trabajo o tocar discos ({target}).",
+
+  "hardblock.secrets": "Hokma bloqueó esto: leer llaves y credenciales guardadas ({target}).",
+
+  "hardblock.real_money": "Hokma bloqueó esto: enviar órdenes con dinero real ({target}).",
+
+  "hardblock.hint.delete": "No borres. Mueve lo que ya no sirve a la papelera de Hokma con la herramienta trash_move; el dueño puede restaurarlo.",
+
+  "hardblock.hint.truncate": "No vacíes archivos. Escribe el contenido nuevo, o mueve el archivo a la papelera de Hokma con trash_move.",
+
+  "hardblock.hint.hokma_internal": "Trabaja solo con los archivos de la carpeta de trabajo. Los ajustes y lo interno de Hokma los cambia el dueño en la app.",
+
+  "hardblock.hint.force_push": "Haz push sin forzar. Si hay que cambiar el historial, pídele al dueño que lo haga.",
+
+  "hardblock.hint.outside_workdir": "Escribe dentro de la carpeta de trabajo. Si el dueño quiere un archivo en otro lugar, dilo y que él lo mueva.",
+
+  "hardblock.hint.secrets": "Las llaves las gestiona el dueño en la app y nunca se muestran al agente. Pídele que las use desde allí.",
+
+  "hardblock.hint.real_money": "Las órdenes reales las envía el dueño desde la app, nunca el agente. Usa papel (paper trading) o backtests.",
+
+  "hardblock.error": "Hokma: error de protección ({error}); bloqueado por seguridad.",
+
+  "permissions.err.bad_mode": "El modo de permisos debe ser ask o auto.",
+
+  "permissions.err.not_found": "Ese elemento no existe.",
+
+  "permissions.err.restore_failed": "No se pudo restaurar: {error}",
+
+  "permissions.err.confirm_required": "Esta acción necesita la confirmación del dueño.",
+
+  "permissions.err.no_git": "Esta carpeta no tiene un repositorio Git seguro, así que no hay puntos de restauración.",
+
+  "permissions.err.bad_path": "Esa ruta no es válida para este punto de restauración.",
+
+  "permissions.err.owner_confirmation_required": "Solo la pestaña de Hokma que tienes abierta puede hacer esto. Apaga Hokma con el botón Apagar Hokma y ábrelo de nuevo con el icono Hokma.",
+
+  "permissions.err.bad_owner_nonce": "Esa confirmación del dueño no es válida.",
+
+  "permissions.err.owner_secret_required": "Esta pestaña no puede confirmar al dueño: no se abrió con el enlace de inicio de Hokma. Apaga Hokma con el botón Apagar Hokma y ábrelo de nuevo con el icono Hokma.",
+
+  "permissions.err.owner_already_registered": "Otra pestaña ya confirmó al dueño en este arranque de Hokma. Apaga Hokma con el botón Apagar Hokma y ábrelo de nuevo con el icono Hokma.",
+  "permissions.err.resume_denied": "Hokma no pudo recuperar tu sesión guardada. Abre Hokma desde su acceso del escritorio.",
+  "permissions.err.session_revoked": "Hokma cerró la sesión guardada porque se usó una copia vieja. Abre Hokma desde su acceso del escritorio para entrar de nuevo.",
+  "permissions.err.handoff_origin": "Hokma solo entrega el código desde la dirección numérica de este equipo.",
+
+  "permissions.err.unknown_point": "Ese punto de restauración no existe.",
+
+  "permissions.journal.mode": "Modo de permisos cambiado a {mode}",
+
+  "permissions.journal.trash_restored": "Restaurado desde la papelera de Hokma: {name}",
+
+  "permissions.journal.trash_purged": "Borrado definitivamente de la papelera de Hokma: {name}",
+
+  "permissions.journal.trash_emptied": "Papelera de Hokma vaciada ({count} elementos)",
+
+  "permissions.journal.checkpoint_restored": "Restaurado desde un punto de restauración: {name}",
+
+  "trash.err.outside": "Solo se pueden mover a la papelera archivos dentro de la carpeta de trabajo.",
+
+  "trash.err.protected": "Esa ruta es de Hokma y no se puede mover.",
+
+  "trash.err.repo_folders": "Hokma no puede mover esto a la papelera; protege las carpetas del repositorio y de la configuración.",
+
+  "trash.err.missing": "Esa ruta no existe.",
+
+  "trash.err.reason": "Di el motivo en una frase corta.",
+
+  "trash.moved": "Movido a la papelera de Hokma: {path} (id {id}). El dueño puede restaurarlo en Ajustes > Papelera.",
+
+  "protection.delete": "Borrar archivos o carpetas",
+
+  "protection.truncate": "Vaciar archivos que tienen contenido",
+
+  "protection.hokma_internal": "Archivos, ajustes y papelera internos de Hokma",
+
+  "protection.force_push": "Forzar o borrar el historial remoto de Git",
+
+  "protection.outside_workdir": "Escribir fuera de la carpeta de trabajo y tocar discos",
+
+  "protection.secrets": "Leer llaves y credenciales guardadas",
+
+  "protection.real_money": "Enviar órdenes con dinero real"
 }

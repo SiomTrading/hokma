@@ -48,7 +48,9 @@ def test_empty_query_returns_well_known_tickers_without_calling_the_provider(cli
 def test_symbol_search_returns_the_provider_matches(client):
     body = client.get("/api/market/symbols?q=nasdaq", headers=AUTH).json()
     assert body["suggested"] is False
-    assert {"symbol": "NQ=F", "name": "Nasdaq 100 Dec 26", "kind": "future", "exchange": "Chicago Mercantile Exchange"} in body["items"]
+    nq = next(item for item in body["items"] if item["symbol"] == "NQ=F")
+    assert (nq["name"], nq["kind"], nq["exchange"]) == ("Nasdaq 100 Dec 26", "future", "Chicago Mercantile Exchange")
+    assert nq["asset_class"] == "future" and nq["route"]["data_state"] == "delayed"
 
 
 def test_symbol_search_with_no_match_is_200_and_empty(client):

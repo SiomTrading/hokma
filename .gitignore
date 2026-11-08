@@ -11,3 +11,6 @@ dashboard/dist/*.map
 *.sqlite-wal
 *.sqlite-shm
 /dist/
+
+# built by e2e/parity/capture.mjs, regenerated on demand
+dashboard/e2e/artifacts/parity-dist/

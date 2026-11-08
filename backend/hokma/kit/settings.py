@@ -5,8 +5,11 @@ Controls, from strongest to weakest. None of the first three depends on the text
 1. Sandbox (Claude Code `sandbox` settings): Bash runs sandboxed with writes allowed only in the
    working folder; the data folder, the config, the launcher and the student's extensions file are in
    `filesystem.denyWrite`. Not available on native Windows: `hokma doctor` warns.
-2. PreToolUse hook `hokma/kit/guard.py`: deterministic, resolves real paths for Edit, MultiEdit, Write
-   and NotebookEdit and blocks the protected paths. Fails CLOSED.
+2. PreToolUse hooks, both fail CLOSED:
+   `hokma/kit/guard.py` resolves real paths for Edit, MultiEdit, Write and NotebookEdit and blocks the
+   protected paths; `hokma/kit/hardblock.py` (matcher `.*`, every tool) applies the always-on protections of
+   both permission modes. The template pins `"disableAllHooks": false` and Hokma launches `claude` with
+   `--setting-sources user`, so a settings file in the working folder cannot switch the hooks off.
 3. Regeneration: the file is rebuilt from the package template at EVERY Claude launch and passed
    explicitly with --settings, so an edit by the agent does not survive the next launch.
 4. `permissions.deny` for Edit/Write/Bash on those paths. The Bash substring rule is best effort
@@ -26,7 +29,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from hokma.core.config import (claude_config_dir, hokma_data_dir,
+from hokma.core.config import (claude_config_dir, hokma_data_dir, hokma_home,
                                launcher_path, workdir_hokma_dir)
 from hokma.kit import extensions
 from hokma.kit import writable
@@ -42,6 +45,7 @@ def _abs_rule_path(p: Path) -> str:
 
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "settings.base.json"
 GUARD_FILE = Path(__file__).resolve().parent / "guard.py"
+HARDBLOCK_FILE = Path(__file__).resolve().parent / "hardblock.py"
 
 
 def protected_paths() -> list[Path]:
@@ -59,6 +63,15 @@ def guard_command() -> str:
     args = " ".join(f"--protect {shlex.quote(str(p))}" for p in protected_paths())
     return (f"cd {shlex.quote(str(hokma_data_dir()))} && "
             f"{shlex.quote(sys.executable)} -I {shlex.quote(str(GUARD_FILE))} {args} || exit 2")
+
+
+def hardblock_command() -> str:
+    """Hook command of the always-on protections: same launch as the guard (absolute path, `-I`, from the data
+    dir, `|| exit 2`), plus the folders it needs: data dir, working folder and the protected paths."""
+    args = [f"--data {shlex.quote(str(hokma_data_dir()))}", f"--workdir {shlex.quote(str(hokma_home()))}"]
+    args += [f"--protect {shlex.quote(str(p))}" for p in protected_paths()]
+    return (f"cd {shlex.quote(str(hokma_data_dir()))} && "
+            f"{shlex.quote(sys.executable)} -I {shlex.quote(str(HARDBLOCK_FILE))} {' '.join(args)} || exit 2")
 
 
 def sandbox_available() -> bool:
@@ -83,8 +96,11 @@ def build_settings() -> dict:
     else:
         sandbox["enabled"] = False  # native Windows has no sandbox; doctor warns
 
-    hook = settings["hooks"]["PreToolUse"][0]["hooks"][0]
-    hook["command"] = hook["command"].replace("{{GUARD_COMMAND}}", guard_command())
+    commands = {"{{GUARD_COMMAND}}": guard_command(), "{{HARDBLOCK_COMMAND}}": hardblock_command()}
+    for group in settings["hooks"]["PreToolUse"]:
+        for hook in group["hooks"]:
+            for placeholder, command in commands.items():
+                hook["command"] = hook["command"].replace(placeholder, command)
 
     # Student extensions: only these two keys, merged last, never able to touch the locks above.
     student, _problems = extensions.load()

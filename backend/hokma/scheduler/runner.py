@@ -19,12 +19,13 @@ from hokma.engine import stream
 from hokma.engine.process import ClaudeProcess, find_claude
 from hokma.i18n import t
 from hokma.kit.launch import LaunchSpec, prepare_claude_launch
+from hokma.permissions import checkpoints, guard_log, modes
 from hokma.scheduler import schedule
 
 log = logging.getLogger("hokma.scheduler")
 
 RUN_FLAGS = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose",
-             "--permission-prompt-tool", "stdio", "--permission-mode", "default"]
+             "--permission-prompt-tool", "stdio"]
 SECRET_ENV = ("HOKMA_SESSION_TOKEN", "HOKMA_TOKEN")
 MAX_SUMMARY = 3900
 SYSTEM = Actor.system("scheduler")
@@ -116,10 +117,18 @@ class JobRunner:
         spec = self.launch()
         env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV and (not self.session_token or v != self.session_token)}
         env.update(spec.env)
+        env.update(modes.work_env(spec.cwd, task_id=str(task_id)))
         claude = self.claude_bin or find_claude(env)
         if not claude:
             raise _RunFailed(t("sched.error.no_claude"))
-        argv = [claude, *spec.args, *RUN_FLAGS, "--model", model, "--agent", job.agent_slug]
+        mode = modes.current_mode(self.db)                      # the same mode as the chat: profile.permission_mode
+        if modes.snapshots_wanted(mode):
+            try:
+                await asyncio.to_thread(checkpoints.take, spec.cwd, f"task-{task_id}")
+            except Exception:
+                log.exception("restore point before %s failed", job.name)
+        argv = [claude, *spec.args, *RUN_FLAGS, "--permission-mode", modes.flag_for(mode), "--model", model,
+                "--agent", job.agent_slug]
         proc = await ClaudeProcess.spawn(argv, env, spec.cwd)
         try:
             with self.db.write() as u:
@@ -133,7 +142,9 @@ class JobRunner:
                 if msg is None:
                     raise _RunFailed(t("sched.error.exited", detail=proc.stderr_tail()[-300:]))
                 kind = msg.get("type")
-                if kind == "control_request":
+                if kind == "user":
+                    self._record_blocks()
+                elif kind == "control_request":
                     await self._deny(proc, job, task_id, msg)
                 elif kind == "assistant":
                     text = stream.assistant_text(msg)
@@ -145,7 +156,15 @@ class JobRunner:
                         raise _RunFailed(str(msg.get("result") or msg.get("subtype") or "error")[:500], usage)
                     return str(msg.get("result") or last_text or ""), usage
         finally:
+            self._record_blocks()
             await proc.terminate()
+
+    def _record_blocks(self) -> None:
+        """Refusals of the always-on protections during this run go to `guard_events` (nobody watches a chat)."""
+        try:
+            guard_log.drain(self.db)
+        except Exception:
+            log.exception("could not read the protection log")
 
     async def _deny(self, proc: ClaudeProcess, job: ScheduledJob, task_id: int, msg: dict[str, Any]) -> None:
         request = msg.get("request") or {}

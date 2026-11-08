@@ -125,7 +125,10 @@ async function scenario(chromium, locale, dist) {
   try {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 940 } });
     await ctx.addInitScript(([token, loc]) => {
-      localStorage.setItem("hokma.token", token);
+      if (!window.name && window.location.protocol.startsWith("http")) {                           // the way a handoff gives a fresh tab its session, never a storage
+        const u = window.location.pathname + window.location.search;
+        window.name = "hokma-handoff:" + JSON.stringify({ o: window.location.origin, u, t: token });
+      }
       localStorage.setItem("hokma.locale", loc);
     }, [server.token, locale]);
     const page = await ctx.newPage();

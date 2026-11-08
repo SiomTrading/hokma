@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Input, Isotype, NavItem } from "@/design";
 import { useI18n } from "@/i18n";
+import { ShutdownDialog } from "@/screens/system/ShutdownDialog";
 import { SIDEBAR_SCREENS, BUILTIN_SCREENS } from "./screens";
 import { Slot } from "./Slot";
 import { formatShortcut, getShortcut } from "./shortcuts";
@@ -8,6 +10,7 @@ import { useShell } from "./store";
 export function Sidebar() {
   const { t } = useI18n();
   const shell = useShell();
+  const [confirmingShutdown, setConfirmingShutdown] = useState(false);
   const activeScreen = shell.tabs.find((tab) => tab.key === shell.activeKey)?.screen;
 
   return (
@@ -45,6 +48,14 @@ export function Sidebar() {
       <div className="sep" />
       <NavItem icon="learn" iconSize={16} label={t("nav.learn")} active={activeScreen === "learn"} onClick={() => shell.openScreen("learn")} />
       <NavItem icon="settings" iconSize={16} label={t("nav.settings")} onClick={() => shell.openSettings()} />
+      <NavItem icon="power" iconSize={16} label={t("nav.shutdown")} title={t("nav.shutdown")} onClick={() => setConfirmingShutdown(true)} />
+      {confirmingShutdown ? (
+        <ShutdownDialog
+          withSession
+          onClose={() => setConfirmingShutdown(false)}
+          onError={(text) => shell.toast({ tone: "bad", text })}
+        />
+      ) : null}
     </aside>
   );
 }

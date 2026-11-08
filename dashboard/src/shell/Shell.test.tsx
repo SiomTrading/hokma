@@ -38,7 +38,8 @@ describe("shell loads", () => {
   it("shows the sign-in notice when there is no session token", () => {
     clearToken();
     render(<App />);
-    expect(screen.getByRole("heading", { name: "Abre Hokma con hokma start" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: t("noToken.title") })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /acceso Hokma/ })).toBeInTheDocument();
     expect(screen.queryByTestId("shell")).not.toBeInTheDocument();
   });
 

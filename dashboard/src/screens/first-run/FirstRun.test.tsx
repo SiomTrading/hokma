@@ -18,6 +18,8 @@ class FakeBackend {
   pgOk = false;
   pgNotEmpty = false;
   failWorkdir: string | null = null;
+  /** Like profile.permission_mode: a new installation starts in "ask" until the setup closes. */
+  permission = { mode: "ask", intro_seen: false };
   state: SetupState = {
     completed: false,
     profile: null,
@@ -125,7 +127,20 @@ class FakeBackend {
         this.state.owner = { owner_name: p.owner_name, fund_name: p.fund_name ?? "" };
         return this.json(this.state);
       }
+      case "GET /api/protections":
+        return this.json({ always_on: true, rules: ["delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money"].map((id) => ({ id, title: id })) });
+      case "GET /api/profile/permission-mode":
+        return this.json(this.permission);
+      case "PUT /api/profile/permission-mode": {
+        const b = body as { mode?: string; intro_seen?: boolean };
+        const before = this.permission.mode;
+        if (b.mode) this.permission = { mode: b.mode, intro_seen: true };
+        else if (b.intro_seen !== undefined) this.permission = { ...this.permission, intro_seen: b.intro_seen };
+        return this.json({ ...this.permission, changed: before !== this.permission.mode, turns_running: 0 });
+      }
       case "POST /api/setup":
+        // like the server: a new installation that did not choose starts in "do everything without asking"
+        if (!this.state.completed && !this.permission.intro_seen) this.permission = { mode: "auto", intro_seen: true };
         this.profile().setup_completed_at = "2026-11-05 12:00:00";
         this.state.completed = true;
         return this.json(this.state);
@@ -231,6 +246,12 @@ describe.each<Locale>(["es", "en"])("first run, complete flow in %s", (locale) =
     expect(screen.getByText("/home/ana/Backups")).toBeInTheDocument();
     expect(screen.getByText(t("firstrun.db.sqliteName"))).toBeInTheDocument();
     expect(screen.getByText(t("firstrun.done.agentsCount", { count: "4" }))).toBeInTheDocument();
+    // P1: the new installation shows the switch already on, and nothing about keys or providers
+    const modeCard = await screen.findByTestId("firstrun-mode");
+    expect(within(modeCard).getByRole("switch", { name: t("permissions.mode.auto") })).toHaveAttribute("aria-checked", "true");
+    expect(within(modeCard).queryByRole("textbox")).not.toBeInTheDocument();      // no key to type here
+    expect(within(modeCard).queryByText(/API|provider|proveedor/i)).not.toBeInTheDocument();
+    expect(backend.posts("/api/profile/permission-mode")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: t("firstrun.open") }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -242,9 +263,43 @@ describe.each<Locale>(["es", "en"])("first run, complete flow in %s", (locale) =
     expect(backend.posts("/api/owner")[0]!.body).toEqual({ owner_name: "Ana Torres", fund_name: "Torres Capital", language: locale, theme: "dark" });
     expect(backend.posts("/api/setup")).toHaveLength(1);
     expect(backend.state.completed).toBe(true);
+    expect(backend.permission).toEqual({ mode: "auto", intro_seen: true });
     const order = backend.calls.filter((c) => c.method === "POST").map((c) => c.path);
     expect(order.indexOf("/api/workdir")).toBeLessThan(order.indexOf("/api/owner"));
     expect(order.indexOf("/api/owner")).toBeLessThan(order.indexOf("/api/setup"));
+  });
+});
+
+describe("first run, permission mode card", () => {
+  beforeEach(() => setLocale("en"));
+
+  /** The name is the only step missing, so the setup opens on it and then goes to the "Ready" card. */
+  async function reachDone(user: ReturnType<typeof userEvent.setup>) {
+    backend.claude = "connected";
+    backend.state.workdir = { ...backend.state.workdir, exists: true, git: true, manual: true };
+    backend.state.profile = { ...backend.profile(), owner_name: "", workdir: "/home/ana/Hokma" };
+    render(
+      <Harness>
+        <FirstRun pollMs={20} />
+      </Harness>,
+    );
+    await screen.findByRole("dialog", { name: t("firstrun.dialog") });
+    await user.type(await screen.findByLabelText(t("firstrun.name.owner")), "Ana");
+    await user.click(screen.getByRole("button", { name: t("firstrun.next") }));
+  }
+
+  it("the owner can switch it off before starting, and that choice is kept", async () => {
+    const user = userEvent.setup();
+    await reachDone(user);
+    const card = await screen.findByTestId("firstrun-mode");
+    const toggle = within(card).getByRole("switch", { name: t("permissions.mode.auto") });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    expect(backend.posts("/api/profile/permission-mode")[0]!.body).toEqual({ mode: "ask" });
+    await user.click(screen.getByRole("button", { name: t("firstrun.open") }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(backend.permission).toEqual({ mode: "ask", intro_seen: true });
   });
 });
 

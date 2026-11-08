@@ -214,6 +214,12 @@ add_path_block() {
 }
 add_path_block
 
+# Shortcut: Hokma. Old Shut down and Restart shortcuts are removed. macOS: applications in ~/Applications/Hokma (no Terminal);
+# Linux: .desktop files with Terminal=false. One implementation, shared with `hokma update`: `hokma shortcuts`
+# (hokma.core.shortcuts). They point at the stable launcher, and there is NO start at login: Hokma starts when the
+# owner opens the "Hokma" shortcut.
+if env "${HOKMA_ENV[@]}" "$VENV/bin/hokma" shortcuts --force >/dev/null; then info inst.shortcuts_created; else warn inst.shortcuts_failed; fi
+
 # ---- Stage 7: doctor --------------------------------------------------------
 info inst.installed "$DIR"
 if [ "$RUN_DOCTOR" = 1 ]; then

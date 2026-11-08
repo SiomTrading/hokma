@@ -17,6 +17,6 @@ function AssetsMenu({ close }: { close: () => void }) {
   );
 }
 
-// keepAlive: the timeframe and the loaded candles stay while another tab is in front; refreshes pause when hidden.
+// keepAlive: the timeframe and the candles stay while another tab is in front; the live channel keeps feeding them.
 registerScreen({ id: "chart", component: ChartScreen, keepAlive: true, title: (params) => params.symbol ?? "" });
 registerSlot("addMenu.assets", AssetsMenu, { order: 0 });

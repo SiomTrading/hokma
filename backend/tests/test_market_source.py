@@ -271,9 +271,10 @@ def test_visible_bars_are_the_newest_ones(source, clock):
 
 
 def test_bad_timeframe_is_rejected(source, clock):
-    with pytest.raises(MarketError) as error:
-        build_chart(source, "AAPL", "2m", clock)
-    assert error.value.code == "bad_timeframe"
+    for text in ("2x", "r:10t", "1M", ""):                # a range or months are not time intervals of the history
+        with pytest.raises(MarketError) as error:
+            build_chart(source, "AAPL", text, clock)
+        assert error.value.code == "bad_timeframe"
 
 
 def test_missing_finer_bars_only_hide_the_line(source, fetcher, clock):

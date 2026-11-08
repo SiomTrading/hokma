@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from hokma.core.proc import spawn_kwargs
 from hokma.core.config import claude_config_dir, hokma_data_dir
 from hokma.setup.messages import SetupError, t
 
@@ -59,7 +60,7 @@ def _plan_name(value: object) -> str | None:
 def _version(path: str) -> str | None:
     try:
         out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=STATUS_TIMEOUT,
-                             stdin=subprocess.DEVNULL, env=_env()).stdout.strip()
+                             stdin=subprocess.DEVNULL, env=_env(), **spawn_kwargs()).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
     return out.split()[0] if out else None
@@ -72,7 +73,7 @@ def detect() -> ClaudeState:
     claude_config_dir().mkdir(parents=True, exist_ok=True)
     try:
         proc = subprocess.run([path, "auth", "status"], capture_output=True, text=True, timeout=STATUS_TIMEOUT,
-                              stdin=subprocess.DEVNULL, env=_env(), cwd=str(hokma_data_dir()))
+                              stdin=subprocess.DEVNULL, env=_env(), cwd=str(hokma_data_dir()), **spawn_kwargs())
         data = json.loads(proc.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         return ClaudeState("no_session", True, version=_version(path))
@@ -141,7 +142,7 @@ def start_login(wait_for_link: float = 4.0) -> dict:
         try:
             proc = subprocess.Popen([path, "auth", "login", "--claudeai"], env=_env(), cwd=str(hokma_data_dir()),
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    text=True, encoding="utf-8", errors="replace", bufsize=1)
+                                    text=True, encoding="utf-8", errors="replace", bufsize=1, **spawn_kwargs())
         except OSError as exc:
             raise SetupError(500, t("setup.err.login_failed", error=exc.strerror or str(exc))) from exc
         running = _Login(proc)

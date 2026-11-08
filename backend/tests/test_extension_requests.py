@@ -54,7 +54,7 @@ def test_requesting_does_not_activate_anything(env):
     assert extensions.load()[0] == {"enabledPlugins": {}, "extraKnownMarketplaces": {}, "mcpServers": {}}
     assert json.loads((requests.requests_dir() / f"{p.id}.json").read_text())["name"]
     spec = prepare_claude_launch()
-    assert json.loads(open(spec.args[spec.args.index("--mcp-config") + 1]).read()) == {"mcpServers": {}}
+    assert json.loads(open(spec.args[spec.args.index("--mcp-config") + 1]).read())["mcpServers"].keys() == {"hokma"}
 
 
 def test_declined_request_changes_nothing_and_approved_one_activates(env):

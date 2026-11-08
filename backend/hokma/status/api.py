@@ -1,7 +1,8 @@
 """HTTP surface of the extensions, news and system status screens. Every route needs the session token."""
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
+from hokma.db.api import current_database
 from hokma.i18n import t
 from hokma.status import catalog, checks, extensions_service as service, home, news
 from hokma.status.auth import require_token
@@ -36,8 +37,8 @@ def system_status() -> dict:
 
 
 @router.get("/api/news", summary="Installed version, CHANGELOG and the latest published version")
-def system_news(refresh: bool = Query(default=False)) -> dict:
-    return news.collect(refresh)
+def system_news(request: Request, refresh: bool = Query(default=False)) -> dict:
+    return request.app.state.updates.check(current_database(request), refresh)
 
 
 @router.get("/api/extensions", summary="Installed extensions, marketplaces and pending agent requests")

@@ -89,12 +89,15 @@ async function startApp(launcher, env, port) {
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (out += d));
   const token = await until(() => /#t=([\w-]+)/.exec(out)?.[1], "the session token of the updated app", 60000);
+  const once = /#t=[\w-]+&o=([\w-]+)/.exec(out)?.[1];
+  assert.ok(once, "the start link carries the one-time code of the owner registration");
   const base = `http://127.0.0.1:${port}/`;
   await until(async () => (await fetch(`${base}health`)).ok, "the updated app health");
   const api = async (p) => (await fetch(`${base}${p.replace(/^\//, "")}`, { headers: { "X-Hokma-Token": token } })).json();
   return {
     base,
     token,
+    once,
     api,
     async stop() {
       child.kill("SIGTERM");
@@ -136,7 +139,7 @@ for (const locale of locales) {
     // (c1) the migration ran in the update: base created at the latest schema, profile from owner.json, not completed
     const db = path.join(data, "hokma.db");
     assert.ok(fs.existsSync(db), "the update created hokma.db");
-    assert.equal(sqlite(db, "SELECT MAX(version) FROM schema_version")[0][0], 2, "schema 2");
+    assert.equal(sqlite(db, "SELECT MAX(version) FROM schema_version")[0][0], 4, "schema 4");
     const [[ownerName, fundName, completedAt]] = sqlite(db, "SELECT owner_name, fund_name, setup_completed_at FROM profile");
     assert.equal(ownerName, OWNER);
     assert.equal(fundName, FUND);
@@ -144,12 +147,18 @@ for (const locale of locales) {
     assert.ok(fs.existsSync(path.join(work, ".git")) && fs.existsSync(path.join(work, "CLAUDE.md")), "the folder survived");
 
     browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
-    const openPanel = async (url, token) => {
+    const openPanel = async (url, token, once) => {
       const ctx = await browser.newContext({ viewport: { width: 1440, height: 940 } });
-      await ctx.addInitScript(([tk, loc]) => {
-        localStorage.setItem("hokma.token", tk);
+      await ctx.addInitScript(([tk, loc, o]) => {
         localStorage.setItem("hokma.locale", loc);
-      }, [token, locale]);
+        // first load of the tab: the token comes the way a handoff gives it (window.name, never a storage); the start
+        // link carries the one-time code of the owner registration, which the app takes and clears from the bar
+        if (!window.name && window.location.protocol.startsWith("http")) {
+          const u = window.location.pathname + window.location.search;
+          window.name = "hokma-handoff:" + JSON.stringify({ o: window.location.origin, u, t: tk });
+          if (o && !window.location.hash) window.history.replaceState(null, "", "#o=" + o);
+        }
+      }, [token, locale, once]);
       const page = await ctx.newPage();
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
@@ -161,7 +170,7 @@ for (const locale of locales) {
     fakeClaude(path.join(root, "bin-out"), false);
     const port = await free();
     app = await startApp(launcher, cleanEnv(home, { PATH: `${path.join(root, "bin-out")}:${process.env.PATH}` }), port);
-    let view = await openPanel(app.base, app.token);
+    let view = await openPanel(app.base, app.token, app.once);
     const dialog = view.page.getByRole("dialog", { name: msg("firstrun.dialog") });
     await dialog.waitFor();
     await dialog.getByText(msg("firstrun.returning")).waitFor();
@@ -178,7 +187,7 @@ for (const locale of locales) {
     // (c3) Claude signed in: nothing is missing, the panel goes straight in and the setup closes by itself
     fakeClaude(path.join(root, "bin-in"), true);
     app = await startApp(launcher, cleanEnv(home, { PATH: `${path.join(root, "bin-in")}:${process.env.PATH}` }), await free());
-    view = await openPanel(app.base, app.token);
+    view = await openPanel(app.base, app.token, app.once);
     await view.page.locator("aside").first().getByText(FUND).first().waitFor();
     await until(async () => (await app.api("/api/setup")).completed === true, "the setup closed by itself");
     assert.equal(await view.page.getByRole("dialog", { name: msg("firstrun.dialog") }).count(), 0, "no first-run modal");

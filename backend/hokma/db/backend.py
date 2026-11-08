@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -118,6 +119,9 @@ class Backend(ABC):
 
 # --------------------------------------------------------------------------------------------- SQLite
 
+WAL_RETRY_SECONDS = 5.0
+
+
 def map_sqlite_error(exc: sqlite3.Error) -> DbError | sqlite3.Error:
     """Constraint failures become IntegrityViolation; trigger aborts become RuleViolation."""
     if isinstance(exc, sqlite3.IntegrityError):
@@ -136,8 +140,22 @@ class SqliteSession(Session):
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.execute("PRAGMA busy_timeout = 5000")
-        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._enable_wal()
         self._conn.execute("PRAGMA synchronous = NORMAL")
+
+    def _enable_wal(self) -> None:
+        """Switching a new file to WAL needs a lock that `busy_timeout` does not wait for: several processes opening a
+        file that does not exist yet can get "database is locked" on this one statement. Retry it for a few seconds."""
+        deadline = time.monotonic() + WAL_RETRY_SECONDS
+        while True:
+            try:
+                self._conn.execute("PRAGMA journal_mode = WAL")
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                    self._conn.close()
+                    raise
+                time.sleep(0.02)
 
     def query(self, sql: str, params: Params = None) -> list[dict[str, Any]]:
         try:

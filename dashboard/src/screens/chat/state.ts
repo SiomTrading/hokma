@@ -1,6 +1,6 @@
 import { DEFAULT_MODEL, isModel } from "./types";
 import { attachmentUrl } from "./chatApi";
-import type { ModelId, PermissionBody, ProjectRef, ServerEvent, StoredAttachment, StoredTool, ToolSummary } from "./types";
+import type { GuardBlock, ModelId, PermissionBody, ProjectRef, ServerEvent, StoredAttachment, StoredTool, ToolSummary } from "./types";
 
 export interface AttachmentChip {
   key: string;
@@ -22,6 +22,7 @@ export type Item =
   | { kind: "assistant"; key: string; text: string; streaming: boolean; status: "complete" | "stopped" | "error"; messageId?: string }
   | { kind: "tool"; key: string; toolUseId: string; name: string; summary: ToolSummary; result?: { isError: boolean; text: string } }
   | { kind: "permission"; key: string; body: PermissionBody; sending?: boolean; resolution?: { decision: "allow" | "deny"; by: string } }
+  | { kind: "block"; key: string; block: GuardBlock }
   | { kind: "notice"; key: string; tone: "info" | "warn" | "bad"; text: string };
 
 export interface ChatState {
@@ -114,6 +115,10 @@ function answerItems(base: string, text: string, tools: StoredTool[], status: "c
   return items;
 }
 
+function blockItem(block: GuardBlock): Item {
+  return { kind: "block", key: `block-${block.id}`, block: { id: block.id, rule: block.rule, tool: block.tool, target: block.target, at: block.at } };
+}
+
 function permissionItem(body: PermissionBody): Item {
   return { kind: "permission", key: `perm-${body.request_id}`, body };
 }
@@ -173,6 +178,10 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
             : item,
         ),
       };
+    case "guard_block": {
+      if (state.items.some((item) => item.kind === "block" && item.block.id === event.id)) return state;
+      return { ...state, items: [...closeStreaming(state.items), blockItem(event)] };
+    }
     case "done": {
       const status = event.stopped ? "stopped" : "complete";
       const items = closeStreaming(state.items, status);
@@ -204,6 +213,7 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
           items.push({ kind: "user", key: `m-${message.id}`, messageId: message.id, text: message.text, attachments: (message.attachments ?? []).map(chipOf) });
         } else if (message.role === "assistant") {
           items.push(...answerItems(`m-${message.id}`, message.text, message.tools ?? [], message.status, false, message.id));
+          for (const block of message.blocks ?? []) items.push(blockItem(block));
         }
       }
       return { ...state, items, loading: false, loadError: null };

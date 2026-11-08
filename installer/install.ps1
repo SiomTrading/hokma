@@ -216,6 +216,12 @@ if (($userPath -split ";") -notcontains $BinDir) {
     Info "inst.path_added_win" $BinDir
 }
 
+# Shortcut: Hokma (Start menu and Desktop). Old Shut down and Restart shortcuts are removed. One implementation, shared with
+# `hokma update`: `hokma shortcuts` (hokma.core.shortcuts). They point at the stable launcher, run without a console
+# window, and there is NO start at login: Hokma starts when the owner opens the "Hokma" shortcut.
+& $HokmaExe shortcuts --force
+if ($LASTEXITCODE -eq 0) { Info "inst.shortcuts_created" } else { Warn "inst.shortcuts_failed" }
+
 # ---- Stage 7: doctor --------------------------------------------------------
 Info "inst.installed" $Dir
 if (-not $NoDoctor) {

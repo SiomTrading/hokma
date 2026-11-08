@@ -131,13 +131,16 @@ interface NavItemProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "ch
   /** Shortcut text shown on the right (hidden when the menu is collapsed). */
   kbd?: string;
   iconSize?: number;
+  /** A small dot after the label, with its accessible text (for example "new version available"). */
+  badge?: string;
 }
 
-export function NavItem({ icon, label, active, kbd, iconSize = 17, className, type = "button", ...rest }: NavItemProps) {
+export function NavItem({ icon, label, active, kbd, iconSize = 17, badge, className, type = "button", ...rest }: NavItemProps) {
   return (
-    <button type={type} className={cx("nav", active && "on", className)} aria-label={label} aria-current={active ? "page" : undefined} {...rest}>
+    <button type={type} className={cx("nav", active && "on", className)} aria-label={badge ? label + ", " + badge : label} aria-current={active ? "page" : undefined} {...rest}>
       <Icon name={icon} size={iconSize} />
       <span className="hide-c">{label}</span>
+      {badge ? <span className="nav-badge" aria-hidden="true" title={badge} /> : null}
       {kbd ? <span className="kbd hide-c">{kbd}</span> : null}
     </button>
   );

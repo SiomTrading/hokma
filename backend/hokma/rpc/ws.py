@@ -1,14 +1,14 @@
 """JSON-RPC over WebSocket. Echo only, with a per-boot temporary token."""
 import json
-import secrets
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from hokma.core import session
 from hokma.core.origin import token_matches
 
 router = APIRouter()
 
-SESSION_TOKEN = secrets.token_urlsafe(24)
+SESSION_TOKEN = session.token()
 
 
 @router.websocket("/rpc")

@@ -115,6 +115,11 @@ def complete_setup(request: Request) -> dict:
             if not profile.workdir:
                 u.profile.save(workdir=str(hokma_home()))
             _sync_engine(u, lang)
+            if not profile.setup_completed_at and not profile.permission_mode_intro_seen:
+                # A new installation starts in "Do everything without asking" (the "Ready" card shows the switch and
+                # the owner may have changed it already: that sets intro_seen). One that updated from 0.0.5 had
+                # finished this step long ago, so it keeps "ask" and sees the one-time notice in the chat.
+                u.profile.set_permission_mode("auto", intro_seen=True)
             u.profile.complete_setup()
         _remember_claude(claude.detect())
         _journal(db, lang, t("setup.journal.done"))

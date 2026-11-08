@@ -24,10 +24,24 @@ class Latest:
 
 
 _cache: dict[str, tuple[float, Latest]] = {}
+_last_fetch_at: float | None = None          # wall clock (epoch seconds) of the last successful network check
 
 
 def clear_cache() -> None:
+    global _last_fetch_at
     _cache.clear()
+    _last_fetch_at = None
+
+
+def last_fetch_at() -> float | None:
+    """When the last successful check against the update source finished (epoch seconds), or None."""
+    return _last_fetch_at
+
+
+def cached_latest() -> Latest | None:
+    """The latest version already known, without touching the network."""
+    hit = _cache.get(configured_ref() or "github")
+    return hit[1] if hit else None
 
 
 def changelog_path() -> Path:
@@ -96,8 +110,10 @@ def latest_cached(refresh: bool = False) -> Latest:
     hit = _cache.get(key)
     if hit and not refresh and time.monotonic() - hit[0] < CACHE_SECONDS:
         return hit[1]
+    global _last_fetch_at
     latest = fetch_latest()
     _cache[key] = (time.monotonic(), latest)
+    _last_fetch_at = time.time()
     return latest
 
 

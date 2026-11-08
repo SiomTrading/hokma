@@ -1,28 +1,16 @@
 """`hokma` command: start, doctor, version, update, ext and the installer helpers."""
 import argparse
 import json
+import os
 import sys
-import threading
-import time
-import urllib.request
-import webbrowser
+from pathlib import Path
 
 from hokma import __version__
-from hokma.core.config import DEFAULT_HOST, DEFAULT_PORT
+from hokma.core.config import DEFAULT_PORT, LAST_PORT
 from hokma.i18n import t
 
 # Commands that run without the integrity gate: they must work to diagnose or (re)install.
-NO_INTEGRITY_GATE = {"version", "doctor", "write-manifest"}
-
-
-def _open_when_ready(url: str, health: str) -> None:
-    for _ in range(50):
-        try:
-            urllib.request.urlopen(health, timeout=1)
-            webbrowser.open(url)
-            return
-        except OSError:
-            time.sleep(0.2)
+NO_INTEGRITY_GATE = {"version", "doctor", "write-manifest", "stop"}
 
 
 def _ask(prompt: str) -> str:
@@ -101,22 +89,74 @@ def cmd_db(_: argparse.Namespace) -> int:
     return code
 
 
+def _handoff_token(args: argparse.Namespace) -> tuple[str, str, str] | None:
+    """The session token, the owner confirmation hash and the hash of the one-time owner secret (the last two may
+    be empty) a previous supervisor handed over (an inherited pipe, or standard input on Windows). None on a
+    normal start, ("", "", "") when it cannot be read."""
+    from hokma.core import session
+
+    try:
+        if args.handoff_fd is not None:
+            with os.fdopen(args.handoff_fd, "rb") as pipe:
+                line = pipe.readline().decode("ascii", "replace").strip()
+                owner = pipe.readline().decode("ascii", "replace").strip()
+                once = pipe.readline().decode("ascii", "replace").strip()
+        elif args.handoff_stdin:
+            line = sys.stdin.readline().strip()
+            owner = sys.stdin.readline().strip()
+            once = sys.stdin.readline().strip()
+        else:
+            return None
+    except OSError:
+        return "", "", ""
+    if not session.TOKEN_PATTERN.fullmatch(line) or any(
+            v and not session.OWNER_HASH_PATTERN.fullmatch(v) for v in (owner, once)):
+        return "", "", ""
+    return line, owner, once
+
+
 def cmd_start(args: argparse.Namespace) -> int:
-    """Start the server. The first run (names, folder, database, Claude) happens in the app, not in the console."""
-    from hokma.core.server import run
-    from hokma.rpc.ws import SESSION_TOKEN
+    """`hokma start` runs Hokma in the background and returns at once (see hokma.core.launcher). With
+    `--foreground` it is the supervisor itself: it creates the session token, starts the engine as a child and
+    starts it again after an update or a crash. `--no-browser` and the internal hand over options only make sense
+    in the foreground, so they imply it. The first run (names, folder, database, Claude) happens in the app."""
+    foreground = args.foreground or args.no_browser or args.handoff_fd is not None or args.handoff_stdin
+    if not foreground:
+        from hokma.core.launcher import start
+
+        return start(args.port)
+    from hokma.core.supervisor import run_supervisor
+
+    handoff = _handoff_token(args)
+    if handoff is not None and handoff[0] == "":
+        print(f"{t('cli.tag.fail')} {t('cli.start.bad_handoff')}", file=sys.stderr)
+        return 2
+    token, owner_hash, owner_secret_hash = handoff or (None, "", "")
+    return run_supervisor(port=args.port, token=token, print_url=args.no_browser, owner_hash=owner_hash,
+                          owner_secret_hash=owner_secret_hash)
+
+
+def cmd_stop(_: argparse.Namespace) -> int:
+    """Close Hokma cleanly through the supervisor's local control channel."""
+    from hokma.core.launcher import stop
+
+    return stop()
+
+
+def cmd_restart(args: argparse.Namespace) -> int:
+    from hokma.core.launcher import restart
+
+    return restart(args.port)
+
+
+def cmd_engine(args: argparse.Namespace) -> int:
+    """The engine, started by the supervisor. The token arrives on standard input."""
+    from hokma.core.engine_main import main as engine_main
 
     code = _migrate_db()
     if code:
         return code
-    base = f"http://{DEFAULT_HOST}:{args.port}/"
-    url = f"{base}#t={SESSION_TOKEN}"
-    if args.no_browser:
-        print(url, flush=True)
-    else:
-        threading.Thread(target=_open_when_ready, args=(url, base + "health"), daemon=True).start()
-    run(port=args.port)
-    return 0
+    return engine_main(args.port)
 
 
 def cmd_doctor(_: argparse.Namespace) -> int:
@@ -183,7 +223,45 @@ def cmd_post_update(_: argparse.Namespace) -> int:
     code = _migrate_db()                                  # after the kit sync: new agent files are seeded too
     if code:
         return code
+    _ensure_shortcuts()
     print(json.dumps(report.to_dict()))
+    return 0
+
+
+def _ensure_shortcuts() -> None:
+    """Create the Hokma shortcuts that are missing (an owner coming from an older version has none). Never touches the
+    database or the working folder, never fails the update, and does nothing outside an installed Hokma."""
+    from hokma.core import shortcuts
+    from hokma.kit.integrity import is_installed_app
+
+    if not is_installed_app():
+        return
+    try:
+        result = shortcuts.install(only_missing=True)
+    except shortcuts.ShortcutError as exc:
+        print(f"{t('cli.tag.warn')} " + t("cli.shortcuts.failed", error=exc), file=sys.stderr)
+        return
+    _warn_legacy_left(result)
+
+
+def _warn_legacy_left(result) -> None:
+    """Old Shut down and Restart shortcuts that could not be deleted: a warning, never a failure."""
+    left = getattr(result, "legacy_left", None)
+    if left:
+        print(f"{t('cli.tag.warn')} " + t("cli.shortcuts.legacy_left", paths=", ".join(str(p) for p in left)),
+              file=sys.stderr)
+
+
+def cmd_shortcuts(args: argparse.Namespace) -> int:
+    from hokma.core import shortcuts
+
+    try:
+        result = shortcuts.install(only_missing=not args.force)
+    except shortcuts.ShortcutError as exc:
+        print(f"{t('cli.tag.warn')} " + t("cli.shortcuts.failed", error=exc), file=sys.stderr)
+        return 1
+    _warn_legacy_left(result)
+    print(t("cli.shortcuts.created"))
     return 0
 
 
@@ -211,8 +289,13 @@ def cmd_update(args: argparse.Namespace) -> int:
     from hokma.update.runner import run_update
     from hokma.update.source import UpdateError, resolve_source
 
+    progress = None
+    if args.progress_file:
+        from hokma.update.state import ProgressWriter
+
+        progress = ProgressWriter(Path(args.progress_file))
     try:
-        result = run_update(resolve_source(args.source), force=args.force)
+        result = run_update(resolve_source(args.source), force=args.force, progress=progress)
     except UpdateError as exc:
         print(f"{t('cli.tag.fail')} {t('cli.update.failed', error=exc, version=__version__)}", file=sys.stderr)
         return 1
@@ -317,10 +400,20 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(errors="replace")
     p = argparse.ArgumentParser(prog="hokma")
     sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("start", help="Start Hokma and open the dashboard")
-    s.add_argument("--port", type=int, default=DEFAULT_PORT)
-    s.add_argument("--no-browser", action="store_true")
+    s = sub.add_parser("start", help="Start Hokma in the background and open the dashboard")
+    s.add_argument("--port", type=int, default=None, help=f"default: the first free port from {DEFAULT_PORT} to {LAST_PORT}")
+    s.add_argument("--no-browser", action="store_true", help="foreground: print the address instead of opening it")
+    s.add_argument("--foreground", action="store_true", help="stay in this terminal (tests, watching the log)")
+    s.add_argument("--handoff-fd", type=int, help=argparse.SUPPRESS)           # internal: supervisor hand over
+    s.add_argument("--handoff-stdin", action="store_true", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_start)
+    sub.add_parser("stop", help="Close Hokma cleanly").set_defaults(fn=cmd_stop)
+    rs = sub.add_parser("restart", help="Close Hokma and open it again with a new session")
+    rs.add_argument("--port", type=int, default=None)
+    rs.set_defaults(fn=cmd_restart)
+    en = sub.add_parser("engine", help=argparse.SUPPRESS)                      # internal: started by `hokma start`
+    en.add_argument("--port", type=int, default=DEFAULT_PORT)
+    en.set_defaults(fn=cmd_engine)
     sub.add_parser("doctor", help="Check the installation").set_defaults(fn=cmd_doctor)
     sub.add_parser("owner", help="Change your name and your fund's name (needs an interactive terminal)"
                    ).set_defaults(fn=cmd_owner)
@@ -333,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--from", dest="source", help="override: local manifest or https URL (tests)")
     u.add_argument("--force", action="store_true", help="reinstall the same or an older version")
     u.add_argument("--json", action="store_true")
+    u.add_argument("--progress-file", help=argparse.SUPPRESS)                  # internal: stage reports for the app
     u.set_defaults(fn=cmd_update)
 
     e = sub.add_parser("ext", help="Manage your extensions (plugins, marketplaces, MCP servers)")
@@ -365,6 +459,9 @@ def main(argv: list[str] | None = None) -> int:
                    ).set_defaults(fn=cmd_verify_install)
     k = sub.add_parser("kit-sync", help="Install or update the kit in your working folder")
     k.set_defaults(fn=cmd_kit_sync)
+    sc = sub.add_parser("shortcuts", help="Create the Hokma shortcut and remove the old Shut down and Restart ones")
+    sc.add_argument("--force", action="store_true", help="recreate the ones that already exist")
+    sc.set_defaults(fn=cmd_shortcuts)
     sub.add_parser("post-update", help="Kit sync + settings after an update").set_defaults(fn=cmd_post_update)
 
     args = p.parse_args(argv)

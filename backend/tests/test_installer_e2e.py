@@ -35,6 +35,25 @@ def _data_dir(home: Path) -> Path:
     return home / ".local" / "share" / "hokma"
 
 
+def _shortcut_paths(home: Path) -> list[Path]:
+    if sys.platform == "darwin":
+        return sorted((home / "Applications" / "Hokma").glob("*.app")) if (home / "Applications" / "Hokma").exists() else []
+    return sorted((home / ".local" / "share" / "applications").glob("hokma*.desktop"))
+
+
+def _check_shortcuts_installed(home: Path, launcher: Path, data: Path):
+    """Only Hokma exists, runs the stable launcher, and nothing starts at login."""
+    found = _shortcut_paths(home)
+    assert len(found) == 1, found
+    if sys.platform != "darwin":
+        by_name = {p.name: p.read_text(encoding="utf-8") for p in found}
+        for name, action in (("hokma.desktop", "start"),):
+            assert f' {action}\n' in by_name[name] and str(launcher) in by_name[name] and "Terminal=false" in by_name[name]
+            assert "runtime" not in by_name[name], "a shortcut must not point at a runtime slot"
+    assert not (home / ".config" / "autostart").exists() and not (home / ".config" / "systemd").exists()
+    assert not (home / "Library" / "LaunchAgents").exists()
+
+
 def _full_cycle(home: Path):
     home.mkdir(parents=True)
     work = home / "Hokma"
@@ -49,6 +68,7 @@ def _full_cycle(home: Path):
     assert (work / ".git").is_dir()
     assert (work / "CLAUDE.md").is_file()
     assert "# >>> hokma >>>" in (home / ".bashrc").read_text()
+    _check_shortcuts_installed(home, launcher, data)
     assert not (home / ".claude").exists(), "installer must not touch ~/.claude"
 
     # Runtime and Claude config live in the data dir, never inside the working folder.
@@ -86,6 +106,7 @@ def _full_cycle(home: Path):
     assert u.returncode == 0, u.stdout + u.stderr
     assert not launcher.exists()
     assert not (data / "runtime").exists() and not (data / "bin").exists()
+    assert not _shortcut_paths(home), "uninstall must remove the shortcut"
     assert (data / "claude-config").is_dir()
     assert (work / "CLAUDE.md").is_file(), "working folder must survive uninstall"
     assert "hokma" not in (home / ".bashrc").read_text()

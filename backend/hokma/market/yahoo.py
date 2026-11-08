@@ -21,13 +21,15 @@ USER_AGENT = "Mozilla/5.0 (compatible; Hokma)"
 TIMEOUT_SECONDS = 8
 MAX_BODY_BYTES = 8 * 1024 * 1024
 
-# interval and range sent upstream. Yahoo allows 1m for 7 days, 5m and 15m for 60 days, 1h for 730 days.
+# interval and range sent upstream, the longest each base allows (verified against the real service: 1m answers at most
+# 8 days per request, 5m and 15m need the start within 60 days, `730d` for 1h returns more than 730 days so `2y` is
+# used, which returns exactly 730). Any other interval of the chart is aggregated from one of these bases.
 UPSTREAM_PARAMS = {
-    "1m": ("1m", "5d"),
-    "5m": ("5m", "5d"),
-    "15m": ("15m", "1mo"),
-    "1h": ("1h", "3mo"),
-    "1D": ("1d", "1y"),
+    "1m": ("1m", "7d"),
+    "5m": ("5m", "60d"),
+    "15m": ("15m", "60d"),
+    "1h": ("1h", "2y"),
+    "1D": ("1d", "10y"),
 }
 # Seconds a cached answer is considered fresh.
 FRESH_FOR = {"1m": 20, "5m": 45, "15m": 90, "1h": 240, "1D": 900}

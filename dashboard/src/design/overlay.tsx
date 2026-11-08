@@ -86,13 +86,15 @@ interface ModalProps {
   onClose: () => void;
   /** Close when the dark backdrop is clicked. Default true. */
   closeOnScrim?: boolean;
+  /** `alertdialog` for a short question the person must answer. Default `dialog`. */
+  role?: "dialog" | "alertdialog";
   style?: CSSProperties;
   className?: string;
   children: ReactNode;
 }
 
 /** Mount it only while it should be visible. It must live inside the `.hk` root. */
-export function Modal({ label, onClose, closeOnScrim = true, style, className, children }: ModalProps) {
+export function Modal({ label, onClose, closeOnScrim = true, role = "dialog", style, className, children }: ModalProps) {
   const dialog = useRef<HTMLDivElement>(null);
   useDismiss(true, onClose);
 
@@ -122,7 +124,7 @@ export function Modal({ label, onClose, closeOnScrim = true, style, className, c
 
   return (
     <Scrim onMouseDown={(event) => closeOnScrim && event.target === event.currentTarget && onClose()}>
-      <div ref={dialog} className={cx("modal", className)} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} style={style} onKeyDown={onKeyDown}>
+      <div ref={dialog} className={cx("modal", className)} role={role} aria-modal="true" aria-label={label} tabIndex={-1} style={style} onKeyDown={onKeyDown}>
         {children}
       </div>
     </Scrim>

@@ -1,6 +1,8 @@
 """Market data for the chart.
 
-    GET /api/market/symbols?q=            symbol search (empty q: a short list of well-known tickers)
+    GET /api/market/symbols?q=&class=     symbol search (empty q: a short list of well-known tickers). Each result says
+                                          its asset class and which source would serve it today (`route`); `class`
+                                          filters (future, equity, crypto, forex, index)
     GET /api/market/candles?symbol=&tf=   recent bars, last price, market state, delay and the opening high
 
 Every route needs the per-boot session token (`X-Hokma-Token` or `?token=`). Errors are `{"detail": {"code",
@@ -23,6 +25,8 @@ from hokma.i18n import t
 from hokma.market.cache import RateLimiter
 from hokma.market.catalog import SUGGESTIONS
 from hokma.market.errors import BAD_RESPONSE, NETWORK, RATE_LIMITED, UNKNOWN_SYMBOL, UPSTREAM, MarketError
+from hokma.market.models import SymbolHit
+from hokma.market.symbols import FUTURE, classify
 from hokma.market.replay import ReplayFetcher
 from hokma.market.service import build_chart
 from hokma.market.source import MarketDataSource
@@ -49,6 +53,11 @@ def set_clock(clock) -> None:
     _clock = clock
 
 
+def now() -> float:
+    """The current time for the market state; tests replace it with `set_clock`."""
+    return _clock()
+
+
 def get_source() -> MarketDataSource:
     global _source
     with _source_lock:
@@ -59,16 +68,28 @@ def get_source() -> MarketDataSource:
         return _source
 
 
+class RouteOut(BaseModel):
+    provider: str
+    source: str
+    data_state: Literal["live", "delayed"]
+
+
 class SymbolOut(BaseModel):
     symbol: str
     name: str
     kind: str
     exchange: str
+    asset_class: str | None = None
+    route: RouteOut | None = None
 
 
 class SymbolsOut(BaseModel):
     items: list[SymbolOut]
     suggested: bool
+    live_classes: list[str] = []
+
+
+SEARCH_CLASSES = ("", "future", "equity", "crypto", "forex", "index")
 
 
 class CandleOut(BaseModel):
@@ -126,6 +147,8 @@ def _message(code: str) -> str:
         return t("market.error.bad_timeframe")
     if code == "bad_symbol":
         return t("market.error.bad_symbol")
+    if code == "bad_class":
+        return t("market.error.bad_request")
     return t("market.error.unauthorized")
 
 
@@ -140,18 +163,54 @@ def _guard(header_token: str, query_token: str) -> None:
         raise _fail(429, RATE_LIMITED)
 
 
+def _announced(text: str, hub) -> list[SymbolHit]:
+    """Futures roots that a connected provider announced and that match the text, offered as `{root}=F` even when
+    the search source does not return them."""
+    needle = text.upper()
+    hits = []
+    for root in hub.announced_roots():
+        symbol = f"{root}=F"
+        if FUTURE.match(symbol) and (not needle or needle in symbol):
+            hits.append(SymbolHit(symbol, root, "future", ""))
+    return hits
+
+
+def _wanted(asset_class: str | None, kind: str, wanted: str) -> bool:
+    if not wanted:
+        return True
+    if wanted == "index":
+        return asset_class is None and kind == "index"
+    return asset_class == wanted
+
+
 @router.get("/symbols", response_model=SymbolsOut, summary="Search symbols: stocks, ETFs, indices, futures, crypto")
-def symbols(q: str = Query(default="", max_length=40), x_hokma_token: str = Header(default=""),
-            token: str = Query(default="")) -> SymbolsOut:
+def symbols(q: str = Query(default="", max_length=40), asset_class: str = Query(default="", alias="class", max_length=10),
+            x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> SymbolsOut:
     _guard(x_hokma_token, token)
+    wanted = asset_class.strip().lower()
+    if wanted not in SEARCH_CLASSES:
+        raise _fail(400, "bad_class")
+    from hokma.connections import runtime
+
+    service, hub = runtime.get_service(), runtime.get_hub()
+    if not service.loaded:
+        service.load()
     text = q.strip()
     if not text:
-        return SymbolsOut(items=[SymbolOut(**asdict(s)) for s in SUGGESTIONS], suggested=True)
-    try:
-        hits = get_source().search(text)
-    except MarketError as error:
-        raise _fail(error.status, error.code) from None
-    return SymbolsOut(items=[SymbolOut(**asdict(h)) for h in hits], suggested=False)
+        hits: list[SymbolHit] = list(SUGGESTIONS)
+    else:
+        try:
+            hits = list(get_source().search(text))
+        except MarketError as error:
+            raise _fail(error.status, error.code) from None
+    known = {hit.symbol for hit in hits}
+    hits += [hit for hit in _announced(text, hub) if hit.symbol not in known]
+    items = []
+    for hit in hits:
+        asset = classify(hit.symbol, hit.kind)
+        if _wanted(asset, hit.kind, wanted):
+            items.append(SymbolOut(**asdict(hit), asset_class=asset, route=RouteOut(**hub.preview_route(hit.symbol, asset))))
+    return SymbolsOut(items=items, suggested=not text, live_classes=hub.live_classes())
 
 
 @router.get("/candles", response_model=ChartOut, summary="Recent candles for a symbol")

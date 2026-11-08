@@ -8,6 +8,7 @@ import signal
 import subprocess
 from typing import Any
 
+from hokma.core.proc import CREATE_NEW_PROCESS_GROUP, spawn_kwargs
 from hokma.engine.stream import parse_line
 
 LINE_LIMIT = 64 * 1024 * 1024          # one stream-json line can carry a whole file or an image
@@ -26,14 +27,11 @@ class ClaudeProcess:
 
     @classmethod
     async def spawn(cls, argv: list[str], env: dict[str, str], cwd: str) -> "ClaudeProcess":
-        kwargs: dict[str, Any] = {}
-        if os.name == "posix":
-            kwargs["start_new_session"] = True            # own process group: the kill reaches the children
-        else:
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        own_group: dict[str, Any] = {"start_new_session": True} if os.name == "posix" else {}   # the kill reaches the children
         proc = await asyncio.create_subprocess_exec(
             *argv, cwd=cwd, env=env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, limit=LINE_LIMIT, **kwargs)
+            stderr=asyncio.subprocess.PIPE, limit=LINE_LIMIT,
+            **spawn_kwargs(extra_flags=CREATE_NEW_PROCESS_GROUP), **own_group)
         return cls(proc)
 
     @property
@@ -99,7 +97,7 @@ class ClaudeProcess:
                 os.killpg(pid, sig)                       # type: ignore[arg-type]
             else:
                 cmd = ["taskkill", "/T", "/PID", str(pid)] + (["/F"] if force or sig is None else [])
-                subprocess.run(cmd, capture_output=True, timeout=10, check=False)
+                subprocess.run(cmd, capture_output=True, timeout=10, check=False, **spawn_kwargs())
         except (ProcessLookupError, PermissionError, OSError, subprocess.SubprocessError):
             try:
                 self._proc.kill()
@@ -113,7 +111,7 @@ async def claude_version(claude: str | None = None) -> str | None:
         return None
     try:
         proc = await asyncio.create_subprocess_exec(claude, "--version", stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.DEVNULL)
+                                                    stderr=asyncio.subprocess.DEVNULL, **spawn_kwargs())
         out, _ = await asyncio.wait_for(proc.communicate(), 10)
     except (OSError, asyncio.TimeoutError):
         return None

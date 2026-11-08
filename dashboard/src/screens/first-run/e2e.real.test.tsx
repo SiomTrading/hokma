@@ -13,6 +13,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setToken } from "@/api";
+import { setOwnerOnce } from "@/api/owner";
 import { setLocale, t } from "@/i18n";
 import type { Locale } from "@/i18n";
 import { ShellProvider } from "@/shell/store";
@@ -38,6 +39,7 @@ function freePort(): Promise<number> {
 interface Backend {
   base: string;
   token: string;
+  once: string;
   home: string;
   data: string;
   proc: ChildProcess;
@@ -67,13 +69,13 @@ async function boot(lang: Locale): Promise<Backend> {
     env: { ...env, PYTHONPATH: path.join(REPO, "backend") + path.delimiter + path.join(REPO, "cli") },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const token = await new Promise<string>((resolve, reject) => {
+  const [token, once] = await new Promise<[string, string]>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("backend did not print its URL")), 30_000);
     proc.stdout!.on("data", (chunk: Buffer) => {
-      const match = /#t=([A-Za-z0-9_-]+)/.exec(chunk.toString());
+      const match = /#t=([A-Za-z0-9_-]+)&o=([A-Za-z0-9_-]+)/.exec(chunk.toString());
       if (match) {
         clearTimeout(timer);
-        resolve(match[1]!);
+        resolve([match[1]!, match[2]!]);
       }
     });
     proc.on("exit", (code) => reject(new Error("backend exited with " + code)));
@@ -87,7 +89,7 @@ async function boot(lang: Locale): Promise<Backend> {
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  return { base, token, home, data, proc, root };
+  return { base, token, once, home, data, proc, root };
 }
 
 function sql(data: string, query: string): string {
@@ -115,6 +117,7 @@ describe.skipIf(!runnable).each<Locale>(["es", "en"])("real backend, first run i
     setLocale(locale);
     server = await boot(locale);
     setToken(server.token);
+    setOwnerOnce(server.once);                                   // what the start link gives the tab
     const user = userEvent.setup();
     render(
       <ShellProvider>

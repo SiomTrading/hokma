@@ -15,7 +15,7 @@ cd dashboard && npm install && npm run build && cd ..
 uv run hokma start
 
 # 3. Check
-curl http://127.0.0.1:8765/health      # {"status":"ok","version":"0.0.5"}
+curl http://127.0.0.1:8765/health      # {"status":"ok","version":"0.0.6"}
 uv run hokma doctor
 uv run hokma version
 uv run pytest

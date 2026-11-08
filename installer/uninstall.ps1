@@ -47,6 +47,21 @@ if (Test-Path $launcher) {
 
 if (Test-Path $launcher) { Remove-Item -Force $launcher; Info "un.command_removed" }
 
+# Shortcuts (Start menu and Desktop), in every language: the names come from the installer message files.
+$shortcutFolders = @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop")) | Where-Object { $_ }
+foreach ($code in @("es", "en")) {
+    $table = Get-MsgTable $code
+    foreach ($key in @("shortcut.start", "shortcut.legacy.stop", "shortcut.legacy.restart")) {
+        $name = $table[$key]
+        if (-not $name) { continue }
+        foreach ($folder in $shortcutFolders) {
+            $path = Join-Path $folder ($name + ".lnk")
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+        }
+    }
+}
+Info "un.shortcuts_removed"
+
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath) {
     $parts = $userPath -split ";" | Where-Object { $_ -and ($_ -ne $BinDir) }

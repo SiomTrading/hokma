@@ -27,7 +27,7 @@ MAX_REDIRECTS = 5
 TIMEOUT_SECONDS = 15
 TOTAL_SECONDS = 90
 CHUNK = 64 * 1024
-USER_AGENT = "Hokma/0.0.5"
+USER_AGENT = "Hokma/0.0.6"
 
 PAGE_TYPES = {"text/html", "application/xhtml+xml"}
 ALLOWED_TYPES = {

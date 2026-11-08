@@ -10,6 +10,8 @@ import subprocess
 import sys
 import threading
 
+from hokma.core.proc import spawn_kwargs
+
 IS_WINDOWS = sys.platform == "win32"
 READ_SIZE = 65536
 HIGH_WATER = 32          # queued chunks before the reader pauses (back pressure on a flooding command)
@@ -36,7 +38,7 @@ class PosixPty:
 
         try:
             self.proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, cwd=cwd, env=env,
-                                         close_fds=True, start_new_session=True, preexec_fn=become_tty_owner)
+                                         close_fds=True, start_new_session=True, preexec_fn=become_tty_owner, **spawn_kwargs())
         except BaseException:
             os.close(master)
             raise
@@ -170,7 +172,8 @@ class PosixPty:
                     if len(fields) > 3 and fields[3] == str(self.pid).encode():
                         found.append(int(entry))
             else:                                    # macOS and others: same session token as the leader
-                out = subprocess.run(["ps", "-axo", "pid=,sess="], capture_output=True, text=True, timeout=3).stdout
+                out = subprocess.run(["ps", "-axo", "pid=,sess="], capture_output=True, text=True, timeout=3,
+                                     **spawn_kwargs()).stdout
                 rows = [line.split() for line in out.splitlines() if len(line.split()) == 2]
                 leader = next((sess for pid, sess in rows if pid == str(self.pid)), None)
                 if leader is not None:

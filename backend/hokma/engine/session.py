@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 from hokma.engine import stream
 from hokma.engine.process import ClaudeProcess, find_claude
 from hokma.engine.protocols import ConversationRecord, ProjectRecord
+from hokma.permissions import modes
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -16,8 +17,7 @@ MAX_STORED_RESULT = 600            # characters of each tool result kept with a 
 PERMISSION_TIMEOUT = 600.0         # seconds without an answer = deny
 STOP_GRACE = 3.0                   # seconds the CLI gets to honour an interrupt before the tree is killed
 BASE_FLAGS = ["-p", "--output-format", "stream-json", "--input-format", "stream-json",
-              "--include-partial-messages", "--verbose", "--permission-prompt-tool", "stdio",
-              "--permission-mode", "default"]
+              "--include-partial-messages", "--verbose", "--permission-prompt-tool", "stdio"]
 SECRET_ENV = ("HOKMA_SESSION_TOKEN", "HOKMA_TOKEN")
 
 
@@ -119,12 +119,15 @@ class ChatSession:
         if proc is not None:
             await proc.terminate()
 
-    async def _ensure_process(self, conv: ConversationRecord, project: ProjectRecord) -> ClaudeProcess:
+    async def _ensure_process(self, conv: ConversationRecord, project: ProjectRecord,
+                              mode: str = modes.DEFAULT_MODE) -> ClaudeProcess:
         if conv.engine_session and not self._session_id:
             self._session_id, self._session_started = conv.engine_session, True
         if not self._session_id:
             self._session_id = str(uuid.uuid4())
-        key = (conv.model, conv.agent, project.path, self._session_id)
+        # The permission mode is part of the key: when the owner changes it, the process of this conversation is
+        # replaced before the next turn and resumed (`--resume`) with the other `--permission-mode`.
+        key = (conv.model, conv.agent, project.path, self._session_id, mode)
         if self._proc is not None and self._proc.alive and self._proc_key == key:
             return self._proc
         await self._drop_process()
@@ -135,10 +138,11 @@ class ChatSession:
             raise TurnError("integrity", f"{type(exc).__name__}: {exc}") from exc
         env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV and v != self.engine.session_token}
         env.update(spec.env)
+        env.update(modes.work_env(project.path, self.conversation_id))
         claude = self.engine.claude_bin or find_claude(env)
         if not claude:
             raise TurnError("claude_not_found", "the `claude` command is not installed or not on PATH")
-        argv = [claude, *spec.args, *BASE_FLAGS, "--model", conv.model]
+        argv = [claude, *spec.args, *BASE_FLAGS, "--permission-mode", modes.flag_for(mode), "--model", conv.model]
         if conv.agent:
             argv += ["--agent", conv.agent]
         argv += ["--resume", self._session_id] if self._session_started else ["--session-id", self._session_id]
@@ -168,9 +172,13 @@ class ChatSession:
         usage: dict[str, Any] = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cost_usd": 0.0}
         status, error, result_seen = "complete", None, False
         proc: ClaudeProcess | None = None
+        guard_blocks: list[dict[str, Any]] = []
         self.live = {"turn_id": turn_id, "parts": parts, "tools": tools}
         try:
-            proc = await self._ensure_process(conv, project)
+            mode = self.engine.permission_mode()
+            if modes.snapshots_wanted(mode):
+                await self.engine.take_checkpoint(project.path, self.conversation_id)
+            proc = await self._ensure_process(conv, project, mode)
             await proc.write(stream.user_message(blocks))
             while True:
                 msg = await proc.read()
@@ -199,6 +207,7 @@ class ChatSession:
                                          "name": block.get("name", ""), "input": block.get("input") or {},
                                          "summary": summary})
                 elif kind == "user":
+                    await self._publish_blocks(turn_id, guard_blocks)
                     for res in stream.tool_results(msg):
                         for line in tools:
                             if line["id"] == res.get("tool_use_id"):
@@ -239,10 +248,26 @@ class ChatSession:
             if isinstance(exc, asyncio.CancelledError):
                 raise
         finally:
-            await self._finish_turn(conv, turn_id, parts, tools, usage, status, error)
+            await self._publish_blocks(turn_id, guard_blocks)
+            await self._finish_turn(conv, turn_id, parts, tools, usage, status, error, guard_blocks)
+
+    async def _publish_blocks(self, turn_id: str, blocks: list[dict[str, Any]]) -> None:
+        """Refusals of the always-on protections written by the hook since the last look: stored in `guard_events`
+        by the engine and shown in the chat as `guard_block` cards. The ones of this conversation also travel with
+        the saved answer, so the card is still there when the conversation is opened again."""
+        for event in await self.engine.drain_blocks():
+            cid = event.get("conversation_id")
+            target = cid if cid else self.conversation_id
+            payload = {k: v for k, v in event.items() if k != "conversation_id"}
+            if target == self.conversation_id:
+                blocks.append({k: v for k, v in payload.items() if k != "type"})
+                await self.emit({**payload, "turn_id": turn_id})
+            else:
+                await self.engine.broadcast(target, {"conversation_id": target, **payload})
 
     async def _finish_turn(self, conv: ConversationRecord, turn_id: str, parts: list[str], tools: list[dict],
-                           usage: dict[str, Any], status: str, error: TurnError | None) -> None:
+                           usage: dict[str, Any], status: str, error: TurnError | None,
+                           blocks: list[dict[str, Any]] | None = None) -> None:
         for pending in list(self.pending.values()):
             await self.resolve(pending.request_id, "deny", "engine")
         await asyncio.gather(*self._waiters, return_exceptions=True)
@@ -250,8 +275,9 @@ class ChatSession:
         message_id = None
         kept = tools[:MAX_STORED_TOOLS]
         if text or status == "complete" or kept:
+            meta = {**({"tools": kept} if kept else {}), **({"blocks": blocks[:MAX_STORED_TOOLS]} if blocks else {})}
             rec = self.engine.store.add_message(conv.id, "assistant", text, usage["tokens_in"], usage["tokens_out"],
-                                                status, {"tools": kept} if kept else None)
+                                                status, meta or None)
             message_id = rec.id
         self.live = None                        # in the same step as the save: a socket that opens now sees the message
         if status != "complete":

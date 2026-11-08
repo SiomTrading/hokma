@@ -3,6 +3,7 @@ import { ApiError } from "@/api";
 import { Button, Dot, Input, Isotype, Loading, Modal, Option, Pane, Segmented, Steps } from "@/design";
 import { useI18n } from "@/i18n";
 import type { Locale } from "@/i18n";
+import { FirstRunMode } from "@/screens/permissions/FirstRunMode";
 import { useShell, useShellEvent } from "@/shell/useShell";
 import { setupApi } from "./api";
 import { useDatabaseSwitch } from "./useDatabaseSwitch";
@@ -348,6 +349,7 @@ export function FirstRun({ pollMs }: Props) {
                 <span className="lbl">{t("firstrun.done.agents")}</span>
                 <span className="h2">{state.agents.total > 0 ? t("firstrun.done.agentsCount", { count: String(state.agents.total - 1) }) : t("firstrun.done.agentsNone")}</span>
               </Pane>
+              <FirstRunMode completed={state.completed} fallback={state.profile ?? undefined} />
             </div>
           ) : null}
 

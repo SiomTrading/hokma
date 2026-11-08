@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from hokma import __version__
+from hokma.core.proc import spawn_kwargs
 from hokma.core.config import hokma_data_dir, hokma_home, kit_baseline_path, requests_dir, workdir_pointer
 from hokma.setup.messages import SetupError, t
 
@@ -233,7 +234,7 @@ def git_init(path: Path) -> bool:
         return False
     try:
         proc = subprocess.run(["git", "init", "--quiet"], cwd=str(path), env=_git_env(), capture_output=True,
-                              text=True, timeout=30, stdin=subprocess.DEVNULL)
+                              text=True, timeout=30, stdin=subprocess.DEVNULL, **spawn_kwargs())
     except FileNotFoundError:
         raise SetupError(409, t("setup.err.git_missing")) from None
     except (OSError, subprocess.SubprocessError) as exc:

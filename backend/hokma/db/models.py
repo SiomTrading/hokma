@@ -70,7 +70,7 @@ class Record:
 
 @dataclass(frozen=True, slots=True)
 class Profile(Record):
-    BOOLS = ("telemetry_enabled", "exists")
+    BOOLS = ("telemetry_enabled", "exists", "permission_mode_intro_seen")
     exists: bool = False
     owner_name: str = ""
     fund_name: str | None = None
@@ -87,6 +87,9 @@ class Profile(Record):
     weekly_token_cap: int | None = None
     theme: str = "dark"
     active_project_id: int | None = None
+    permission_mode: str = "ask"
+    permission_mode_intro_seen: bool = False
+    update_checked_at: str | None = None
     setup_completed_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -335,6 +338,20 @@ class GuardEvent(Record):
     task_id: int | None
     reason: str
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class TrashItem(Record):
+    id: int
+    original_path: str
+    stored_path: str
+    size_bytes: int | None
+    project_id: int | None
+    conversation_id: int | None
+    reason: str | None
+    moved_at: str
+    restored_at: str | None = None
+    purged_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

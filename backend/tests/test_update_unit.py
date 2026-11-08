@@ -196,7 +196,7 @@ def test_extensions_merge_and_cannot_disable_locks(env):
     s = build_settings()
     assert s["enabledPlugins"] == {"good@market": True}
     assert list(s["extraKnownMarketplaces"]) == ["market"]
-    assert s["permissions"]["deny"] and "allow" not in s["permissions"]
+    assert s["permissions"]["deny"] and s["permissions"]["allow"] == ["mcp__hokma__trash_move"]   # not the student's
     assert s["sandbox"]["enabled"] is True and s["hooks"]["PreToolUse"] and "env" not in s
     _, problems = extensions.load()
     assert any("permissions" in p for p in problems) and any("evil" in p for p in problems)
@@ -258,3 +258,14 @@ def test_update_endpoint_needs_a_token_and_takes_no_source_from_the_request(env,
     r = c.post("/api/update", headers={"X-Hokma-Token": SESSION_TOKEN}, json={"source": "https://evil.test/m.json"})
     assert r.status_code == 200
     assert all("evil.test" not in " ".join(map(str, argv)) and "--from" not in argv for argv in seen)
+
+
+def test_the_cli_error_shown_to_the_student_has_no_internal_tag():
+    from hokma.i18n import t
+    from hokma.update.api import clean_cli_error
+
+    raw = f"{t('cli.tag.warn')} careful\n{t('cli.tag.fail')} Not updated: no network. You are still on 0.0.6.\n"
+    cleaned = clean_cli_error(raw)
+    assert "[FAIL]" not in cleaned and "[warn]" not in cleaned
+    assert cleaned.endswith("Not updated: no network. You are still on 0.0.6.")
+    assert clean_cli_error("plain message") == "plain message" and clean_cli_error("") == ""

@@ -18,10 +18,12 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from hokma import __version__
+from hokma.core.proc import spawn_kwargs
 from hokma.core.config import (current_pointer, current_slot, hokma_data_dir, hokma_home, other_slot,
-                               slot_dir)
+                               slot_dir, slot_exe)
 from hokma.i18n import t
 from hokma.update.archive import extract, fetch_archive
 from hokma.update.source import ManifestSource, UpdateError, UpdateSource, parse_version
@@ -44,8 +46,7 @@ class UpdateResult:
 
 
 def _exe(slot: str) -> Path:
-    venv = slot_dir(slot) / "venv"
-    return venv / ("Scripts/hokma.exe" if sys.platform == "win32" else "bin/hokma")
+    return slot_exe(slot)
 
 
 def _uv() -> Path:
@@ -60,7 +61,8 @@ def _env() -> dict[str, str]:
 
 def _run(cmd: list[str], what: str, env: dict[str, str], timeout: int = 900) -> str:
     try:
-        r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL,
+                           **spawn_kwargs())
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise UpdateError(f"{what}: {exc}") from exc
     if r.returncode != 0:
@@ -100,7 +102,11 @@ class _Lock:
         self.path.unlink(missing_ok=True)
 
 
-def run_update(source: UpdateSource | str, *, force: bool = False) -> UpdateResult:
+def run_update(source: UpdateSource | str, *, force: bool = False,
+               progress: Callable[[str], None] | None = None) -> UpdateResult:
+    """`progress(stage)` is called when each real stage starts: download, unpack, python, dependencies,
+    verify, switch."""
+    step = progress or (lambda _stage: None)
     if isinstance(source, str):
         source = ManifestSource(source)
     active = current_slot()
@@ -122,7 +128,9 @@ def run_update(source: UpdateSource | str, *, force: bool = False) -> UpdateResu
         flipped = False
         try:
             archive = work / "release.pkg"
+            step("download")
             fetch_archive(manifest.url, archive, manifest.sha256, manifest.headers)        # hash checked before unpacking
+            step("unpack")
             release = extract(archive, work / "release")
 
             declared = VERSION_LINE.search((release / "backend/hokma/__init__.py").read_text(encoding="utf-8"))
@@ -144,17 +152,21 @@ def run_update(source: UpdateSource | str, *, force: bool = False) -> UpdateResu
             env.update(UV_NO_CONFIG="1", UV_PYTHON_INSTALL_DIR=str(hokma_data_dir() / "python"),
                        UV_CACHE_DIR=str(hokma_data_dir() / "cache"), UV_PYTHON_PREFERENCE="only-managed",
                        UV_PROJECT_ENVIRONMENT=str(target_dir / "venv"))
+            step("python")
             _run([str(_uv()), "python", "install", py_version], t("update.step.python"), env)
+            step("dependencies")
             _run([str(_uv()), "sync", "--project", str(target_dir / "app"), "--frozen", "--no-dev",
                   "--python", py_version], t("update.step.dependencies"), env)
 
             new = str(_exe(target))
+            step("verify")
             _run([new, "write-manifest"], t("update.step.manifest"), _env())
             _run([new, "verify-install"], t("update.step.verify"), _env())
             said = _run([new, "version"], t("update.step.smoke"), _env()).strip()
             if said != f"hokma {manifest.version}":
                 raise UpdateError(t("update.version_said", said=repr(said), expected=manifest.version))
 
+            step("switch")
             write_pointer(target)                   # THE atomic switch
             flipped = True
             out = _run([new, "post-update"], t("update.step.post"), _env())

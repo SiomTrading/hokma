@@ -1,0 +1,543 @@
+{
+ "_doc": "Shared by backend/tests (Python) and dashboard (TypeScript). ok cases give the normalized result, error cases the error code: 'months' or 'invalid'. Days never become weeks, hours never become days.",
+ "cases": [
+  {
+   "input": "1m",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "m",
+   "seconds": 60,
+   "canonical": "1m"
+  },
+  {
+   "input": "5m",
+   "ok": true,
+   "kind": "time",
+   "n": 5,
+   "unit": "m",
+   "seconds": 300,
+   "canonical": "5m"
+  },
+  {
+   "input": "15m",
+   "ok": true,
+   "kind": "time",
+   "n": 15,
+   "unit": "m",
+   "seconds": 900,
+   "canonical": "15m"
+  },
+  {
+   "input": "1h",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "h",
+   "seconds": 3600,
+   "canonical": "1h"
+  },
+  {
+   "input": "1D",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "D",
+   "seconds": 86400,
+   "canonical": "1D"
+  },
+  {
+   "input": "7m",
+   "ok": true,
+   "kind": "time",
+   "n": 7,
+   "unit": "m",
+   "seconds": 420,
+   "canonical": "7m"
+  },
+  {
+   "input": "13m",
+   "ok": true,
+   "kind": "time",
+   "n": 13,
+   "unit": "m",
+   "seconds": 780,
+   "canonical": "13m"
+  },
+  {
+   "input": "45m",
+   "ok": true,
+   "kind": "time",
+   "n": 45,
+   "unit": "m",
+   "seconds": 2700,
+   "canonical": "45m"
+  },
+  {
+   "input": "3h",
+   "ok": true,
+   "kind": "time",
+   "n": 3,
+   "unit": "h",
+   "seconds": 10800,
+   "canonical": "3h"
+  },
+  {
+   "input": "2D",
+   "ok": true,
+   "kind": "time",
+   "n": 2,
+   "unit": "D",
+   "seconds": 172800,
+   "canonical": "2D"
+  },
+  {
+   "input": "1W",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "W",
+   "seconds": 604800,
+   "canonical": "1W"
+  },
+  {
+   "input": "1s",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "s",
+   "seconds": 1,
+   "canonical": "1s"
+  },
+  {
+   "input": "15s",
+   "ok": true,
+   "kind": "time",
+   "n": 15,
+   "unit": "s",
+   "seconds": 15,
+   "canonical": "15s"
+  },
+  {
+   "input": "30s",
+   "ok": true,
+   "kind": "time",
+   "n": 30,
+   "unit": "s",
+   "seconds": 30,
+   "canonical": "30s"
+  },
+  {
+   "input": "90s",
+   "ok": true,
+   "kind": "time",
+   "n": 90,
+   "unit": "s",
+   "seconds": 90,
+   "canonical": "90s"
+  },
+  {
+   "input": "3599s",
+   "ok": true,
+   "kind": "time",
+   "n": 3599,
+   "unit": "s",
+   "seconds": 3599,
+   "canonical": "3599s"
+  },
+  {
+   "input": "60s",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "m",
+   "seconds": 60,
+   "canonical": "1m"
+  },
+  {
+   "input": "120s",
+   "ok": true,
+   "kind": "time",
+   "n": 2,
+   "unit": "m",
+   "seconds": 120,
+   "canonical": "2m"
+  },
+  {
+   "input": "3600s",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "h",
+   "seconds": 3600,
+   "canonical": "1h"
+  },
+  {
+   "input": "60m",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "h",
+   "seconds": 3600,
+   "canonical": "1h"
+  },
+  {
+   "input": "120m",
+   "ok": true,
+   "kind": "time",
+   "n": 2,
+   "unit": "h",
+   "seconds": 7200,
+   "canonical": "2h"
+  },
+  {
+   "input": "1440m",
+   "ok": true,
+   "kind": "time",
+   "n": 24,
+   "unit": "h",
+   "seconds": 86400,
+   "canonical": "24h"
+  },
+  {
+   "input": "1439m",
+   "ok": true,
+   "kind": "time",
+   "n": 1439,
+   "unit": "m",
+   "seconds": 86340,
+   "canonical": "1439m"
+  },
+  {
+   "input": "168h",
+   "ok": true,
+   "kind": "time",
+   "n": 168,
+   "unit": "h",
+   "seconds": 604800,
+   "canonical": "168h"
+  },
+  {
+   "input": "24h",
+   "ok": true,
+   "kind": "time",
+   "n": 24,
+   "unit": "h",
+   "seconds": 86400,
+   "canonical": "24h"
+  },
+  {
+   "input": "1d",
+   "ok": true,
+   "kind": "time",
+   "n": 1,
+   "unit": "D",
+   "seconds": 86400,
+   "canonical": "1D"
+  },
+  {
+   "input": "365D",
+   "ok": true,
+   "kind": "time",
+   "n": 365,
+   "unit": "D",
+   "seconds": 31536000,
+   "canonical": "365D"
+  },
+  {
+   "input": "7D",
+   "ok": true,
+   "kind": "time",
+   "n": 7,
+   "unit": "D",
+   "seconds": 604800,
+   "canonical": "7D"
+  },
+  {
+   "input": "2w",
+   "ok": true,
+   "kind": "time",
+   "n": 2,
+   "unit": "W",
+   "seconds": 1209600,
+   "canonical": "2W"
+  },
+  {
+   "input": "52W",
+   "ok": true,
+   "kind": "time",
+   "n": 52,
+   "unit": "W",
+   "seconds": 31449600,
+   "canonical": "52W"
+  },
+  {
+   "input": "  7m  ",
+   "ok": true,
+   "kind": "time",
+   "n": 7,
+   "unit": "m",
+   "seconds": 420,
+   "canonical": "7m"
+  },
+  {
+   "input": "07m",
+   "ok": true,
+   "kind": "time",
+   "n": 7,
+   "unit": "m",
+   "seconds": 420,
+   "canonical": "7m"
+  },
+  {
+   "input": "10r",
+   "ok": true,
+   "kind": "range",
+   "size": 10,
+   "unit": "t",
+   "canonical": "r:10t"
+  },
+  {
+   "input": "r:10t",
+   "ok": true,
+   "kind": "range",
+   "size": 10,
+   "unit": "t",
+   "canonical": "r:10t"
+  },
+  {
+   "input": "1r",
+   "ok": true,
+   "kind": "range",
+   "size": 1,
+   "unit": "t",
+   "canonical": "r:1t"
+  },
+  {
+   "input": "10000r",
+   "ok": true,
+   "kind": "range",
+   "size": 10000,
+   "unit": "t",
+   "canonical": "r:10000t"
+  },
+  {
+   "input": "2.5rp",
+   "ok": true,
+   "kind": "range",
+   "size": 2.5,
+   "unit": "p",
+   "canonical": "r:2.5p"
+  },
+  {
+   "input": "r:2.5p",
+   "ok": true,
+   "kind": "range",
+   "size": 2.5,
+   "unit": "p",
+   "canonical": "r:2.5p"
+  },
+  {
+   "input": "r:2.50p",
+   "ok": true,
+   "kind": "range",
+   "size": 2.5,
+   "unit": "p",
+   "canonical": "r:2.5p"
+  },
+  {
+   "input": "5rp",
+   "ok": true,
+   "kind": "range",
+   "size": 5,
+   "unit": "p",
+   "canonical": "r:5p"
+  },
+  {
+   "input": "0.25rp",
+   "ok": true,
+   "kind": "range",
+   "size": 0.25,
+   "unit": "p",
+   "canonical": "r:0.25p"
+  },
+  {
+   "input": "r:10p",
+   "ok": true,
+   "kind": "range",
+   "size": 10,
+   "unit": "p",
+   "canonical": "r:10p"
+  },
+  {
+   "input": "M",
+   "ok": false,
+   "error": "months"
+  },
+  {
+   "input": "3M",
+   "ok": false,
+   "error": "months"
+  },
+  {
+   "input": "1M",
+   "ok": false,
+   "error": "months"
+  },
+  {
+   "input": "",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "   ",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "m",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "7",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "abc",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "7x",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "0m",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "0s",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "-5m",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "1.5h",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "7 m",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "7mm",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "3601s",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "1441m",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "169h",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "366D",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "53W",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "7S",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "7H",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "10R",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "10rt",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "r:0t",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "r:10001t",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "r:2.5t",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "0rp",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "r:0p",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "r:-1p",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "r:abc",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "2.5r",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "7m;",
+   "ok": false,
+   "error": "invalid"
+  },
+  {
+   "input": "1e3m",
+   "ok": false,
+   "error": "invalid"
+  }
+ ]
+}

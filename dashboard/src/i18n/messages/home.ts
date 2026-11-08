@@ -28,7 +28,7 @@ export default defineMessages({
     "home.cap.unset": "Define tu tope semanal para ver cuánto llevas.",
     "home.cap.set": "Definir tope",
     "home.notReady.title": "Tu fondo se está preparando",
-    "home.notReady.body": "La base de datos se crea al abrir Hokma con hokma start.",
+    "home.notReady.body": "La base de datos se crea al abrir Hokma desde el acceso Hokma.",
     "home.cards": "Para empezar",
   },
   en: {
@@ -58,7 +58,7 @@ export default defineMessages({
     "home.cap.unset": "Set your weekly allowance to see how much you have used.",
     "home.cap.set": "Set allowance",
     "home.notReady.title": "Your fund is getting ready",
-    "home.notReady.body": "The database is created when you open Hokma with hokma start.",
+    "home.notReady.body": "The database is created when you open Hokma from the Hokma shortcut.",
     "home.cards": "To get started",
   },
 });

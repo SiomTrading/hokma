@@ -2,6 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState 
 import type { ClipboardEvent, KeyboardEvent, Ref } from "react";
 import { Button, Icon, IconButton, Menu, MenuItem } from "@/design";
 import { useI18n } from "@/i18n";
+import { PermissionPill } from "@/screens/permissions/PermissionPill";
 import { useShell } from "@/shell/useShell";
 import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, USAGE_WARN_PCT, formatSize, uploadAttachment } from "./chatApi";
 import { suggestionsFor } from "./commands";
@@ -259,6 +260,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
           onKeyDown={onKeyDown}
           onPaste={onPaste}
         />
+        <PermissionPill running={running} />
         <button ref={pill} type="button" className="pill acc chat-model" aria-haspopup="menu" aria-expanded={modelMenu} onClick={() => setModelMenu((v) => !v)}>
           {t("chat.model.pill", { name: t(`chat.model.${model}`) })}
           <Icon name="chevronUp" size={12} strokeWidth={2.4} />

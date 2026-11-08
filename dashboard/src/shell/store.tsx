@@ -37,6 +37,13 @@ export interface ShellApi {
   closeTab: (key: string) => void;
   activateTab: (key: string) => void;
   setTabTitle: (key: string, title: string | undefined) => void;
+  /**
+   * Changes the params of an open tab (the chart's symbol). The key follows the params, so the tab stays reachable by
+   * `openScreen` with the same params, and the active tab stays active under its new key. When another tab already has
+   * those params, the two are merged: this one closes and the other one takes its place (and its focus). Returns the
+   * key the tab has now, or null when there is no tab with `key`. The screen is mounted again under the new key.
+   */
+  setTabParams: (key: string, params: TabParams) => string | null;
 
   layout: Layout;
   toggleSidebar: () => void;
@@ -187,6 +194,26 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     setTabs((current) => current.map((t) => (t.key === key && t.title !== title ? { ...t, title } : t)));
   }, []);
 
+  const setTabParams = useCallback((key: string, params: TabParams): string | null => {
+    const current = tabsRef.current;
+    const tab = current.find((t) => t.key === key);
+    if (!tab) return null;
+    const clean: TabParams = { ...params };
+    const nextKey = tabKeyFor(tab.screen, clean);
+    let next: Tab[];
+    if (nextKey === key) {
+      next = current.map((t) => (t.key === key ? { ...t, params: clean } : t));
+    } else if (current.some((t) => t.key === nextKey)) {
+      next = current.filter((t) => t.key !== key); // the same params are open already: keep that one
+    } else {
+      next = current.map((t) => (t.key === key ? { ...t, key: nextKey, params: clean } : t));
+    }
+    tabsRef.current = next;
+    setTabs(next);
+    if (nextKey !== key) setActiveKey((active) => (active === key ? nextKey : active));
+    return nextKey;
+  }, []);
+
   const toggleSidebar = useCallback(() => {
     setSidebar((s) => ((s + 1) % 3) as SidebarState);
     setFocus(false);
@@ -254,6 +281,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       closeTab,
       activateTab: setActiveKey,
       setTabTitle,
+      setTabParams,
       layout: { sidebar, rightPanel, terminal, focus },
       toggleSidebar,
       toggleRightPanel,
@@ -277,7 +305,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       on,
     }),
     [
-      tabs, activeKey, openScreen, closeTab, setTabTitle, sidebar, rightPanel, terminal, focus, toggleSidebar, toggleRightPanel,
+      tabs, activeKey, openScreen, closeTab, setTabTitle, setTabParams, sidebar, rightPanel, terminal, focus, toggleSidebar, toggleRightPanel,
       toggleTerminal, toggleFocus, theme, setTheme, locale, setLocale, settings, openSettings, closeSettings, sidebarQuery,
       focusSearch, newConversation, toasts, toast, dismissToast, emit, on,
     ],

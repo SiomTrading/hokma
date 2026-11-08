@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, 
 import type { DragEvent } from "react";
 import { Button, EmptyState, ErrorState, Isotype, Loading, Modal, Pill } from "@/design";
 import { useI18n } from "@/i18n";
+import { IntroNotice } from "@/screens/permissions/IntroNotice";
 import { useShell, useShellEvent } from "@/shell/useShell";
 import type { ScreenProps } from "@/shell/registry";
 import "./chat.css";
@@ -273,6 +274,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
         {!state.loading && !state.loadError && state.items.length === 0 ? (
           <EmptyState icon="chat" title={t("chat.empty.title")} description={t("chat.empty.text")} className="chat-empty" />
         ) : null}
+        {active ? <IntroNotice /> : null}
         {state.items.map((item) => (
           <MessageItem
             key={item.key}

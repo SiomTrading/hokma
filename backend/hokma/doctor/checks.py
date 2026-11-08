@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from hokma.core.proc import spawn_kwargs
 from hokma.core.config import claude_config_dir, dashboard_dist, hokma_data_dir, hokma_home
 from hokma.i18n import t
 
@@ -73,7 +74,7 @@ def check_claude_session(timeout: float = 15.0) -> Check:
     env = {**os.environ, "CLAUDE_CONFIG_DIR": str(claude_config_dir())}
     try:
         r = subprocess.run(["claude", "auth", "status"], env=env, capture_output=True,
-                           text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+                           text=True, timeout=timeout, stdin=subprocess.DEVNULL, **spawn_kwargs())
     except (subprocess.TimeoutExpired, OSError):
         return Check(name, WARN, t("doctor.session.unknown"))
     if r.returncode == 0 and '"loggedIn": false' not in r.stdout:
@@ -169,6 +170,11 @@ def check_settings_lock() -> Check:
     except (KeyError, IndexError, ValueError, OSError):
         return Check(name, WARN, t("doctor.locks.incomplete"))
     missing = []
+    if actual.get("disableAllHooks") is not False:
+        missing.append("disableAllHooks")
+    commands = " ".join(h.get("command", "") for g in actual["hooks"]["PreToolUse"] for h in g.get("hooks", []))
+    if "hardblock.py" not in commands:
+        missing.append("hook hardblock")
     for p in protected_paths():
         rule = _abs_rule_path(p)
         for needed in (f"Edit({rule})", f"Edit({rule}/**)", f"Write({rule})", f"Write({rule}/**)"):

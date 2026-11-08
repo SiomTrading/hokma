@@ -12,6 +12,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from hokma.core.proc import spawn_kwargs
 from hokma.update.safe_exec import clean_env, find_executable
 
 # Only these keys may exist in a project's .git/config (compared in lowercase). Git itself parses the file
@@ -43,7 +44,7 @@ def _run(args: list[str], timeout: int):
     with tempfile.TemporaryDirectory(prefix="hokma-helper-") as cwd:
         try:
             return subprocess.run([exe, *args], capture_output=True, text=True, timeout=timeout, env=_env(cwd),
-                                  cwd=cwd, stdin=subprocess.DEVNULL)
+                                  cwd=cwd, stdin=subprocess.DEVNULL, **spawn_kwargs())
         except (OSError, subprocess.SubprocessError):
             return None
 
@@ -118,3 +119,22 @@ def log(project: Path, limit: int = 20) -> list[str]:
         return []
     done = _git(project, "log", f"-{int(limit)}", "--pretty=format:%s")
     return done.stdout.splitlines() if done is not None and done.returncode == 0 else []
+
+
+def run_project_git(project: Path, args: list[str], *, extra_env: dict[str, str] | None = None,
+                    input_bytes: bytes | None = None, timeout: int = 120):
+    """git on a project with the same lock-down as every other call here, for callers that need raw bytes or an
+    extra environment variable (a temporary index file). Returns CompletedProcess (stdout and stderr as bytes) or
+    None when git is missing or cannot run. The caller has checked `repo_state` first."""
+    exe = find_executable("git")
+    if exe is None:
+        return None
+    with tempfile.TemporaryDirectory(prefix="hokma-helper-") as cwd:
+        env = _env(cwd)
+        env.update(extra_env or {})
+        try:
+            return subprocess.run([exe, "-C", str(project), *_HARDEN, *_IDENTITY, *args], capture_output=True,
+                                  timeout=timeout, env=env, cwd=cwd, input=input_bytes,
+                                  stdin=None if input_bytes is not None else subprocess.DEVNULL, **spawn_kwargs())
+        except (OSError, subprocess.SubprocessError):
+            return None

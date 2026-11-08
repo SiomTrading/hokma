@@ -51,7 +51,8 @@ def test_every_key_used_in_the_code_exists_and_every_key_is_used():
 def test_installer_keys_are_used_by_the_scripts():
     scripts = "".join((ROOT / "installer" / name).read_text(encoding="utf-8")
                       for name in ("install.sh", "uninstall.sh", "install.ps1", "uninstall.ps1", "messages.sh", "messages.ps1"))
-    unused = [k for k in properties("en") if not k.startswith("tag.") and k not in scripts]
+    # `tag.*` and `shortcut.*` are looked up by a computed key (the uninstallers loop over the three actions)
+    unused = [k for k in properties("en") if not k.startswith(("tag.", "shortcut.")) and k not in scripts]
     assert unused == []
 
 

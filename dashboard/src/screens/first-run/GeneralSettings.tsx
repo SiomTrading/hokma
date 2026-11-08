@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "@/api";
+import { ApiError, deviceKeySupported, isFirefox, logoutSession, useSessionInfo } from "@/api";
 import { Button, ErrorState, Input, Loading, Segmented, Toggle } from "@/design";
 import { useI18n } from "@/i18n";
 import type { Locale } from "@/i18n";
+import { PermissionsSettings } from "@/screens/permissions/PermissionsSettings";
 import { useShell, useShellEvent } from "@/shell/useShell";
 import { setupApi } from "./api";
 import { DatabaseChoice } from "./DatabaseChoice";
@@ -33,6 +34,8 @@ export function GeneralSettings() {
   const [report, setReport] = useState<MigrationDto | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const session = useSessionInfo();
+  const firefox = isFirefox();
 
   const apply = useCallback((next: SetupState) => {
     setState(next);
@@ -108,6 +111,16 @@ export function GeneralSettings() {
     shell.setLocale(locale);
     void setupApi.patchProfile({ language: locale }).catch(() => undefined);
   };
+
+  const closeSession = () =>
+    run(async () => {
+      try {
+        await logoutSession();
+      } catch (cause) {
+        if (cause instanceof ApiError && cause.status === 401) return;     // the session was already gone: the entry screen shows
+        throw new Error(cause instanceof ApiError && cause.code !== "http_error" ? cause.message : t("session.logout.failed"));
+      }
+    });
 
   const relaunch = () => {
     shell.closeSettings();
@@ -202,6 +215,29 @@ export function GeneralSettings() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span className="p">{t("general.light")}</span>
         <Toggle label={t("general.light")} checked={shell.theme === "light"} onChange={(on) => shell.setTheme(on ? "light" : "dark")} />
+      </div>
+
+      <PermissionsSettings />
+
+      <div className="sep" />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="session-section">
+        <span className="h2">{t("session.logout.title")}</span>
+        <span className="p">{t("session.logout.description")}</span>
+        {firefox ? (
+          <span className="p" role="note" data-testid="session-firefox">
+            {t("session.firefoxNotice")}
+          </span>
+        ) : null}
+        {!firefox && (session.storageUnavailable || !deviceKeySupported()) ? (
+          <span className="p" role="note" data-testid="session-no-storage">
+            {t("session.noStorage")}
+          </span>
+        ) : null}
+        <div>
+          <Button size="sm" disabled={busy} onClick={() => void closeSession()}>
+            {t("session.logout.button")}
+          </Button>
+        </div>
       </div>
 
       <div className="sep" />

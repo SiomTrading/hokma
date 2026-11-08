@@ -102,7 +102,20 @@ class JournalRepo(Repo):
         return int(self.s.scalar(f"SELECT count(*) FROM journal_entries{where}", params))
 
 
+HARD_RULES = ("delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money")
+
+
 class GuardEventsRepo(Repo):
+    def record_block(self, rule: str, tool: str | None, target: str, *, task_id: int | None = None,
+                     agent_slug: str | None = None, at: str | None = None) -> GuardEvent:
+        """A call the always-on protections refused (`decision='blocked'`, `guard` = the rule)."""
+        if rule not in HARD_RULES:
+            raise ValidationError(f"unknown protection rule {rule!r}")
+        new_id = self.s.insert("guard_events", {
+            "guard": rule, "decision": "blocked", "agent_slug": agent_slug, "tool": (tool or "")[:200] or None,
+            "task_id": task_id, "reason": (target or "")[:1000] or rule, "created_at": to_db_time(at) or utcnow()})
+        return self._get("guard_events", "id", new_id, GuardEvent)
+
     def record(self, guard: str, decision: str, reason: str, *, agent_slug: str | None = None,
                tool: str | None = None, task_id: int | None = None) -> GuardEvent:
         new_id = self.s.insert("guard_events", {

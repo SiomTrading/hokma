@@ -57,9 +57,9 @@ def test_chat_store_persists_status_names_and_permissions(db):
 
 def test_hokma_db_migrate_command(env, capsys):
     assert main(["db", "migrate"]) == 0
-    assert t("db.migrate.done", version=2) in capsys.readouterr().out
+    assert t("db.migrate.done", version=4) in capsys.readouterr().out
     assert main(["db", "migrate"]) == 0
-    assert sqlite3.connect(str(db_path())).execute("SELECT count(*) FROM schema_version").fetchone()[0] == 2
+    assert sqlite3.connect(str(db_path())).execute("SELECT count(*) FROM schema_version").fetchone()[0] == 4
 
 
 def test_hokma_db_migrate_exits_with_4_and_the_catalog_message(env, capsys):

@@ -153,15 +153,20 @@ async function scenario(chromium, locale, dist) {
   try {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 940 } });
     await ctx.addInitScript(([token, loc]) => {
-      localStorage.setItem("hokma.token", token);
+      if (!window.name && window.location.protocol.startsWith("http")) {                           // the way a handoff gives a fresh tab its session, never a storage
+        const u = window.location.pathname + window.location.search;
+        window.name = "hokma-handoff:" + JSON.stringify({ o: window.location.origin, u, t: token });
+      }
       localStorage.setItem("hokma.locale", loc);
     }, [server.token, locale]);
     const page = await ctx.newPage();
     const errors = [];
     const outside = [];
     page.on("pageerror", (e) => errors.push(e.message));
+    const polled = [];
     page.on("request", (r) => {
       const url = new URL(r.url());
+      if (url.pathname.startsWith("/api/market/candles")) polled.push(r.url());
       if (!["127.0.0.1", "localhost"].includes(url.hostname) && !["data:", "blob:"].includes(url.protocol)) outside.push(r.url());
     });
     await page.goto(`http://127.0.0.1:${server.port}/`);
@@ -171,9 +176,11 @@ async function scenario(chromium, locale, dist) {
 
     // chart tabs stay mounted (hidden) in the background: every locator looks only at the tab in front
     const front = page.locator(".screen-host:not([hidden])");
-    const candles = () => front.locator("[data-candle]");
+    // The bars are drawn on a canvas: the chart body says how many it holds, and the canvas must exist and have size.
+    const body = front.getByTestId("chart-body");
+    const barCount = async () => Number((await body.getAttribute("data-bars")) ?? 0);
     const title = front.getByTestId("chart-title");
-    const opening = front.getByTestId("opening-line");
+    const opening = front.getByTestId("opening-pill");
     const search = () => page.getByRole("textbox", { name: msg("chart.search.label") });
     const openAddMenu = async () => {
       await page.getByRole("button", { name: msg("top.addTab") }).click();
@@ -195,12 +202,28 @@ async function scenario(chromium, locale, dist) {
     await tab("NQ=F").waitFor();
     await title.waitFor();
     assert.equal((await title.innerText()).replace(/\s+/g, " "), "NQ=F · 5m");
-    await until(async () => (await candles().count()) > 20, "candles drawn");
-    await front.getByRole("img", { name: msg("chart.aria", { symbol: "NQ=F", tf: "5m" }) }).waitFor();
+    await until(async () => (await barCount()) > 20, "bars drawn");
+    const chartImage = front.getByRole("img", { name: msg("chart.aria", { symbol: "NQ=F", tf: "5m" }) });
+    await chartImage.waitFor();
+    await until(async () => {
+      const box = await chartImage.locator("canvas").first().boundingBox();
+      return box !== null && box.width > 300 && box.height > 150;
+    }, "the chart canvas has a size");
+    // the canvas has painted candles: more than one color of pixel in its plot area
+    const painted = await chartImage.locator("canvas").first().evaluate((canvas) => {
+      const ctx = canvas.getContext("2d");
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const colors = new Set();
+      for (let i = 0; i < data.length; i += 4 * 97) if (data[i + 3] > 0) colors.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);
+      return colors.size;
+    });
+    assert.ok(painted > 2, "the canvas holds painted candles");
 
-    // 3. the page says whether the market is open (the answer depends on the clock when the run happens) and names the source
-    const state = await front.getByTestId("market-state").innerText();
-    assert.ok(state.includes(msg("chart.market.closed")) || state.includes(msg("chart.market.open")), "market state shown");
+    // 3. no provider serves NQ=F: the chart says Delayed through the live channel, names the source and links to Connections
+    await front.getByTestId("live-status").waitFor();
+    assert.equal(await front.getByTestId("live-status").getAttribute("data-data-state"), "delayed");
+    assert.notEqual(await front.getByTestId("live-status").getAttribute("data-mode"), "live", "delayed data is never shown as live");
+    await front.getByTestId("connect-link").waitFor();
     await front.getByText(msg("chart.source", { source: "Yahoo Finance" })).waitFor();
 
     // 4. the opening high line is calculated from the real bars and matches an independent calculation
@@ -210,10 +233,10 @@ async function scenario(chromium, locale, dist) {
     await shot("nq-5m");
 
     // 5. changing the timeframe redraws
-    const bars5 = await candles().count();
+    const bars5 = await barCount();
     await page.getByRole("button", { name: "15m", exact: true }).click();
     await until(async () => (await title.innerText()).includes("15m"), "15m title");
-    await until(async () => (await candles().count()) !== bars5, "candles redrawn for 15m");
+    await until(async () => (await barCount()) !== bars5, "bars redrawn for 15m");
     await until(async () => (await opening.count()) === 1, "opening line on 15m");
     assert.equal(await openingPrice(), nq5, "15m bars give the same opening high as the 5m bars");
     await page.getByRole("button", { name: "1h", exact: true }).click();
@@ -222,7 +245,7 @@ async function scenario(chromium, locale, dist) {
     assert.equal(await openingPrice(), nq5, "1h opening high comes from the 5 minute bars");
     await page.getByRole("button", { name: "1D", exact: true }).click();
     await until(async () => (await title.innerText()).includes("1D"), "1D title");
-    await until(async () => (await candles().count()) > 10, "daily candles");
+    await until(async () => (await barCount()) > 10, "daily bars");
     assert.equal(await opening.count(), 0, "no opening line on the daily chart");
     await shot("nq-1d");
     await page.getByRole("button", { name: "5m", exact: true }).click();
@@ -236,11 +259,20 @@ async function scenario(chromium, locale, dist) {
     await until(async () => (await title.innerText()).startsWith("AAPL"), "AAPL chart");
     await until(async () => (await opening.count()) === 1, "AAPL opening line");
     assert.equal(await openingPrice(), expectedOpeningHigh("chart_AAPL_5m.json", "AAPL 5m"));
-    // the recorded stock session is over whenever this runs: closed market, with the time of the last data
-    const closed = await front.getByTestId("market-state").innerText();
-    assert.ok(closed.includes(msg("chart.market.closed")), "stock market closed");
-    assert.ok(/\d\d:\d\d/.test(closed), "last data time shown");
-    assert.equal(await front.getByTestId("delay-notice").count(), 0, "a closed market is not a delayed one");
+    // the recorded stock session is over unless the clock of the run falls inside a session: closed (with the time of the
+    // last data and the delay as its own label) or delayed, and never live
+    const live = front.getByTestId("live-status");
+    await until(async () => ["closed", "delayed"].includes(await live.getAttribute("data-mode")), "AAPL closed or delayed");
+    assert.equal(await live.getAttribute("data-data-state"), "delayed");
+    if ((await live.getAttribute("data-mode")) === "closed") {
+      const closed = await front.getByTestId("market-state").innerText();
+      assert.ok(closed.includes(msg("chart.market.closed")), "stock market closed");
+      assert.ok(/\d\d:\d\d/.test(closed), "last data time shown");
+      assert.equal(await front.getByTestId("delay-notice").count(), 1, "a closed market of delayed data says both");
+    } else {
+      assert.ok((await front.getByTestId("market-state").innerText()).includes(msg("chart.live.delayedMinutes", { minutes: 15 })));
+    }
+    assert.equal(await front.getByTestId("connect-link").getAttribute("href"), "#/connections?class=equity");
     await shot("aapl-closed");
 
     // 7. an unknown symbol is an error with a message, not an empty chart; typing a ticker and Enter opens it
@@ -252,18 +284,51 @@ async function scenario(chromium, locale, dist) {
     await alert.waitFor();
     assert.equal(await page.getByRole("button", { name: msg("chart.ask") }).isDisabled(), true);
 
-    // 8. a network failure while loading shows the error state and the retry brings the chart back
+    // 7b. range bars on the delayed fallback are all approximate and say so; seconds are refused with the link to connect a source
     await tab("NQ=F").click();
     await title.waitFor();
-    await page.route("**/api/market/candles**", (route) => route.abort());
+    const writeInterval = async (text) => {
+      await page.getByRole("button", { name: msg("chart.interval.more") }).click();
+      const field = page.getByRole("combobox");
+      await field.fill(text);
+      await field.press("Enter");
+    };
+    await writeInterval("10r");
+    await until(async () => (await title.innerText()).includes(msg("chart.interval.rangeTitle", { size: "10t" })), "range title");
+    await until(async () => (await barCount()) > 5, "range bars drawn");
+    const approx = front.getByTestId("chart-notice");
+    await approx.waitFor();
+    assert.equal(await approx.getAttribute("data-kind"), "approx_all");
+    assert.ok((await approx.innerText()).includes(msg("chart.notice.approxAll")), "the approximate range says so");
+    await front.getByTestId("connect-link").waitFor();
+    await shot("range-approx");
+    // seconds: the box already knows the source gives 1-minute bars at best, so it disables them with the reason and never asks the engine
+    await page.getByRole("button", { name: msg("chart.interval.more") }).click();
+    const field = page.getByRole("combobox");
+    await field.fill("15");
+    const firstSuggestion = page.getByRole("listbox").getByRole("option").first();
+    assert.equal(await firstSuggestion.getAttribute("aria-disabled"), "true", "seconds suggestions are disabled");
+    assert.equal(await firstSuggestion.getAttribute("title"), msg("market.err.seconds_need_ticks"));
+    await field.fill("15s");
+    await field.press("Enter");
+    const reason = page.getByRole("alert").filter({ hasText: msg("market.err.seconds_need_ticks") });
+    await reason.waitFor();
+    assert.ok((await title.innerText()).includes(msg("chart.interval.rangeTitle", { size: "10t" })), "the chart stays on the range");
+    await page.keyboard.press("Escape");
+    await writeInterval("5m");
+    await until(async () => (await title.innerText()).includes("5m"), "back on 5m");
+    await until(async () => (await opening.count()) === 1, "NQ=F 5m opening line after range and seconds");
+
+    // 8. the chart never asks the HTTP API for candles: everything above came through /ws/market
+    await tab("NQ=F").click();
+    await title.waitFor();
     await page.getByRole("button", { name: "15m", exact: true }).click();
-    await page.getByRole("alert").filter({ hasText: msg("chart.error.title") }).waitFor();
-    await page.unroute("**/api/market/candles**");
-    await page.getByRole("button", { name: msg("ui.error.retry") }).click();
-    await until(async () => (await candles().count()) > 5, "chart back after retry");
+    await until(async () => (await title.innerText()).includes("15m"), "15m title again");
+    await until(async () => (await barCount()) > 5, "bars on 15m");
     await page.getByRole("button", { name: "5m", exact: true }).click();
     await until(async () => (await opening.count()) === 1, "NQ=F 5m again");
-    await shot("error-recovered");
+    assert.deepEqual(polled, [], "no request to /api/market/candles");
+    await shot("back-on-nq");
 
     // 9. ask the fund: the chart image goes to a new conversation and the chat tab opens
     await page.getByRole("button", { name: msg("chart.ask") }).click();

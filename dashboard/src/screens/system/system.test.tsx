@@ -4,10 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, t } from "@/i18n";
 import { renderWithApp } from "@/test/utils";
 import { ExtensionsSection } from "./ExtensionsSection";
-import { NewsSection } from "./NewsSection";
 import { StatusSection } from "./StatusSection";
 import { failure, mockApi } from "./testkit";
-import type { ExtensionsData, MarketData, NewsData, StatusData } from "./types";
+import type { ExtensionsData, MarketData, StatusData } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -169,77 +168,6 @@ describe("Extensions states", () => {
   });
 });
 
-const NEWS: NewsData = {
-  installed: { version: "0.0.5", installed_at: "2026-11-04T12:00:00Z" },
-  changelog: [{ version: "0.0.5", body: "- Chat with photos\n- A <script>alert(1)</script> line" }],
-  latest: { version: "0.0.6", notes: "- Faster charts", published_at: "2026-11-05T10:00:00Z" },
-  latest_error: null,
-  newer: true,
-};
-
-function newsWords(l: Loc) {
-  return {
-    update: T("news.update", l),
-    newer: T("news.newer", l, { version: "0.0.6" }),
-    coming: T("news.coming", l),
-    done: T("news.updated", l, { version: "0.0.6" }).split(".")[0],
-  };
-}
-
-describe.each([
-  ["es", newsWords("es")],
-  ["en", newsWords("en")],
-] as const)("News (%s)", (locale, words) => {
-  it("shows the installed version, the notice, the real notes and the changelog without raw HTML", async () => {
-    setLocale(locale);
-    mockApi({ "GET /api/news": NEWS });
-    renderWithApp(<NewsSection />);
-    expect((await screen.findAllByText("v0.0.5", { selector: ".pill" })).length).toBe(2);
-    expect(screen.getByText(words.newer)).toBeInTheDocument();
-    expect(screen.getByText(words.coming)).toBeInTheDocument();
-    expect(screen.getByText("Faster charts")).toBeInTheDocument();
-    expect(screen.getByText("Chat with photos")).toBeInTheDocument();
-    expect(document.querySelector("script")).toBeNull();
-    expect(screen.queryByText(/sesi.n|cohorte|session \d|cohort/i)).not.toBeInTheDocument();
-  });
-
-  it("updates through /api/update and reports the result", async () => {
-    setLocale(locale);
-    const calls = mockApi({
-      "GET /api/news": NEWS,
-      "POST /api/update": { status: "updated", from_version: "0.0.5", to_version: "0.0.6", restart_required: true },
-    });
-    renderWithApp(<NewsSection />);
-    await userEvent.click(await screen.findByRole("button", { name: words.update }));
-    expect(await screen.findByText(new RegExp(words.done))).toBeInTheDocument();
-    expect(calls.some((c) => c.method === "POST" && c.path === "/api/update")).toBe(true);
-  });
-});
-
-describe("News states", () => {
-  it("has no update button and no 'coming' block when there is nothing newer", async () => {
-    mockApi({ "GET /api/news": { ...NEWS, latest: { version: "0.0.5", notes: null, published_at: null }, newer: false } });
-    renderWithApp(<NewsSection />);
-    expect(await screen.findByText(T("news.upToDate", "es"))).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Actualizar Hokma" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Lo que viene")).not.toBeInTheDocument();
-  });
-
-  it("shows the update error from the server", async () => {
-    mockApi({ "GET /api/news": NEWS, "POST /api/update": failure(502, "No access to the release") });
-    renderWithApp(<NewsSection />);
-    await userEvent.click(await screen.findByRole("button", { name: "Actualizar Hokma" }));
-    expect(await screen.findByText("No access to the release")).toBeInTheDocument();
-  });
-
-  it("offers to check again when the latest version could not be read", async () => {
-    mockApi({ "GET /api/news": { ...NEWS, latest: null, newer: false, latest_error: "Offline" } });
-    renderWithApp(<NewsSection />);
-    expect(await screen.findByText(/Offline/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Buscar actualizaciones" })).toBeInTheDocument();
-  });
-});
-
 const STATUS: StatusData = {
   version: "0.0.5",
   workdir: "/home/ana/Hokma",
@@ -285,5 +213,30 @@ describe("System status errors", () => {
     mockApi({ "GET /api/status": failure(500, "Checks failed") });
     renderWithApp(<StatusSection />);
     expect(await screen.findByText("Checks failed")).toBeInTheDocument();
+  });
+});
+
+describe("Open source notices (T-2)", () => {
+  it("next to the version, opens the library, its Apache 2.0 license and its NOTICE text as published", async () => {
+    setLocale("en");
+    mockApi({ "GET /api/status": STATUS });
+    renderWithApp(<StatusSection />);
+    await userEvent.click(await screen.findByRole("button", { name: "Open source notices" }));
+    const dialog = screen.getByRole("dialog", { name: t("sys.notices.title") });
+    const item = within(dialog).getByTestId("notice-lightweight-charts");
+    expect(item).toHaveTextContent("lightweight-charts");
+    expect(item).toHaveTextContent(t("sys.notices.license", { license: "Apache License 2.0" }));
+    expect(within(item).getByRole("link", { name: t("sys.notices.readLicense") })).toHaveAttribute("href", "https://www.apache.org/licenses/LICENSE-2.0");
+    const notice = within(item).getByTestId("notice-text").textContent;
+    expect(notice).toBe("TradingView Lightweight Charts\u2122\nCopyright (\u0441) 2025 TradingView, Inc. https://www.tradingview.com/\n");
+    await userEvent.click(within(dialog).getByRole("button", { name: t("sys.notices.close") }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("has its texts in Spanish too", async () => {
+    setLocale("es");
+    mockApi({ "GET /api/status": STATUS });
+    renderWithApp(<StatusSection />);
+    expect(await screen.findByRole("button", { name: "Avisos de c\u00f3digo abierto" })).toBeInTheDocument();
   });
 });

@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "asset_classes": ["equity", "crypto", "forex", "future"],
+  "default_priority": {
+    "equity": ["alpaca", "finnhub", "databento"],
+    "crypto": ["coinbase", "finnhub"],
+    "forex": ["finnhub"],
+    "future": ["siomtrading_futures", "databento", "massive"]
+  },
+  "providers": {
+    "coinbase": {
+      "name": "Coinbase",
+      "asset_classes": ["crypto"],
+      "needs_key": false,
+      "key_fields": [],
+      "enabled_by_default": true,
+      "data_state": "live",
+      "delay_seconds": 0,
+      "max_symbols": 100,
+      "premium": false,
+      "url": "wss://ws-feed.exchange.coinbase.com",
+      "test_symbol": "BTC-USD"
+    },
+    "alpaca": {
+      "name": "Alpaca IEX",
+      "asset_classes": ["equity"],
+      "needs_key": true,
+      "key_fields": ["key_id", "secret"],
+      "enabled_by_default": true,
+      "data_state": "live",
+      "delay_seconds": 0,
+      "max_symbols": 30,
+      "premium": false,
+      "url": "wss://stream.data.alpaca.markets/v2/iex",
+      "test_symbol": "SPY"
+    },
+    "finnhub": {
+      "name": "Finnhub",
+      "asset_classes": ["equity", "forex", "crypto"],
+      "needs_key": true,
+      "key_fields": ["key"],
+      "enabled_by_default": true,
+      "data_state": "live",
+      "delay_seconds": 0,
+      "max_symbols": 50,
+      "premium": false,
+      "url": "wss://ws.finnhub.io",
+      "test_symbol": "BTC-USD"
+    },
+    "siomtrading_futures": {
+      "name": "SiomTrading Futures",
+      "asset_classes": ["future"],
+      "needs_key": true,
+      "key_fields": ["key"],
+      "enabled_by_default": true,
+      "data_state": "live",
+      "delay_seconds": 0,
+      "max_symbols": 20,
+      "premium": false,
+      "url": "wss://stream.siomtrading.com/v1/stream/futures",
+      "test_symbol": "NQ=F"
+    },
+    "databento": {
+      "name": "Databento",
+      "asset_classes": ["future", "equity"],
+      "needs_key": true,
+      "key_fields": ["key"],
+      "enabled_by_default": true,
+      "data_state": "live",
+      "delay_seconds": 0,
+      "max_symbols": 100,
+      "premium": true,
+      "host": null,
+      "port": null,
+      "test_symbol": "NQ=F"
+    },
+    "massive": {
+      "name": "Massive",
+      "asset_classes": ["future"],
+      "needs_key": true,
+      "key_fields": ["key"],
+      "enabled_by_default": true,
+      "data_state": "live",
+      "delay_seconds": 0,
+      "max_symbols": 50,
+      "premium": true,
+      "url": "wss://socket.massive.com/futures",
+      "test_symbol": "NQ=F"
+    }
+  },
+  "polling": {
+    "name": "Yahoo Finance",
+    "interval_seconds": 20,
+    "delay_seconds": {"future": 600, "equity": 900, "forex": 0, "crypto": 0, "index": 900}
+  }
+}

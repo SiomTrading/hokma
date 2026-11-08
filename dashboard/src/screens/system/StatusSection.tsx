@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useApiQuery } from "@/api";
 import { Button, Dot, ErrorState, Loading, Pane, Row } from "@/design";
 import { useI18n } from "@/i18n";
+import { OpenSourceNotices } from "./OpenSourceNotices";
 import type { CheckStatus, StatusData } from "./types";
 
 const TONE: Record<CheckStatus, { color: string; pill: string }> = {
@@ -24,7 +25,10 @@ export function StatusSection() {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-          <span className="p mono" style={{ fontSize: 12 }}>{t("sys.version")}: {data.version}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span className="p mono" style={{ fontSize: 12 }}>{t("sys.version")}: {data.version}</span>
+            <OpenSourceNotices />
+          </span>
           <span className="p mono" style={{ fontSize: 12, overflowWrap: "anywhere" }}>{t("sys.workdir")}: {data.workdir}</span>
           <span className="p" style={{ fontSize: 12 }}>{t("sys.summary", { ok: data.summary.ok, warn: data.summary.warn, fail: data.summary.fail })}</span>
         </div>

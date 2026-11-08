@@ -16,6 +16,8 @@ export interface ProfileDto {
   claude_status: ClaudeStatus;
   claude_plan: string | null;
   setup_completed_at: string | null;
+  permission_mode?: "ask" | "auto";
+  permission_mode_intro_seen?: boolean;
 }
 
 export interface SetupState {

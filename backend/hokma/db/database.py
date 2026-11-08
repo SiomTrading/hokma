@@ -17,6 +17,7 @@ from hokma.db.repos.governance import BugsRepo, DecisionsRepo, GuardEventsRepo, 
 from hokma.db.repos.misc import OnboardingRepo, UsageRepo
 from hokma.db.repos.profile import LicenseChecksRepo, ProfileRepo
 from hokma.db.repos.projects import ProjectsRepo
+from hokma.db.repos.trash import TrashItemsRepo
 from hokma.db.repos.tasks import TaskCommentsRepo, TaskEventsRepo, TaskLinksRepo, TaskRunsRepo, TasksRepo
 
 
@@ -47,6 +48,7 @@ class Unit:
         self.scheduled_jobs = ScheduledJobsRepo(session)
         self.onboarding = OnboardingRepo(session)
         self.usage = UsageRepo(session)
+        self.trash = TrashItemsRepo(session)
 
 
 class Database:

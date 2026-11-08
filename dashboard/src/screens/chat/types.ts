@@ -44,6 +44,15 @@ export interface StoredTool {
   result: string | null;
 }
 
+/** A refusal of one of the always-on protections, as the server sends it live and as it is saved with the answer. */
+export interface GuardBlock {
+  id: number | string;
+  rule: string;
+  tool: string;
+  target: string;
+  at: string;
+}
+
 export interface StoredAttachment {
   id: string;
   name: string;
@@ -69,6 +78,7 @@ export interface HistoryMessage {
   created_at: number;
   tools?: StoredTool[];
   attachments?: StoredAttachment[];
+  blocks?: GuardBlock[];
 }
 
 /** Everything the server can send on /ws/chat. */
@@ -80,6 +90,7 @@ export type ServerEvent =
   | { type: "tool_result"; conversation_id: string; turn_id: string; tool_use_id: string; is_error: boolean; text: string }
   | ({ type: "permission_request" } & PermissionBody)
   | { type: "permission_resolved"; conversation_id: string; request_id: string; decision: "allow" | "deny"; by: "human" | "timeout" | "stop" | "engine" }
+  | ({ type: "guard_block"; conversation_id: string; turn_id?: string } & GuardBlock)
   | { type: "done"; conversation_id: string; turn_id: string; message_id: string | null; stopped: boolean; usage: Usage; engine_session: string | null }
   | { type: "error"; conversation_id?: string; turn_id?: string; code: string; message: string }
   | { type: "command_result"; conversation_id?: string; name: "model" | "agent" | "project"; ok: boolean; value: unknown; options?: string[] }

@@ -67,6 +67,13 @@
   "doctor.extensions.mirror": "The copy of extensions.json in your working folder differs from the protected one (the protected one is used). Change extensions with: hokma ext ...",
   "doctor.extensions.ok": "{plugins} plugins, {marketplaces} marketplaces, {servers} MCP servers",
 
+  "shutdown.err.unauthorized": "The session is not valid. Enter again with the Hokma icon.",
+  "shutdown.err.nonce": "The shutdown request is not valid or has expired. Try again.",
+  "shutdown.err.origin": "Hokma only shuts down from its own panel.",
+  "shutdown.err.in_use": "Hokma is open with your session in another tab or browser. Continue there, or shut it down from there.",
+  "shutdown.err.too_soon": "Hokma received a shutdown order a moment ago. Wait a few seconds.",
+  "shutdown.journal.panel": "Hokma was shut down from the panel",
+  "shutdown.journal.entry": "Hokma was shut down from the entry screen",
   "update.invalid_version": "invalid version: {version}",
   "update.manifest_not_object": "the version manifest is not a JSON object",
   "update.manifest_missing": "the version manifest is missing: {fields}",
@@ -102,6 +109,25 @@
   "update.api.bad_token": "invalid token",
   "update.api.timeout": "The update took too long; you are still on the previous version",
   "update.api.failed": "The update failed",
+  "cli.start.bad_handoff": "Could not continue Hokma after the update: the session hand over failed. Start Hokma again with: hokma start",
+  "supervisor.restarting": "Restarting Hokma...",
+  "supervisor.crashed": "Hokma stopped unexpectedly. Starting it again in {seconds} s.",
+  "supervisor.gave_up": "Hokma could not start. The reason is in {path}",
+  "supervisor.port_busy": "Port {port} is already in use. Hokma may already be open: look for its tab, or start it on another port with: hokma start --port NUMBER",
+  "cli.start.running": "Hokma is running in the background on port {port}. To close it: hokma stop",
+  "cli.start.already_running": "Hokma is already running on port {port}. Opening it in your browser.",
+  "cli.start.address_taken": "Another program is using the Hokma address (port {port}). The browser is not opened. Close it or restart the computer and open Hokma again.",
+  "cli.start.failed": "Hokma could not start. The reason is in {path}",
+  "cli.stop.done": "Hokma is closed.",
+  "cli.stop.not_running": "Hokma is not running.",
+  "cli.stop.unreachable": "Hokma is running but did not answer the request to close. Try again in a few seconds.",
+  "cli.stop.timeout": "Hokma did not close in time. Try again with: hokma stop",
+  "cli.shortcuts.created": "Hokma shortcut created.",
+  "cli.shortcuts.legacy_left": "Could not remove these old shortcuts; delete them by hand: {paths}",
+  "cli.shortcuts.failed": "Could not create the Hokma shortcut: {error}",
+  "supervisor.no_port": "No port is free from {first} to {last}. Close the programs that use them and try again.",
+  "supervisor.already_running": "Hokma is already running on port {port}.",
+  "supervisor.no_control": "Hokma could not open its local control channel. The reason is in {path}",
   "update.github.no_access": "I could not reach the Hokma repository on GitHub. Check your connection and repeat the update.",
   "update.github.no_release": "There is no published Hokma version yet.",
   "update.github.rate_limited": "GitHub is limiting requests for now. Try again in a few minutes.",
@@ -310,6 +336,30 @@
   "market.error.bad_timeframe": "That timeframe is not available.",
   "market.error.bad_symbol": "That symbol has characters that are not allowed.",
   "market.error.unauthorized": "Open Hokma with hokma start.",
+  "market.error.limit": "This source is at its symbol limit. Close a chart or switch another source on in Connections.",
+  "market.error.down": "The price feed is not available right now. Hokma keeps trying.",
+  "market.error.bad_request": "The price feed did not understand that request.",
+  "market.error.not_entitled": "Your access to this source does not include that symbol. Open Connections to check it.",
+  "market.error.interval_months": "Months are not available yet",
+  "market.error.interval_invalid": "Write a number and a unit: 30s, 7m, 3h, 2D, 1W",
+  "market.error.interval_unavailable": "{interval} needs {base} bars, which {source} doesn't have for {symbol}",
+  "market.error.seconds_need_ticks": "This source gives 1-minute bars at best. Connect a live source for seconds",
+  "market.error.range_ticks_unknown": "This asset has no known tick size: use a price range, for example 2.5rp",
+  "connections.error.auth_failed": "The provider did not accept the key. Check it and try again.",
+  "connections.error.no_key": "Save a key for this source first.",
+  "connections.error.timeout": "No data arrived within 10 seconds. Try again later.",
+  "connections.error.unreachable": "Could not reach the provider. Check your connection.",
+  "connections.error.rate_limited": "The provider is limiting requests. Wait a minute and try again.",
+  "connections.error.connection_limit": "The provider allows one connection per account. Close the other one and try again.",
+  "connections.error.store_unavailable": "System credential store not available",
+  "connections.error.unavailable": "This source is not available in this version.",
+  "connections.error.unknown_provider": "That source does not exist.",
+  "connections.error.bad_key": "That key is empty or has characters that are not allowed.",
+  "connections.error.bad_priority": "That order does not match the sources of this group.",
+  "connections.error.token_invalid": "Token not valid",
+  "connections.error.access_revoked": "Access revoked",
+  "connections.error.other_device": "Connected from another device",
+  "connections.error.bad_request": "That request is not valid.",
 
   "agents.error.agent_not_found": "That agent does not exist.",
   "agents.error.agent_invalid": "The agent data is not valid.",
@@ -358,5 +408,96 @@
   "voice.error.transcribe_failed": "The audio could not be transcribed. Try recording again.",
   "voice.error.offline": "The speech model needs to be downloaded once and there is no internet connection. Connect and try again.",
   "voice.error.disk": "The speech model could not be saved. Free some disk space and try again.",
-  "voice.error.download_failed": "The speech model download failed. Try again in a moment."
+  "voice.error.download_failed": "The speech model download failed. Try again in a moment.",
+
+  "hardblock.delete": "Hokma blocked this: deleting files or folders ({target}).",
+
+  "hardblock.truncate": "Hokma blocked this: emptying a file that has content ({target}).",
+
+  "hardblock.hokma_internal": "Hokma blocked this: Hokma's own files and settings are not for the agent to read or change ({target}).",
+
+  "hardblock.force_push": "Hokma blocked this: forcing or deleting remote Git history ({target}).",
+
+  "hardblock.outside_workdir": "Hokma blocked this: writing outside the working folder or touching disks ({target}).",
+
+  "hardblock.secrets": "Hokma blocked this: reading stored keys and credentials ({target}).",
+
+  "hardblock.real_money": "Hokma blocked this: placing real-money orders ({target}).",
+
+  "hardblock.hint.delete": "Do not delete. Move what is no longer needed to the Hokma trash with the trash_move tool; the owner can restore it.",
+
+  "hardblock.hint.truncate": "Do not empty files. Write the new content instead, or move the file to the Hokma trash with trash_move.",
+
+  "hardblock.hint.hokma_internal": "Work only with the files of the working folder. Settings and Hokma internals are changed by the owner in the app.",
+
+  "hardblock.hint.force_push": "Push without force. If history must change, ask the owner to do it.",
+
+  "hardblock.hint.outside_workdir": "Write inside the working folder. If the owner wants a file elsewhere, say so and let them move it.",
+
+  "hardblock.hint.secrets": "Keys are managed by the owner in the app and are never shown to the agent. Ask the owner to use them from there.",
+
+  "hardblock.hint.real_money": "Real orders are placed by the owner in the app, never by the agent. Use paper trading or backtests instead.",
+
+  "hardblock.error": "Hokma: protection error ({error}); blocked for safety.",
+
+  "permissions.err.bad_mode": "The permission mode must be ask or auto.",
+
+  "permissions.err.not_found": "That item does not exist.",
+
+  "permissions.err.restore_failed": "It could not be restored: {error}",
+
+  "permissions.err.confirm_required": "This action needs the owner's confirmation.",
+
+  "permissions.err.no_git": "This folder has no safe Git repository, so there are no restore points.",
+
+  "permissions.err.bad_path": "That path is not valid for this restore point.",
+
+  "permissions.err.owner_confirmation_required": "Only the owner's open Hokma tab can do this. Shut Hokma down with the Shut down Hokma button and open it again with the Hokma icon.",
+
+  "permissions.err.bad_owner_nonce": "That owner confirmation is not valid.",
+
+  "permissions.err.owner_secret_required": "This tab cannot confirm the owner: it was not opened with the start link of Hokma. Shut Hokma down with the Shut down Hokma button and open it again with the Hokma icon.",
+
+  "permissions.err.owner_already_registered": "Another tab already confirmed the owner for this start of Hokma. Shut Hokma down with the Shut down Hokma button and open it again with the Hokma icon.",
+  "permissions.err.resume_denied": "Hokma could not restore your saved session. Open Hokma from its desktop shortcut.",
+  "permissions.err.session_revoked": "Hokma closed the saved session because an old copy of it was used. Open Hokma from its desktop shortcut to enter again.",
+  "permissions.err.handoff_origin": "Hokma only gives a code to enter from the numeric address of this computer.",
+
+  "permissions.err.unknown_point": "That restore point does not exist.",
+
+  "permissions.journal.mode": "Permission mode set to {mode}",
+
+  "permissions.journal.trash_restored": "Restored from the Hokma trash: {name}",
+
+  "permissions.journal.trash_purged": "Deleted for good from the Hokma trash: {name}",
+
+  "permissions.journal.trash_emptied": "Hokma trash emptied ({count} items)",
+
+  "permissions.journal.checkpoint_restored": "Restored from a restore point: {name}",
+
+  "trash.err.outside": "Only files inside the working folder can be moved to the trash.",
+
+  "trash.err.protected": "That path belongs to Hokma and cannot be moved.",
+
+  "trash.err.repo_folders": "Hokma cannot move this to the trash; it protects repository and settings folders.",
+
+  "trash.err.missing": "That path does not exist.",
+
+  "trash.err.reason": "Say why in one short sentence.",
+
+  "trash.moved": "Moved to the Hokma trash: {path} (id {id}). The owner can restore it from Settings > Trash.",
+
+  "protection.delete": "Deleting files or folders",
+
+  "protection.truncate": "Emptying files that have content",
+
+  "protection.hokma_internal": "Hokma's own files, settings and trash",
+
+  "protection.force_push": "Forcing or deleting remote Git history",
+
+  "protection.outside_workdir": "Writing outside the working folder and touching disks",
+
+  "protection.secrets": "Reading stored keys and credentials",
+
+  "protection.real_money": "Placing real-money orders"
 }

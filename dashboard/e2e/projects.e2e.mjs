@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { runSuite, until } from "./lib.mjs";
+import { reloadWithHandoff, runSuite, until } from "./lib.mjs";
 
 /** The upload is filed by type in a subfolder of the project; find it wherever the backend put it. */
 function findFile(dir, name) {
@@ -112,7 +112,7 @@ await runSuite("projects", { script: "serve.py" }, async ({ page, server, root, 
   assert.equal((await projects()).find((p) => p.active).name, "Strategy");
 
   // 8. reload: everything is still there, with Strategy active and the uploaded file in the renamed project
-  await page.reload();
+  await reloadWithHandoff(page);
   await list.getByRole("button", { name: /Research Desk/ }).waitFor();
   await list.getByRole("button", { name: /Strategy/ }).and(page.locator('[aria-current]')).waitFor();
   assert.equal((await projects()).find((p) => p.active).name, "Strategy");

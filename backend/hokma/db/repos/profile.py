@@ -15,10 +15,12 @@ _ENUMS = {
     "database_engine": ("sqlite", "postgres"),
     "claude_status": ("connected", "no_session", "no_cli", "unknown"),
     "theme": ("dark", "light"),
+    "permission_mode": ("ask", "auto"),
 }
 _FIELDS = ("owner_name", "fund_name", "timezone", "language", "engine", "telemetry_enabled",
            "max_parallel_agents", "workdir", "database_engine", "claude_status", "claude_plan",
-           "weekly_token_cap", "theme", "active_project_id")
+           "weekly_token_cap", "theme", "active_project_id", "permission_mode",
+           "permission_mode_intro_seen", "update_checked_at")
 
 
 def _clean_name(value: Any, *, required: bool, field: str) -> str | None:
@@ -48,12 +50,14 @@ class ProfileRepo(Repo):
              language: Any = UNSET, engine: Any = UNSET, telemetry_enabled: Any = UNSET,
              max_parallel_agents: Any = UNSET, workdir: Any = UNSET, database_engine: Any = UNSET,
              claude_status: Any = UNSET, claude_plan: Any = UNSET, weekly_token_cap: Any = UNSET,
-             theme: Any = UNSET, active_project_id: Any = UNSET) -> Profile:
+             theme: Any = UNSET, active_project_id: Any = UNSET, permission_mode: Any = UNSET,
+             permission_mode_intro_seen: Any = UNSET, update_checked_at: Any = UNSET) -> Profile:
         values = given(owner_name=owner_name, fund_name=fund_name, timezone=timezone, language=language,
                        engine=engine, telemetry_enabled=telemetry_enabled, max_parallel_agents=max_parallel_agents,
                        workdir=workdir, database_engine=database_engine, claude_status=claude_status,
                        claude_plan=claude_plan, weekly_token_cap=weekly_token_cap, theme=theme,
-                       active_project_id=active_project_id)
+                       active_project_id=active_project_id, permission_mode=permission_mode,
+                       permission_mode_intro_seen=permission_mode_intro_seen, update_checked_at=update_checked_at)
         for name, allowed in _ENUMS.items():
             if name in values:
                 require_in(name, values[name], allowed)
@@ -67,6 +71,8 @@ class ProfileRepo(Repo):
             values["fund_name"] = _clean_name(values["fund_name"], required=False, field="fund_name")
         if "telemetry_enabled" in values:
             values["telemetry_enabled"] = flag(values["telemetry_enabled"])
+        if "permission_mode_intro_seen" in values:
+            values["permission_mode_intro_seen"] = flag(values["permission_mode_intro_seen"])
         if values.get("active_project_id") is not None:
             pid = values["active_project_id"]
             if isinstance(pid, bool) or not isinstance(pid, int) or pid < 1:
@@ -93,6 +99,16 @@ class ProfileRepo(Repo):
         if self.get() is None:
             raise ValidationError("the profile does not exist yet")
         return self.save(active_project_id=project_id)
+
+    def set_permission_mode(self, mode: str, *, intro_seen: bool | None = None) -> Profile:
+        """'ask' or 'auto'. Only the owner's endpoint and the first-run step call this; never an agent."""
+        require_in("permission_mode", mode, _ENUMS["permission_mode"])
+        if self.get() is None:
+            raise ValidationError("the profile does not exist yet")
+        values: dict[str, Any] = {"permission_mode": mode}
+        if intro_seen is not None:
+            values["permission_mode_intro_seen"] = flag(intro_seen)
+        return self.save(**values)
 
     def set_claude_status(self, status: str, plan: str | None = None) -> Profile:
         require_in("claude_status", status, _ENUMS["claude_status"])

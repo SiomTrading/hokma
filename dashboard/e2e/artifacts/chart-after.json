@@ -1,0 +1,75 @@
+{
+  "tokens": {
+    "up": "#0cc",
+    "down": "#f26038"
+  },
+  "found": {
+    "up": 34,
+    "down": 19
+  },
+  "medianStep": 18,
+  "medianBodyWidth": 10,
+  "bodyShare": 0.556,
+  "samples": [
+    {
+      "kind": "up",
+      "x": 24,
+      "bodyWidth": 10,
+      "center": [
+        29,
+        416
+      ],
+      "color": "#00cccc"
+    },
+    {
+      "kind": "up",
+      "x": 42,
+      "bodyWidth": 10,
+      "center": [
+        47,
+        390
+      ],
+      "color": "#00cccc"
+    },
+    {
+      "kind": "up",
+      "x": 60,
+      "bodyWidth": 10,
+      "center": [
+        65,
+        373
+      ],
+      "color": "#00cccc"
+    },
+    {
+      "kind": "down",
+      "x": 186,
+      "bodyWidth": 10,
+      "center": [
+        191,
+        328
+      ],
+      "color": "#f26038"
+    },
+    {
+      "kind": "down",
+      "x": 204,
+      "bodyWidth": 10,
+      "center": [
+        209,
+        336
+      ],
+      "color": "#f26038"
+    },
+    {
+      "kind": "down",
+      "x": 222,
+      "bodyWidth": 10,
+      "center": [
+        227,
+        345
+      ],
+      "color": "#f26038"
+    }
+  ]
+}

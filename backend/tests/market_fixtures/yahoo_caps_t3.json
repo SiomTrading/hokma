@@ -1,0 +1,262 @@
+{
+ "recorded_at": "2026-11-05",
+ "note": "Real Yahoo v8 chart answers, summarized. range=730d returns more than 730 days (1063 for AAPL): use 2y for 1h. 1m is limited per request to 8 days, 5m and 15m to a start within 60 days, 1h to 730 days.",
+ "cases": {
+  "AAPL|1m|7d": {
+   "status": 200,
+   "bars": 2731,
+   "first": 1793194200,
+   "last": 1793912400,
+   "span_days": 8.3
+  },
+  "AAPL|1m|8d": {
+   "status": 200,
+   "bars": 3121,
+   "first": 1793107800,
+   "last": 1793912400,
+   "span_days": 9.3
+  },
+  "AAPL|1m|1mo": {
+   "status": 422,
+   "error": "1m data not available for startTime=1791243991 and endTime=1793922391. Only 8 days worth of 1m granularity data are allowed to be fetched per request."
+  },
+  "AAPL|5m|60d": {
+   "status": 200,
+   "bars": 4681,
+   "first": 1786627800,
+   "last": 1793912400,
+   "span_days": 84.3
+  },
+  "AAPL|5m|1mo": {
+   "status": 200,
+   "bars": 1795,
+   "first": 1791293400,
+   "last": 1793912400,
+   "span_days": 30.3
+  },
+  "AAPL|5m|3mo": {
+   "status": 422,
+   "error": "5m data not available for startTime=1785887196 and endTime=1793922396. The requested range must be within the last 60 days."
+  },
+  "AAPL|15m|60d": {
+   "status": 200,
+   "bars": 1561,
+   "first": 1786627800,
+   "last": 1793912400,
+   "span_days": 84.3
+  },
+  "AAPL|15m|3mo": {
+   "status": 422,
+   "error": "15m data not available for startTime=1785887200 and endTime=1793922400. The requested range must be within the last 60 days."
+  },
+  "AAPL|1h|730d": {
+   "status": 200,
+   "bars": 5099,
+   "first": 1702045800,
+   "last": 1793912400,
+   "span_days": 1063.3
+  },
+  "AAPL|1h|2y": {
+   "status": 200,
+   "bars": 3498,
+   "first": 1730903400,
+   "last": 1793912400,
+   "span_days": 729.3,
+   "last_40": [
+    1793291400,
+    1793295000,
+    1793298600,
+    1793302200,
+    1793367000,
+    1793370600,
+    1793374200,
+    1793377800,
+    1793381400,
+    1793385000,
+    1793388600,
+    1793629800,
+    1793633400,
+    1793637000,
+    1793640600,
+    1793644200,
+    1793647800,
+    1793651400,
+    1793716200,
+    1793719800,
+    1793723400,
+    1793727000,
+    1793730600,
+    1793734200,
+    1793737800,
+    1793802600,
+    1793806200,
+    1793809800,
+    1793813400,
+    1793817000,
+    1793820600,
+    1793824200,
+    1793889000,
+    1793892600,
+    1793896200,
+    1793899800,
+    1793903400,
+    1793907000,
+    1793910600,
+    1793912400
+   ]
+  },
+  "AAPL|1h|3y": {
+   "status": 422,
+   "error": "1h data not available for startTime=1699314405 and endTime=1793922405. The requested range must be within the last 730 days."
+  },
+  "AAPL|1d|10y": {
+   "status": 200,
+   "bars": 2513,
+   "first": 1478529000,
+   "last": 1793889000,
+   "span_days": 3650.0,
+   "last_5": [
+    1793367000,
+    1793629800,
+    1793716200,
+    1793802600,
+    1793889000
+   ]
+  },
+  "AAPL|1d|max": {
+   "status": 200,
+   "bars": 169,
+   "first": 470725200,
+   "last": 1793912401,
+   "span_days": 15314.7
+  },
+  "NQ=F|1m|7d": {
+   "status": 200,
+   "bars": 9803,
+   "first": 1793246940,
+   "last": 1793921809,
+   "span_days": 7.8
+  },
+  "NQ=F|1m|8d": {
+   "status": 200,
+   "bars": 11242,
+   "first": 1793160540,
+   "last": 1793921811,
+   "span_days": 8.8
+  },
+  "NQ=F|1m|1mo": {
+   "status": 422,
+   "error": "1m data not available for startTime=1791244014 and endTime=1793922414. Only 8 days worth of 1m granularity data are allowed to be fetched per request."
+  },
+  "NQ=F|5m|60d": {
+   "status": 200,
+   "bars": 17228,
+   "first": 1787803500,
+   "last": 1793921814,
+   "span_days": 70.8
+  },
+  "NQ=F|5m|1mo": {
+   "status": 200,
+   "bars": 7788,
+   "first": 1791240300,
+   "last": 1793921817,
+   "span_days": 31.0
+  },
+  "NQ=F|5m|3mo": {
+   "status": 422,
+   "error": "5m data not available for startTime=1785887219 and endTime=1793922419. The requested range must be within the last 60 days."
+  },
+  "NQ=F|15m|60d": {
+   "status": 200,
+   "bars": 5744,
+   "first": 1787803200,
+   "last": 1793921819,
+   "span_days": 70.8
+  },
+  "NQ=F|15m|3mo": {
+   "status": 422,
+   "error": "15m data not available for startTime=1785887222 and endTime=1793922422. The requested range must be within the last 60 days."
+  },
+  "NQ=F|1h|730d": {
+   "status": 200,
+   "bars": 17403,
+   "first": 1718337600,
+   "last": 1793921822,
+   "span_days": 874.8
+  },
+  "NQ=F|1h|2y": {
+   "status": 200,
+   "bars": 14523,
+   "first": 1730847600,
+   "last": 1793921825,
+   "span_days": 730.0,
+   "last_40": [
+    1793782800,
+    1793786400,
+    1793790000,
+    1793793600,
+    1793797200,
+    1793800800,
+    1793804400,
+    1793808000,
+    1793811600,
+    1793815200,
+    1793818800,
+    1793822400,
+    1793826000,
+    1793829600,
+    1793833200,
+    1793836800,
+    1793840400,
+    1793844000,
+    1793847600,
+    1793851200,
+    1793854800,
+    1793858400,
+    1793862000,
+    1793865600,
+    1793869200,
+    1793872800,
+    1793876400,
+    1793880000,
+    1793883600,
+    1793887200,
+    1793890800,
+    1793894400,
+    1793898000,
+    1793901600,
+    1793905200,
+    1793908800,
+    1793912400,
+    1793916000,
+    1793919600,
+    1793921825
+   ]
+  },
+  "NQ=F|1h|3y": {
+   "status": 422,
+   "error": "1h data not available for startTime=1699314428 and endTime=1793922428. The requested range must be within the last 730 days."
+  },
+  "NQ=F|1d|10y": {
+   "status": 200,
+   "bars": 2517,
+   "first": 1478494800,
+   "last": 1793854800,
+   "span_days": 3650.0,
+   "last_5": [
+    1793332800,
+    1793595600,
+    1793682000,
+    1793768400,
+    1793854800
+   ]
+  },
+  "NQ=F|1d|max": {
+   "status": 200,
+   "bars": 268,
+   "first": 973054800,
+   "last": 1793921829,
+   "span_days": 9500.8
+  }
+ }
+}

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "note": "Hosts and URL shapes that place real-money orders. Data hosts, paper and sandbox hosts are not listed. A command that mentions one of these is refused by the always-on protections (rule real_money).",
+  "hosts": [
+    "api.alpaca.markets",
+    "api-fxtrade.oanda.com",
+    "stream-fxtrade.oanda.com",
+    "live.tradovateapi.com",
+    "api.tradier.com",
+    "api.tradestation.com",
+    "api.schwabapi.com",
+    "api.tastyworks.com",
+    "api.etrade.com",
+    "api.robinhood.com",
+    "api.kraken.com",
+    "api.gemini.com",
+    "api.bybit.com",
+    "api.kucoin.com",
+    "api.bitfinex.com",
+    "api.ibkr.com",
+    "ndax.io",
+    "trading-api.kalshi.com"
+  ],
+  "url_patterns": [
+    "(?:api\\.exchange\\.coinbase\\.com|api\\.coinbase\\.com|api\\.international\\.coinbase\\.com)/\\S*orders?\\b",
+    "(?:api[1-4]?\\.binance\\.(?:com|us)|fapi\\.binance\\.com|dapi\\.binance\\.com)/\\S*order\\b",
+    "(?:localhost|127\\.0\\.0\\.1):7496\\b",
+    "iserver/account/[^/\\s]+/orders?\\b"
+  ]
+}

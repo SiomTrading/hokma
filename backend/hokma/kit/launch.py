@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from hokma.core.config import claude_config_dir, hokma_data_dir, hokma_home
 from hokma.kit import extensions, integrity
-from hokma.kit.settings import write_settings
+from hokma.kit.settings import protected_paths, write_settings
 
 
 class IntegrityError(RuntimeError):
@@ -36,6 +36,19 @@ def check_integrity() -> None:
 
 
 MCP_RUN = Path(__file__).resolve().parent / "mcp_run.py"
+TRASH_MCP = Path(__file__).resolve().parent / "trash_mcp.py"
+HOKMA_SERVER = "hokma"
+
+
+def hokma_server() -> dict:
+    """Hokma's own MCP server (the trash tool). Started like the guard hooks: by absolute path, isolated interpreter.
+    The engine sets HOKMA_WORK_ROOT and HOKMA_CONVERSATION_ID on the `claude` process; the environment expansion of
+    the MCP config hands them to the server, and an empty or unexpanded value is ignored there."""
+    args = ["-I", str(TRASH_MCP), "--data", str(hokma_data_dir()), "--workdir", str(hokma_home())]
+    for p in protected_paths():
+        args += ["--protect", str(p)]
+    return {"type": "stdio", "command": sys.executable, "args": args,
+            "env": {"HOKMA_WORK_ROOT": "${HOKMA_WORK_ROOT:-}", "HOKMA_CONVERSATION_ID": "${HOKMA_CONVERSATION_ID:-}"}}
 
 
 def write_mcp_config() -> str:
@@ -49,6 +62,7 @@ def write_mcp_config() -> str:
                             "args": ["-I", str(MCP_RUN), "--data", str(hokma_data_dir()), "--name", name]}
         else:
             servers[name] = cfg
+    servers[HOKMA_SERVER] = hokma_server()                  # last: a student's server cannot take this name over
     path = claude_config_dir() / "hokma-mcp.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"mcpServers": servers}, indent=2) + "\n", encoding="utf-8")

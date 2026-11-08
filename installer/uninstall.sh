@@ -54,6 +54,19 @@ fi
 rm -f "$BIN_DIR/hokma"
 info un.command_removed
 
+# Shortcuts, in every language: the names come from the installer message files. Only Hokma's own files go.
+APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+rm -f "$APPS_DIR/hokma.desktop" "$APPS_DIR/hokma-stop.desktop" "$APPS_DIR/hokma-restart.desktop"
+MAC_APPS="$HOME/Applications/Hokma"
+for code in es en; do
+  for key in shortcut.start shortcut.legacy.stop shortcut.legacy.restart; do
+    name="$(msg_lookup "$key" "$code")"
+    if [ -n "$name" ]; then rm -rf "$MAC_APPS/$name.app"; fi
+  done
+done
+rmdir "$MAC_APPS" 2>/dev/null || true
+info un.shortcuts_removed
+
 for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
   if [ -f "$rc" ] && grep -q '# >>> hokma >>>' "$rc"; then
     tmp="$(mktemp)"

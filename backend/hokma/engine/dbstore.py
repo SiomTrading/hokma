@@ -71,9 +71,11 @@ class DbChatStore:
     def add_message(self, conversation_id, role, text, tokens_in=0, tokens_out=0, status="complete", meta=None):
         meta = dict(meta or {})
         ids = [n for n in (_int(i) for i in meta.get("attachments") or []) if n is not None]
-        stored = {"tools": meta["tools"]} if meta.get("tools") else None
+        stored = {k: meta[k] for k in ("tools", "blocks") if meta.get(k)} or None
+        if stored is not None and len(json.dumps(stored)) > META_LIMIT and stored.get("tools"):
+            stored = {**stored, "tools": [{**t, "result": None} for t in stored["tools"]]}
         if stored is not None and len(json.dumps(stored)) > META_LIMIT:
-            stored = {"tools": [{**t, "result": None} for t in stored["tools"]]}
+            stored = {"blocks": stored["blocks"]} if stored.get("blocks") and len(json.dumps(stored["blocks"])) < META_LIMIT else None
         with self.db.write() as u:
             conv = u.conversations.get(int(conversation_id))
             m = u.messages.add(conv.id, role, text, model=conv.model if role == "assistant" else None,

@@ -16,6 +16,8 @@ version and switched with one atomic file replace):
     <data>/kit-baseline.json                     kit files as last installed (for kit updates)
     <data>/owner.json                            owner and fund names filled into the kit text
     <data>/workdir                               working folder chosen in the app (wins over HOKMA_HOME)
+    <data>/engine.lock                           {pid, port, started_at} of the running supervisor, no secrets
+    <data>/control.sock                          POSIX control channel of the supervisor (mode 0600)
 """
 import os
 import sys
@@ -23,7 +25,18 @@ from pathlib import Path
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+LAST_PORT = 8775                      # a start without --port uses the first free port from DEFAULT_PORT to here
 SLOTS = ("a", "b")
+BROWSER_HOST = "hokma.localhost"
+
+
+def browser_host() -> str:
+    """The fixed name the browser reaches the engine under once the page is authenticated: `hokma.localhost`.
+    Browsers resolve `*.localhost` to the loopback. Cookies ignore the port, so another local server on
+    `hokma.localhost:<other port>` would receive the remembered-session cookie, but the device key is not extractable
+    and is bound to the origin with its port: that server cannot sign the challenge, so the cookie alone resumes
+    nothing."""
+    return BROWSER_HOST
 
 
 def hokma_home() -> Path:
@@ -82,6 +95,40 @@ def slot_dir(slot: str) -> Path:
     if slot not in SLOTS:
         raise ValueError(f"invalid slot {slot!r}")
     return runtime_root() / slot
+
+
+def slot_exe(slot: str) -> Path:
+    """The `hokma` executable inside the venv of a slot."""
+    return slot_dir(slot) / "venv" / ("Scripts/hokma.exe" if sys.platform == "win32" else "bin/hokma")
+
+
+def running_slot() -> str | None:
+    """The slot this code is running from, or None in a dev checkout."""
+    here = Path(__file__).resolve()
+    for slot in SLOTS:
+        if slot_dir(slot).resolve() in here.parents:
+            return slot
+    return None
+
+
+def engine_log_path() -> Path:
+    """Where the supervisor writes why the engine could not be kept running."""
+    return hokma_data_dir() / "logs" / "engine.log"
+
+
+def engine_lock_path() -> Path:
+    """Who is running Hokma now: pid, port and start time. Never a token or a code."""
+    return hokma_data_dir() / "engine.lock"
+
+
+def control_socket_path() -> Path:
+    """POSIX local control channel of the supervisor (`hokma stop`). Windows uses a named pipe instead."""
+    return hokma_data_dir() / "control.sock"
+
+
+def supervisor_out_path() -> Path:
+    """Where a detached supervisor's standard output and error go (it has no terminal)."""
+    return hokma_data_dir() / "logs" / "supervisor.out"
 
 
 def other_slot(slot: str) -> str:

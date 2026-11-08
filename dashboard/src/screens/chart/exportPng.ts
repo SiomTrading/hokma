@@ -1,5 +1,6 @@
-import { candleSpan, formatBarTime, formatMoment, formatPercent, formatPrice } from "./format";
-import { GRID_LINES, VIEW_H, VIEW_W, layoutChart } from "./geometry";
+import { formatMoment, formatPercent, formatPrice } from "./format";
+import type { PriceChartHandle } from "./PriceChart";
+import { openingVisible } from "./PriceChart";
 import type { ChartData } from "./types";
 
 export const IMAGE_WIDTH = 1280;
@@ -14,13 +15,24 @@ export interface PngOptions {
   root: Element;
   t: Translate;
   locale: string;
+  /** The chart on screen: its picture goes between the header and the footer. */
+  chart: PriceChartHandle;
 }
 
 function token(style: CSSStyleDeclaration, name: string, fallback: string): string {
   return style.getPropertyValue(name).trim() || fallback;
 }
 
-/** Draws the chart that is on screen into a PNG: the same candles, grid, opening line and prices. */
+/** Where the chart picture lands inside the plot area: as large as fits, without stretching the candles. */
+export function fitPlot(source: { width: number; height: number }, box: { x: number; y: number; width: number; height: number }) {
+  if (source.width <= 0 || source.height <= 0) return { x: box.x, y: box.y, width: 0, height: 0, scale: 0 };
+  const scale = Math.min(box.width / source.width, box.height / source.height);
+  const width = source.width * scale;
+  const height = source.height * scale;
+  return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height, scale };
+}
+
+/** The chart that is on screen as a PNG: header with symbol and price, the chart picture, the opening pill and the source. */
 export function renderChartPng(data: ChartData, options: PngOptions): Promise<Blob> {
   const canvas = document.createElement("canvas");
   canvas.width = IMAGE_WIDTH;
@@ -28,16 +40,23 @@ export function renderChartPng(data: ChartData, options: PngOptions): Promise<Bl
   const ctx = canvas.getContext("2d");
   if (!ctx) return Promise.reject(new Error("canvas unavailable"));
 
+  let shot: HTMLCanvasElement;
+  try {
+    shot = options.chart.takeScreenshot();
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error("chart unavailable"));
+  }
+
   const style = getComputedStyle(options.root);
   const color = {
     bg: token(style, "--bg", "#101516"),
     t1: token(style, "--t1", "#F0F5F8"),
     t2: token(style, "--t2", "#A8B3B8"),
     t3: token(style, "--t3", "#8A969C"),
-    grid: token(style, "--grid", "rgba(255,255,255,0.06)"),
-    up: token(style, "--up", "#4FD69C"),
-    down: token(style, "--down", "#FF8A73"),
+    up: token(style, "--up", "#00CCCC"),
+    down: token(style, "--down", "#F26038"),
     org: token(style, "--org", "#F26038"),
+    orgSub: token(style, "--org-sub", "rgba(242,96,56,0.14)"),
     border: token(style, "--border", "rgba(255,255,255,0.09)"),
   };
   const { t, locale } = options;
@@ -64,70 +83,41 @@ export function renderChartPng(data: ChartData, options: PngOptions): Promise<Bl
   ctx.font = `500 18px ${mono}`;
   ctx.fillText(formatPercent(data.change_pct, locale), IMAGE_WIDTH - 32, 80);
 
-  // plot
-  const top = HEADER;
-  const height = IMAGE_HEIGHT - HEADER - FOOTER;
-  const sx = IMAGE_WIDTH / VIEW_W;
-  const sy = height / VIEW_H;
-  const px = (x: number) => x * sx;
-  const py = (y: number) => top + y * sy;
-  const layout = layoutChart(data.candles, data.opening_range);
-
   ctx.strokeStyle = color.border;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, top + 0.5);
-  ctx.lineTo(IMAGE_WIDTH, top + 0.5);
+  ctx.moveTo(0, HEADER + 0.5);
+  ctx.lineTo(IMAGE_WIDTH, HEADER + 0.5);
   ctx.stroke();
 
-  ctx.strokeStyle = color.grid;
-  ctx.fillStyle = color.t3;
-  ctx.font = `400 15px ${mono}`;
-  ctx.textAlign = "left";
-  for (const line of layout.grid) {
-    ctx.beginPath();
-    ctx.moveTo(0, py(line.y));
-    ctx.lineTo(IMAGE_WIDTH, py(line.y));
-    ctx.stroke();
-    ctx.fillText(formatPrice(line.price, locale), 10, py(line.y) - 6);
-  }
+  // the chart as it is drawn on screen
+  const plot = fitPlot(shot, { x: 0, y: HEADER + 1, width: IMAGE_WIDTH, height: IMAGE_HEIGHT - HEADER - FOOTER - 1 });
+  if (plot.width > 0) ctx.drawImage(shot, plot.x, plot.y, plot.width, plot.height);
 
-  for (const shape of layout.shapes) {
-    ctx.fillStyle = ctx.strokeStyle = shape.up ? color.up : color.down;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(px(shape.cx), py(shape.wickTop));
-    ctx.lineTo(px(shape.cx), py(shape.wickBottom));
-    ctx.stroke();
-    ctx.fillRect(px(shape.x), py(shape.bodyY), Math.max(1, shape.width * sx), Math.max(1.5, shape.bodyH * sy));
-  }
-
-  if (layout.openingY !== null && data.opening_range) {
-    const y = py(layout.openingY);
-    ctx.strokeStyle = color.org;
-    ctx.fillStyle = color.org;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([8, 8]);
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(IMAGE_WIDTH, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.font = `600 16px ${sans}`;
-    ctx.textAlign = "right";
-    ctx.fillText(`${t("chart.opening")} ${formatPrice(data.opening_range.high, locale)}`, IMAGE_WIDTH - 16, y - 8);
-  }
-
-  // time labels
-  const span = candleSpan(data.candles);
-  ctx.fillStyle = color.t3;
-  ctx.font = `400 14px ${mono}`;
-  ctx.textAlign = "center";
-  const last = data.candles.length - 1;
-  if (last >= 0) {
-    for (let i = 0; i < GRID_LINES; i += 1) {
-      const index = Math.min(last, Math.round(((i + 0.5) / GRID_LINES) * last));
-      ctx.fillText(formatBarTime(data.candles[index]!.t, data.timeframe, data.timezone, locale, span), px(layout.shapes[index]!.cx), top + height - 8);
+  // the opening pill on top, at the height of its line
+  const opening = data.opening_range;
+  if (opening && openingVisible(data.candles, opening)) {
+    const y = options.chart.priceToCoordinate(opening.high);
+    // the screenshot is in device pixels; the coordinate is in CSS pixels of the chart
+    const ratio = typeof window !== "undefined" && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+    if (y !== null && plot.width > 0) {
+      const lineY = plot.y + y * ratio * plot.scale;
+      const text = `${t("chart.opening")} ${formatPrice(opening.high, locale)}`;
+      ctx.font = `600 16px ${sans}`;
+      const width = ctx.measureText(text).width + 24;
+      const height = 28;
+      const top = lineY - plot.y > 0.1 * plot.height ? lineY - height - 6 : lineY + 6;
+      const right = plot.x + plot.width - (options.chart.priceAxisWidth() + 12) * plot.scale * ratio;
+      ctx.fillStyle = color.orgSub;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") ctx.roundRect(right - width, top, width, height, height / 2);
+      else ctx.rect(right - width, top, width, height);
+      ctx.fill();
+      ctx.fillStyle = color.org;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, right - 12, top + height / 2);
+      ctx.textBaseline = "alphabetic";
     }
   }
 

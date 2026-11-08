@@ -22,6 +22,7 @@ a:hover { color: #5fe3e3; }
 .nav:active { transform: scale(0.98); }
 .nav.on { background: var(--acc-sub); color: var(--t1); }
 .nav.on svg { color: var(--acc); }
+.nav .nav-badge { width: 8px; height: 8px; border-radius: 50%; background: var(--org); flex: none; margin-left: auto; box-shadow: 0 0 0 3px var(--org-sub); }
 .nav .kbd { margin-left: auto; font: 500 10px "JetBrains Mono", monospace; color: var(--t3); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
 
 .sep { height: 1px; background: var(--border); margin: 6px 4px; flex: none; }

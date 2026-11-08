@@ -1,5 +1,7 @@
 {
+  "disableAllHooks": false,
   "permissions": {
+    "allow": ["mcp__hokma__trash_move"],
     "deny": []
   },
   "sandbox": {
@@ -19,6 +21,15 @@
           {
             "type": "command",
             "command": "{{GUARD_COMMAND}}"
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{HARDBLOCK_COMMAND}}"
           }
         ]
       }

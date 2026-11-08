@@ -11,6 +11,7 @@ from hokma.engine.protocols import (DEFAULT_MODEL, MODELS, AgentCatalog, ChatSto
                                     ProjectRecord, ProjectResolver)
 from hokma.engine.session import PERMISSION_TIMEOUT, STOP_GRACE, ChatSession, TurnError
 from hokma.kit.launch import LaunchSpec, prepare_claude_launch
+from hokma.permissions import modes
 
 MAX_FRAME_CHARS = 2 * 1024 * 1024
 MAX_TEXT_CHARS = 200_000
@@ -65,7 +66,10 @@ class ChatEngine:
     def __init__(self, store: ChatStore | None = None, projects: ProjectResolver | None = None,
                  agents: AgentCatalog | None = None, launch: Callable[[], LaunchSpec] = prepare_claude_launch,
                  claude_bin: str | None = None, session_token: str = "", permission_timeout: float = PERMISSION_TIMEOUT,
-                 stop_grace: float = STOP_GRACE, max_processes: int = MAX_PROCESSES) -> None:
+                 stop_grace: float = STOP_GRACE, max_processes: int = MAX_PROCESSES,
+                 permission_mode: Callable[[], str] | None = None,
+                 checkpoint: Callable[[str, str], Any] | None = None,
+                 blocks: Callable[[], list[dict[str, Any]]] | None = None) -> None:
         self.store: ChatStore = store or MemoryStore()
         self.projects: ProjectResolver = projects or WorkdirProjects()
         self.agents: AgentCatalog = agents or FileAgents()
@@ -73,6 +77,31 @@ class ChatEngine:
         self.permission_timeout, self.stop_grace, self.max_processes = permission_timeout, stop_grace, max_processes
         self.sessions: dict[str, ChatSession] = {}
         self.subscribers: dict[str, set[Connection]] = {}
+        self.permission_mode: Callable[[], str] = permission_mode or modes.current_mode
+        self._checkpoint, self._blocks = checkpoint, blocks
+
+    async def take_checkpoint(self, project_path: str, conversation_id: str) -> None:
+        """Restore point before a turn (auto mode). A failure never stops the turn."""
+        try:
+            if self._checkpoint is not None:
+                await asyncio.to_thread(self._checkpoint, project_path, conversation_id)
+            else:
+                from hokma.permissions import checkpoints
+
+                await asyncio.to_thread(checkpoints.take, project_path, conversation_id)
+        except Exception:
+            pass
+
+    async def drain_blocks(self) -> list[dict[str, Any]]:
+        try:
+            if self._blocks is not None:
+                return self._blocks()
+            from hokma.db import get_database
+            from hokma.permissions import guard_log
+
+            return await asyncio.to_thread(guard_log.drain, get_database())
+        except Exception:
+            return []
 
     # ------------------------------------------------------------ plumbing
 
@@ -171,6 +200,8 @@ class ChatEngine:
         tools = m.meta.get("tools")
         if tools:
             row["tools"] = tools
+        if m.meta.get("blocks"):
+            row["blocks"] = m.meta["blocks"]
         files = []
         for attachment_id in m.meta.get("attachments") or []:
             record = self.store.get_attachment(attachment_id) if isinstance(attachment_id, str) else None

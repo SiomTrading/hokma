@@ -1,5 +1,6 @@
 import { Bubble, Button, Chip, Icon, Pill } from "@/design";
 import { useI18n } from "@/i18n";
+import { BlockCard } from "@/screens/permissions/BlockCard";
 import { Markdown } from "./markdown";
 import type { AttachmentChip, Item } from "./state";
 import type { SummaryKind } from "./types";
@@ -128,6 +129,8 @@ export function MessageItem({ item, actions }: { item: Item; actions: MessageAct
       return <ToolLine item={item} />;
     case "permission":
       return <PermissionCard item={item} actions={actions} />;
+    case "block":
+      return <BlockCard block={item.block} />;
     case "notice":
       return (
         <div className="chat-notice" role={item.tone === "bad" ? "alert" : "status"}>

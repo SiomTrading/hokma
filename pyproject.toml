@@ -1,6 +1,6 @@
 [project]
 name = "hokma"
-version = "0.0.5"
+version = "0.0.6"
 description = "Hokma: installable harness by SiomTrading"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,6 +12,8 @@ dependencies = [
     "faster-whisper==1.2.1",
     "av==15.1.0",
     "pywinpty==3.0.3; sys_platform == 'win32'",
+    "keyring==25.7.0",
+    "databento==0.90.0",
 ]
 
 [project.scripts]

@@ -49,6 +49,56 @@ export const free = () =>
     });
   });
 
+/** What each test tab knows of its own session, to hand it over the way `reloadWithHandoff()` of the app does. */
+const sessions = new WeakMap();
+
+/** Remembers the token and sees the owner confirmation the tab registers with the engine. Call it before the first load. */
+export function trackSession(page, token) {
+  const session = { token, nonce: null };
+  sessions.set(page, session);
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/session/owner-nonce")) {
+      const nonce = JSON.parse(r.postData() ?? "{}").nonce;
+      if (!session.nonce && typeof nonce === "string") session.nonce = nonce;
+    }
+  });
+}
+
+/**
+ * A reload the way Hokma makes its own (the restart after an update): the page writes the handoff for this same
+ * origin and address, then reloads. F5, Ctrl+R and the toolbar button hand NOTHING over (the session is lost, checked
+ * in session.e2e.mjs), so a test that needs its session across a reload goes through here. The writer of the app is
+ * covered by handoff.test.ts and by the automatic restart in session.e2e.mjs.
+ */
+export async function reloadWithHandoff(page) {
+  const { token, nonce } = sessions.get(page);
+  await page.evaluate(([t, n]) => {
+    const p = new URLSearchParams(window.location.hash.slice(1));
+    p.delete("t");
+    p.delete("o");
+    const rest = p.toString();
+    const u = window.location.pathname + window.location.search + (rest ? "#" + rest : "");
+    window.name = "hokma-handoff:" + JSON.stringify({ o: window.location.origin, u, t, ...(n ? { n } : {}) });
+  }, [token, nonce]);
+  await page.reload();
+}
+
+/**
+ * Source of the init script that gives a fresh tab its token the way a handoff does (origin and address of the page it
+ * runs in, see src/api/handoff.ts). `after` is more source that runs only on that first load of the tab.
+ */
+export const handoffScript = (token, after = "") => `
+  (() => {
+    if (window.name || !window.location.protocol.startsWith("http")) return;       // not about:blank, which loads first
+    const p = new URLSearchParams(window.location.hash.slice(1));
+    p.delete("t");
+    p.delete("o");
+    const rest = p.toString();
+    const u = window.location.pathname + window.location.search + (rest ? "#" + rest : "");
+    window.name = "hokma-handoff:" + JSON.stringify({ o: window.location.origin, u, t: ${JSON.stringify(token)} });
+    ${after}
+  })();`;
+
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function until(fn, what, ms = 15000) {
@@ -123,6 +173,8 @@ export async function startServer({ script, root, dist, signedIn = false }) {
     port,
     base: `${base}/`,
     token: info.token,
+    once: info.once,
+    info,
     home,
     data,
     fakeLog,
@@ -150,11 +202,19 @@ export async function runSuite(name, { script, signedIn = false }, scenario) {
     const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1440, height: 940 } });
-      await ctx.addInitScript(([token, loc]) => {
-        if (!localStorage.getItem("hokma.token")) localStorage.setItem("hokma.token", token);
+      // first load of the tab: the token arrives the way a reload hands it over (window.name, never a storage), and
+      // the start link carries the one-time code of the owner registration; the app takes it and clears the bar
+      await ctx.addInitScript({
+        content: handoffScript(
+          server.token,
+          `if (${JSON.stringify(server.info.once)} && !window.location.hash) window.history.replaceState(null, "", "#o=" + ${JSON.stringify(server.info.once)});`,
+        ),
+      });
+      await ctx.addInitScript((loc) => {
         if (!localStorage.getItem("hokma.locale")) localStorage.setItem("hokma.locale", loc);
-      }, [server.token, locale]);
+      }, locale);
       const page = await ctx.newPage();
+      trackSession(page, server.token);
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
       await scenario({ locale, page, server, root, errors, ...translator(locale) });

@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { buildDashboard, here } from "./lib.mjs";
 
-const SUITES = ["chat", "agents", "chart", "first-run", "projects", "terminal", "update"];
+const SUITES = ["chat", "agents", "chart", "chart-state", "first-run", "projects", "terminal", "update", "permissions", "connections", "session", "resume", "shutdown"];
 const wanted = process.argv.slice(2);
 const unknown = wanted.filter((w) => !SUITES.includes(w));
 if (unknown.length) {

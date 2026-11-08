@@ -1,5 +1,6 @@
 import { EmptyState, IconButton, Modal, NavItem } from "@/design";
 import { useI18n } from "@/i18n";
+import { useUpdateStatus } from "@/screens/system/updateStatus";
 import { getSettingsSection } from "./registry";
 import { settingsSectionList } from "./screens";
 import { Boundary } from "./Slot";
@@ -9,6 +10,7 @@ export function SettingsModal() {
   const { t } = useI18n();
   const shell = useShell();
   const sections = settingsSectionList();
+  const updates = useUpdateStatus();
   const current = sections.find((s) => s.id === shell.settings.section) ?? sections[0]!;
   const Body = getSettingsSection(current.id)?.component;
 
@@ -25,6 +27,7 @@ export function SettingsModal() {
             iconSize={16}
             label={t(section.titleKey)}
             active={section.id === current.id}
+            badge={section.id === "news" && updates?.newer ? t("news.dotLabel") : undefined}
             onClick={() => shell.openSettings(section.id)}
           />
         ))}

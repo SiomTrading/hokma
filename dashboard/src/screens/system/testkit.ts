@@ -23,7 +23,7 @@ export function mockApi(routes: Record<string, Handler | unknown>): Call[] {
       calls.push(call);
       const route = routes[`${method} ${url.pathname}`];
       if (route === undefined) return new Response(JSON.stringify({ detail: "not mocked" }), { status: 404 });
-      const out = typeof route === "function" ? (route as Handler)(call) : route;
+      const out = await (typeof route === "function" ? (route as Handler)(call) : route);
       if (out instanceof Response) return out;
       return new Response(JSON.stringify(out), { status: 200, headers: { "Content-Type": "application/json" } });
     }),

@@ -6,6 +6,7 @@ import { setLocale } from "@/i18n";
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   setLocale("es");
 });
 

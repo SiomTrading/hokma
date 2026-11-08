@@ -4,6 +4,7 @@ Behaviour is chosen by a tag in the user's text:
   (none)    plain answer                 [perm]   the agent asks permission to use a tool and waits for the answer
   [slow]    streams until interrupted    [hang]   streams and ignores the interrupt (must be killed)
   [error]   the turn ends with an error result      [crash]  the process dies without a result
+  [block]   a protection hook refused a tool call: a line is appended to <data>/guard/blocks.jsonl, then a plain answer
 Everything the process receives is appended to the file named by FAKE_CLAUDE_LOG (one JSON object per line).
 """
 import json
@@ -69,6 +70,18 @@ def user_text(message):
 def turn_text():
     for m in load("text_turn")["lines"]:
         emit(m)
+
+
+def turn_block():
+    folder = os.path.join(os.environ["HOKMA_DATA_DIR"], "guard")
+    os.makedirs(folder, exist_ok=True)
+    line = {"ts": "2026-11-05T12:00:00Z", "rule": "delete", "tool": "Bash", "target": "rm informes/viejo.md",
+            "conversation_id": os.environ.get("HOKMA_CONVERSATION_ID", "")}
+    if os.environ.get("HOKMA_TASK_ID"):
+        line["task_id"] = os.environ["HOKMA_TASK_ID"]
+    with open(os.path.join(folder, "blocks.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(line) + "\n")
+    turn_text()
 
 
 def turn_error():
@@ -142,6 +155,9 @@ def main():
             alive = turn_slow()
         elif "[error]" in text:
             turn_error()
+            alive = True
+        elif "[block]" in text:
+            turn_block()
             alive = True
         else:
             turn_text()

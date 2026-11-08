@@ -1,6 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useSessionInfo } from "@/api";
 import { Button, EmptyState, IconButton, Isotype, Pane, Toaster, cx } from "@/design";
 import { useI18n } from "@/i18n";
+import { ShutdownDialog } from "@/screens/system/ShutdownDialog";
 import { getScreen } from "./registry";
 import { SettingsModal } from "./SettingsModal";
 import { Sidebar } from "./Sidebar";
@@ -188,6 +190,8 @@ export function Shell() {
 
 export function NoToken() {
   const { t } = useI18n();
+  const session = useSessionInfo();
+  const [confirmingShutdown, setConfirmingShutdown] = useState(false);
   return (
     <div className="hk" data-testid="no-token">
       <div className="blob" aria-hidden="true" style={{ width: 640, height: 640, background: "var(--blob1)", top: -280, left: "8%", opacity: 0.75 }} />
@@ -196,8 +200,17 @@ export function NoToken() {
           <Isotype size={56} />
           <h1 className="disp">{t("noToken.title")}</h1>
           <p className="p">{t("noToken.body")}</p>
+          {session.revoked ? (
+            <p className="p" role="alert" data-testid="session-revoked">
+              {t("session.revokedNotice")}
+            </p>
+          ) : null}
+          <Button size="sm" onClick={() => setConfirmingShutdown(true)} data-testid="no-token-shutdown">
+            {t("nav.shutdown")}
+          </Button>
         </main>
       </div>
+      {confirmingShutdown ? <ShutdownDialog withSession={false} onClose={() => setConfirmingShutdown(false)} /> : null}
     </div>
   );
 }

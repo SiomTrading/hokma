@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from hokma.core.proc import spawn_kwargs
 from hokma.core.config import hokma_home
 
 STRIPPED_NAMES = frozenset({
@@ -92,6 +93,6 @@ def run_isolated(name: str, args: list[str], *, input_text: str | None = None, t
         try:
             return subprocess.run([exe, *args], input=input_text, capture_output=True, text=True, timeout=timeout,
                                   env=clean_env(cwd), cwd=cwd,
-                                  stdin=None if input_text is not None else subprocess.DEVNULL)
+                                  stdin=None if input_text is not None else subprocess.DEVNULL, **spawn_kwargs())
         except (OSError, subprocess.SubprocessError):
             return None

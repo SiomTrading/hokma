@@ -141,11 +141,17 @@ def test_bad_owner_file_means_defaults(env):
 
 def test_start_never_asks_in_the_console_and_prints_the_token_url(env, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("start must not ask anything"))
-    monkeypatch.setattr("hokma.core.server.run", lambda **_: None)
+    monkeypatch.setattr("hokma.core.supervisor.Supervisor.run", lambda self: 0)     # no engine is started here
     assert cli.main(["start", "--no-browser", "--port", "8799"]) == 0
-    from hokma.rpc.ws import SESSION_TOKEN
+    from hokma.core.session import TOKEN_PATTERN
 
-    assert capsys.readouterr().out.strip() == f"http://127.0.0.1:8799/#t={SESSION_TOKEN}"
+    printed = capsys.readouterr().out.strip()
+    base, _, fragment = printed.partition("/#t=")
+    token, _, once = fragment.partition("&o=")
+    assert base == "http://127.0.0.1:8799" and TOKEN_PATTERN.fullmatch(token)
+    from hokma.core.session import OWNER_SECRET_PATTERN
+
+    assert OWNER_SECRET_PATTERN.fullmatch(once) and once != token
     assert not owner.exists()
 
 

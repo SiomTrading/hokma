@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.0.6
+
+Hokma works without asking, keeps a way back for everything it touches, updates from a button, and the chart gets its
+prices over a live connection.
+
+- One shortcut: Hokma. The Shut down Hokma and Restart Hokma shortcuts are removed on install, reinstall and update, and
+  a Shut down Hokma button sits below Settings in the panel (it asks first and leaves a "Hokma is shut down" screen in
+  every open tab). The entry screen has the same button for a browser without a session.
+- Permissions: a "Do everything without asking" mode. Seven protections stay on in both modes with no switch:
+  deleting, emptying files, Hokma's own data, force push, writing outside the working folder, stored secrets and real
+  money orders. A refusal is logged and shown in the app.
+- Trash and restore points: agents move files to a trash instead of deleting them, and the owner restores, deletes
+  for good or empties it from Settings. Before each turn in the no-questions mode Hokma takes a restore point, so what
+  the protections cannot see can still be brought back.
+- Updates: Check for updates is always visible in News. Updating shows the real stage, then Hokma restarts itself and
+  the open tabs reload on the new version. If it is not running under its supervisor, the app says to restart it.
+  The supervisor restarts a crashed engine with growing waits and stops after repeated crashes, writing the reason to
+  a log.
+- Connections: one screen, `#/connections`, holds every data connection, with one card per provider, its state, its
+  data type (live or delayed), the symbols in use, an on/off switch, "Test connection" and "Remove key". Keys live in
+  the system credential store, never in a file, a log or the panel. Providers of the same asset class are ordered by
+  priority. Nothing about providers or keys is left in Settings, first run, chat or the command line.
+- Live prices: the chart receives bars and the last price over `WS /ws/market` instead of polling. Providers:
+  Coinbase (crypto, no key), Alpaca (US stocks and ETFs), Finnhub (US stocks, forex, crypto), Databento and Massive
+  (CME futures), each with the data state it declares. A symbol with no connected provider is served by a delayed
+  fallback, labelled "Delayed", with a link to Connections.
+- SiomTrading Futures: a futures provider with its own stream. The student pastes an access token on its card; the
+  token travels only in the first message of the connection. It reconnects after a drop, stops with a clear message
+  when the token is invalid, revoked or used from another device, follows contract rollovers, and shows the data type
+  the server announces. It is tested against a fake server; the public address of the stream is set in
+  `backend/hokma/market/providers.json`.
+- Database: a migration adds the permission mode, the trash and the restore points; databases from 0.0.5 migrate on
+  the first start.
+- Session: the page no longer keeps the session token in the browser profile (only in the tab). The calls only the
+  owner makes (permission mode, Trash, restore points) also need a confirmation the open tab registers once, held in
+  memory by the page and the engine; a token read from disk is not enough. The protections also refuse reading the
+  browser profiles and other processes' memory, environment and command line, renaming or linking `.git`, `.claude`
+  and `.hokma`, and Git commands that delete refs or set a program to run.
+
 ## 0.0.5
 
 The dashboard is now the full Hokma app, in a glass design with dark and light themes, in Spanish and English.

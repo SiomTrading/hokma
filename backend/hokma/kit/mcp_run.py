@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 
+from hokma.core.proc import spawn_kwargs
 from hokma.i18n import t
 
 
@@ -37,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if os.name == "posix":
         os.execvpe(command, [command, *argv_rest], env)      # does not return
-    return subprocess.call([command, *argv_rest], env=env)
+    return subprocess.call([command, *argv_rest], env=env, **spawn_kwargs())
 
 
 if __name__ == "__main__":
