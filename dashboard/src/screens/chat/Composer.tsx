@@ -1,3 +1,4 @@
+import { useTierMode } from "../engines/useEngines";
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, Ref } from "react";
 import { Button, Icon, IconButton, Menu, MenuItem } from "@/design";
@@ -33,6 +34,7 @@ interface ComposerProps {
   onStop: () => void;
 }
 
+const TIER_OF: Record<ModelId, "fast" | "balanced" | "deep"> = { haiku: "fast", sonnet: "balanced", opus: "deep" };
 const MODEL_DOT: Record<ModelId, string> = { haiku: "var(--ok)", sonnet: "var(--acc)", opus: "var(--org)" };
 
 export function Composer({ ref, model, running, stopping, options, modelMenuRequest, usagePct = null, onModel, onSend, onStop }: ComposerProps) {
@@ -40,6 +42,9 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
   const shell = useShell();
   const [text, setText] = useState("");
   const [chips, setChips] = useState<AttachmentChip[]>([]);
+  const tiers = useTierMode();
+  const label = (m: ModelId) => (tiers ? t(`eng.tier.${TIER_OF[m]}`) : t(`chat.model.${m}`));
+  const hint = (m: ModelId) => (tiers ? t(`eng.tier.${TIER_OF[m]}.hint`) : t(`chat.model.${m}.hint`));
   const [modelMenu, setModelMenu] = useState(false);
   const [active, setActive] = useState(0);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
@@ -198,14 +203,14 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
             key={m}
             selected={m === model}
             dotColor={MODEL_DOT[m]}
-            hint={t(`chat.model.${m}.hint`)}
+            hint={hint(m)}
             onClick={() => {
               onModel(m);
               setModelMenu(false);
               input.current?.focus();
             }}
           >
-            {t(`chat.model.${m}`)}
+            {label(m)}
           </MenuItem>
         ))}
       </Menu>
@@ -262,7 +267,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
         />
         <PermissionPill running={running} />
         <button ref={pill} type="button" className="pill acc chat-model" aria-haspopup="menu" aria-expanded={modelMenu} onClick={() => setModelMenu((v) => !v)}>
-          {t("chat.model.pill", { name: t(`chat.model.${model}`) })}
+          {tiers ? t("eng.tier.pill", { name: label(model) }) : t("chat.model.pill", { name: label(model) })}
           <Icon name="chevronUp" size={12} strokeWidth={2.4} />
         </button>
         {voice.Recorder ? (
@@ -290,7 +295,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
         )}
       </div>
       <div className="chat-help">
-        <span className="p">{t(`chat.model.${model}.help`)}</span>
+        <span className="p">{tiers ? hint(model) : t(`chat.model.${model}.help`)}</span>
         {usagePct !== null ? (
           <div className="chat-usage" data-testid="usage-bar" data-over={usagePct >= USAGE_WARN_PCT}>
             <div

@@ -11,7 +11,7 @@ import { setHub } from "./hub";
 
 const OPTIONS = {
   agents: [{ slug: "risk", name: "Risk desk", description: "Watches limits" }],
-  projects: [{ id: "5", name: "Strategy" }],
+  projects: [{ id: "5", name: "Strategy", kind: "strategy" }],
   default_project: { id: "default", name: "Main" },
 };
 
@@ -70,7 +70,7 @@ async function mount(props = screenProps) {
     </>,
   );
   server.open();
-  await screen.findByText("Main");
+  await screen.findByText(t("chat.scope.general"));
   return view;
 }
 
@@ -310,26 +310,76 @@ describe("history and reconnection", () => {
     expect(screen.queryByText(t("chat.reconnecting"))).toBeNull();
   });
 
-  it("Ctrl N starts a fresh conversation in the plain chat tab", async () => {
-    function Harness() {
-      const shell = useShell();
-      return <button onClick={shell.newConversation}>new</button>;
-    }
-    server = new FakeServer();
-    renderWithApp(
-      <>
-        <ChatScreen {...screenProps} />
-        <Harness />
-      </>,
-    );
-    server.open();
-    await userEvent.type(box(), "first{Enter}");
-    server.emit(conversationEvent);
-    expect(screen.getByTestId("user-message")).toBeInTheDocument();
-    await userEvent.click(screen.getByText("new"));
-    expect(screen.queryByTestId("user-message")).toBeNull();
-    await userEvent.type(box(), "second{Enter}");
-    expect(server.last("send")).toMatchObject({ conversation_id: null, text: "second" });
+  describe("draft conversation (0.0.7)", () => {
+    const draftProps = { tabKey: "chat:draft=dr1", params: { draft: "dr1" }, active: true };
+    const scopeOf = (name: string) => screen.getByRole("radio", { name });
+
+    it("shows the picker with General marked, and a first message without a choice is General (U-11)", async () => {
+      server = new FakeServer();
+      renderWithApp(<ChatScreen {...draftProps} />);
+      server.open();
+      expect(await screen.findByRole("radiogroup", { name: t("chat.scope.label") })).toBeInTheDocument();
+      expect(scopeOf(t("chat.scope.general"))).toHaveAttribute("aria-checked", "true");
+      await userEvent.type(box(), "first{Enter}");
+      expect(server.last("send")).toMatchObject({ conversation_id: null, text: "first", project_id: null, client_ref: "dr1" });
+      server.emit({ ...conversationEvent, project: null, client_ref: "dr1" });
+      expect(screen.queryByRole("radiogroup")).toBeNull();
+    });
+
+    it("arrows move, Enter picks, the header follows and the first send carries the project (U-11)", async () => {
+      server = new FakeServer();
+      renderWithApp(<ChatScreen {...draftProps} />);
+      server.open();
+      const general = await screen.findByRole("radio", { name: t("chat.scope.general") });
+      await screen.findByRole("radio", { name: "Strategy" });
+      general.focus();
+      await userEvent.keyboard("{ArrowRight}");
+      expect(scopeOf("Strategy")).toHaveFocus();
+      expect(scopeOf(t("chat.scope.general"))).toHaveAttribute("aria-checked", "true"); // moving does not choose
+      await userEvent.keyboard("{Enter}");
+      expect(scopeOf("Strategy")).toHaveAttribute("aria-checked", "true");
+      expect(within(document.querySelector(".chat-head") as HTMLElement).getByText("Strategy")).toBeInTheDocument();
+      await userEvent.type(box(), "hello{Enter}");
+      expect(server.last("send")).toMatchObject({ project_id: "5", client_ref: "dr1" });
+      expect(calls.filter((c) => c.method === "POST" && c.url.includes("/activate"))).toHaveLength(0); // the panel is not touched
+    });
+
+    it("never shows the picker on a stored conversation, and its header is its own project or General (U-13)", async () => {
+      server = new FakeServer();
+      const view = renderWithApp(<ChatScreen tabKey="chat:conversation=7" params={{ conversation: "7" }} active />);
+      server.open();
+      server.emit({ ...conversationEvent, project: null, created: false });
+      server.emit({ type: "history", conversation_id: "7", messages: [] });
+      expect(await screen.findByText(t("chat.scope.general"))).toBeInTheDocument();
+      expect(screen.queryByText("Main")).toBeNull(); // the active project of the panel is not the conversation's
+      expect(screen.queryByRole("radiogroup")).toBeNull();
+      server.emit({ ...conversationEvent, project: { id: "5", name: "Strategy" }, created: false });
+      expect(await screen.findByText("Strategy")).toBeInTheDocument();
+      expect(screen.queryByRole("radiogroup")).toBeNull();
+      view.unmount();
+    });
+
+    it("asks the shell to bind the conversation to its draft tab when the engine creates it, without remounting", async () => {
+      let bound = "";
+      function Probe() {
+        const shell = useShell();
+        bound = shell.tabs.map((tab) => tab.conversation ?? "").join(",");
+        return null;
+      }
+      server = new FakeServer();
+      renderWithApp(
+        <>
+          <ChatScreen {...draftProps} />
+          <Probe />
+        </>,
+      );
+      server.open();
+      await userEvent.type(box(), "bind me{Enter}");
+      const before = screen.getByTestId("user-message");
+      server.emit({ ...conversationEvent, project: null, client_ref: "dr1" });
+      expect(screen.getByTestId("user-message")).toBe(before); // same node: the screen was not remounted
+      expect(bound.replaceAll(",", "")).toBe(""); // this host has no tab named dr1: the call is a no-op there, the store test covers the binding
+    });
   });
 });
 

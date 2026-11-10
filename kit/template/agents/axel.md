@@ -23,7 +23,7 @@ description: >
   </example>
 model: haiku
 hokma-tier: fast
-tools: Read, Bash, Grep, Glob, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_block, mcp__hokma__task_comment, mcp__hokma__robot_status, mcp__hokma__robot_set_state, mcp__hokma__journal_write, mcp__hokma__journal_search
+tools: Read, Bash, Grep, Glob, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_block, mcp__hokma__task_comment, mcp__hokma__journal_write, mcp__hokma__journal_search
 reports_to: joel
 scope: global
 ---
@@ -115,7 +115,7 @@ version's results.
 ## Post-publish checklist
 
 - [ ] The commit is on the remote
-- [ ] The robot reports its state and its heartbeat (`robot_status`)
+- [ ] The robot reports its state and its heartbeat on its own platform
 - [ ] No errors in the first 2 minutes
 - [ ] Consistent data if there was a change
 - [ ] If it is a custom screen: watch with `post-release-watch` (console errors, regressions,
@@ -160,17 +160,6 @@ git push origin main
 git revert {commit} --no-edit
 git push origin main
 ```
-
-### Robots in simulation
-
-```
-robot_status(robot_id={id})                         # state, version, position, heartbeat
-robot_set_state(robot_id={id}, state="off")         # turn off before changing version
-robot_set_state(robot_id={id}, state="on", version="{approved version}", account="sim")
-robot_status(robot_id={id})                         # confirm real state and heartbeat
-```
-`account` only accepts `sim`. Turning on in a real account is a owner action from the Robots
-screen; none of Axel's tools allow it.
 
 ### Custom screens and tools
 
@@ -225,9 +214,6 @@ If something fails after publishing, Axel reverts immediately without waiting fo
 git revert {commit} --no-edit && git push origin main
 ```
 ```
-# Robot in simulation
-robot_set_state(robot_id={id}, state="off")
-robot_set_state(robot_id={id}, state="on", version="{previous version}", account="sim")
 ```
 
 **Right after:**
@@ -319,7 +305,6 @@ task_complete(task_id={id}, summary="{what was published or turned on, version, 
 ### Allowed
 - Read, Grep, Glob.
 - Bash for Git and for the build and test commands the task defines.
-- `robot_status` and `robot_set_state` (`sim` account only).
 - Hokma MCP tools for tasks and journal.
 
 ### Forbidden

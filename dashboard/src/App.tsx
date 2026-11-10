@@ -3,6 +3,7 @@ import { justUpdated, useToken } from "@/api";
 import { HashRoute } from "@/screens/connections/HashRoute";
 import { RestartOverlay } from "@/screens/system/RestartOverlay";
 import { UpdateWatcher } from "@/screens/system/UpdateWatcher";
+import { ChatRoute } from "@/shell/ChatRoute";
 import { NoToken, Shell } from "@/shell/Shell";
 import { ShellProvider, useShell } from "@/shell/store";
 
@@ -25,6 +26,7 @@ export function App() {
           <UpdateWatcher />
           <AfterUpdate />
           <HashRoute />
+          <ChatRoute />
         </ShellProvider>
       ) : (
         <NoToken />

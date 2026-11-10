@@ -13,6 +13,7 @@ export {
   Input,
   Meter,
   NavItem,
+  NavLink,
   Option,
   Pane,
   Pill,

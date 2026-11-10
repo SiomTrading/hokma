@@ -1,5 +1,95 @@
 # Changelog
 
+## 0.0.11
+
+Settings > Extensions is tidy again, and installing a plugin takes one click.
+
+- Two tabs, Plugins and MCP, in the same glass style as the rest of the panel. Hokma remembers the tab you chose in
+  this browser. Plugins holds the marketplace, installed plugins and "Add by link"; MCP holds remote servers
+  (Authorize and Revoke), local servers and agent requests for MCP servers.
+- The Anthropic marketplace with its search box is always visible in Plugins; no button to open it first.
+- Not installed: one Install button. It adds the marketplace to your list when needed, asks for your confirmation
+  once, and the plugin ends up installed and on. Installed: On/Off switch and Uninstall (also asks first).
+- New `POST /api/extensions/uninstall`, with the same confirmation and the same recorded approval as every change.
+
+## 0.0.10
+
+Add and authorize a remote MCP server (for example Lauz) without leaving Hokma.
+
+- Settings > Extensions > Remote MCP servers: type a name and an https address and press Add. The server appears as
+  "Needs authorization".
+- Authorize opens a window with a sign-in link. Sign in, accept, copy the full address of the final tab (it does not
+  load, that is expected), paste it and press Connect. Claude Code keeps and refreshes the token in Hokma's own
+  folder; Hokma never reads it, stores it or writes it to logs.
+- States: Needs authorization, Connected, Error (with Retry). Revoke clears the access and keeps the server listed.
+- The left menu now has a collapse button next to the logo (Ctrl+B also works); the choice is remembered.
+
+## 0.0.9
+
+Hokma works with any model, keeps its protections with every engine, and the tools it promised now exist.
+
+- Connect the AI you already have. Engines: Claude Code (still the recommended one), Codex with a ChatGPT account or
+  an OpenAI key, Gemini with a Google account (free quota) or a key, and a direct API key for OpenAI, Anthropic,
+  Google, OpenRouter, DeepSeek, Ollama, LM Studio or any OpenAI compatible address. Nothing is required: you can
+  choose "later" and the panel opens complete. Connections are listed, tested with a real short turn, renamed,
+  made default and removed (API under `/api/engines`). Keys live only in the secure store of your computer.
+- Levels: Fast, Balanced and Deep for every connection, each mapped to a model you can change. A conversation can
+  change engine; the new engine receives the last 20 messages.
+- Your Claude outside Hokma: Hokma can reuse the access you already have (variables of your Claude settings,
+  gateways, keys). It shows names and the host, never a secret value. Secrets stay in the secure store and reach
+  Claude Code through `apiKeyHelper`, not through the environment of the agent's commands.
+- Region blocks are explained, not worked around. When a provider refuses the location Hokma sees, the panel says so
+  and offers to connect another engine.
+- The protections are the same with every engine. A broker inside Hokma checks every command, file change, fetch and
+  MCP call of Codex, Gemini and the direct engine with the same rules as the Claude Code hooks (delete, truncate,
+  Hokma's own folders, force push, outside the work folder, secrets, real money). It denies unknown tools. In
+  "automatic" mode the engine's own approvals stay on and Hokma answers after the broker.
+- Engine processes receive an allow listed environment: no provider keys of other connections, no market keys, no
+  Hokma token.
+- The Hokma tools are real. `task_*`, `project_*`, `journal_*`, `ips_read`, `decision_propose`, `decision_list`,
+  `schedule_create`, `schedule_list`, `extension_request`, `agents_list` and `bug_*` run on the same rules the
+  panel shows, with Claude Code, Codex, Gemini and the direct engine. Decisions, routines and extensions wait for
+  you. `agents/hokma.md`, `HOKMA.md`, Hugo and Axel stop naming robot and data tools that have no module yet.
+- Database: migration 0006 adds `engine_connections` and `conversations.connection_id`. Nothing is removed. If you
+  had Claude connected, it becomes your default connection and your conversations keep their history and resume.
+
+## 0.0.8
+
+Fixes reported by the community.
+
+- A work folder on another drive (for example `D:`) is no longer blocked by the protection of Hokma's own folders on
+  `C:`. The guard compares drive letters when the path comparison cannot decide: two different drives never nest, so
+  Read and Edit work in `D:`. Anything ambiguous (mixed absolute and relative paths, a path with no drive) stays
+  protected, and aliases and `subst` drives are still caught by the realpath and identity checks.
+- The Hokma agent no longer promises tools that do not exist (`agents_list`, the task, journal, decision, schedule and
+  IPS tools). `agents/hokma.md` and `HOKMA.md` tell it to read `agents/*.md` and the agents table, and to keep tasks,
+  journal and decisions as Markdown notes in the fund folder until the real tools arrive. Only `trash_move` exists.
+  The update brings the new text to an existing fund when you never edited those two files; if you did, your file
+  stays and the new text is written beside it as `<name>.hokma-new`.
+- When the Claude sign-in fails, the panel shows what `claude auth login` actually printed (the last lines, without
+  terminal codes, link parameters or token-like strings) in Spanish or English, instead of staying silent.
+- `Instalar-Hokma.cmd` no longer stops when Claude Code is missing. It installs Hokma, opens it, and then recommends
+  Claude Code for chatting, which you can install later, like `install.ps1` and `install.sh` already did.
+
+## 0.0.7
+
+New conversation means a new conversation, one per browser tab, and a new conversation starts in General.
+
+- New conversation opens a clean conversation in its own tab of the panel. The one you had stays where it was, with
+  its history. The Chat entry of the menu goes back to the chat tab you used last.
+- Every conversation has an address, `#/chat/<number>`, and New conversation is `#/chat/new`. New conversation and the
+  rows of the list are real links: the wheel, Ctrl+click or Cmd+click open them in another browser tab. In Firefox and
+  in private mode Hokma does not remember the session, so the new tab asks you to enter with the Hokma icon.
+- Each browser tab keeps its own panel tabs and survives F5 without touching the others. The menu, the right panel
+  and the terminal stay shared.
+- The shortcut for a new conversation is Ctrl+Shift+O (Cmd+Shift+O on macOS). Ctrl+N belongs to the browser.
+- A new conversation is General (no project, your working folder) and never inherits the last project you used. A
+  picker above the first message lets you choose General or a project. Conversations you already had keep following
+  the active project, as before.
+- The projects panel has a General entry. Choosing it leaves no active project: the terminal and the conversations that
+  follow the active project work in your working folder.
+- Database: migration 0005 adds `conversations.project_mode` and `profile.no_active_project`. It changes no row.
+
 ## 0.0.6
 
 Hokma works without asking, keeps a way back for everything it touches, updates from a button, and the chart gets its

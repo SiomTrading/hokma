@@ -1,5 +1,6 @@
 import { useId } from "react";
 import type {
+  AnchorHTMLAttributes,
   ButtonHTMLAttributes,
   CSSProperties,
   HTMLAttributes,
@@ -143,6 +144,28 @@ export function NavItem({ icon, label, active, kbd, iconSize = 17, badge, classN
       {badge ? <span className="nav-badge" aria-hidden="true" title={badge} /> : null}
       {kbd ? <span className="kbd hide-c">{kbd}</span> : null}
     </button>
+  );
+}
+
+interface NavLinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "children"> {
+  icon: IconName;
+  label: string;
+  active?: boolean;
+  kbd?: string;
+  iconSize?: number;
+}
+
+/**
+ * A `NavItem` that is a real link: a plain click can be handled by the page (`onClick` with `preventDefault`), and
+ * the middle button, Ctrl, Cmd or Shift click are left to the browser, which opens the address in another tab.
+ */
+export function NavLink({ icon, label, active, kbd, iconSize = 17, className, ...rest }: NavLinkProps) {
+  return (
+    <a className={cx("nav", active && "on", className)} aria-label={label} aria-current={active ? "page" : undefined} {...rest}>
+      <Icon name={icon} size={iconSize} />
+      <span className="hide-c">{label}</span>
+      {kbd ? <span className="kbd hide-c">{kbd}</span> : null}
+    </a>
   );
 }
 

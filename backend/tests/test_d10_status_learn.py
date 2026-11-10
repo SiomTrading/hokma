@@ -128,6 +128,20 @@ def test_toggle_needs_confirmation_then_changes_the_file_and_records_an_approval
         assert [r.action for r in u.extension_requests.list()] == ["disable", "enable"]
 
 
+def test_uninstall_needs_confirmation_removes_the_plugin_and_records_an_approval(client, db):  # noqa: F811
+    seed_plugin()
+    assert client.post("/api/extensions/uninstall", json={"id": "tool@acme"}).status_code == 400
+    assert "tool@acme" in extensions.load()[0]["enabledPlugins"]
+    done = client.post("/api/extensions/uninstall", json={"id": "tool@acme", "confirmed": True})
+    assert done.status_code == 200 and done.json()["uninstalled"] is True
+    assert "tool@acme" not in extensions.load()[0]["enabledPlugins"]
+    with db.read() as u:
+        request = u.extension_requests.list()[0]
+        assert request.status == "applied" and request.action == "uninstall"
+        assert u.approvals.latest_for("extension", request.id).verdict == "approved"
+    assert client.post("/api/extensions/uninstall", json={"id": "tool@acme", "confirmed": True}).status_code == 404
+
+
 def test_toggle_rejects_bad_ids_and_unknown_plugins(client):
     assert client.post("/api/extensions/toggle", json={"id": "../x@y", "enabled": True, "confirmed": True}).status_code == 422
     unknown = client.post("/api/extensions/toggle", json={"id": "ghost@nowhere", "enabled": True, "confirmed": True})

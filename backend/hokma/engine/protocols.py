@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 MODELS = ("haiku", "sonnet", "opus")
 DEFAULT_MODEL = "sonnet"
+GENERAL_PROJECT_ID = "general"   # id of the record that stands for "no project": the working folder
 
 
 @dataclass
@@ -15,6 +16,7 @@ class ConversationRecord:
     agent: str | None = None
     project_id: str | None = None
     engine_session: str | None = None
+    project_mode: str = "fixed"     # "follow": no project_id means the active project (before 0.0.7); "fixed": it means general
 
 
 @dataclass
@@ -66,6 +68,9 @@ class ProjectResolver(Protocol):
         """The project with that id; None or unknown id gives the default (active) project."""
 
     def find_by_name(self, name: str) -> ProjectRecord | None: ...
+
+    def general(self) -> ProjectRecord:
+        """The record of a conversation without a project: the working folder. Its id is GENERAL_PROJECT_ID."""
 
 
 class AgentCatalog(Protocol):

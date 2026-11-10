@@ -12,7 +12,8 @@ export interface ShortcutDef {
 
 /** Single source of truth. Learn > Shortcuts lists this array. */
 export const SHORTCUTS: readonly ShortcutDef[] = [
-  { id: "newChat", labelKey: "shortcut.newChat", key: "n", mod: true },
+  // Ctrl+N / Cmd+N belong to the browser (new window) and never reach the page: Ctrl+Shift+O does.
+  { id: "newChat", labelKey: "shortcut.newChat", key: "o", mod: true, shift: true },
   { id: "search", labelKey: "shortcut.search", key: "k", mod: true },
   { id: "terminal", labelKey: "shortcut.terminal", key: "`", mod: true },
   { id: "sidebar", labelKey: "shortcut.sidebar", key: "b", mod: true },
@@ -39,6 +40,13 @@ export function formatShortcut(def: ShortcutDef, mac: boolean = isMac()): string
   if (def.shift) parts.push("Shift");
   parts.push(def.key.length === 1 ? def.key.toUpperCase() : def.key);
   return parts.join(" ");
+}
+
+/** The short label for the narrow menu: "Ctrl⇧O", "⌘⇧O". The full one ("Ctrl Shift O") is in Learn > Shortcuts. */
+export function formatShortcutCompact(def: ShortcutDef, mac: boolean = isMac()): string {
+  if (def.key === "escape") return "Esc";
+  const key = def.key.length === 1 ? def.key.toUpperCase() : def.key;
+  return `${def.mod ? (mac ? "⌘" : "Ctrl") : ""}${def.shift ? "⇧" : ""}${key}`;
 }
 
 /** Returns the shortcut a keyboard event triggers, or null. Escape is handled by the layers themselves. */

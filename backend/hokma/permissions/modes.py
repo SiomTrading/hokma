@@ -37,7 +37,7 @@ def current_mode(db: Any = None) -> str:
         return DEFAULT_MODE
 
 
-def work_env(project_path: str, conversation_id: str = "", task_id: str = "") -> dict[str, str]:
+def work_env(project_path: str, conversation_id: str = "", task_id: str = "", agent: str = "") -> dict[str, str]:
     """Variables the hooks and the MCP server read. They are set on the `claude` process by the engine, so the agent
     cannot change them for its own hooks."""
     env = {"HOKMA_WORK_ROOT": os.path.abspath(project_path)}
@@ -45,6 +45,8 @@ def work_env(project_path: str, conversation_id: str = "", task_id: str = "") ->
         env["HOKMA_CONVERSATION_ID"] = str(conversation_id)
     if task_id:
         env["HOKMA_TASK_ID"] = str(task_id)
+    if agent:
+        env["HOKMA_AGENT"] = str(agent)
     return env
 
 

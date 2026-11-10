@@ -16,7 +16,11 @@ from hokma.agents.files import TIER_MODEL
 from hokma.db import Actor, Conflict, Database, DbError
 from hokma.db.models import ScheduledJob
 from hokma.engine import stream
-from hokma.engine.process import ClaudeProcess, find_claude
+from hokma.engines.base import EngineContext, EngineError
+from hokma.engine.dbstore import DbChatStore
+from hokma.engines import catalog
+from hokma.engines.claude_code import ClaudeCodeAdapter
+from hokma.engines.registry import build_adapter, tier_of
 from hokma.i18n import t
 from hokma.kit.launch import LaunchSpec, prepare_claude_launch
 from hokma.permissions import checkpoints, guard_log, modes
@@ -89,6 +93,7 @@ class JobRunner:
     def __init__(self, db: Database, *, launch: Callable[[], LaunchSpec] = prepare_claude_launch,
                  claude_bin: str | None = None, session_token: str = "") -> None:
         self.db, self.launch, self.claude_bin, self.session_token = db, launch, claude_bin, session_token
+        self.adapters = {"claude_code": ClaudeCodeAdapter(self)}
 
     async def run(self, job: ScheduledJob, now: datetime | None = None) -> RunOutcome:
         now = now or _now()
@@ -115,49 +120,62 @@ class JobRunner:
 
     async def _execute(self, job: ScheduledJob, task_id: int, model: str) -> tuple[str, dict[str, Any]]:
         spec = self.launch()
-        env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV and (not self.session_token or v != self.session_token)}
-        env.update(spec.env)
-        env.update(modes.work_env(spec.cwd, task_id=str(task_id)))
-        claude = self.claude_bin or find_claude(env)
-        if not claude:
-            raise _RunFailed(t("sched.error.no_claude"))
         mode = modes.current_mode(self.db)                      # the same mode as the chat: profile.permission_mode
         if modes.snapshots_wanted(mode):
             try:
                 await asyncio.to_thread(checkpoints.take, spec.cwd, f"task-{task_id}")
             except Exception:
                 log.exception("restore point before %s failed", job.name)
-        argv = [claude, *spec.args, *RUN_FLAGS, "--permission-mode", modes.flag_for(mode), "--model", model,
-                "--agent", job.agent_slug]
-        proc = await ClaudeProcess.spawn(argv, env, spec.cwd)
+        adapter, connection, model = self.resolve_engine(model)
+        ctx = EngineContext(conversation_id="", model=model, cwd=spec.cwd, agent=job.agent_slug, mode=mode,
+                            task_id=str(task_id), connection=connection,
+                            extra={"base_flags": RUN_FLAGS, "no_session_flags": True})
         try:
-            with self.db.write() as u:
-                run = u.task_runs.current(task_id)
-                if run is not None:
-                    u.task_runs.set_pid(run.id, proc._proc.pid)
-            await proc.write(stream.user_message([{"type": "text", "text": job.prompt}]))
-            last_text = ""
-            while True:
-                msg = await proc.read()
-                if msg is None:
-                    raise _RunFailed(t("sched.error.exited", detail=proc.stderr_tail()[-300:]))
-                kind = msg.get("type")
-                if kind == "user":
+            eng = await adapter.open(ctx)
+        except EngineError as exc:
+            raise _RunFailed(t("sched.error.no_claude") if exc.code == "claude_not_found" else exc.message) from exc
+        try:
+            pid = getattr(eng, "pid", None)
+            if pid:
+                with self.db.write() as u:
+                    run = u.task_runs.current(task_id)
+                    if run is not None:
+                        u.task_runs.set_pid(run.id, pid)
+            current, last_text = "", ""
+            async for ev in eng.send([{"type": "text", "text": job.prompt}]):
+                kind = ev["type"]
+                if kind == "tool_result":
                     self._record_blocks()
-                elif kind == "control_request":
-                    await self._deny(proc, job, task_id, msg)
-                elif kind == "assistant":
-                    text = stream.assistant_text(msg)
-                    if text:
-                        last_text = text
-                elif kind == "result":
-                    usage = stream.usage_of(msg)
-                    if msg.get("is_error") or str(msg.get("subtype", "")).startswith("error"):
-                        raise _RunFailed(str(msg.get("result") or msg.get("subtype") or "error")[:500], usage)
-                    return str(msg.get("result") or last_text or ""), usage
+                elif kind == "text":
+                    current += ev["text"]
+                elif kind == "message_break":
+                    if current.strip():
+                        last_text = current
+                    current = ""
+                elif kind == "permission_request":
+                    await self._deny(eng, job, task_id, ev)
+                elif kind == "error":
+                    raise _RunFailed(str(ev.get("message") or "error")[:500] if ev.get("code") != "engine_exited"
+                                     else t("sched.error.exited", detail=str(ev.get("message", ""))[-300:]))
+                elif kind == "done":
+                    usage = ev.get("usage") or {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cost_usd": 0.0}
+                    return str(ev.get("result") or current or last_text or ""), usage
+            raise _RunFailed(t("sched.error.exited", detail=""))
         finally:
             self._record_blocks()
-            await proc.terminate()
+            await eng.close()
+
+    def resolve_engine(self, model: str):
+        """The adapter, connection and concrete model of a scheduled run: the default connection (Claude Code when
+        there is none or it is Claude Code, as before 0.0.9)."""
+        with self.db.read() as u:
+            default = u.engine_connections.default()
+        if default is None or default.engine == "claude_code":
+            return self.adapters["claude_code"], None, model
+        conn = DbChatStore._conn(default)
+        adapter = self.adapters.get(default.engine) or self.adapters.setdefault(default.engine,
+                                                                               build_adapter(default.engine, self))
+        return adapter, conn, catalog.tier_model(conn, tier_of(model)) or ""
 
     def _record_blocks(self) -> None:
         """Refusals of the always-on protections during this run go to `guard_events` (nobody watches a chat)."""
@@ -166,14 +184,11 @@ class JobRunner:
         except Exception:
             log.exception("could not read the protection log")
 
-    async def _deny(self, proc: ClaudeProcess, job: ScheduledJob, task_id: int, msg: dict[str, Any]) -> None:
-        request = msg.get("request") or {}
-        request_id = str(msg.get("request_id", ""))
-        if request.get("subtype") != "can_use_tool":
-            await proc.write(stream.control_error(request_id, "unsupported request"))
+    async def _deny(self, eng: Any, job: ScheduledJob, task_id: int, ev: dict[str, Any]) -> None:
+        if (ev.get("input") or {}).get("cancelled"):
             return
-        tool = str(request.get("tool_name", ""))
-        await proc.write(stream.permission_reply(request_id, False, request.get("input"), t("sched.permission.denied")))
+        tool = str(ev.get("tool", ""))
+        await eng.answer_permission(str(ev.get("request_id", "")), False, t("sched.permission.denied"), ev.get("input"))
         with self.db.write() as u:
             u.guard_events.record("permission", "blocked", "unattended scheduled run: nobody can answer",
                                   agent_slug=job.agent_slug, tool=tool, task_id=task_id)

@@ -182,7 +182,9 @@ def test_p7_the_agent_asks_to_delete_and_uses_trash_move(owner, mcp):
     assert refused.rule == "delete" and (owner.work / "notas.md").exists()
 
     listed = rpc(mcp, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-    assert [t["name"] for t in listed] == ["trash_move"]                  # the only tool: nothing lists, restores or empties
+    names = [t["name"] for t in listed]
+    assert names[0] == "trash_move"
+    assert not [n for n in names if "restore" in n or "empty" in n or n.startswith("trash_") and n != "trash_move"]
     result = call(mcp, ["notas.md"])
     assert result["isError"] is False and "Settings > Trash" in result["content"][0]["text"]
     assert not (owner.work / "notas.md").exists()

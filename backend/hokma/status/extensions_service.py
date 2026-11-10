@@ -96,7 +96,8 @@ def listing() -> dict:
         summary = requests.Request("", "plugin", plugin_id, None, "").summary()
         plugins.append({"id": plugin_id, "name": name, "marketplace": marketplace, "kind": "plugin",
                         "enabled": enabled, "summary": summary})
-    servers = [{"id": f"mcp:{name}", "name": name, "kind": "mcp", "enabled": True, "target": _server_target(entry)}
+    servers = [{"id": f"mcp:{name}", "name": name, "kind": "mcp", "enabled": True, "target": _server_target(entry),
+                "remote": entry.get("type") == "http"}
                for name, entry in sorted(data["mcpServers"].items())]
     marketplaces = [{"name": name, "source": _describe_source(entry["source"])}
                     for name, entry in sorted(data["extraKnownMarketplaces"].items())]
@@ -128,6 +129,28 @@ def toggle_plugin(plugin_id: str, enabled: bool) -> dict:
         unit.extensions.set_enabled(row.id, enabled)
         unit.extension_requests.mark_applied(request.id, row.id)
     return {"id": plugin_id, "enabled": enabled, "warnings": warnings}
+
+
+def uninstall_plugin(plugin_id: str) -> dict:
+    data, _ = extensions.load()
+    name, marketplace = _split(plugin_id)
+    if plugin_id not in data["enabledPlugins"]:
+        raise ServiceError(404, t("status.ext.unknown_plugin", plugin=plugin_id))
+    db = _db()
+    with db.write() as unit:
+        owner = _owner(unit)
+        sync_table(unit, data)
+        row = unit.extensions.find(marketplace, name) or unit.extensions.add(name, marketplace, "plugin")
+        request = unit.extension_requests.create(
+            "uninstall", "plugin", name, marketplace, f"dashboard: uninstall {plugin_id}", actor=Actor.human(owner))
+        unit.extension_requests.approve(request.id, decided_by=owner)
+        try:
+            warnings = extensions.remove_plugin(plugin_id)
+        except ValueError as exc:
+            raise ServiceError(400, str(exc)) from exc
+        unit.extensions.set_enabled(row.id, False)
+        unit.extension_requests.mark_applied(request.id, row.id)
+    return {"id": plugin_id, "uninstalled": True, "warnings": warnings}
 
 
 def add_marketplace(repo: str) -> dict:

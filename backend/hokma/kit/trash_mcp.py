@@ -1,4 +1,7 @@
-"""MCP server `hokma`: the tool an agent uses to get rid of files, `trash_move(paths, reason)`.
+"""MCP server `hokma`: `trash_move(paths, reason)` and the tools of `hokma.kit.hokma_tools` (tasks, projects, journal,
+IPS, decisions, schedules, extension requests, agents, bugs).
+
+The trash tool: the way for an agent to get rid of files.
 
 Deleting is refused by the always-on protections, so this is the way: the files go to `<data>/trash/{id}/` and a row
 in `trash_items`, and the owner restores or empties them from Settings > Trash. The tool accepts paths inside the
@@ -83,9 +86,18 @@ def handle(message: dict, data: str, roots: list[str], protect: list[str]) -> di
     if method == "ping":
         return {"jsonrpc": "2.0", "id": ident, "result": {}}
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": ident, "result": {"tools": [TOOL]}}
+        from hokma.kit import hokma_tools
+
+        return {"jsonrpc": "2.0", "id": ident, "result": {"tools": [TOOL, *hokma_tools.definitions()]}}
     if method == "tools/call":
-        if not isinstance(params, dict) or params.get("name") != TOOL["name"]:
+        from hokma.kit import hokma_tools
+
+        name = params.get("name") if isinstance(params, dict) else None
+        if name in hokma_tools.TOOLS:
+            text, is_error = hokma_tools.call(name, params.get("arguments") or {})
+            return {"jsonrpc": "2.0", "id": ident, "result": {"content": [{"type": "text", "text": text}],
+                                                              "isError": is_error}}
+        if name != TOOL["name"]:
             return {"jsonrpc": "2.0", "id": ident, "error": {"code": -32602, "message": "unknown tool"}}
         arguments_in = params.get("arguments")
         text, is_error = call_trash_move(arguments_in if isinstance(arguments_in, dict) else {}, data, roots, protect)

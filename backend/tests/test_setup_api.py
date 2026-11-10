@@ -114,6 +114,32 @@ def test_claude_plan_is_absent_when_the_cli_does_not_report_it(client, fake_cli,
     assert body["state"] == "connected" and body["plan"] is None
 
 
+def test_login_that_fails_shows_the_real_output_without_secrets(client, fake_cli, monkeypatch):
+    monkeypatch.setenv("FAKE_LOGIN_FAIL", "1")
+    for lang in ("en", "es"):
+        lead = claude.t("setup.err.login_exited", code=3, output="").text(lang).split("Claude")[0]
+        resp = client.post("/api/claude/login", headers=lang_headers(lang))
+        assert resp.status_code == 500
+        message = resp.json()["detail"]["message"]
+        assert message.startswith(lead)
+        assert "Error: OAuth flow failed" in message          # the real output, not discarded
+        assert "https://claude.com/cai/oauth/authorize" in message
+        for secret in ("SECRETSTATE123", "sk-ant-api03", "A1b2C3d4A1b2C3d4", "\x1b"):
+            assert secret not in message
+        claude.stop_login()
+
+
+def test_login_that_dies_later_reports_its_output_in_the_status(client, fake_cli):
+    assert client.post("/api/claude/login", headers=HEADERS).json()["running"] is True
+    client.post("/api/claude/login/code", headers=HEADERS, json={"code": "wrong"})
+    for _ in range(50):
+        info = client.get("/api/claude", headers=lang_headers("en")).json()["login"]
+        if "error" in info:
+            break
+        time.sleep(0.1)
+    assert info["running"] is False and "Invalid code" in info["error"]
+
+
 def test_login_code_without_a_login_in_progress(client, fake_cli):
     assert client.post("/api/claude/login/code", headers=HEADERS, json={"code": "good-code"}).status_code == 409
 

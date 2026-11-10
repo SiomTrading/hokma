@@ -7,6 +7,8 @@ export type HubStatus = "connecting" | "open" | "closed";
 /** One consumer of the socket: a chat tab. `id` is null until the server creates its conversation. */
 export interface HubClient {
   id: string | null;
+  /** The `client_ref` this tab sends with the message that creates its conversation (its draft id). */
+  ref?: string | null;
   /** True while the tab waits for the server to create a conversation for it. */
   awaiting: boolean;
   onEvent: (event: ServerEvent) => void;
@@ -79,7 +81,17 @@ export class ChatHub {
     if (!data || typeof data !== "object" || typeof (data as { type?: unknown }).type !== "string") return;
     const event = data as ServerEvent;
     this.watchers.forEach((watcher) => watcher(event));
+    const ref = "client_ref" in event && typeof event.client_ref === "string" ? event.client_ref : undefined;
     const cid = "conversation_id" in event ? event.conversation_id : undefined;
+    if (ref) {
+      // The answer to the message that created a conversation goes back to the tab that asked, whatever else is waiting.
+      const asker = [...this.clients].find((client) => client.ref === ref);
+      if (asker) {
+        if (event.type === "conversation" && cid && asker.id === null) asker.claim(cid);
+        asker.onEvent(event);
+      }
+      return;
+    }
     if (cid) {
       const owners = [...this.clients].filter((client) => client.id === cid);
       if (owners.length > 0) {

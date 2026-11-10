@@ -131,10 +131,10 @@ def complete_setup(request: Request) -> dict:
 # ---------------------------------------------------------------- Claude
 
 @router.get("/api/claude")
-def get_claude() -> dict:
+def get_claude(request: Request) -> dict:
     state = claude.detect()
     _remember_claude(state)
-    return state.to_dict()
+    return state.to_dict(lang_of(request))
 
 
 @router.post("/api/claude/login")

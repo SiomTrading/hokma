@@ -139,7 +139,7 @@ for (const locale of locales) {
     // (c1) the migration ran in the update: base created at the latest schema, profile from owner.json, not completed
     const db = path.join(data, "hokma.db");
     assert.ok(fs.existsSync(db), "the update created hokma.db");
-    assert.equal(sqlite(db, "SELECT MAX(version) FROM schema_version")[0][0], 4, "schema 4");
+    assert.equal(sqlite(db, "SELECT MAX(version) FROM schema_version")[0][0], 5, "schema 5");
     const [[ownerName, fundName, completedAt]] = sqlite(db, "SELECT owner_name, fund_name, setup_completed_at FROM profile");
     assert.equal(ownerName, OWNER);
     assert.equal(fundName, FUND);
@@ -154,7 +154,10 @@ for (const locale of locales) {
         // first load of the tab: the token comes the way a handoff gives it (window.name, never a storage); the start
         // link carries the one-time code of the owner registration, which the app takes and clears from the bar
         if (!window.name && window.location.protocol.startsWith("http")) {
-          const u = window.location.pathname + window.location.search;
+          const hp = new URLSearchParams(window.location.hash.slice(1));                          // the address carries #/chat/... now
+        hp.delete("t");
+        hp.delete("o");
+        const u = window.location.pathname + window.location.search + (hp.toString() ? "#" + hp.toString() : "");
           window.name = "hokma-handoff:" + JSON.stringify({ o: window.location.origin, u, t: tk });
           if (o && !window.location.hash) window.history.replaceState(null, "", "#o=" + o);
         }

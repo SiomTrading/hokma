@@ -2,14 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, ErrorState, Input, Loading, Menu, MenuItem, Modal } from "@/design";
 import { ApiError } from "@/api";
 import { useI18n } from "@/i18n";
-import { tabKeyFor } from "@/shell/store";
+import { isPlainClick } from "@/shell/links";
+import { conversationOf } from "@/shell/tabsStorage";
 import { useShell } from "@/shell/useShell";
+import type { ShellApi } from "@/shell/store";
 import "./chat.css";
 import { deleteConversation, listConversations, patchConversation, relativeTime } from "./chatApi";
 import { getHub } from "./hub";
 import type { ConversationSummary } from "./types";
 
 const REFRESH_EVENTS = new Set(["done", "conversation", "error"]);
+
+/** Keys of the panel tabs that show a conversation (a draft that became it included). */
+function tabKeysOf(shell: ShellApi, conversationId: string): string[] {
+  return shell.tabs.filter((tab) => conversationOf(tab) === conversationId).map((tab) => tab.key);
+}
 
 function Row({
   conversation,
@@ -53,7 +60,7 @@ function Row({
     setRenaming(false);
     if (!name || name === conversation.title) return;
     patchConversation(conversation.id, { title: name }).then(() => {
-      shell.setTabTitle(tabKeyFor("chat", { conversation: conversation.id }), name);
+      tabKeysOf(shell, conversation.id).forEach((key) => shell.setTabTitle(key, name));
       onChanged();
     }, failed);
   };
@@ -86,10 +93,19 @@ function Row({
 
   return (
     <div className="chat-conv-row" onContextMenu={(event) => { event.preventDefault(); setMenu(true); }}>
-      <button type="button" className={active ? "conv on" : "conv"} aria-current={active ? "page" : undefined} onClick={onOpen}>
+      <a
+        href={`#/chat/${conversation.id}`}
+        className={active ? "conv on" : "conv"}
+        aria-current={active ? "page" : undefined}
+        onClick={(event) => {
+          if (!isPlainClick(event)) return; // wheel, Ctrl, Cmd or Shift: the browser opens it in another tab
+          event.preventDefault();
+          onOpen();
+        }}
+      >
         <span className="chat-conv-title">{title}</span>
         <span className="t">{relativeTime(conversation.last_message_at)}</span>
-      </button>
+      </a>
       <button ref={trigger} type="button" className="chat-conv-more" aria-label={t("chat.list.options", { title })} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
         ···
       </button>
@@ -156,14 +172,15 @@ export function ConversationList({ query }: { query: string }) {
     };
   }, [load]);
 
-  const activeId = shell.tabs.find((tab) => tab.key === shell.activeKey)?.params.conversation;
+  const activeTab = shell.tabs.find((tab) => tab.key === shell.activeKey);
+  const activeId = activeTab ? conversationOf(activeTab) : null;
 
   const confirmDelete = () => {
     if (!toDelete) return;
     setBusy(true);
     deleteConversation(toDelete.id).then(
       () => {
-        shell.closeTab(tabKeyFor("chat", { conversation: toDelete.id }));
+        tabKeysOf(shell, toDelete.id).forEach((key) => shell.closeTab(key));
         setToDelete(null);
         setBusy(false);
         load();

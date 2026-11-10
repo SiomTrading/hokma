@@ -73,7 +73,8 @@ const view = async (page) => parse(await body(page).getAttribute("data-view"));
 const attr = async (page, name) => Number((await body(page).getAttribute(name)) ?? NaN);
 const titleOf = async (page) => (await front(page).getByTestId("chart-title").innerText()).replace(/\s+/g, " ").trim();
 const stored = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), STORE);
-const openTabKeys = (page) => page.evaluate(() => (JSON.parse(localStorage.getItem("hokma.ui.v1") ?? "{}").tabs ?? []).map((t) => t.key));
+// the panel tabs of this browser tab live in sessionStorage (0.0.7)
+const openTabKeys = (page) => page.evaluate(() => (JSON.parse(sessionStorage.getItem("hokma.tabs.v1") ?? "{}").tabs ?? []).map((t) => t.key));
 
 /**
  * The chart in front has bars and a view, and says its title. The view is read once it has settled: the chart library
@@ -138,7 +139,8 @@ const settle = () => sleep(SAVE_WAIT);
 async function freshStart(page, server) {
   await page.goto(server.base);
   await page.evaluate(() => {
-    for (const key of ["hokma.ui.v1", "hokma.chart.tabs.v1", "hokma.chart.timeframe", "hokma.chart.recent", "hokma.chart.intervals"]) localStorage.removeItem(key);
+    for (const key of ["hokma.ui.v1", "hokma.ui.lastTabs.v1", "hokma.chart.tabs.v1", "hokma.chart.timeframe", "hokma.chart.recent", "hokma.chart.intervals"]) localStorage.removeItem(key);
+    sessionStorage.removeItem("hokma.tabs.v1");
   });
   await page.reload();
   await page.getByRole("button", { name: /./ }).first().waitFor();
@@ -317,6 +319,8 @@ function tests({ chromium, server, profile, locale, msg, holder }) {
     await b.ctx.close(); // the browser, all of it
     holder.b = await openBrowser(chromium, profile, server, locale);
     await b.page.goto(server.base);
+    // a browser that opens again starts with the last picture of the tabs and a new chat in front (0.0.7)
+    await b.page.locator(".tab .tl", { hasText: "BTC-USD" }).click();
     await ready(b.page);
     const tabs = b.page.locator('.screen-host[data-screen="chart"]');
     assert.equal(await tabs.count(), 2);

@@ -15,6 +15,11 @@ export interface ProjectRef {
   name: string;
 }
 
+/** A project of the picker of a new conversation: `kind` gives its colour. */
+export interface ProjectOption extends ProjectRef {
+  kind?: string;
+}
+
 export interface Usage {
   tokens_in: number;
   tokens_out: number;
@@ -83,7 +88,7 @@ export interface HistoryMessage {
 
 /** Everything the server can send on /ws/chat. */
 export type ServerEvent =
-  | { type: "conversation"; conversation_id: string; title: string; model: string; agent: string | null; project: ProjectRef | null; created: boolean }
+  | { type: "conversation"; conversation_id: string; title: string; model: string; agent: string | null; project: ProjectRef | null; created: boolean; project_mode?: "follow" | "fixed"; client_ref?: string }
   | { type: "turn_start"; conversation_id: string; turn_id: string; message_id: string }
   | { type: "delta"; conversation_id: string; turn_id: string; text: string }
   | { type: "tool_use"; conversation_id: string; turn_id: string; tool_use_id: string; name: string; input: Record<string, unknown>; summary: ToolSummary }
@@ -92,7 +97,7 @@ export type ServerEvent =
   | { type: "permission_resolved"; conversation_id: string; request_id: string; decision: "allow" | "deny"; by: "human" | "timeout" | "stop" | "engine" }
   | ({ type: "guard_block"; conversation_id: string; turn_id?: string } & GuardBlock)
   | { type: "done"; conversation_id: string; turn_id: string; message_id: string | null; stopped: boolean; usage: Usage; engine_session: string | null }
-  | { type: "error"; conversation_id?: string; turn_id?: string; code: string; message: string }
+  | { type: "error"; conversation_id?: string; turn_id?: string; code: string; message: string; client_ref?: string }
   | { type: "command_result"; conversation_id?: string; name: "model" | "agent" | "project"; ok: boolean; value: unknown; options?: string[] }
   | { type: "history"; conversation_id: string; messages: HistoryMessage[] }
   | { type: "state"; conversation_id: string; state: "idle" | "running"; pending_permissions: PermissionBody[]; partial?: PartialTurn }
@@ -106,6 +111,7 @@ export interface ConversationSummary {
   model: string | null;
   agent: string | null;
   project_id: string | null;
+  project_mode?: "follow" | "fixed";
   message_count: number;
   started_at: string | null;
   last_message_at: string | null;
@@ -113,7 +119,7 @@ export interface ConversationSummary {
 
 export interface ChatOptions {
   agents: Array<{ slug: string; name: string; description: string }>;
-  projects: ProjectRef[];
+  projects: ProjectOption[];
   default_project: ProjectRef | null;
 }
 

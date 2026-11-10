@@ -14,12 +14,15 @@ _CONV = ("SELECT c.*, (SELECT count(*) FROM messages m WHERE m.conversation_id =
 
 class ConversationsRepo(Repo):
     def create(self, *, engine: str, title: str | None = None, project_id: int | None = None,
-               model: str | None = None, agent_slug: str | None = None, pinned: bool = False) -> Conversation:
+               model: str | None = None, agent_slug: str | None = None, pinned: bool = False,
+               project_mode: str = "fixed") -> Conversation:
+        """A new conversation is 'fixed' to its project (or general when project_id is None); see migration 0005."""
         if not engine:
             raise ValidationError("engine is required")
+        require_in("project_mode", project_mode, ("follow", "fixed"))
         new_id = self.s.insert("conversations", {
             "engine": engine, "title": title, "project_id": project_id, "model": model, "agent_slug": agent_slug,
-            "pinned": flag(pinned), "started_at": utcnow()})
+            "pinned": flag(pinned), "project_mode": project_mode, "started_at": utcnow()})
         return self.get(new_id)
 
     def get(self, id: int) -> Conversation:
@@ -69,13 +72,17 @@ class ConversationsRepo(Repo):
         return self._set(id, archived=flag(archived))
 
     def set_project(self, id: int, project_id: int | None) -> Conversation:
-        return self._set(id, project_id=project_id)
+        """Choosing a project freezes the choice: the conversation stops following the active project."""
+        return self._set(id, project_id=project_id, project_mode="fixed")
 
     def set_model(self, id: int, model: str | None) -> Conversation:
         return self._set(id, model=model)
 
     def set_agent(self, id: int, agent_slug: str | None) -> Conversation:
         return self._set(id, agent_slug=agent_slug)
+
+    def set_engine_kind(self, id: int, engine: str) -> Conversation:
+        return self._set(id, engine=engine)
 
     def set_engine_session(self, id: int, session: str | None) -> Conversation:
         return self._set(id, engine_session=session)

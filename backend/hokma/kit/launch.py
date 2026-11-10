@@ -48,7 +48,17 @@ def hokma_server() -> dict:
     for p in protected_paths():
         args += ["--protect", str(p)]
     return {"type": "stdio", "command": sys.executable, "args": args,
-            "env": {"HOKMA_WORK_ROOT": "${HOKMA_WORK_ROOT:-}", "HOKMA_CONVERSATION_ID": "${HOKMA_CONVERSATION_ID:-}"}}
+            "env": {"HOKMA_WORK_ROOT": "${HOKMA_WORK_ROOT:-}", "HOKMA_CONVERSATION_ID": "${HOKMA_CONVERSATION_ID:-}",
+                    "HOKMA_TASK_ID": "${HOKMA_TASK_ID:-}", "HOKMA_AGENT": "${HOKMA_AGENT:-}"}}
+
+
+def _user_registered_servers() -> set[str]:
+    """Remote servers Hokma registered in Claude's own user config (needed for `claude mcp login`)."""
+    try:
+        data = json.loads((claude_config_dir() / ".claude.json").read_text(encoding="utf-8"))
+        return {n for n, c in (data.get("mcpServers") or {}).items() if isinstance(c, dict) and c.get("type") == "http"}
+    except (OSError, ValueError, AttributeError):
+        return set()
 
 
 def write_mcp_config() -> str:
@@ -56,7 +66,10 @@ def write_mcp_config() -> str:
     cannot write (Claude's MCP config has no cwd); the real definition stays in the protected extensions file."""
     data, _ = extensions.load()
     servers = {}
+    registered = _user_registered_servers()
     for name, cfg in data["mcpServers"].items():
+        if cfg.get("type", "stdio") != "stdio" and name in registered:
+            continue                      # registered with `claude mcp add --scope user`: Claude owns its sign-in
         if cfg.get("type", "stdio") == "stdio":
             servers[name] = {"type": "stdio", "command": sys.executable,
                             "args": ["-I", str(MCP_RUN), "--data", str(hokma_data_dir()), "--name", name]}

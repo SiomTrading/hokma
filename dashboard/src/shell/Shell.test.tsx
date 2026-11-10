@@ -5,8 +5,10 @@ import { App } from "@/App";
 import { clearToken } from "@/api";
 import { setLocale, t } from "@/i18n";
 import { renderShell } from "@/test/utils";
+import { LAYOUT_KEY } from "./tabsStorage";
 import { registerScreen, registerSettingsSection, registerSlot, resetRegistry } from "./registry";
-import { useShell, useShellEvent } from "./store";
+import { useShell } from "./store";
+import type { ShellApi } from "./store";
 
 const root = () => screen.getByTestId("shell");
 
@@ -29,9 +31,10 @@ describe("shell loads", () => {
     renderShell();
     const menu = screen.getByRole("complementary", { name: t("nav.menu") });
     for (const name of [t("nav.newChat"), t("nav.chat"), t("nav.panel"), t("nav.chart"), t("nav.tasks"), t("nav.learn"), t("nav.settings")]) {
-      expect(within(menu).getByRole("button", { name })).toBeInTheDocument();
+      expect(within(menu).getByRole(name === t("nav.newChat") ? "link" : "button", { name })).toBeInTheDocument();
     }
-    expect(within(menu).getByText("Ctrl N")).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: t("nav.newChat") })).toHaveAttribute("href", "#/chat/new");
+    expect(within(menu).getByText("Ctrl⇧O")).toBeInTheDocument(); // the compact label of the narrow menu
     expect(within(menu).getByRole("searchbox", { name: "Buscar conversaciones" })).toBeInTheDocument();
   });
 
@@ -67,6 +70,15 @@ describe("top bar buttons change the grid like the design", () => {
     expect(root()).toHaveClass("sbx");
     await userEvent.click(btn);
     expect(root()).not.toHaveClass("sbc", "sbx");
+  });
+
+  it("the button next to the logo and Ctrl+B change the menu, and the choice is remembered", async () => {
+    const side = screen.getByRole("complementary", { name: t("nav.menu") });
+    await userEvent.click(within(side).getByRole("button", { name: t("sidebar.collapse") }));
+    expect(root()).toHaveClass("sbc");
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}").sidebar).toBe(1);
+    await userEvent.keyboard("{Control>}b{/Control}");
+    expect(root()).toHaveClass("sbx");
   });
 
   it("terminal toggles the dock", async () => {
@@ -177,16 +189,21 @@ describe("slots and settings", () => {
 describe("keyboard shortcuts", () => {
   const press = (init: KeyboardEventInit) => fireEvent.keyDown(document, init);
 
-  it("Ctrl N opens a conversation and emits the event", () => {
-    const seen = vi.fn();
-    function Listener() {
-      useShellEvent("conversation:new", seen);
+  it("Ctrl Shift O opens a new draft conversation in the same browser tab; Ctrl N does nothing", () => {
+    let shellApi: ShellApi | null = null;
+    function Probe() {
+      shellApi = useShell();
       return null;
     }
-    registerSlot("statusBar", Listener);
+    registerSlot("statusBar", Probe);
     renderShell();
+    const drafts = () => shellApi!.tabs.filter((tab) => tab.params.draft).length;
+    const before = drafts();
     press({ key: "n", ctrlKey: true });
-    expect(seen).toHaveBeenCalledTimes(1);
+    expect(drafts()).toBe(before);
+    press({ key: "O", ctrlKey: true, shiftKey: true });
+    expect(drafts()).toBe(before + 1);
+    expect(shellApi!.activeKey).toContain("chat:draft=");
   });
 
   it("Ctrl B, Ctrl J, Ctrl ` and Ctrl Shift F drive the layout", () => {

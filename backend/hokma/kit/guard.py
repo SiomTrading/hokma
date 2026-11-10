@@ -50,9 +50,21 @@ def _inside(path: str, roots: list[str]) -> bool:
         try:
             if os.path.commonpath([path, root]) == root:
                 return True
-        except ValueError:  # cannot compare (different drives, mixed types): treat as protected
+        except ValueError:
+            # commonpath cannot compare. Two different drive letters (C: vs D:) can never nest, so that root
+            # does not contain the path. Anything else (mixed absolute and relative, odd types) stays protected.
+            if _different_drives(path, root):
+                continue
             return True
     return False
+
+
+def _different_drives(a: str, b: str) -> bool:
+    """True only when both paths are str, both name a drive and the drives differ (case-folded). Fail closed otherwise."""
+    if not (isinstance(a, str) and isinstance(b, str)):
+        return False
+    drive_a, drive_b = ntpath.splitdrive(ntpath.normcase(a))[0], ntpath.splitdrive(ntpath.normcase(b))[0]
+    return bool(drive_a) and bool(drive_b) and drive_a != drive_b
 
 
 def _identity(path: str) -> tuple[int, int] | None:

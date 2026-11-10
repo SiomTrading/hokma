@@ -24,6 +24,11 @@ elif args[:2] == ["auth", "status"]:
     else:
         print(json.dumps({"loggedIn": False, "authMethod": "none"}))
         sys.exit(1)
+elif args[:2] == ["auth", "login"] and os.environ.get("FAKE_LOGIN_FAIL"):
+    print("\x1b[31mError: OAuth flow failed\x1b[0m")
+    print("callback https://claude.com/cai/oauth/authorize?code=true&state=SECRETSTATE123")
+    print("token sk-ant-api03-ABCDEFGHIJKLMNOP and " + "A1b2C3d4" * 5)
+    sys.exit(3)
 elif args[:2] == ["auth", "login"]:
     print("Opening browser to sign in...")
     print("If the browser did not open, visit: https://claude.com/cai/oauth/authorize?code=true&state=abc")

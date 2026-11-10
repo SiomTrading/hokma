@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from hokma.core.config import claude_config_dir, hokma_home
-from hokma.engine.protocols import AttachmentRecord, ConversationRecord, MessageRecord, ProjectRecord
+from hokma.engine.protocols import (GENERAL_PROJECT_ID, AttachmentRecord, ConversationRecord, MessageRecord,
+                                    ProjectRecord)
 
 SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
@@ -24,7 +25,7 @@ class MemoryStore:
         return f"{prefix}{next(self._ids)}"
 
     def create_conversation(self, title, model, agent, project_id):
-        rec = ConversationRecord(self._id("c"), title, model, agent, project_id)
+        rec = ConversationRecord(self._id("c"), title, model, agent, project_id, project_mode="fixed")
         self.conversations[rec.id] = rec
         self.messages[rec.id] = []
         return rec
@@ -38,6 +39,8 @@ class MemoryStore:
             if not hasattr(rec, key) or key == "id":
                 raise KeyError(key)
             setattr(rec, key, value)
+            if key == "project_id":
+                rec.project_mode = "fixed"
 
     def add_message(self, conversation_id, role, text, tokens_in=0, tokens_out=0, status="complete", meta=None):
         rec = MessageRecord(self._id("m"), conversation_id, role, text, tokens_in, tokens_out, status,
@@ -81,6 +84,9 @@ class WorkdirProjects:
             if found:
                 return found
         return ProjectRecord("default", self.root.name or "Hokma", str(self.root))
+
+    def general(self):
+        return ProjectRecord(GENERAL_PROJECT_ID, self.root.name or "Hokma", str(self.root))
 
     def find_by_name(self, name):
         if not name or not SLUG.match(name):

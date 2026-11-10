@@ -242,7 +242,7 @@ async function scenario(locale) {
     await inside(page);
     const hostUrl = new URL(page.url());
     const hostBase = `${hostUrl.protocol}//${hostUrl.host}/`;
-    assert.equal(hostUrl.hash, "", "the handoff code leaves the address bar");
+    assert.match(hostUrl.hash, /^(#\/chat\/(new|\d+))?$/, "the handoff code leaves the address bar (only a chat address may remain)");
     assert.equal(seen.startRegistrations.length >= 1, true, "the start link page registered the owner");
     assert.equal(Object.hasOwn(seen.startRegistrations[0], "remember"), false, "no cookie is requested at the registration");
     assert.equal(seen.handoffs, 1, "one handoff code was asked for");

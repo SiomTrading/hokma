@@ -7,9 +7,12 @@ from typing import Any, Awaitable, Callable
 
 from hokma.engine import attachments as att
 from hokma.engine.memory import FileAgents, MemoryStore, WorkdirProjects
-from hokma.engine.protocols import (DEFAULT_MODEL, MODELS, AgentCatalog, ChatStore, ConversationRecord,
+from hokma.engine.protocols import (DEFAULT_MODEL, GENERAL_PROJECT_ID, MODELS, AgentCatalog, ChatStore, ConversationRecord,
                                     ProjectRecord, ProjectResolver)
 from hokma.engine.session import PERMISSION_TIMEOUT, STOP_GRACE, ChatSession, TurnError
+from hokma.engines import catalog
+from hokma.engines.base import EngineAdapter
+from hokma.engines.registry import build_adapter, tier_of
 from hokma.kit.launch import LaunchSpec, prepare_claude_launch
 from hokma.permissions import modes
 
@@ -21,6 +24,7 @@ TITLE_WORDS, TITLE_CHARS = 8, 60
 COMMANDS = {"modelo": "model", "model": "model", "agente": "agent", "agent": "agent",
             "proyecto": "project", "project": "project"}
 _COMMAND = re.compile(r"^/([A-Za-z]+)(?:\s+(.*))?$", re.S)
+_CLIENT_REF = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def parse_command(text: str) -> tuple[str, str | None] | None:
@@ -79,6 +83,56 @@ class ChatEngine:
         self.subscribers: dict[str, set[Connection]] = {}
         self.permission_mode: Callable[[], str] = permission_mode or modes.current_mode
         self._checkpoint, self._blocks = checkpoint, blocks
+        self.adapters: dict[str, EngineAdapter] = {}
+
+    def adapter_for(self, kind: str) -> EngineAdapter:
+        adapter = self.adapters.get(kind)
+        if adapter is None:
+            adapter = self.adapters[kind] = build_adapter(kind, self)
+        return adapter
+
+    def resolve_engine(self, conv: ConversationRecord) -> tuple[EngineAdapter, dict[str, Any] | None, str]:
+        """The adapter, the saved connection (None = Claude Code as before 0.0.9) and the concrete model."""
+        getter = getattr(self.store, "connection_for", None)
+        conn = getter(conv.id) if getter else None
+        if conn is None:
+            return self.adapter_for("claude_code"), None, conv.model
+        if conn.get("status") == "removed":
+            raise TurnError("connection_removed", "the connection of this conversation was removed; pick another")
+        tier = tier_of(conv.model)
+        model = catalog.tier_model(conn, tier) or ""
+        return self.adapter_for(conn["engine"]), conn, model
+
+    def history_for(self, conv: ConversationRecord) -> list[dict[str, str]]:
+        """The last turns of the conversation, for an engine that starts a session with no memory of them."""
+        try:
+            rows = self.store.list_messages(conv.id)[-21:]
+        except Exception:
+            return []
+        if rows and rows[-1].role == "user":
+            rows = rows[:-1]                       # the message being sent now
+        return [{"role": r.role, "text": r.text} for r in rows if r.text and r.role in ("user", "assistant")]
+
+    @staticmethod
+    def instructions_for(project_path: str, agent: str | None) -> str:
+        """HOKMA.md and the persona of the active agent, for engines that have no `--agent`."""
+        parts: list[str] = []
+        base = Path(project_path)
+        for name in ("HOKMA.md", "CLAUDE.md"):
+            try:
+                parts.append((base / name).read_text(encoding="utf-8")[:20_000])
+                break
+            except OSError:
+                continue
+        if agent:
+            try:
+                body = (base / ".claude" / "agents" / f"{agent}.md").read_text(encoding="utf-8")
+                if body.startswith("---"):
+                    body = body.split("---", 2)[-1]
+                parts.append(body.strip()[:10_000])
+            except OSError:
+                pass
+        return "\n\n".join(parts)
 
     async def take_checkpoint(self, project_path: str, conversation_id: str) -> None:
         """Restore point before a turn (auto mode). A failure never stops the turn."""
@@ -159,13 +213,25 @@ class ChatEngine:
         try:
             await handler(conn, msg)
         except Exception as exc:                               # a bug must not close the socket
-            await self._error(conn, "engine_error", f"{type(exc).__name__}: {exc}", msg.get("conversation_id"))
+            await self._error(conn, "engine_error", f"{type(exc).__name__}: {exc}", msg.get("conversation_id"),
+                              self._ref(msg) if msg["type"] == "send" else None)
 
     @staticmethod
-    async def _error(conn: Connection, code: str, message: str, conversation_id: Any = None) -> None:
+    def _ref(msg: dict) -> str | None:
+        """The panel's `client_ref` of a message that creates a conversation; a malformed one is ignored."""
+        ref = msg.get("client_ref")
+        if msg.get("conversation_id") is None and isinstance(ref, str) and _CLIENT_REF.match(ref):
+            return ref
+        return None
+
+    @staticmethod
+    async def _error(conn: Connection, code: str, message: str, conversation_id: Any = None,
+                     client_ref: str | None = None) -> None:
         event: dict[str, Any] = {"type": "error", "code": code, "message": message}
         if isinstance(conversation_id, str):
             event["conversation_id"] = conversation_id
+        elif client_ref:
+            event["client_ref"] = client_ref
         await conn.send(event)
 
     async def _on_ping(self, conn: Connection, msg: dict) -> None:
@@ -229,33 +295,49 @@ class ChatEngine:
 
     # --------------------------------------------------------- conversations
 
+    def _project_of(self, conv: ConversationRecord) -> ProjectRecord:
+        """The project a turn of this conversation runs in. A 'fixed' conversation without a project (or whose
+        project is gone) is general: the working folder. A 'follow' one (made before 0.0.7) keeps tracking the
+        active project through the resolver's default."""
+        if conv.project_mode == "fixed":
+            if conv.project_id is None:
+                return self.projects.general()
+            found = self.projects.get(conv.project_id)
+            return found if found is not None and found.id == conv.project_id else self.projects.general()
+        return self.projects.get(conv.project_id)
+
     def _conv_body(self, conv: ConversationRecord, created: bool) -> dict[str, Any]:
-        project = self.projects.get(conv.project_id)
+        project = self._project_of(conv)
+        general = project is None or project.id == GENERAL_PROJECT_ID
         return {"title": conv.title, "model": conv.model, "agent": conv.agent, "created": created,
-                "project": {"id": project.id, "name": project.name} if project else None}
+                "project_mode": conv.project_mode,
+                "project": None if general else {"id": project.id, "name": project.name}}
 
     async def _conversation_for(self, conn: Connection, msg: dict) -> tuple[ConversationRecord, bool] | None:
         """Existing or new conversation with the optional model, agent and project_id of the message applied."""
         cid = msg.get("conversation_id")
+        ref = self._ref(msg)
         conv = self._existing(msg)
         if cid is not None and conv is None:
             await self._error(conn, "unknown_conversation", "no such conversation", cid)
             return None
         model = msg.get("model")
         if model is not None and model not in MODELS:
-            await self._error(conn, "unknown_model", f"model must be one of {', '.join(MODELS)}", cid)
+            await self._error(conn, "unknown_model", f"model must be one of {', '.join(MODELS)}", cid, ref)
             return None
         project_id = msg.get("project_id")
         if project_id is not None:
             found = self.projects.get(project_id) if isinstance(project_id, str) else None
             if found is None or found.id != project_id:
-                await self._error(conn, "unknown_project", "no such project", cid)
+                await self._error(conn, "unknown_project", "no such project", cid, ref)
                 return None
         agent = msg.get("agent") if "agent" in msg else conv.agent if conv else None
         if agent is not None:
-            project = self.projects.get(project_id or (conv.project_id if conv else None))
+            # a new conversation without project_id is born general; an existing one keeps its own project
+            project = (self.projects.get(project_id) if project_id else
+                       self._project_of(conv) if conv else self.projects.general())
             if not isinstance(agent, str) or project is None or not self.agents.exists(agent, project):
-                await self._error(conn, "unknown_agent", "no such agent", cid)
+                await self._error(conn, "unknown_agent", "no such agent", cid, ref)
                 return None
         if conv is None:
             conv = self.store.create_conversation("", model or DEFAULT_MODEL, agent, project_id)
@@ -277,12 +359,13 @@ class ChatEngine:
         text, ids = msg.get("text", ""), msg.get("attachments") or []
         if not isinstance(text, str) or len(text) > MAX_TEXT_CHARS or not isinstance(ids, list) \
                 or len(ids) > MAX_ATTACHMENTS or not all(isinstance(i, str) for i in ids):
-            return await self._error(conn, "bad_message", "invalid text or attachments", msg.get("conversation_id"))
+            return await self._error(conn, "bad_message", "invalid text or attachments", msg.get("conversation_id"),
+                                     self._ref(msg))
         command = parse_command(text)
         if command and not ids:
             return await self._run_command(conn, msg, *command)
         if not text.strip() and not ids:
-            return await self._error(conn, "bad_message", "empty message", msg.get("conversation_id"))
+            return await self._error(conn, "bad_message", "empty message", msg.get("conversation_id"), self._ref(msg))
         resolved = await self._conversation_for(conn, msg)
         if resolved is None:
             return
@@ -293,14 +376,17 @@ class ChatEngine:
         if not conv.title and text.strip():
             self.store.update_conversation(conv.id, title=self.make_title(text))
             conv = self.store.get_conversation(conv.id)
-        project = self.projects.get(conv.project_id)
+        project = self._project_of(conv)
         if project is None:
             return await self._error(conn, "unknown_project", "no such project", conv.id)
         built = self._build_content(text, ids, project)
         if isinstance(built, str):
             return await self._error(conn, "attachment_not_found", f"unknown attachment {built}", conv.id)
         blocks, meta = built
-        await conn.send({"type": "conversation", "conversation_id": conv.id, **self._conv_body(conv, created)})
+        event = {"type": "conversation", "conversation_id": conv.id, **self._conv_body(conv, created)}
+        if created and self._ref(msg):
+            event["client_ref"] = self._ref(msg)
+        await conn.send(event)
         session.start_turn(conv, project, blocks, text, meta)
 
     def _build_content(self, text: str, ids: list[str], project: ProjectRecord):

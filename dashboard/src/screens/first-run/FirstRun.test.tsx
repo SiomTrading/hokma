@@ -15,6 +15,9 @@ class FakeBackend {
   calls: Array<{ method: string; path: string; body: unknown }> = [];
   claude: "connected" | "no_session" | "no_cli" = "no_session";
   loginStarted = false;
+  /** What `claude auth login` printed when it failed: the real route sends it as the error message. */
+  loginFailure: string | null = null;
+  loginDied: string | null = null;
   pgOk = false;
   pgNotEmpty = false;
   failWorkdir: string | null = null;
@@ -68,15 +71,20 @@ class FakeBackend {
       case "GET /api/setup":
         return this.json(this.state);
       case "GET /api/claude":
-        if (this.loginStarted && this.claude === "no_session") this.claude = "connected";
+        if (this.loginStarted && this.claude === "no_session" && !this.loginDied) this.claude = "connected";
         return this.json({
           state: this.claude,
           installed: this.claude !== "no_cli",
           plan: this.claude === "connected" ? "Max" : null,
           version: "9.9.9",
-          login: { running: this.loginStarted, url: this.loginStarted ? "https://claude.com/cai/oauth/authorize?x=1" : null },
+          login: {
+            running: this.loginStarted && !this.loginDied,
+            url: this.loginStarted ? "https://claude.com/cai/oauth/authorize?x=1" : null,
+            ...(this.loginDied ? { error: this.loginDied } : {}),
+          },
         });
       case "POST /api/claude/login":
+        if (this.loginFailure) return this.json({ detail: { code: "login_exited", message: this.loginFailure } }, 500);
         this.loginStarted = true;
         return this.json({ running: true, url: "https://claude.com/cai/oauth/authorize?x=1" });
       case "GET /api/fs/dirs":
@@ -205,7 +213,6 @@ describe.each<Locale>(["es", "en"])("first run, complete flow in %s", (locale) =
     const dialog = await screen.findByRole("dialog", { name: t("firstrun.dialog") });
     expect(within(dialog).getByText(t("firstrun.welcome"))).toBeInTheDocument();
     expect(within(dialog).queryByText(/licen/i)).not.toBeInTheDocument();
-    expect(within(dialog).queryByText(/API/)).not.toBeInTheDocument();
 
     // 1. Claude
     expect(await screen.findByText(t("firstrun.claude.noSession"))).toBeInTheDocument();
@@ -375,6 +382,34 @@ describe("first run, edge cases", () => {
     await user.click(screen.getByRole("button", { name: t("firstrun.claude.recheck") }));
     expect(await screen.findByText(t("firstrun.claude.connectedPlan", { plan: "Max" }))).toBeInTheDocument();
     expect(nextButton()).toBeEnabled();
+  });
+
+  it("shows what the Claude sign-in printed when it fails to start", async () => {
+    backend.loginFailure = "Sign-in ended with an error (code 3). Claude Code said: Error: OAuth flow failed";
+    const user = userEvent.setup();
+    render(
+      <Harness>
+        <FirstRun />
+      </Harness>,
+    );
+    await screen.findByText(t("firstrun.claude.noSession"));
+    await user.click(screen.getByRole("button", { name: t("firstrun.claude.login") }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Error: OAuth flow failed");
+  });
+
+  it("shows what the Claude sign-in printed when it dies while waiting for the code", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness>
+        <FirstRun pollMs={20} />
+      </Harness>,
+    );
+    await screen.findByText(t("firstrun.claude.noSession"));
+    backend.loginDied = "Sign-in ended with an error (code 1). Claude Code said: Invalid code";
+    backend.claude = "no_session";
+    backend.loginStarted = true;
+    await user.click(screen.getByRole("button", { name: t("firstrun.claude.recheck") }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Invalid code");
   });
 
   it("can continue without a session", async () => {

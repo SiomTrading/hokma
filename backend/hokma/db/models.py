@@ -70,7 +70,7 @@ class Record:
 
 @dataclass(frozen=True, slots=True)
 class Profile(Record):
-    BOOLS = ("telemetry_enabled", "exists", "permission_mode_intro_seen")
+    BOOLS = ("telemetry_enabled", "exists", "permission_mode_intro_seen", "no_active_project")
     exists: bool = False
     owner_name: str = ""
     fund_name: str | None = None
@@ -87,6 +87,7 @@ class Profile(Record):
     weekly_token_cap: int | None = None
     theme: str = "dark"
     active_project_id: int | None = None
+    no_active_project: bool = False
     permission_mode: str = "ask"
     permission_mode_intro_seen: bool = False
     update_checked_at: str | None = None
@@ -151,6 +152,8 @@ class Conversation(Record):
     last_message_at: str | None
     message_count: int = 0
     archived: bool = False
+    project_mode: str = "follow"
+    connection_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,3 +460,24 @@ class WeekUsage(Record):
     pct: float | None
     starts_at: str
     ends_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class EngineConnection(Record):
+    BOOLS = ("is_default",)
+    JSONS = ("tier_models", "settings")
+    id: int
+    engine: str
+    label: str
+    auth_kind: str
+    provider: str | None
+    wire: str | None
+    base_url: str | None
+    tier_models: dict | None
+    status: str
+    status_detail: str | None
+    is_default: bool
+    settings: dict | None
+    checked_at: str | None
+    created_at: str
+    updated_at: str

@@ -61,6 +61,9 @@ const HOST_NAME = /^hokma\.localhost$/;
 const storageOf = (page) =>
   page.evaluate(() => JSON.stringify([Object.entries(sessionStorage), Object.entries(localStorage), document.cookie]));
 
+/** Keys of sessionStorage other than the panel tabs of this browser tab (hokma.tabs.v1: tabs and conversation ids, no secrets). */
+const otherSessionKeys = (page) => page.evaluate(() => Object.keys(sessionStorage).filter((key) => key !== "hokma.tabs.v1"));
+
 const databaseNames = (page) => page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
 
 /**
@@ -133,13 +136,13 @@ try {
   const nonce = enters[0].nonce;
   assert.match(nonce ?? "", /^[0-9a-f]{32}$/, "the host page made a new 128 bit confirmation");
   assert.notEqual(nonce, startRegistrations[0].nonce, "it is not the one of the start link page");
-  assert.equal(await page.evaluate(() => window.location.hash), "", "the token, the one-time code and the handoff code leave the address bar");
+  assert.match(await page.evaluate(() => window.location.hash), /^(#\/chat\/(new|\d+))?$/, "the token, the one-time code and the handoff code leave the address bar (only a chat address may remain)");
   assert.equal(await page.evaluate(() => window.name), "", "nothing is handed over while the page is open");
 
   const secrets = [server.token, startRegistrations[0].nonce, nonce, server.once, ...handoffCodes];
   const inStorage = await storageOf(page);
   for (const secret of secrets) assert.ok(!inStorage.includes(secret), "no storage of the tab holds a secret");
-  assert.equal(await page.evaluate(() => sessionStorage.length), 0, "sessionStorage is empty");
+  assert.deepEqual(await otherSessionKeys(page), [], "sessionStorage holds nothing but the panel tabs of this browser tab (no token, no code)");
   assert.equal(await page.evaluate(() => document.cookie.length), 0, "no cookie the page can read");
   assert.deepEqual(await databaseNames(page), ["hokma-session"], "the device key is the only use of IndexedDB");
 
@@ -181,7 +184,7 @@ try {
   await until(async () => (await page.evaluate(() => window.__beforeRestart ?? false)) === false, "the page restarted by itself", 40000);
   await page.locator("#chat-message").waitFor();
   assert.equal(await page.evaluate(() => window.name), "", "emptied after the automatic restart too");
-  assert.equal(await page.evaluate(() => sessionStorage.length), 0);
+  assert.deepEqual(await otherSessionKeys(page), []);
   assert.ok(!(await storageOf(page)).includes(server.token));
   assert.ok(hostRegistrations.every((r) => r.nonce === nonce), "still the same confirmation after the restart");
   await until(() => resumes.length >= 1, "the signature after the restart", 20000);
@@ -197,7 +200,7 @@ try {
   await reloadWithKeyboard(page);
   await page.locator("#chat-message").waitFor();
   assert.equal(await page.evaluate(() => window.name), "", "nothing is left in window.name after F5");
-  assert.equal(await page.evaluate(() => sessionStorage.length), 0);
+  assert.deepEqual(await otherSessionKeys(page), []);
   await until(() => resumes.length > resumesBeforeF5, "the resume after F5", 20000);
   const afterF5 = resumes[resumes.length - 1];
   assert.match(afterF5.nonce, /^[0-9a-f]{32}$/);

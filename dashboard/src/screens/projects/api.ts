@@ -12,6 +12,8 @@ export const createProject = (name: string, kind: ProjectKind): Promise<ProjectI
 
 export const renameProject = (id: number, name: string): Promise<ProjectInfo> => api.patch<ProjectInfo>(base(id), { name });
 
+export const deactivateProject = (): Promise<ProjectList> => api.post<ProjectList>("/api/projects/deactivate");
+
 export const activateProject = (id: number): Promise<ProjectList> => api.post<ProjectList>(`${base(id)}/activate`);
 
 export const projectTree = (id: number): Promise<ProjectTree> => api.get<ProjectTree>(`${base(id)}/tree`);

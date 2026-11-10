@@ -28,6 +28,7 @@ function readText(file: Blob): Promise<string> {
 class FakeBackend {
   projects: FakeProject[] = [];
   activeId: number | null = null;
+  generalChosen = false;
   calls: { method: string; path: string; body: unknown }[] = [];
   nextId = 1;
 
@@ -44,7 +45,7 @@ class FakeBackend {
       texts: {},
     };
     this.projects.push(project);
-    this.activeId ??= id;
+    if (!this.generalChosen) this.activeId ??= id;
     return project;
   }
 
@@ -79,6 +80,11 @@ class FakeBackend {
         return this.json(project);
       case "POST /api/projects/:id/activate":
         this.activeId = project!.id;
+        this.generalChosen = false;
+        return this.json(this.list());
+      case "POST /api/projects/deactivate":
+        this.activeId = null;
+        this.generalChosen = true;
         return this.json(this.list());
       case "GET /api/projects/:id/tree":
         return this.json({ id: project!.id, name: project!.name, path: project!.path, entries: project!.entries, truncated: false, git: project!.git, commits: [] });
@@ -164,10 +170,12 @@ describe.each(["es", "en"] as const)("projects panel (%s)", (locale) => {
     mount();
     const list = await within(panel()).findByRole("list", { name: t("projects.list") });
     const items = within(list).getAllByRole("listitem");
-    expect(items).toHaveLength(2);
-    expect(items[0]).toHaveTextContent("Fondo Cedro");
-    expect(within(items[0]!).getByRole("button")).toHaveAttribute("aria-current", "true");
-    expect(items[1]).toHaveTextContent(t("projects.filesGit", { n: 3 }));
+    expect(items).toHaveLength(3); // General first, then the projects
+    expect(items[0]).toHaveTextContent(t("projects.general"));
+    expect(within(items[0]!).getByRole("button")).not.toHaveAttribute("aria-current");
+    expect(items[1]).toHaveTextContent("Fondo Cedro");
+    expect(within(items[1]!).getByRole("button")).toHaveAttribute("aria-current", "true");
+    expect(items[2]).toHaveTextContent(t("projects.filesGit", { n: 3 }));
     expect(within(panel()).getByText("/work")).toBeInTheDocument();
     expect(await within(panel()).findByRole("treeitem", { name: t("projects.collapse", { name: "contexto" }) })).toBeInTheDocument();
     expect(within(panel()).getByText(t("projects.drop.title"))).toBeInTheDocument();
@@ -326,6 +334,61 @@ describe.each(["es", "en"] as const)("projects panel (%s)", (locale) => {
     backend.projects[0]!.git = { ok: false, reason: "unsafe" };
     mount();
     expect(await within(panel()).findByText(t("projects.gitOff"))).toBeInTheDocument();
-    expect(within(panel()).getByRole("listitem")).toHaveTextContent(t("projects.filesNoGit", { n: 0 }));
+    expect(within(panel()).getAllByRole("listitem")[1]).toHaveTextContent(t("projects.filesNoGit", { n: 0 }));
+  });
+});
+
+describe("General and more than one project (3083)", () => {
+  it("switches between two projects and General: the active project, the announcement and the tree follow", async () => {
+    const second = backend.add("Robot NQ", "robot");
+    mount();
+    const user = userEvent.setup();
+    await within(panel()).findByRole("list");
+    const general = () => within(panel()).getByTestId("project-general");
+    expect(general()).not.toHaveAttribute("aria-current");
+
+    await user.click(within(panel()).getByRole("button", { name: /Robot NQ/ }));
+    await waitFor(() => expect(backend.activeId).toBe(second.id));
+
+    await user.click(general());
+    await waitFor(() => expect(backend.activeId).toBeNull());
+    expect(backend.called("POST", "/api/projects/deactivate")).toHaveLength(1);
+    await waitFor(() => expect(general()).toHaveAttribute("aria-current", "true"));
+    expect(within(panel()).getByRole("button", { name: /Robot NQ/ })).not.toHaveAttribute("aria-current");
+    expect(within(panel()).getByRole("button", { name: /Fondo Cedro/ })).not.toHaveAttribute("aria-current");
+    // the other panels (chat, terminal) are told there is no project
+    await waitFor(() => expect(announced[announced.length - 1]).toEqual({ id: null, name: null }));
+
+    // a project can be picked again afterwards
+    await user.click(within(panel()).getByRole("button", { name: /Fondo Cedro/ }));
+    await waitFor(() => expect(backend.activeId).toBe(1));
+    await waitFor(() => expect(announced[announced.length - 1]).toEqual({ id: "1", name: "Fondo Cedro" }));
+    expect(announced.map((a) => (a as { id: string | null }).id)).toEqual(["1", String(second.id), null, "1"]);
+  });
+
+  it("clicking General while it is already the choice does nothing", async () => {
+    mount();
+    const user = userEvent.setup();
+    await within(panel()).findByRole("list");
+    await user.click(within(panel()).getByTestId("project-general"));
+    await waitFor(() => expect(backend.called("POST", "/api/projects/deactivate")).toHaveLength(1));
+    await user.click(within(panel()).getByTestId("project-general"));
+    expect(backend.called("POST", "/api/projects/deactivate")).toHaveLength(1);
+  });
+
+  it("a project that is created becomes the active one, and General takes the choice back out of it", async () => {
+    mount();
+    const user = userEvent.setup();
+    await within(panel()).findByRole("list");
+    await user.click(within(panel()).getByTestId("project-general"));
+    await waitFor(() => expect(backend.activeId).toBeNull());
+    await user.click(screen.getByRole("button", { name: t("projects.create") }));
+    const dialog = await screen.findByRole("dialog", { name: t("projects.dialog.createTitle") });
+    await user.type(within(dialog).getByLabelText(t("projects.field.name")), "Nuevo");
+    await user.click(within(dialog).getByRole("button", { name: t("projects.create") }));
+    await waitFor(() => expect(within(panel()).getByRole("button", { name: /Nuevo/ })).toHaveAttribute("aria-current", "true"));
+    await user.click(within(panel()).getByTestId("project-general"));
+    await waitFor(() => expect(backend.activeId).toBeNull());
+    expect(within(panel()).getByRole("button", { name: /Nuevo/ })).not.toHaveAttribute("aria-current");
   });
 });

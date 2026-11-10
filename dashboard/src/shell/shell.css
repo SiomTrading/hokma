@@ -22,6 +22,9 @@
 .sr-only { position: absolute; left: -9999px; }
 
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px 8px; }
+.brand-toggle { margin-left: auto; flex: none; }
+.hk.sbc .brand { flex-direction: column; gap: 6px; padding: 2px 0 8px; }
+.hk.sbc .brand-toggle { margin-left: 0; }
 .brand-name { font: 700 15px Montserrat, sans-serif; letter-spacing: 0.06em; }
 .brand-sub { font: 400 11px Montserrat, sans-serif; color: var(--t3); }
 

@@ -40,8 +40,18 @@ await runSuite("first-run", { script: "firstrun-serve.py", signedIn: true }, asy
   for (const key of ["claude", "folder", "database", "name", "done"]) {
     assert.ok((await stepsLabel.innerText()).includes(msg(`firstrun.step.${key}`)), `step ${key} listed`);
   }
-  await noKeys("claude step");
-  await next();
+  // Connect your AI: Claude Code is recommended, the other ways are listed, a false key gives a clear error
+  await dialog.getByText(msg("eng.recommended"), { exact: true }).waitFor();
+  await dialog.getByText(msg("eng.codex.title")).waitFor();
+  await dialog.getByText(msg("eng.gemini.title")).waitFor();
+  await dialog.getByLabel(msg("eng.key.label"), { exact: true }).fill("sk-false-key-for-e2e");
+  await dialog.getByRole("button", { name: msg("eng.key.connect") }).click();
+  const keyError = dialog.getByRole("alert").first();
+  await keyError.waitFor({ timeout: 90000 });
+  assert.ok((await keyError.innerText()).trim().length > 0, "a false key shows a clear error");
+  assert.ok(!(await dialog.innerText()).includes("sk-false-key-for-e2e"), "the key is never shown back");
+  // "I'll do it later" ends the step without connecting anything
+  await dialog.getByRole("button", { name: msg("eng.later") }).click();
 
   // 1. folder: type a path that does not exist yet; the backend creates it and starts Git there
   await heading("firstrun.folder.title");

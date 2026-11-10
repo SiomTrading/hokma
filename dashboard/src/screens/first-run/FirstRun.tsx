@@ -7,7 +7,7 @@ import { FirstRunMode } from "@/screens/permissions/FirstRunMode";
 import { useShell, useShellEvent } from "@/shell/useShell";
 import { setupApi } from "./api";
 import { useDatabaseSwitch } from "./useDatabaseSwitch";
-import { ClaudeStep } from "./ClaudeStep";
+import { EnginesStep } from "../engines/EnginesStep";
 import { DatabaseChoice } from "./DatabaseChoice";
 import { FolderBrowser } from "./FolderBrowser";
 import type { DbChoice, SetupState, WorkdirOption } from "./types";
@@ -259,7 +259,7 @@ export function FirstRun({ pollMs }: Props) {
         <div style={{ flex: 1, overflow: "auto", padding: 22 }}>
           {state === null ? <Loading label={t("firstrun.loading")} /> : null}
 
-          {state !== null && id === "claude" ? <ClaudeStep pollMs={pollMs} /> : null}
+          {state !== null && id === "claude" ? <EnginesStep pollMs={pollMs} onLater={() => setStep(step + 1)} /> : null}
 
           {state !== null && id === "folder" ? (
             <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>

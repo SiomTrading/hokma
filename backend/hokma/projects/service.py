@@ -88,11 +88,22 @@ def active_id(db: Database | None = None) -> int | None:
     database = _db(db)
     _import_legacy(database)
     with database.read() as u:
-        wanted = u.profile.get_or_default().active_project_id
+        profile = u.profile.get_or_default()
+        if profile.no_active_project:
+            return None                               # "General" was chosen: the working folder
+        wanted = profile.active_project_id
         if wanted is not None and u.projects.find(wanted) is not None:
             return wanted
         rows = u.projects.list(status="active")
     return min((p.id for p in rows), default=None)
+
+
+def deactivate(db: Database | None = None) -> None:
+    """"General": no active project. The terminal, new chats and the conversations that follow the active project use the working folder."""
+    database = _db(db)
+    _import_legacy(database)
+    with database.write() as u:
+        u.profile.set_no_active_project()
 
 
 def activate(project_id: int, db: Database | None = None) -> int:
@@ -184,7 +195,9 @@ def create_project(name: str, kind: str = "other", *, slug: str | None = None, d
                     u.onboarding.mark("first_project")
         except DbError as exc:
             raise ProjectError("db_failed", 500) from exc
-        if active_id(database) is None or _count_projects(database) == 1:
+        with database.read() as u:
+            chose_general = u.profile.get_or_default().no_active_project
+        if (active_id(database) is None and not chose_general) or _count_projects(database) == 1:
             activate(row.id, database)
         out = _public(row, active_id(database))
         out["git"] = {"ok": git.ok, "reason": git.reason}

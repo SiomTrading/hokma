@@ -72,25 +72,31 @@ def test_project_flow_from_creation_to_the_chat(env, monkeypatch, lang):
         assert client.post(f"/api/projects/{alpha['id']}/links", headers=H,
                            json={"url": "http://example.com/x", "download": False}).status_code == 400
 
-        # the chat uses the active project
+        # a new conversation is General (0.0.7): it does not inherit the active project and runs in the working folder
         with connect(client) as ws:
             events = turn(ws, "hola")
+        conv = [e for e in events if e["type"] == "conversation"][0]
+        assert conv["project"] is None and conv["project_mode"] == "fixed"
+        assert os.path.realpath(env.entries("start")[-1]["cwd"]) == os.path.realpath(env.home)
+        # naming the project runs the chat in it
+        with connect(client) as ws:
+            events = turn(ws, "hola", project_id=str(alpha["id"]))
         conv = [e for e in events if e["type"] == "conversation"][0]
         assert conv["project"]["name"] == "Alpha"
         assert os.path.realpath(env.entries("start")[-1]["cwd"]) == os.path.realpath(folder)
         # the attachment the chat copies lands inside the project too
         att = client.post("/api/attachments", headers=H, files={"file": ("plan.pdf", b"%PDF-1.4 plan", "application/pdf")}).json()
         with connect(client) as ws:
-            turn(ws, "mira", attachments=[att["id"]])
+            turn(ws, "mira", attachments=[att["id"]], project_id=str(alpha["id"]))
         assert os.path.isfile(os.path.join(folder, "attachments", "plan.pdf"))
         tree = client.get(f"/api/projects/{alpha['id']}/tree", headers=H).json()
         assert "attachments/plan.pdf" in [e["path"] for e in tree["entries"]]
 
-        # switch: the next conversation starts in the other project
+        # switch: a conversation that names the other project starts in it
         main_id = first["projects"][0]["id"]
         client.post(f"/api/projects/{main_id}/activate", headers=H)
         with connect(client) as ws:
-            events = turn(ws, "otra")
+            events = turn(ws, "otra", project_id=str(main_id))
         assert [e for e in events if e["type"] == "conversation"][0]["project"]["name"] == "Fondo Prueba"
         assert os.path.realpath(env.entries("start")[-1]["cwd"]) == os.path.realpath(env.home / "projects" / "principal")
 

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from hokma.db.api import current_database
 from hokma.i18n import t
-from hokma.status import catalog, checks, extensions_service as service, home, news
+from hokma.status import catalog, checks, extensions_service as service, home, mcp_auth, news
 from hokma.status.auth import require_token
 
 router = APIRouter(dependencies=[Depends(require_token)])
@@ -20,8 +20,25 @@ class ToggleBody(BaseModel):
     confirmed: bool = False
 
 
+class UninstallBody(BaseModel):
+    id: str = Field(pattern=PLUGIN_ID)
+    confirmed: bool = False
+
+
 class MarketplaceBody(BaseModel):
     repo: str = Field(pattern=GITHUB_REPO)
+
+
+class McpServerBody(BaseModel):
+    name: str = Field(min_length=1, max_length=32)
+    url: str = Field(min_length=1, max_length=2000)
+
+
+class McpPasteBody(BaseModel):
+    pasted: str = Field(min_length=1, max_length=4000)
+
+
+MCP_NAME = Path(pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 
 def _call(fn, *args):
@@ -57,9 +74,47 @@ def add_anthropic_marketplace() -> dict:
     return _call(service.add_marketplace, catalog.REPO)
 
 
+@router.get("/api/extensions/servers", summary="State of each remote MCP server: needs authorization, connected or error")
+def remote_servers() -> dict:
+    return {"servers": _call(mcp_auth.servers_state)}
+
+
+@router.post("/api/extensions/servers", status_code=201, summary="Add a remote MCP server (name and https address)")
+def add_remote_server(body: McpServerBody) -> dict:
+    return _call(mcp_auth.add_server, body.name, body.url)
+
+
+@router.post("/api/extensions/servers/{name}/login", summary="Start the sign-in; returns the authorization link")
+def login_remote_server(name: str = MCP_NAME) -> dict:
+    return _call(mcp_auth.start_login, name)
+
+
+@router.post("/api/extensions/servers/{name}/login/code", summary="Send the pasted final address to finish the sign-in")
+def finish_remote_login(body: McpPasteBody, name: str = MCP_NAME) -> dict:
+    return _call(mcp_auth.submit_login, name, body.pasted)
+
+
+@router.post("/api/extensions/servers/{name}/login/cancel", summary="Cancel a sign-in in progress")
+def cancel_remote_login(name: str = MCP_NAME) -> dict:
+    mcp_auth.stop_login()
+    return {"cancelled": True}
+
+
+@router.post("/api/extensions/servers/{name}/logout", summary="Revoke the stored access of a remote MCP server")
+def revoke_remote_server(name: str = MCP_NAME) -> dict:
+    return _call(mcp_auth.revoke, name)
+
+
 @router.get("/api/home", summary="Numbers for the home screen")
 def home_numbers() -> dict:
     return home.collect()
+
+
+@router.post("/api/extensions/uninstall", summary="Uninstall a plugin; needs the owner's confirmation")
+def uninstall_extension(body: UninstallBody) -> dict:
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail=t("status.ext.not_confirmed"))
+    return _call(service.uninstall_plugin, body.id)
 
 
 @router.post("/api/extensions/toggle", summary="Turn a plugin on or off; needs the owner's confirmation")

@@ -126,7 +126,10 @@ async function scenario(chromium, locale, dist) {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 940 } });
     await ctx.addInitScript(([token, loc]) => {
       if (!window.name && window.location.protocol.startsWith("http")) {                           // the way a handoff gives a fresh tab its session, never a storage
-        const u = window.location.pathname + window.location.search;
+        const hp = new URLSearchParams(window.location.hash.slice(1));                          // the address carries #/chat/... now
+        hp.delete("t");
+        hp.delete("o");
+        const u = window.location.pathname + window.location.search + (hp.toString() ? "#" + hp.toString() : "");
         window.name = "hokma-handoff:" + JSON.stringify({ o: window.location.origin, u, t: token });
       }
       localStorage.setItem("hokma.locale", loc);
@@ -137,9 +140,11 @@ async function scenario(chromium, locale, dist) {
     const base = `http://127.0.0.1:${server.port}/`;
     await page.goto(base);
 
-    const box = page.locator("#chat-message");
-    const users = page.getByTestId("user-message");
-    const answers = page.getByTestId("assistant-message");
+    // chat screens stay mounted in the background (a second conversation tab): everything is read from the one in front
+    const front = page.locator(".screen-host:not([hidden])");
+    const box = front.locator("#chat-message");
+    const users = front.getByTestId("user-message");
+    const answers = front.getByTestId("assistant-message");
     const expectCount = async (loc, n, what) => until(async () => (await loc.count()) === n, `${what} = ${n}`);
     const turn = async (text) => {
       const before = await users.count();
@@ -148,7 +153,7 @@ async function scenario(chromium, locale, dist) {
       // a normal message shows up as a user bubble at once; slash commands do not
       if (!text.startsWith("/")) await until(async () => (await users.count()) > before, "the user bubble");
     };
-    const idle = () => page.getByRole("button", { name: msg("chat.composer.send") }).waitFor({ timeout: 20000 });
+    const idle = () => front.getByRole("button", { name: msg("chat.composer.send") }).waitFor({ timeout: 20000 });
 
     // 1. write and receive a streamed answer
     await box.waitFor();
@@ -161,34 +166,34 @@ async function scenario(chromium, locale, dist) {
 
     // 2. stop in the middle of a turn
     await turn("long one [slow]");
-    await page.getByRole("button", { name: msg("chat.composer.stop") }).click();
-    await page.getByText(msg("chat.stopped"), { exact: true }).waitFor({ timeout: 20000 });
+    await front.getByRole("button", { name: msg("chat.composer.stop") }).click();
+    await front.getByText(msg("chat.stopped"), { exact: true }).waitFor({ timeout: 20000 });
     await idle();
 
     // 3. approve and reject a permission
     await turn("write [perm]");
-    const card = page.getByTestId("permission-card");
+    const card = front.getByTestId("permission-card");
     await card.waitFor({ timeout: 20000 });
     await card.getByRole("button", { name: msg("chat.perm.approve") }).click();
-    await page.getByTestId("permission-done").getByText(msg("chat.perm.allowed")).waitFor();
+    await front.getByTestId("permission-done").getByText(msg("chat.perm.allowed")).waitFor();
     await idle();
-    // the recorded permission request has a fixed id, so the rejection runs in a second conversation (Ctrl N)
-    await page.keyboard.press("Control+n");
-    await page.getByText(msg("chat.empty.title")).waitFor();
+    // the recorded permission request has a fixed id, so the rejection runs in a second conversation (Ctrl Shift O)
+    await page.keyboard.press("Control+Shift+O");
+    await front.getByText(msg("chat.empty.title")).waitFor();
     await turn("again [perm]");
-    await page.getByTestId("permission-card").waitFor({ timeout: 20000 });
-    await page.getByTestId("permission-card").getByRole("button", { name: msg("chat.perm.reject") }).click();
-    await page.getByTestId("permission-done").getByText(msg("chat.perm.denied")).waitFor();
+    await front.getByTestId("permission-card").waitFor({ timeout: 20000 });
+    await front.getByTestId("permission-card").getByRole("button", { name: msg("chat.perm.reject") }).click();
+    await front.getByTestId("permission-done").getByText(msg("chat.perm.denied")).waitFor();
     await idle();
     const answersBeforeFiles = await answers.count();
 
     // 4. attach a PNG and a PDF by clicking, and see the preview
-    const input = page.getByTestId("file-input");
+    const input = front.getByTestId("file-input");
     await input.setInputFiles([
       { name: "chart.png", mimeType: "image/png", buffer: PNG },
       { name: "plan.pdf", mimeType: "application/pdf", buffer: PDF },
     ]);
-    const pending = page.getByTestId("pending-attachment");
+    const pending = front.getByTestId("pending-attachment");
     await expectCount(pending, 2, "pending attachments");
     await until(async () => (await pending.first().locator("img").count()) === 1, "image preview");
     await until(async () => !(await pending.allInnerTexts()).some((text) => text.includes(msg("chat.composer.uploading"))), "upload end");
@@ -210,7 +215,7 @@ async function scenario(chromium, locale, dist) {
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const data = new DataTransfer();
       data.items.add(new File([bytes], "pasted.png", { type: "image/png" }));
-      document.getElementById("chat-message").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+      document.querySelector(".screen-host:not([hidden]) #chat-message").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
     }, PNG.toString("base64"));
     await expectCount(pending, 1, "pasted attachment");
     await pending.first().getByRole("button", { name: msg("chat.composer.removeAttachment", { name: "pasted.png" }) }).click();
@@ -222,20 +227,20 @@ async function scenario(chromium, locale, dist) {
     const opusAsk = page.getByRole("dialog", { name: msg("chat.opus.title") });
     await opusAsk.waitFor();
     await opusAsk.getByRole("button", { name: msg("chat.opus.confirm") }).click();
-    await page.getByRole("button", { name: msg("chat.model.pill", { name: msg("chat.model.opus") }) }).waitFor();
+    await front.getByRole("button", { name: msg("chat.model.pill", { name: msg("chat.model.opus") }) }).waitFor();
     await turn("with opus");
     await idle();
     assert.ok(fakeEntries(server.fakeLog, "start").at(-1).argv.join(" ").includes("--model opus"), "next turn launched with opus");
 
     // model menu from the pill
-    await page.getByRole("button", { name: msg("chat.model.pill", { name: msg("chat.model.opus") }) }).click();
+    await front.getByRole("button", { name: msg("chat.model.pill", { name: msg("chat.model.opus") }) }).click();
     await page.getByRole("menuitem", { name: new RegExp(msg("chat.model.haiku")) }).click();
-    await page.getByRole("button", { name: msg("chat.model.pill", { name: msg("chat.model.haiku") }) }).waitFor();
+    await front.getByRole("button", { name: msg("chat.model.pill", { name: msg("chat.model.haiku") }) }).waitFor();
 
     // 7. /project changes the pill and the working folder of the engine
     await box.fill(`${M["chat.cmd.project"]} Str`);
     await page.getByRole("menuitem", { name: "Strategy" }).click();
-    await page.locator(".chat-head").getByText("Strategy", { exact: true }).waitFor();
+    await front.locator(".chat-head").getByText("Strategy", { exact: true }).waitFor();
     await turn("in the other project");
     await idle();
     assert.equal(fakeEntries(server.fakeLog, "start").at(-1).cwd, path.join(server.home, "projects", "strategy"));
@@ -243,7 +248,7 @@ async function scenario(chromium, locale, dist) {
     // 8. /agent shows the agent in the header and the turn goes to it
     await box.fill(`${M["chat.cmd.agent"]} risk`);
     await page.getByRole("menuitem", { name: /risk-desk/ }).click();
-    await page.locator(".chat-head").getByText(msg("chat.agentValue", { name: "risk-desk" }), { exact: true }).waitFor();
+    await front.locator(".chat-head").getByText(msg("chat.agentValue", { name: "risk-desk" }), { exact: true }).waitFor();
     await turn("as the agent");
     await idle();
     assert.ok(fakeEntries(server.fakeLog, "start").at(-1).argv.join(" ").includes("--agent risk-desk"));
@@ -268,13 +273,13 @@ async function scenario(chromium, locale, dist) {
     await pinnedRow.click();
 
     // 11. history when a stored conversation is opened
-    await page.getByTestId("user-message").first().waitFor({ timeout: 15000 });
-    assert.ok((await page.getByTestId("user-message").first().innerText()).includes("hello there"));
-    assert.ok((await page.getByTestId("assistant-message").first().innerText()).includes("pong"));
+    await users.first().waitFor({ timeout: 15000 });
+    assert.ok((await users.first().innerText()).includes("hello there"));
+    assert.ok((await answers.first().innerText()).includes("pong"));
 
-    // 12. Ctrl N starts a clean conversation
-    await page.keyboard.press("Control+n");
-    await until(async () => (await page.getByTestId("user-message").count()) === 0 || (await page.locator("section[aria-label]").count()) >= 1, "fresh chat");
+    // 12. Ctrl Shift O starts a clean conversation
+    await page.keyboard.press("Control+Shift+O");
+    await until(async () => (await users.count()) === 0, "fresh chat");
 
     // 13. reconnection: cut the socket on the page side and see the app recover on its own
     await page.evaluate(() => window.dispatchEvent(new Event("offline")));

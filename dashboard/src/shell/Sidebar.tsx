@@ -1,16 +1,21 @@
 import { useState } from "react";
-import { Input, Isotype, NavItem } from "@/design";
+import { isFirefox, useSessionInfo } from "@/api";
+import { IconButton, Input, Isotype, NavItem, NavLink } from "@/design";
 import { useI18n } from "@/i18n";
 import { ShutdownDialog } from "@/screens/system/ShutdownDialog";
 import { SIDEBAR_SCREENS, BUILTIN_SCREENS } from "./screens";
 import { Slot } from "./Slot";
-import { formatShortcut, getShortcut } from "./shortcuts";
+import { formatShortcutCompact, getShortcut, isMac } from "./shortcuts";
+import { isPlainClick } from "./links";
 import { useShell } from "./store";
 
 export function Sidebar() {
   const { t } = useI18n();
   const shell = useShell();
   const [confirmingShutdown, setConfirmingShutdown] = useState(false);
+  const session = useSessionInfo();
+  // A new browser tab enters by itself only where Hokma remembers the session (not Firefox, not private mode).
+  const canOpenInTab = !isFirefox() && !session.storageUnavailable;
   const activeScreen = shell.tabs.find((tab) => tab.key === shell.activeKey)?.screen;
 
   return (
@@ -23,8 +28,26 @@ export function Sidebar() {
             <Slot name="brand.subtitle" />
           </span>
         </div>
+        <IconButton
+          icon="sidebar"
+          className="brand-toggle"
+          label={t("sidebar.collapse")}
+          title={`${t("sidebar.collapse")} (${formatShortcutCompact(getShortcut("sidebar"))})`}
+          onClick={shell.toggleSidebar}
+        />
       </div>
-      <NavItem icon="plus" label={t("nav.newChat")} kbd={formatShortcut(getShortcut("newChat"))} onClick={shell.newConversation} />
+      <NavLink
+        icon="plus"
+        label={t("nav.newChat")}
+        href="#/chat/new"
+        title={t(canOpenInTab ? "nav.newChatTitle" : "nav.newChatTitlePlain", { mod: isMac() ? "Cmd" : "Ctrl" })}
+        kbd={formatShortcutCompact(getShortcut("newChat"))}
+        onClick={(event) => {
+          if (!isPlainClick(event)) return; // wheel, Ctrl, Cmd or Shift: the browser opens it in another tab
+          event.preventDefault();
+          shell.newConversation();
+        }}
+      />
       <div className="sep" />
       {SIDEBAR_SCREENS.map((id) => {
         const meta = BUILTIN_SCREENS[id]!;

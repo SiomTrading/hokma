@@ -4,6 +4,7 @@ import { Button, EmptyState, ErrorState, Isotype, Loading, Modal, Pill } from "@
 import { useI18n } from "@/i18n";
 import { IntroNotice } from "@/screens/permissions/IntroNotice";
 import { useShell, useShellEvent } from "@/shell/useShell";
+import { openDialog, getSnapshot as projectsSnapshot, subscribe as subscribeProjects } from "@/screens/projects/store";
 import type { ScreenProps } from "@/shell/registry";
 import "./chat.css";
 import { USAGE_WARN_PCT, chatOptions, errorText, saveToProject, weeklyUsagePct } from "./chatApi";
@@ -13,6 +14,7 @@ import type { ComposerHandle } from "./Composer";
 import { getHub } from "./hub";
 import type { HubClient } from "./hub";
 import { MessageItem } from "./Messages";
+import { ProjectScope } from "./ProjectScope";
 import { initialState, reducer } from "./state";
 import type { AttachmentChip } from "./state";
 import type { ChatOptions, ModelId, ServerEvent } from "./types";
@@ -41,6 +43,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
   const hub = getHub();
   const status = useHubStatus();
   const fixedConversation = params.conversation ?? null;
+  const draft = params.draft ?? null;
   const [state, dispatch] = useReducer(reducer, fixedConversation, initialState);
   const [options, setOptions] = useState<ChatOptions | null>(null);
   const [optionsTick, setOptionsTick] = useState(0);
@@ -58,7 +61,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
 
   const client = useRef<HubClient | null>(null);
   if (client.current === null) {
-    client.current = { id: fixedConversation, awaiting: false, onEvent: () => undefined, onOpen: () => undefined, claim: () => undefined };
+    client.current = { id: fixedConversation, ref: draft, awaiting: false, onEvent: () => undefined, onOpen: () => undefined, claim: () => undefined };
   }
 
   const loadUsage = useCallback(() => {
@@ -67,9 +70,14 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
   const loadUsageRef = useRef(loadUsage);
   loadUsageRef.current = loadUsage;
 
+  const bindRef = useRef({ draft, tabKey, bind: shell.bindConversation });
+  bindRef.current = { draft, tabKey, bind: shell.bindConversation };
+
   const handleEvent = useCallback((event: ServerEvent) => {
     const t = tRef.current;
     const self = client.current!;
+    // The engine gave this draft its conversation: the tab keeps its key and stays mounted, it only remembers the id.
+    if (event.type === "conversation" && bindRef.current.draft) bindRef.current.bind(bindRef.current.tabKey, event.conversation_id);
     dispatch({ type: "event", event, errorText });
     if (event.type === "done" || event.type === "error") self.awaiting = false;
     if (event.type === "done") loadUsageRef.current();
@@ -145,15 +153,16 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
     setTabTitle(tabKey, state.title || undefined);
   }, [setTabTitle, tabKey, state.title]);
 
-  // Ctrl N: the plain chat tab starts over. A tab bound to a stored conversation keeps it.
-  useShellEvent("conversation:new", () => {
-    if (fixedConversation) return;
-    client.current!.id = null;
-    client.current!.awaiting = false;
-    lastCommand.current = null;
-    dispatch({ type: "reset", id: null });
-    composer.current?.focus();
-  });
+  // A project created in the projects panel has to reach the picker of a new conversation.
+  useEffect(() => {
+    let last = projectsSnapshot().list;
+    return subscribeProjects(() => {
+      const next = projectsSnapshot().list;
+      if (next === last) return;
+      last = next;
+      setOptionsTick((n) => n + 1);
+    });
+  }, []);
 
   useEffect(() => {
     if (active) composer.current?.focus();
@@ -176,7 +185,12 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
       return true;
     }
     const message: Record<string, unknown> = { type: "send", conversation_id: self.id, text, attachments: attachments.map((chip) => chip.id) };
-    if (self.id === null) message.model = current.model;
+    if (self.id === null) {
+      message.model = current.model;
+      // A new conversation is General unless a project was picked in the picker: the engine never inherits one.
+      message.project_id = current.project?.id ?? null;
+      if (draft) message.client_ref = draft;
+    }
     if (!hub.send(message)) {
       shell.toast({ tone: "warn", text: t("chat.composer.notConnected") });
       return false;
@@ -231,7 +245,11 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
   };
 
   const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
-  const projectName = state.project?.name ?? options?.default_project?.name ?? "";
+  // The header says where the conversation really runs: its project, or General. Not the active project of the panel.
+  const projectName = state.loading ? "" : (state.project?.name ?? t("chat.scope.general"));
+  // "Save to project" goes to the conversation's project or, without one, to the active project.
+  const saveProjectName = state.project?.name ?? options?.default_project?.name ?? "";
+  const showScope = draft !== null && state.id === null && state.items.length === 0 && !state.loading && !state.loadError;
 
   return (
     <section
@@ -272,7 +290,20 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
         {state.loading ? <Loading label={t("chat.loading")} /> : null}
         {state.loadError ? <ErrorState message={state.loadError} onRetry={retryOpen} /> : null}
         {!state.loading && !state.loadError && state.items.length === 0 ? (
-          <EmptyState icon="chat" title={t("chat.empty.title")} description={t("chat.empty.text")} className="chat-empty" />
+          <div className="chat-empty chat-empty-box">
+            {showScope ? (
+              <ProjectScope
+                projects={options?.projects ?? []}
+                value={state.project}
+                onChange={(project) => dispatch({ type: "local_project", project })}
+                onCreate={() => {
+                  if (!shell.layout.rightPanel) shell.toggleRightPanel();
+                  openDialog("create");
+                }}
+              />
+            ) : null}
+            <EmptyState icon="chat" title={t("chat.empty.title")} description={t("chat.empty.text")} />
+          </div>
         ) : null}
         {active ? <IntroNotice /> : null}
         {state.items.map((item) => (
@@ -280,7 +311,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
             key={item.key}
             item={item}
             actions={{
-              projectName,
+              projectName: saveProjectName,
               canSave: state.id !== null,
               onPermission: answerPermission,
               onSaveMessage: (id) => save({ message_id: id }),

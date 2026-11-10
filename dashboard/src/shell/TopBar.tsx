@@ -27,7 +27,8 @@ export function TopBar() {
   const { layout } = shell;
 
   const pick = (screen: string) => {
-    shell.openScreen(screen);
+    if (screen === "chat") shell.newConversation();
+    else shell.openScreen(screen);
     setAddOpen(false);
   };
 

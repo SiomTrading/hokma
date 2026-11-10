@@ -15,6 +15,7 @@ from hokma.core.lifecycle import Lifecycle, WebSocketTracker
 from hokma.core.shutdown_api import router as shutdown_router
 from hokma.core.origin import TEST_HOSTS, LocalOnlyMiddleware, hosts_for_port
 from hokma.db.api import database_lifespan, router as database_router
+from hokma.engines.api import router as engines_router
 from hokma.engine.api import router as engine_router
 from hokma.engine.conversations_api import router as conversations_router
 from hokma.learn.api import router as learn_router
@@ -77,6 +78,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     app.include_router(database_router)
     app.include_router(voice_router)
     app.include_router(engine_router)
+    app.include_router(engines_router)
     app.include_router(projects_router)
     app.include_router(setup_router)
     app.include_router(terminal_router)

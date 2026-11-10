@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "min_cli": {
+    "claude_code": "2.0.0",
+    "codex": "0.46.0",
+    "gemini_cli": "0.8.0"
+  },
+  "providers": {
+    "openai": {
+      "label": "OpenAI",
+      "wire": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "models_path": "/models",
+      "host": "api.openai.com",
+      "tiers": {
+        "fast": "gpt-4.1-mini",
+        "balanced": "gpt-4.1",
+        "deep": "o3"
+      }
+    },
+    "anthropic": {
+      "label": "Anthropic",
+      "wire": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "models_path": "/v1/models",
+      "host": "api.anthropic.com",
+      "tiers": {
+        "fast": "claude-haiku-5-5",
+        "balanced": "claude-sonnet-5-5",
+        "deep": "claude-opus-5-5"
+      }
+    },
+    "google": {
+      "label": "Google",
+      "wire": "openai",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "models_path": "/models",
+      "host": "generativelanguage.googleapis.com",
+      "tiers": {
+        "fast": "gemini-2.5-flash-lite",
+        "balanced": "gemini-2.5-flash",
+        "deep": "gemini-2.5-pro"
+      }
+    },
+    "openrouter": {
+      "label": "OpenRouter",
+      "wire": "openai",
+      "base_url": "https://openrouter.ai/api/v1",
+      "models_path": "/models",
+      "host": "openrouter.ai",
+      "tiers": {
+        "fast": "anthropic/claude-haiku-5.5",
+        "balanced": "anthropic/claude-sonnet-5.5",
+        "deep": "anthropic/claude-opus-5.5"
+      }
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "wire": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "models_path": "/models",
+      "host": "api.deepseek.com",
+      "tiers": {
+        "fast": "deepseek-chat",
+        "balanced": "deepseek-chat",
+        "deep": "deepseek-reasoner"
+      }
+    },
+    "moonshot": {
+      "label": "Kimi (Moonshot)",
+      "wire": "openai",
+      "base_url": "https://api.moonshot.ai/v1",
+      "models_path": "/models",
+      "host": "api.moonshot.ai",
+      "tiers": {
+        "fast": "kimi-k3.1-pro-highspeed",
+        "balanced": "kimi-k3",
+        "deep": "kimi-k3.1-pro"
+      }
+    },
+    "ollama": {
+      "label": "Ollama",
+      "wire": "openai",
+      "base_url": "http://localhost:11434/v1",
+      "models_path": "/models",
+      "local": true,
+      "tiers": {}
+    },
+    "lmstudio": {
+      "label": "LM Studio",
+      "wire": "openai",
+      "base_url": "http://localhost:1234/v1",
+      "models_path": "/models",
+      "local": true,
+      "tiers": {}
+    },
+    "custom": {
+      "label": "OpenAI compatible",
+      "wire": "openai",
+      "base_url": "",
+      "models_path": "/models",
+      "tiers": {}
+    },
+    "gemini_cli": {
+      "label": "Gemini",
+      "wire": "openai",
+      "base_url": "",
+      "local": false,
+      "tiers": {
+        "fast": "gemini-2.5-flash-lite",
+        "balanced": "gemini-2.5-flash",
+        "deep": "gemini-2.5-pro"
+      }
+    }
+  },
+  "region_patterns": {
+    "default": [
+      "unsupported_country_region_territory",
+      "not available in your (?:country|region)",
+      "country, region, or territory not supported",
+      "is not supported in your (?:country|region)",
+      "unavailable in your (?:country|region)",
+      "location is not supported"
+    ],
+    "anthropic": [
+      "unsupported country",
+      "app unavailable in region",
+      "not available in your region"
+    ],
+    "openai": [
+      "unsupported_country_region_territory",
+      "country, region, or territory not supported"
+    ],
+    "google": [
+      "user location is not supported for the api use"
+    ]
+  }
+}

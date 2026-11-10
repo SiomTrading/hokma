@@ -48,6 +48,8 @@ class Env:
         monkeypatch.setenv("HOKMA_DATA_DIR", str(self.data))
         monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
         monkeypatch.setenv("FAKE_CLAUDE_LOG", str(self.log))
+        from hokma.engines import envfilter
+        monkeypatch.setattr(envfilter, "ALLOWED", (*envfilter.ALLOWED, "FAKE_CLAUDE_*"))
         self.store = MemoryStore()
         self.launch_spec = LaunchSpec(args=[], env={"CLAUDE_CONFIG_DIR": str(self.data / "cfg")}, cwd=str(self.home))
 

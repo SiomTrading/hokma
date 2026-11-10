@@ -12,6 +12,7 @@ from hokma.db.paths import db_path
 from hokma.db.repos.agents import AgentsRepo
 from hokma.db.repos.approvals import ApprovalsRepo
 from hokma.db.repos.conversations import AttachmentsRepo, ConversationsRepo, MessagesRepo
+from hokma.db.repos.engines import EngineConnectionsRepo
 from hokma.db.repos.extensions import ExtensionRequestsRepo, ExtensionsRepo, ScheduledJobsRepo
 from hokma.db.repos.governance import BugsRepo, DecisionsRepo, GuardEventsRepo, JournalRepo
 from hokma.db.repos.misc import OnboardingRepo, UsageRepo
@@ -49,6 +50,7 @@ class Unit:
         self.onboarding = OnboardingRepo(session)
         self.usage = UsageRepo(session)
         self.trash = TrashItemsRepo(session)
+        self.engine_connections = EngineConnectionsRepo(session)
 
 
 class Database:

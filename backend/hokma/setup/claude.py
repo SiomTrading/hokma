@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 
 from hokma.core.proc import spawn_kwargs
 from hokma.core.config import claude_config_dir, hokma_data_dir
-from hokma.setup.messages import SetupError, t
+from hokma.i18n import language
+from hokma.setup.messages import Msg, SetupError, t
 
 STATUS_TIMEOUT = 15
 LOGIN_LIFETIME = 600
@@ -25,6 +26,10 @@ OUTPUT_LIMIT = 8000
 _URL = re.compile(r"https://[^\s\"'<>]+")
 _ALLOWED_HOSTS = ("claude.com", "claude.ai", "anthropic.com")
 _CODE = re.compile(r"^[A-Za-z0-9._~#%+/=\-]{1,600}$")
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+_SECRET_URL = re.compile(r"(https?://[^\s\"'<>?#]+)[?#][^\s\"'<>]*")
+_SECRET_TOKEN = re.compile(r"\b(?:sk-[A-Za-z0-9_\-]{8,}|[A-Za-z0-9_\-~.+/=]{32,})\b")
+_SHOWN_CHARS = 600
 _PLANS = {"pro": "Pro", "max": "Max", "team": "Team", "enterprise": "Enterprise", "free": "Free"}
 
 
@@ -35,9 +40,9 @@ class ClaudeState:
     plan: str | None = None
     version: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self, lang: str | None = None) -> dict:
         return {"state": self.state, "installed": self.installed, "plan": self.plan, "version": self.version,
-                "login": login_info()}
+                "login": login_info(lang)}
 
 
 def claude_path() -> str | None:
@@ -90,6 +95,7 @@ class _Login:
     started: float = field(default_factory=time.monotonic)
     output: str = ""
     url: str | None = None
+    reader: threading.Thread | None = None
 
 
 _login: _Login | None = None
@@ -111,6 +117,28 @@ def _read(login: _Login) -> None:
             login.output = (login.output + line)[-OUTPUT_LIMIT:]
             if login.url is None:
                 login.url = _safe_url(login.output)
+
+
+def _clean_output(text: str) -> str:
+    """The tail of what `claude auth login` printed, safe to show: no terminal codes, no link parameters
+    (they carry the OAuth state), no long token-like strings."""
+    text = _ANSI.sub("", text)
+    text = _SECRET_URL.sub(r"\1", text)
+    text = _SECRET_TOKEN.sub("[hidden]", text)
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return " | ".join(lines)[-_SHOWN_CHARS:]
+
+
+def _failure(login: _Login) -> Msg | None:
+    """The sign-in child ended without success: its real output as a translated message, else None."""
+    code = login.proc.poll()
+    if code is None or code == 0:
+        return None
+    if login.reader is not None:
+        login.reader.join(timeout=1.0)
+    with _lock:
+        shown = _clean_output(login.output)
+    return t("setup.err.login_exited", code=code, output=shown or "-")
 
 
 def _alive(login: _Login | None) -> bool:
@@ -148,19 +176,27 @@ def start_login(wait_for_link: float = 4.0) -> dict:
         running = _Login(proc)
         with _lock:
             _login = running
-        threading.Thread(target=_read, args=(running,), daemon=True).start()
+        running.reader = threading.Thread(target=_read, args=(running,), daemon=True)
+        running.reader.start()
     deadline = time.monotonic() + wait_for_link
     while running.url is None and running.proc.poll() is None and time.monotonic() < deadline:
         time.sleep(0.1)
+    failure = _failure(running)
+    if failure is not None:
+        raise SetupError(500, failure)
     return login_info()
 
 
-def login_info() -> dict:
+def login_info(lang: str | None = None) -> dict:
     with _lock:
         login = _login
     if login is None:
         return {"running": False, "url": None}
-    return {"running": _alive(login), "url": login.url}
+    info: dict = {"running": _alive(login), "url": login.url}
+    failure = _failure(login)
+    if failure is not None:
+        info["error"] = failure.text(lang or language())
+    return info
 
 
 def submit_code(code: str) -> dict:

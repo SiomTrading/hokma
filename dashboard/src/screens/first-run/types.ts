@@ -34,6 +34,7 @@ export interface SetupState {
 export interface LoginInfo {
   running: boolean;
   url: string | null;
+  error?: string;
 }
 
 export interface ClaudeDto {

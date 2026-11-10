@@ -132,7 +132,8 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
         title: event.title || state.title,
         model: isModel(event.model) ? event.model : state.model,
         agent: event.agent,
-        project: event.project ?? state.project,
+        // null is a real answer now: a conversation without a project is General
+        project: event.project ?? null,
       };
     case "turn_start": {
       const items = [...state.items];

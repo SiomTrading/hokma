@@ -19,7 +19,7 @@ _ENUMS = {
 }
 _FIELDS = ("owner_name", "fund_name", "timezone", "language", "engine", "telemetry_enabled",
            "max_parallel_agents", "workdir", "database_engine", "claude_status", "claude_plan",
-           "weekly_token_cap", "theme", "active_project_id", "permission_mode",
+           "weekly_token_cap", "theme", "active_project_id", "no_active_project", "permission_mode",
            "permission_mode_intro_seen", "update_checked_at")
 
 
@@ -51,13 +51,15 @@ class ProfileRepo(Repo):
              max_parallel_agents: Any = UNSET, workdir: Any = UNSET, database_engine: Any = UNSET,
              claude_status: Any = UNSET, claude_plan: Any = UNSET, weekly_token_cap: Any = UNSET,
              theme: Any = UNSET, active_project_id: Any = UNSET, permission_mode: Any = UNSET,
-             permission_mode_intro_seen: Any = UNSET, update_checked_at: Any = UNSET) -> Profile:
+             permission_mode_intro_seen: Any = UNSET, update_checked_at: Any = UNSET,
+             no_active_project: Any = UNSET) -> Profile:
         values = given(owner_name=owner_name, fund_name=fund_name, timezone=timezone, language=language,
                        engine=engine, telemetry_enabled=telemetry_enabled, max_parallel_agents=max_parallel_agents,
                        workdir=workdir, database_engine=database_engine, claude_status=claude_status,
                        claude_plan=claude_plan, weekly_token_cap=weekly_token_cap, theme=theme,
                        active_project_id=active_project_id, permission_mode=permission_mode,
-                       permission_mode_intro_seen=permission_mode_intro_seen, update_checked_at=update_checked_at)
+                       permission_mode_intro_seen=permission_mode_intro_seen, update_checked_at=update_checked_at,
+                       no_active_project=no_active_project)
         for name, allowed in _ENUMS.items():
             if name in values:
                 require_in(name, values[name], allowed)
@@ -71,6 +73,8 @@ class ProfileRepo(Repo):
             values["fund_name"] = _clean_name(values["fund_name"], required=False, field="fund_name")
         if "telemetry_enabled" in values:
             values["telemetry_enabled"] = flag(values["telemetry_enabled"])
+        if "no_active_project" in values:
+            values["no_active_project"] = flag(values["no_active_project"])
         if "permission_mode_intro_seen" in values:
             values["permission_mode_intro_seen"] = flag(values["permission_mode_intro_seen"])
         if values.get("active_project_id") is not None:
@@ -98,7 +102,13 @@ class ProfileRepo(Repo):
         """The project the chat uses when a conversation names none (null clears it)."""
         if self.get() is None:
             raise ValidationError("the profile does not exist yet")
-        return self.save(active_project_id=project_id)
+        return self.save(active_project_id=project_id, no_active_project=False)
+
+    def set_no_active_project(self) -> Profile:
+        """"General": no active project at all. The next activation (or null project id with the flag off) ends it."""
+        if self.get() is None:
+            raise ValidationError("the profile does not exist yet")
+        return self.save(active_project_id=None, no_active_project=True)
 
     def set_permission_mode(self, mode: str, *, intro_seen: bool | None = None) -> Profile:
         """'ask' or 'auto'. Only the owner's endpoint and the first-run step call this; never an agent."""

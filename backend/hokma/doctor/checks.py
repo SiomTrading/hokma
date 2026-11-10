@@ -82,6 +82,37 @@ def check_claude_session(timeout: float = 15.0) -> Check:
     return Check(name, WARN, t("doctor.session.none", config=claude_config_dir()))
 
 
+def check_engines() -> list[Check]:
+    """One row per saved connection (binary, session or key as the last test saw them). No connection is a Warn, not a
+    Fail: Hokma is healthy without an engine."""
+    name = t("doctor.engines.name")
+    try:
+        from hokma.db import get_database
+
+        with get_database().read() as u:
+            rows = u.engine_connections.list()
+    except Exception:
+        return [check_claude_cli(), check_claude_session()]          # no database yet: the 0.0.8 checks
+    if not rows:
+        return [Check(name, WARN, t("doctor.engines.none"))]
+    out = []
+    for c in rows:
+        label = f"{name}: {c.label}"
+        if c.status == "connected":
+            out.append(Check(label, OK, t("doctor.engines.ok")))
+        elif c.status_detail == "region":
+            out.append(Check(label, WARN, t("engines.err.region", provider=c.provider or c.engine)))
+        elif c.status == "no_cli":
+            out.append(Check(label, WARN, t("engines.err.not_found", cli=c.engine)))
+        elif c.status == "no_session":
+            out.append(Check(label, WARN, t("engines.err.auth", provider=c.provider or c.engine)))
+        elif c.status == "error" and c.status_detail == "quota":
+            out.append(Check(label, WARN, t("engines.err.quota", provider=c.provider or c.engine)))
+        else:
+            out.append(Check(label, WARN, t("doctor.engines.untested")))
+    return out
+
+
 def check_workdir() -> Check:
     name = t("doctor.workdir.name")
     home = hokma_home()
@@ -205,7 +236,7 @@ def check_extensions() -> Check:
 
 
 def run_checks() -> list[Check]:
-    return [check_uv(), check_python(), check_git(), check_claude_cli(), check_claude_session(),
+    return [check_uv(), check_python(), check_git(), *check_engines(),
             check_workdir(), check_dashboard(), check_runtime_outside_workdir(),
             check_config_isolation(), check_integrity(), check_sandbox(), check_settings_lock(),
             check_extensions()]

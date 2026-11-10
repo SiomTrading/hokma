@@ -81,6 +81,16 @@ def claude_config_dir() -> Path:
     return hokma_data_dir() / "claude-config"
 
 
+def codex_home_dir() -> Path:
+    """Codex's own configuration folder for Hokma (CODEX_HOME). Inside the protected data folder."""
+    return hokma_data_dir() / "codex-home"
+
+
+def engine_dir() -> Path:
+    """Engine state that is not a secret: transcripts of the direct engine and the broker's own files."""
+    return hokma_data_dir() / "engine"
+
+
 def launcher_path() -> Path:
     """The `hokma` command placed on the user's PATH."""
     name = "hokma.cmd" if sys.platform == "win32" else "hokma"

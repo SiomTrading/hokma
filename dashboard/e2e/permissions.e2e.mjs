@@ -153,7 +153,7 @@ await runSuite("permissions", { script: "permissions-serve.py" }, async ({ page,
   assert.equal((await server.api("/api/guard-events")).events.length >= 1, true, "the refusal is stored");
 
   await reloadWithHandoff(page);
-  await page.locator("aside .conv", { hasText: "please delete the notes" }).first().click();
+  await page.locator("aside .conv", { hasText: "hello there" }).first().click();       // one conversation holds every turn above
   await page.getByTestId("block-card").waitFor({ timeout: 20000 });
   assert.ok((await page.getByTestId("block-card").innerText()).includes(msg("block.title.delete")), "the card persists");
 });

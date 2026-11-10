@@ -38,7 +38,7 @@ The full list is in `skills-manifest.json`: 82 bundle, 11 fetch.
 
 ## Hokma MCP tools the agents call
 
-`task_*`, `project_*`, `journal_*`, `bug_*`, `decision_*`, `schedule_*`, `robot_status`,
-`robot_set_state` (simulation only), `ips_read`, `extension_request`, `agents_list`.
-
-These tools are provided by the Hokma MCP server.
+Only `trash_move` exists today (`mcp__hokma__trash_move`). The `task_*`, `project_*`, `journal_*`, `bug_*`,
+`decision_*`, `schedule_*`, `robot_*`, `ips_read`, `extension_request` and `agents_list` tools are planned (task 3126).
+Until then `agents/hokma.md` and `HOKMA.md` keep tasks, journal and decisions as notes in the fund folder. The other
+agent files still list the planned tools in their `tools:` line.

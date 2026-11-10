@@ -16,6 +16,16 @@ export interface ServerItem {
   kind: "mcp";
   enabled: boolean;
   target: string;
+  remote?: boolean;
+}
+
+export type RemoteState = "needs_auth" | "connected" | "error" | "no_cli";
+
+export interface RemoteServer {
+  name: string;
+  url: string;
+  state: RemoteState;
+  message: string;
 }
 
 export interface MarketplaceSource {

@@ -93,10 +93,23 @@ export function ProjectsPanel() {
 
   // Tell the other panels (chat, terminal) which project is active, once loaded and on every change.
   useEffect(() => {
-    if (!active || announced.current === active.id) return;
-    announced.current = active.id;
-    shell.emit("project:active", { id: String(active.id), name: active.name });
-  }, [active, shell]);
+    if (!list) return;
+    const id = active ? active.id : 0; // 0: General, no project
+    if (announced.current === id) return;
+    announced.current = id;
+    shell.emit("project:active", active ? { id: String(active.id), name: active.name } : { id: null, name: null });
+  }, [list, active, shell]);
+
+  const chooseGeneral = useCallback(async () => {
+    if (!list || list.active_id === null) return;
+    try {
+      await client.deactivateProject();
+      await refresh();
+      shell.toast({ tone: "info", text: t("projects.toast.general") });
+    } catch (cause) {
+      shell.toast({ tone: "bad", text: messageOf(cause) });
+    }
+  }, [list, shell, t]);
 
   const choose = useCallback(
     async (project: ProjectInfo) => {
@@ -164,6 +177,15 @@ export function ProjectsPanel() {
         <EmptyState icon="folder" title={t("projects.empty.title")} description={t("projects.empty.body")} action={<Button size="sm" variant="primary" onClick={() => openDialog("create")}>{t("projects.create")}</Button>} />
       ) : (
         <div role="list" aria-label={t("projects.list")} style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 6px" }}>
+          <div role="listitem">
+            <button type="button" data-testid="project-general" aria-current={list && list.active_id === null ? true : undefined} className={list && list.active_id === null ? "proj on" : "proj"} onClick={() => void chooseGeneral()}>
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Dot color="var(--t3)" />
+                <span className="h2" style={{ fontSize: 13 }}>{t("projects.general")}</span>
+              </span>
+              <span className="p" style={{ fontSize: 11 }}>{t("projects.generalHint")}</span>
+            </button>
+          </div>
           {list?.projects.map((p) => (
             <div key={p.id} role="listitem">
               <button type="button" aria-current={p.active || undefined} className={p.active ? "proj on" : "proj"} onClick={() => void choose(p)}>

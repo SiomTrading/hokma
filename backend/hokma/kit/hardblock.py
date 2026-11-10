@@ -233,7 +233,10 @@ SECRET_RE = re.compile("|".join([
     _B + r"\.ssh" + _E, _B + r"\.aws" + _E, _B + r"\.config/gh" + _E, _B + r"\.git-credentials(?:$|[\s\"'])",
     _B + r"\.gnupg" + _E, _B + r"_?\.?netrc(?:$|[\s\"'])", r"github cli/hosts\.yml", r"hokma-market",
     # The keyring service that holds the remembered session (read or write), same as the Connections one.
-    r"hokma-session",
+    r"hokma-session", r"hokma-engine", r"engine_key",
+    # Engine credentials: the Codex and Gemini sign-ins (Hokma's copies and the student's own) and the student's own
+    # Claude session file.
+    r"codex-home/auth\.json", r"\.codex/auth\.json", r"\.gemini/oauth_creds\.json", r"\.claude/\.credentials\.json",
     r"hokma/database\.json", r"hokma/claude-config/(?:\.credentials\.json|credentials\.json|\.claude\.json)",
     r"claude-config/(?:\.credentials\.json|\.claude\.json)",
     # The system stores themselves: the Secret Service on D-Bus, the keyring and wallet files, the Keychain folder and
@@ -289,8 +292,8 @@ RAW_DATA_RE = re.compile(r"(?:localappdata%?|appdata/local|application support|\
                          r"(?:/|\s|$|[\"'])")
 SETTINGS_RE = re.compile(r"(?:^|[/\s\"'])\.claude/settings[^/\s\"']*\.json")
 ENV_REDEFINE = re.compile(
-    r"\b(?:CLAUDE_CONFIG_DIR|HOKMA_HOME|HOKMA_DATA_DIR)\b[\"'\]\)}]*\s*(?:\+?=|,)|\b(?:setx|unset)\s+(?:CLAUDE_CONFIG_DIR|"
-    r"HOKMA_HOME|HOKMA_DATA_DIR)\b", re.I)
+    r"\b(?:CLAUDE_CONFIG_DIR|CODEX_HOME|HOKMA_HOME|HOKMA_DATA_DIR|HOKMA_AGENT|HOKMA_TASK_ID)\b[\"'\]\)}]*\s*(?:\+?=|,)|\b(?:setx|unset)\s+(?:CLAUDE_CONFIG_DIR|"
+    r"CODEX_HOME|HOKMA_HOME|HOKMA_DATA_DIR|HOKMA_AGENT|HOKMA_TASK_ID|HOKMA_CONVERSATION_ID)\b", re.I)
 _GIT_ENV = (r"GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\w+|GIT_CONFIG_VALUE_\w+|GIT_CONFIG_PARAMETERS|GIT_CONFIG_GLOBAL|"
             r"GIT_CONFIG_SYSTEM|GIT_CONFIG|GIT_DIR|GIT_EXEC_PATH|GIT_TEMPLATE_DIR")
 # A command line that sets one of the variables that change what Git loads or runs: `VAR=x git ..`, `export VAR=`,
@@ -301,7 +304,7 @@ GIT_ENV_RE = re.compile(
     r"[\"'](?:" + _GIT_ENV + r")[\"']\s*[,:]|"
     r"\bsetx\s+(?:/m\s+)?(?:" + _GIT_ENV + r")\b|"
     r"\b(?:set-item|si|new-item|ni)\b[^;&|\n]*\benv:(?:" + _GIT_ENV + r")\b", re.I)
-CRED_CODE = re.compile(r"\bimport\s+keyring\b|\bfrom\s+keyring\b|\bkeyring\s*\.\s*(?:get|set|delete)|"
+CRED_CODE = re.compile(r"engine_key|\bimport\s+keyring\b|\bfrom\s+keyring\b|\bkeyring\s*\.\s*(?:get|set|delete)|"
                        r"\bPasswordVault\b|\bCredRead\b|Get-StoredCredential|\bsecretstorage\b|"
                        r"(?:import_module|__import__)\s*\(\s*[\"']keyring[\"']|"          # loading it by name at run time
                        r"[\"']key[\"']\s*\+\s*[\"']ring[\"']|[\"']keyr[\"']\s*\+\s*[\"']ing[\"']", re.I)

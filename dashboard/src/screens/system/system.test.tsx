@@ -6,9 +6,13 @@ import { renderWithApp } from "@/test/utils";
 import { ExtensionsSection } from "./ExtensionsSection";
 import { StatusSection } from "./StatusSection";
 import { failure, mockApi } from "./testkit";
+import type { Call } from "./testkit";
 import type { ExtensionsData, MarketData, StatusData } from "./types";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
 
 const PLUGIN = { id: "tool@acme", name: "tool", marketplace: "acme", kind: "plugin" as const, enabled: false, summary: 'Plugin "tool@acme" will be activated' };
 
@@ -42,6 +46,11 @@ function extWords(l: Loc) {
     toggle: T("ext.toggle", l, { name: "tool" }),
     confirm: T("ext.confirm.ok", l),
     market: T("ext.market.title", l),
+    tabPlugins: T("ext.tab.plugins", l),
+    tabMcp: T("ext.tab.mcp", l),
+    install: T("ext.install", l),
+    uninstall: T("ext.uninstall", l),
+    search: T("ext.market.search", l),
     add: T("ext.add", l),
     approve: T("ext.requests.approve", l),
     reject: T("ext.requests.reject", l),
@@ -59,8 +68,11 @@ describe.each([
     renderWithApp(<ExtensionsSection />);
     expect(await screen.findByText("tool")).toBeInTheDocument();
     expect(screen.getAllByText("acme").length).toBeGreaterThan(0);
-    expect(screen.getByText("/usr/bin/files")).toBeInTheDocument();
+    expect(screen.queryByText("/usr/bin/files")).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: words.toggle })).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(screen.getByRole("tab", { name: words.tabMcp }));
+    expect(screen.getByText("/usr/bin/files")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: words.toggle })).not.toBeInTheDocument();
     expect(screen.queryByText(/Cat.logo SiomTrading/)).not.toBeInTheDocument();
   });
 
@@ -90,6 +102,7 @@ describe.each([
       "POST /api/extensions/requests/ab12cd34/reject": { id: "ab12cd34", status: "rejected" },
     });
     renderWithApp(<ExtensionsSection />);
+    await userEvent.click(await screen.findByRole("tab", { name: words.tabMcp }));
     expect(await screen.findByText("MCP server runs outside the sandbox")).toBeInTheDocument();
     expect(screen.getByText("It runs a relative path")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: words.approve }));
@@ -98,22 +111,75 @@ describe.each([
     await waitFor(() => expect(calls.some((c) => c.path === "/api/extensions/requests/ab12cd34/reject")).toBe(true));
   });
 
-  it("lists the Anthropic marketplace for real and adds it", async () => {
+  it("opens on Plugins with the marketplace and its search already there, and the search filters", async () => {
+    setLocale(locale);
+    const calls = mockApi({
+      "GET /api/extensions": extensionsData(),
+      "GET /api/extensions/marketplace": (call: Call) => {
+        const q = new URL(call.path, "http://localhost").searchParams.get("q") ?? "";
+        const items = MARKET.items.filter((i) => `${i.display_name} ${i.description}`.toLowerCase().includes(q.toLowerCase()));
+        return { ...MARKET, total: items.length, items };
+      },
+    });
+    renderWithApp(<ExtensionsSection />);
+    expect(await screen.findByText("Reads charts")).toBeInTheDocument();
+    expect(screen.getByText("Writes reports")).toBeInTheDocument();
+    expect(screen.getByText("development")).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("searchbox", { name: words.search }), "report");
+    await waitFor(() => expect(screen.queryByText("Reads charts")).not.toBeInTheDocument());
+    expect(screen.getByText("Writes reports")).toBeInTheDocument();
+    expect(calls.some((c) => c.path.includes("q=report"))).toBe(true);
+  });
+
+  it("installs in one click: the marketplace joins the list, the owner confirms once and the plugin ends on", async () => {
     setLocale(locale);
     const calls = mockApi({
       "GET /api/extensions": extensionsData(),
       "GET /api/extensions/marketplace": MARKET,
       "POST /api/extensions/marketplace": { name: "claude-plugins-official", source: "github:anthropics/claude-plugins-official", warnings: [] },
+      "POST /api/extensions/toggle": { id: "alpha@claude-plugins-official", enabled: true, warnings: [] },
     });
     renderWithApp(<ExtensionsSection />);
-    await userEvent.click(await screen.findByRole("button", { name: words.market }));
-    expect(await screen.findByText("Reads charts")).toBeInTheDocument();
-    expect(screen.getByText("Writes reports")).toBeInTheDocument();
-    expect(screen.getByText("development")).toBeInTheDocument();
-    const turnOnAlpha = screen.getByRole("switch", { name: /Alpha/ });
-    expect(turnOnAlpha).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: /Agregar a mi lista|Add to my list/ }));
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/extensions/marketplace")).toBe(true));
+    expect(screen.queryByRole("switch", { name: /Alpha/ })).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: T("ext.install.of", locale, { name: "Alpha" }) }));
+    const dialog = await screen.findByRole("dialog", { name: T("ext.confirm.install", locale, { name: "Alpha" }) });
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: words.confirm }));
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/toggle")?.body).toEqual({ id: "alpha@claude-plugins-official", enabled: true, confirmed: true }));
+    const posts = calls.filter((c) => c.method === "POST").map((c) => c.path);
+    expect(posts).toEqual(["/api/extensions/marketplace", "/api/extensions/toggle"]);
+  });
+
+  it("an installed marketplace plugin shows the switch and Uninstall instead of Install, and uninstalling asks first", async () => {
+    setLocale(locale);
+    const installed = { ...MARKET, added: true, items: [{ ...MARKET.items[0]!, installed: true, enabled: true }, MARKET.items[1]!] };
+    const calls = mockApi({
+      "GET /api/extensions": extensionsData({ plugins: [] }),
+      "GET /api/extensions/marketplace": installed,
+      "POST /api/extensions/uninstall": { id: "alpha@claude-plugins-official", uninstalled: true, warnings: [] },
+    });
+    renderWithApp(<ExtensionsSection />);
+    expect(await screen.findByRole("switch", { name: /Alpha/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("button", { name: T("ext.install.of", locale, { name: "Alpha" }) })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: T("ext.install.of", locale, { name: "Beta" }) })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: T("ext.uninstall.of", locale, { name: "Alpha" }) }));
+    const dialog = await screen.findByRole("dialog", { name: T("ext.confirm.uninstall", locale, { name: "Alpha" }) });
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: words.confirm }));
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/uninstall")?.body).toEqual({ id: "alpha@claude-plugins-official", confirmed: true }));
+  });
+
+  it("splits Extensions in Plugins and MCP and remembers the tab in this browser", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/extensions": extensionsData(), "GET /api/extensions/marketplace": MARKET, "GET /api/extensions/servers": { servers: [] } });
+    const first = renderWithApp(<ExtensionsSection />);
+    expect(await screen.findByRole("tab", { name: words.tabPlugins })).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(screen.getByRole("tab", { name: words.tabMcp }));
+    expect(screen.getByRole("tab", { name: words.tabMcp })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("searchbox", { name: words.search })).not.toBeInTheDocument();
+    first.unmount();
+    renderWithApp(<ExtensionsSection />);
+    expect(await screen.findByRole("tab", { name: words.tabMcp })).toHaveAttribute("aria-selected", "true");
   });
 
   it("adds a marketplace by owner/repo and validates the form", async () => {

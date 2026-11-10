@@ -19,11 +19,14 @@ a:hover { color: #5fe3e3; }
 .tab .tx { width: 22px; height: 22px; margin-right: 4px; display: grid; place-items: center; border-radius: 6px; border: 0; background: transparent; color: var(--t3); cursor: pointer; font-size: 14px; line-height: 1; }
 
 .nav { display: flex; align-items: center; gap: 11px; min-height: 36px; padding: 0 10px; border-radius: 9px; color: var(--t2); background: transparent; border: 0; font: 500 13px Montserrat, sans-serif; cursor: pointer; text-align: left; width: 100%; white-space: nowrap; transition: transform 140ms var(--ease-out), background 150ms ease, color 150ms ease; }
+a.nav, a.conv { text-decoration: none; box-sizing: border-box; }
+.nav svg { flex: none; }
+.nav > span:not(.kbd):not(.nav-badge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .nav:active { transform: scale(0.98); }
 .nav.on { background: var(--acc-sub); color: var(--t1); }
 .nav.on svg { color: var(--acc); }
 .nav .nav-badge { width: 8px; height: 8px; border-radius: 50%; background: var(--org); flex: none; margin-left: auto; box-shadow: 0 0 0 3px var(--org-sub); }
-.nav .kbd { margin-left: auto; font: 500 10px "JetBrains Mono", monospace; color: var(--t3); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+.nav .kbd { margin-left: auto; flex: none; font: 500 9px "JetBrains Mono", monospace; color: var(--t3); border: 1px solid var(--border); border-radius: 5px; padding: 1px 4px; }
 
 .sep { height: 1px; background: var(--border); margin: 6px 4px; flex: none; }
 .sec { font: 600 10px Montserrat, sans-serif; color: var(--t3); letter-spacing: 0.1em; text-transform: uppercase; padding: 6px 10px 2px; white-space: nowrap; }
@@ -177,3 +180,8 @@ textarea.in { padding: 10px 12px; line-height: 1.55; resize: vertical; min-heigh
   .caret, .dot.live, .fade, .stagger > *, .spin { animation: none; }
   .app, .tg::after, .menu, .modal, .scrim, .toast { transition: none; }
 }
+
+.ext-tabs { display: inline-flex; align-self: flex-start; gap: 4px; padding: 4px; border-radius: 999px; background: var(--glass); border: 1px solid var(--border); box-shadow: inset 0 1px 0 var(--hl); backdrop-filter: blur(20px) saturate(140%); }
+.ext-tab { min-height: 32px; padding: 0 16px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: var(--t2); font: 600 12px Montserrat, sans-serif; cursor: pointer; transition: background 150ms ease, color 150ms ease; }
+.ext-tab[aria-selected="true"] { background: var(--acc); color: var(--on-acc); }
+.ext-tab:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }

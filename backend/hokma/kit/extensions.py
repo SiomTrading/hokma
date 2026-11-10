@@ -146,6 +146,14 @@ def set_plugin(plugin_id: str, enabled: bool) -> list[str]:
     return _save(data)
 
 
+def remove_plugin(plugin_id: str) -> list[str]:
+    if not PLUGIN_ID.match(plugin_id):
+        raise ValueError(t("ext.plugin_form"))
+    data, _ = load()
+    data["enabledPlugins"].pop(plugin_id, None)
+    return _save(data)
+
+
 def add_marketplace(name: str, source: dict) -> list[str]:
     if not NAME.match(name):
         raise ValueError(t("ext.marketplace_name"))

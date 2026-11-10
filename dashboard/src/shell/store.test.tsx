@@ -41,13 +41,14 @@ describe("shell: setTabParams (T-11, store side)", () => {
 
   it("keeps the order of the tabs and does not move the focus when the tab was not active", () => {
     mount();
+    const draft = api.tabs[api.tabs.length - 1]!.key; // a new page starts with a draft chat in front
     act(() => api.openScreen("chart", { symbol: "NQ=F" }));
-    act(() => api.activateTab("chat"));
+    act(() => api.activateTab(draft));
     act(() => {
       api.setTabParams("chart:symbol=NQ=F", { symbol: "ES=F" });
     });
-    expect(active()).toBe("chat");
-    expect(api.tabs.map((tab) => tab.key)).toEqual(["chat", "panel", "chart:symbol=ES=F"]);
+    expect(active()).toBe(draft);
+    expect(api.tabs.map((tab) => tab.key)).toEqual(["panel", draft, "chart:symbol=ES=F"]);
   });
 
   it("merges into the tab that already has those params instead of making two", () => {
@@ -59,7 +60,8 @@ describe("shell: setTabParams (T-11, store side)", () => {
       key = api.setTabParams("chart:symbol=NQ=F", { symbol: "AAPL" });
     });
     expect(key).toBe("chart:symbol=AAPL");
-    expect(api.tabs.map((tab) => tab.key)).toEqual(["chat", "panel", "chart:symbol=AAPL"]);
+    expect(api.tabs.map((tab) => tab.key).filter((key) => key.startsWith("chart"))).toEqual(["chart:symbol=AAPL"]);
+    expect(api.tabs).toHaveLength(3);
     expect(active()).toBe("chart:symbol=AAPL");
   });
 

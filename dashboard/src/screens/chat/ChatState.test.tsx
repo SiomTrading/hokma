@@ -145,7 +145,7 @@ describe("agents:changed", () => {
       </>,
     );
     server.open();
-    await screen.findByText("Main");
+    await screen.findByText(t("chat.scope.general"));
     const count = () => calls.filter((c) => c.url.startsWith("/api/chat/options")).length;
     const before = count();
     await userEvent.click(screen.getByText("change"));
@@ -158,7 +158,7 @@ describe("Opus asks first", () => {
     server = new FakeServer();
     renderWithApp(<ChatScreen tabKey="chat" params={{}} active />);
     server.open();
-    await screen.findByText("Main");
+    await screen.findByText(t("chat.scope.general"));
   }
   const pill = () => screen.getByRole("button", { name: /^Claude · / });
 
@@ -212,7 +212,7 @@ describe("weekly cap bar", () => {
     server = new FakeServer();
     renderWithApp(<ChatScreen tabKey="chat" params={{}} active />);
     server.open();
-    await screen.findByText("Main");
+    await screen.findByText(t("chat.scope.general"));
     await waitFor(() => expect(calls.some((c) => c.url.startsWith("/api/usage/weekly"))).toBe(true));
     expect(screen.queryByTestId("usage-bar")).toBeNull();
   });

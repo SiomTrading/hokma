@@ -38,7 +38,7 @@ await runSuite("projects", { script: "serve.py" }, async ({ page, server, root, 
   await list.getByRole("button", { name: /E2E Fund/ }).waitFor();
   await list.getByRole("button", { name: /Strategy/ }).waitFor();
   assert.equal((await projects()).length, 2);
-  await panel.getByText(msg("projects.workdir")).waitFor();
+  await panel.getByText(msg("projects.workdir"), { exact: true }).waitFor();
   // long paths are shortened in the middle; the full path is the tooltip
   await panel.locator(`[title="${server.home}"]`).first().waitFor();
 

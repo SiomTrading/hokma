@@ -32,8 +32,8 @@ export interface TerminalSnapshot {
 }
 
 const MAX_TABS = 12;
-const READLINE_KEYS = new Set(["n", "k", "b", "j"]); // Ctrl N/K/B/J belong to the shell on Linux and Windows
-const APP_SHORTCUTS = new Set(["terminal", "fullscreen", "settings"]);
+const READLINE_KEYS = new Set(["k", "b", "j"]); // Ctrl K/B/J belong to the shell on Linux and Windows
+const APP_SHORTCUTS = new Set(["terminal", "fullscreen", "settings", "newChat"]);
 
 /** The xterm classes; tests swap them because jsdom cannot lay out a real terminal. */
 const realDrivers = { Terminal, FitAddon, openSocket };

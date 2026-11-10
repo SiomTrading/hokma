@@ -150,6 +150,12 @@ export function ClaudeStep({ pollMs = 3000 }: { pollMs?: number }) {
         </>
       ) : null}
 
+      {!error && claude?.state === "no_session" && claude.login.error ? (
+        <p className="err" role="alert" style={{ font: "500 12px Montserrat, sans-serif", color: "var(--bad)" }}>
+          {claude.login.error}
+        </p>
+      ) : null}
+
       {error ? (
         <p className="err" role="alert" style={{ font: "500 12px Montserrat, sans-serif", color: "var(--bad)" }}>
           {error}

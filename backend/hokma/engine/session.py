@@ -6,8 +6,10 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from hokma.engine import stream
-from hokma.engine.process import ClaudeProcess, find_claude
 from hokma.engine.protocols import ConversationRecord, ProjectRecord
+from hokma.engines.base import EngineContext, EngineError, EngineSession
+from hokma.engines.claude_code import SECRET_ENV  # noqa: F401  (kept for importers)
+from hokma.engines.registry import tier_of
 from hokma.permissions import modes
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
@@ -16,9 +18,6 @@ MAX_STORED_TOOLS = 40              # tool lines kept with a saved answer
 MAX_STORED_RESULT = 600            # characters of each tool result kept with a saved answer
 PERMISSION_TIMEOUT = 600.0         # seconds without an answer = deny
 STOP_GRACE = 3.0                   # seconds the CLI gets to honour an interrupt before the tree is killed
-BASE_FLAGS = ["-p", "--output-format", "stream-json", "--input-format", "stream-json",
-              "--include-partial-messages", "--verbose", "--permission-prompt-tool", "stdio"]
-SECRET_ENV = ("HOKMA_SESSION_TOKEN", "HOKMA_TOKEN")
 
 
 class TurnError(Exception):
@@ -46,8 +45,8 @@ class ChatSession:
         self.state = "idle"
         self.pending: dict[str, Pending] = {}
         self.last_used = time.monotonic()
-        self._proc: ClaudeProcess | None = None
-        self._proc_key: tuple | None = None
+        self._eng: EngineSession | None = None
+        self._eng_key: tuple | None = None
         self._session_id: str | None = None
         self._session_started = False
         self._task: asyncio.Task | None = None
@@ -67,7 +66,7 @@ class ChatSession:
 
     @property
     def has_process(self) -> bool:
-        return self._proc is not None and self._proc.alive
+        return self._eng is not None and self._eng.alive
 
     async def emit(self, event: dict[str, Any]) -> None:
         await self.engine.broadcast(self.conversation_id, {"conversation_id": self.conversation_id, **event})
@@ -87,17 +86,14 @@ class ChatSession:
         self._stop_requested = True
         for pending in list(self.pending.values()):
             await self.resolve(pending.request_id, "deny", "stop")
-        proc = self._proc
-        if proc is not None and proc.alive:
-            try:
-                await proc.write(stream.interrupt_request(f"stop-{uuid.uuid4().hex[:8]}"))
-            except OSError:
-                pass
+        eng = self._eng
+        if eng is not None and eng.alive:
+            await eng.interrupt()
         try:
             await asyncio.wait_for(self._turn_done.wait(), self.engine.stop_grace)
         except asyncio.TimeoutError:
-            if proc is not None:
-                await proc.terminate()
+            if eng is not None:
+                await eng.close()
             await self._turn_done.wait()
 
     async def resolve(self, request_id: str, decision: str, by: str) -> bool:
@@ -112,46 +108,40 @@ class ChatSession:
             await self.stop()
         await self._drop_process()
 
-    # --------------------------------------------------------------- process
+    # --------------------------------------------------------------- engine
 
     async def _drop_process(self) -> None:
-        proc, self._proc, self._proc_key = self._proc, None, None
-        if proc is not None:
-            await proc.terminate()
+        eng, self._eng, self._eng_key = self._eng, None, None
+        if eng is not None:
+            await eng.close()
 
-    async def _ensure_process(self, conv: ConversationRecord, project: ProjectRecord,
-                              mode: str = modes.DEFAULT_MODE) -> ClaudeProcess:
+    async def _ensure_engine(self, conv: ConversationRecord, project: ProjectRecord,
+                             mode: str = modes.DEFAULT_MODE) -> EngineSession:
+        adapter, connection, model = self.engine.resolve_engine(conv)
         if conv.engine_session and not self._session_id:
             self._session_id, self._session_started = conv.engine_session, True
         if not self._session_id:
-            self._session_id = str(uuid.uuid4())
+            self._session_id = adapter.new_ref()
         # The permission mode is part of the key: when the owner changes it, the process of this conversation is
-        # replaced before the next turn and resumed (`--resume`) with the other `--permission-mode`.
-        key = (conv.model, conv.agent, project.path, self._session_id, mode)
-        if self._proc is not None and self._proc.alive and self._proc_key == key:
-            return self._proc
+        # replaced before the next turn and resumed with the other mode.
+        key = (adapter.kind, connection and connection.get("id"), model, conv.agent, project.path, self._session_id,
+               mode)
+        if self._eng is not None and self._eng.alive and self._eng_key == key:
+            return self._eng
         await self._drop_process()
         self.engine.make_room(self)
+        ctx = EngineContext(conversation_id=self.conversation_id, model=model, cwd=project.path, agent=conv.agent,
+                            session_ref=self._session_id, resume=self._session_started, mode=mode,
+                            connection=connection, history=self.engine.history_for(conv),
+                            instructions=self.engine.instructions_for(project.path, conv.agent),
+                            tier=tier_of(conv.model))
         try:
-            spec = self.engine.launch()
-        except Exception as exc:                         # IntegrityError and any failure while preparing settings
-            raise TurnError("integrity", f"{type(exc).__name__}: {exc}") from exc
-        env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV and v != self.engine.session_token}
-        env.update(spec.env)
-        env.update(modes.work_env(project.path, self.conversation_id))
-        claude = self.engine.claude_bin or find_claude(env)
-        if not claude:
-            raise TurnError("claude_not_found", "the `claude` command is not installed or not on PATH")
-        argv = [claude, *spec.args, *BASE_FLAGS, "--permission-mode", modes.flag_for(mode), "--model", conv.model]
-        if conv.agent:
-            argv += ["--agent", conv.agent]
-        argv += ["--resume", self._session_id] if self._session_started else ["--session-id", self._session_id]
-        try:
-            self._proc = await ClaudeProcess.spawn(argv, env, project.path)
-        except OSError as exc:
-            raise TurnError("claude_not_found", str(exc)) from exc
-        self._proc_key = key
-        return self._proc
+            self._eng = await adapter.open(ctx)
+        except EngineError as exc:
+            raise TurnError(exc.code, exc.message) from exc
+        self._session_id = self._eng.session_ref or self._session_id
+        self._eng_key = key
+        return self._eng
 
     # ------------------------------------------------------------------ turn
 
@@ -163,88 +153,84 @@ class ChatSession:
         if not store.get_conversation(conv.id).title:
             title = self.engine.make_title(user_text)
             store.update_conversation(conv.id, title=title)
-            await self.emit({"type": "conversation", "title": title, "model": conv.model, "agent": conv.agent,
-                             "project": {"id": project.id, "name": project.name}, "created": False})
+            # the same body as everywhere else: a general conversation says `project: null`, not the working folder
+            await self.emit({"type": "conversation", **self.engine._conv_body(conv, False), "title": title})
         await self.emit({"type": "turn_start", "turn_id": turn_id, "message_id": user_msg.id})
 
         parts: list[str] = []
         tools: list[dict[str, Any]] = []
         usage: dict[str, Any] = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cost_usd": 0.0}
         status, error, result_seen = "complete", None, False
-        proc: ClaudeProcess | None = None
+        eng: EngineSession | None = None
         guard_blocks: list[dict[str, Any]] = []
         self.live = {"turn_id": turn_id, "parts": parts, "tools": tools}
         try:
             mode = self.engine.permission_mode()
             if modes.snapshots_wanted(mode):
                 await self.engine.take_checkpoint(project.path, self.conversation_id)
-            proc = await self._ensure_process(conv, project, mode)
-            await proc.write(stream.user_message(blocks))
-            while True:
-                msg = await proc.read()
-                if msg is None:
-                    break
-                kind = msg["type"]
-                if kind == "system" and msg.get("subtype") == "init":
+            eng = await self._ensure_engine(conv, project, mode)
+            async for ev in eng.send(blocks):
+                kind = ev["type"]
+                if kind == "session":
                     self._session_started = True
                     if conv.engine_session != self._session_id:
                         conv.engine_session = self._session_id
                         store.update_conversation(conv.id, engine_session=self._session_id)
-                elif kind == "stream_event":
-                    if stream.is_message_start(msg) and parts and not parts[-1].endswith("\n\n"):
+                elif kind == "message_break":
+                    if parts and not parts[-1].endswith("\n\n"):
                         parts.append("\n\n")
                         await self.emit({"type": "delta", "turn_id": turn_id, "text": "\n\n"})
-                    text = stream.text_delta(msg)
-                    if text:
-                        parts.append(text)
-                        await self.emit({"type": "delta", "turn_id": turn_id, "text": text})
-                elif kind == "assistant":
-                    for block in stream.tool_uses(msg):
-                        summary = stream.summarize_tool(block.get("name", ""), block.get("input"))
-                        tools.append({"id": block.get("id", ""), "name": block.get("name"), **summary,
-                                      "at": sum(len(p) for p in parts), "is_error": None, "result": None})
-                        await self.emit({"type": "tool_use", "turn_id": turn_id, "tool_use_id": block.get("id", ""),
-                                         "name": block.get("name", ""), "input": block.get("input") or {},
-                                         "summary": summary})
-                elif kind == "user":
+                elif kind == "text":
+                    parts.append(ev["text"])
+                    await self.emit({"type": "delta", "turn_id": turn_id, "text": ev["text"]})
+                elif kind == "tool_use":
+                    summary = stream.summarize_tool(ev.get("name", ""), ev.get("input"))
+                    tools.append({"id": ev.get("id", ""), "name": ev.get("name"), **summary,
+                                  "at": sum(len(p) for p in parts), "is_error": None, "result": None})
+                    await self.emit({"type": "tool_use", "turn_id": turn_id, "tool_use_id": ev.get("id", ""),
+                                     "name": ev.get("name", ""), "input": ev.get("input") or {},
+                                     "summary": summary})
+                elif kind == "tool_result":
                     await self._publish_blocks(turn_id, guard_blocks)
-                    for res in stream.tool_results(msg):
-                        for line in tools:
-                            if line["id"] == res.get("tool_use_id"):
-                                line["is_error"] = bool(res.get("is_error"))
-                                line["result"] = str(res.get("text") or "")[:MAX_STORED_RESULT]
-                        await self.emit({"type": "tool_result", "turn_id": turn_id, **res})
-                elif kind == "control_request":
-                    await self._on_control_request(proc, turn_id, msg)
-                elif kind == "control_cancel_request":
-                    await self.resolve(str(msg.get("request_id", "")), "deny", "engine")
-                elif kind == "result":
-                    result_seen = True
-                    if stream.is_aborted(msg) or self._stop_requested:
-                        status = "stopped"
-                    elif msg.get("is_error"):
-                        status, error = "error", TurnError("engine_error", str(msg.get("result") or msg.get("subtype")))
+                    for line in tools:
+                        if line["id"] == ev.get("id"):
+                            line["is_error"] = bool(ev.get("is_error"))
+                            line["result"] = str(ev.get("text") or "")[:MAX_STORED_RESULT]
+                    await self.emit({"type": "tool_result", "turn_id": turn_id, "tool_use_id": ev.get("id", ""),
+                                     "is_error": bool(ev.get("is_error")),
+                                     "text": str(ev.get("text") or "")[:stream.MAX_RESULT_TEXT]})
+                elif kind == "permission_request":
+                    if (ev.get("input") or {}).get("cancelled"):
+                        await self.resolve(str(ev.get("request_id", "")), "deny", "engine")
                     else:
-                        usage = stream.usage_of(msg)
-                        if not parts and msg.get("result"):
-                            parts.append(str(msg["result"]))
+                        await self._on_permission_request(eng, turn_id, ev)
+                elif kind == "done":
+                    result_seen = True
+                    if ev.get("status") == "stopped" or self._stop_requested:
+                        status = "stopped"
+                    else:
+                        usage = ev.get("usage") or usage
+                        if not parts and ev.get("result"):
+                            parts.append(str(ev["result"]))
                             await self.emit({"type": "delta", "turn_id": turn_id, "text": parts[0]})
                     break
-            if not result_seen:                                # the process ended without a result
-                if self._stop_requested:
-                    status = "stopped"
-                else:
-                    status = "error"
-                    await proc.terminate()
-                    error = TurnError("engine_exited", f"claude exited with code {proc.returncode}: "
-                                                       f"{proc.stderr_tail()}".strip())
+                elif kind == "error":
+                    result_seen = True
+                    if self._stop_requested:
+                        status = "stopped"
+                    else:
+                        status, error = "error", TurnError(ev.get("code", "engine_error"), ev.get("message", ""))
+                    break
+            if not result_seen:                                # the engine ended without a verdict
+                status = "stopped" if self._stop_requested else "error"
+                if status == "error":
+                    error = TurnError("engine_exited", "the engine ended the turn without an answer")
         except TurnError as exc:
             status, error = "error", exc
         except (OSError, asyncio.CancelledError) as exc:
             status = "stopped" if self._stop_requested else "error"
             if status == "error":
-                tail = proc.stderr_tail() if proc else ""
-                error = TurnError("engine_exited", f"{type(exc).__name__}: {exc} {tail}".strip())
+                error = TurnError("engine_exited", f"{type(exc).__name__}: {exc}".strip())
             if isinstance(exc, asyncio.CancelledError):
                 raise
         finally:
@@ -297,23 +283,19 @@ class ChatSession:
 
     # ----------------------------------------------------------- permissions
 
-    async def _on_control_request(self, proc: ClaudeProcess, turn_id: str, msg: dict[str, Any]) -> None:
-        request_id = str(msg.get("request_id", ""))
-        request = msg.get("request") or {}
-        if request.get("subtype") != "can_use_tool":
-            await proc.write(stream.control_error(request_id, "unsupported request"))
-            return
-        tool = str(request.get("tool_name", ""))
-        pending = Pending(request_id, str(request.get("tool_use_id", "")), tool, request.get("input") or {},
-                          stream.summarize_tool(tool, request.get("input")),
+    async def _on_permission_request(self, eng: EngineSession, turn_id: str, ev: dict[str, Any]) -> None:
+        request_id = str(ev.get("request_id", ""))
+        tool = str(ev.get("tool", ""))
+        pending = Pending(request_id, str(ev.get("id", "")), tool, ev.get("input") or {},
+                          stream.summarize_tool(tool, ev.get("input")),
                           time.time() + self.engine.permission_timeout)
         self.pending[request_id] = pending
         await self.emit({"turn_id": turn_id, **pending.event()})
-        waiter = asyncio.create_task(self._await_decision(proc, pending))
+        waiter = asyncio.create_task(self._await_decision(eng, pending))
         self._waiters.add(waiter)
         waiter.add_done_callback(self._waiters.discard)
 
-    async def _await_decision(self, proc: ClaudeProcess, pending: Pending) -> None:
+    async def _await_decision(self, eng: EngineSession, pending: Pending) -> None:
         try:
             decision, by = await asyncio.wait_for(asyncio.shield(pending.future), self.engine.permission_timeout)
         except asyncio.TimeoutError:
@@ -325,7 +307,7 @@ class ChatSession:
         reason = {"human": "The owner rejected this action.", "timeout": "No answer from the owner in time.",
                   "stop": "The owner stopped the turn."}.get(by, "The action was cancelled.")
         try:
-            await proc.write(stream.permission_reply(pending.request_id, allow, pending.input, reason))
+            await eng.answer_permission(pending.request_id, allow, reason, pending.input)  # type: ignore[call-arg]
         except OSError:
             pass
         human = by == "human"

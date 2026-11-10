@@ -36,11 +36,20 @@ def test_it_closes_hokma_only_under_the_data_folder():
     assert "$_.ProcessId -ne $PID" in POWERSHELL
 
 
-def test_missing_git_or_claude_gets_a_clear_message_and_nothing_is_installed():
+def test_missing_git_stops_the_install_and_nothing_is_installed():
     assert "Get-Command git" in POWERSHELL and "Get-Command claude" in POWERSHELL
     assert "git-scm.com/download/win" in POWERSHELL
-    assert "claude.ai/install.ps1" in POWERSHELL
+    assert "if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail $T.no_git }" in POWERSHELL
     assert "winget install" not in POWERSHELL
+
+
+def test_missing_claude_is_a_warning_and_the_install_goes_on():
+    assert "Fail $T.no_claude" not in POWERSHELL
+    assert "$claudeMissing" in POWERSHELL
+    assert "claude.ai/install.ps1" in POWERSHELL
+    assert "Recomendamos Claude Code para chatear; puedes instalarlo " in POWERSHELL
+    opened = POWERSHELL.index("Show-Step $T.opening")
+    assert opened < POWERSHELL.index("if ($claudeMissing) { Show-Box")      # Hokma is already open when the notice shows
 
 
 def test_it_opens_hokma_at_the_end():

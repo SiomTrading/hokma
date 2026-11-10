@@ -12,8 +12,8 @@ from hokma.core.config import hokma_home
 from hokma.db import Database, IntegrityViolation, NotFound, get_database
 from hokma.engine.attachments import attachments_dir
 from hokma.learn.progress import FIRST_CONVERSATION, FIRST_IMAGE
-from hokma.engine.protocols import (DEFAULT_MODEL, AttachmentRecord, ConversationRecord, MessageRecord,
-                                    ProjectRecord)
+from hokma.engine.protocols import (DEFAULT_MODEL, GENERAL_PROJECT_ID, AttachmentRecord, ConversationRecord,
+                                    MessageRecord, ProjectRecord)
 
 ENGINE_NAME = "claude_code"
 META_LIMIT = 60_000                 # messages.meta holds at most 64000 characters
@@ -40,12 +40,40 @@ class DbChatStore:
     @staticmethod
     def _conv(c) -> ConversationRecord:
         return ConversationRecord(str(c.id), c.title or "", c.model or DEFAULT_MODEL, c.agent_slug,
-                                  str(c.project_id) if c.project_id is not None else None, c.engine_session)
+                                  str(c.project_id) if c.project_id is not None else None, c.engine_session,
+                                  c.project_mode)
+
+    @staticmethod
+    def _conn(c) -> dict[str, Any]:
+        return {"id": c.id, "engine": c.engine, "label": c.label, "auth_kind": c.auth_kind, "provider": c.provider,
+                "wire": c.wire, "base_url": c.base_url, "tier_models": c.tier_models or {}, "status": c.status,
+                "settings": c.settings or {}}
+
+    def connection_for(self, conversation_id) -> dict[str, Any] | None:
+        """The connection of a conversation, else the default one, else None (Claude Code as before 0.0.9)."""
+        number = _int(conversation_id)
+        with self.db.read() as u:
+            conv = u.conversations.find(number) if number is not None else None
+            if conv is not None and conv.connection_id is not None:
+                return self._conn(u.engine_connections.get(conv.connection_id))
+            default = u.engine_connections.default()
+            return self._conn(default) if default else None
+
+    def set_connection(self, conversation_id, connection_id) -> None:
+        with self.db.write() as u:
+            conn = u.engine_connections.get(int(connection_id))
+            u.engine_connections.attach(int(conversation_id), conn.id)
+            u.conversations.set_engine_kind(int(conversation_id), conn.engine)
+            u.conversations.set_engine_session(int(conversation_id), None)
 
     def create_conversation(self, title, model, agent, project_id):
         with self.db.write() as u:
-            created = u.conversations.create(engine=ENGINE_NAME, title=title or None, model=model,
-                                             agent_slug=agent, project_id=_int(project_id))
+            default = u.engine_connections.default()
+            created = u.conversations.create(engine=default.engine if default else ENGINE_NAME, title=title or None,
+                                             model=model, agent_slug=agent, project_id=_int(project_id),
+                                             project_mode="fixed")
+            if default:
+                u.engine_connections.attach(created.id, default.id)
             u.onboarding.mark(FIRST_CONVERSATION)
             return self._conv(created)
 
@@ -164,17 +192,26 @@ class DbProjects:
     def _rec(p) -> ProjectRecord:
         return ProjectRecord(str(p.id), p.name, p.path)
 
+    def _workdir(self) -> Path:
+        with self.db.read() as u:
+            workdir = u.profile.get_or_default().workdir
+        return Path(workdir) if workdir else hokma_home()
+
     def default(self) -> ProjectRecord:
         """The active project (picked in the projects panel); with none, the working folder itself."""
         from hokma.projects.service import active_id
         number = active_id(self.db)
         with self.db.read() as u:
             found = u.projects.find(number) if number is not None else None
-            workdir = u.profile.get_or_default().workdir
         if found is not None:
             return self._rec(found)
-        path = Path(workdir) if workdir else hokma_home()
+        path = self._workdir()
         return ProjectRecord("default", path.name or "Hokma", str(path))
+
+    def general(self) -> ProjectRecord:
+        """No project: the working folder, whatever project is active."""
+        path = self._workdir()
+        return ProjectRecord(GENERAL_PROJECT_ID, path.name or "Hokma", str(path))
 
     def get(self, project_id):
         number = _int(project_id)

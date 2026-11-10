@@ -46,7 +46,7 @@ def _iso(value: str | None) -> str | None:
 
 def _summary(c) -> dict[str, Any]:
     return {"id": str(c.id), "title": c.title or "", "pinned": c.pinned, "archived": c.archived, "model": c.model, "agent": c.agent_slug,
-            "project_id": str(c.project_id) if c.project_id is not None else None,
+            "project_id": str(c.project_id) if c.project_id is not None else None, "project_mode": c.project_mode,
             "message_count": c.message_count, "started_at": _iso(c.started_at),
             "last_message_at": _iso(c.last_message_at or c.started_at)}
 
@@ -126,7 +126,7 @@ def create_router(db_getter=get_database, engine_getter=None) -> APIRouter:
         with db_getter().read() as u:
             agents = [{"slug": a.slug, "name": a.display_name, "description": a.description or ""}
                       for a in u.agents.list() if a.status != "off"]
-            projects = [{"id": str(p.id), "name": p.name} for p in u.projects.list()]
+            projects = [{"id": str(p.id), "name": p.name, "kind": p.kind} for p in u.projects.list()]
         return {"agents": agents, "projects": projects, "default_project": {"id": default.id, "name": default.name}}
 
     @router.post("/api/conversations/{conversation_id}/save", status_code=201)

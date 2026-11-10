@@ -24,7 +24,6 @@
   "cli.ext.none_pending": "There are no pending requests.",
   "cli.ext.rejected": "Request rejected.",
   "cli.integrity.modified": "The Hokma installation was modified ({detail}). For safety it will not start. Run the Hokma installer again.",
-
   "doctor.uv.missing": "uv not found. Run the Hokma installer again.",
   "doctor.python.old": "Version {version}; Hokma needs 3.12 or newer. Run the installer again.",
   "doctor.git.missing": "git is missing. Install it (https://git-scm.com) and run the installer again.",
@@ -66,7 +65,6 @@
   "doctor.extensions.name": "Your extensions",
   "doctor.extensions.mirror": "The copy of extensions.json in your working folder differs from the protected one (the protected one is used). Change extensions with: hokma ext ...",
   "doctor.extensions.ok": "{plugins} plugins, {marketplaces} marketplaces, {servers} MCP servers",
-
   "shutdown.err.unauthorized": "The session is not valid. Enter again with the Hokma icon.",
   "shutdown.err.nonce": "The shutdown request is not valid or has expired. Try again.",
   "shutdown.err.origin": "Hokma only shuts down from its own panel.",
@@ -133,7 +131,6 @@
   "update.github.rate_limited": "GitHub is limiting requests for now. Try again in a few minutes.",
   "update.github.release_incomplete": "The published version {version} is incomplete. Tell your instructor.",
   "update.github.unreachable": "I could not reach GitHub: {error}",
-
   "ext.unknown_source": "unknown marketplace source",
   "ext.bad_field": "invalid field in the source ({field})",
   "ext.git_transport": "git transport not allowed",
@@ -149,7 +146,6 @@
   "ext.ignored_marketplace": "ignored marketplace: {name} ({error})",
   "ext.ignored_server": "ignored MCP server: {name} ({error})",
   "ext.mirror_failed": "could not update the informational copy in the working folder ({error})",
-
   "guard.no_path": "Hokma: {tool} without a valid path; blocked for safety.",
   "guard.suspicious": "Hokma: the path {path} contains $, % or ~; blocked for safety.",
   "guard.device_path": "Hokma: the path {path} is a device or network (UNC) path; blocked for safety.",
@@ -159,13 +155,11 @@
   "guard.protected": "Hokma: {path} is part of the Hokma runtime or configuration and the agent cannot modify it.",
   "guard.hardlink": "Hokma: {path} has several hard links and could be the same file as a protected one.",
   "guard.error": "Hokma: guard error ({error}); blocked for safety.",
-
   "integrity.missing_manifest": "the integrity manifest is missing",
   "integrity.bad_manifest": "the integrity manifest is damaged",
   "integrity.modified": "modified: {file}",
   "integrity.absent": "missing: {file}",
   "integrity.new": "new file: {file}",
-
   "fs.path_not_allowed": "path not allowed: {path}",
   "fs.unsafe_dir": "unsafe folder: {name}",
   "fs.unsafe_dir_link": "unsafe folder (link or not a folder): {name}",
@@ -175,7 +169,6 @@
   "fs.unsafe_path": "unsafe path (link or not a regular file): {path}",
   "fs.escapes": "the path leaves the working folder: {path}",
   "kit.skipped": "skipped for safety (symbolic link or path outside the folder): {path} ({error})",
-
   "mcp.not_object": "the MCP server definition must be an object",
   "mcp.remote_url": "an http/sse MCP server needs an https url",
   "mcp.bad_type": "MCP server type not allowed",
@@ -190,7 +183,6 @@
   "mcp.risk.variable": "variable {name} {reason}",
   "mcp.risk.interpreter": "the command is an interpreter and loads code with {flags}",
   "mcp_run.failed": "Hokma: could not start the MCP server ({error})",
-
   "req.risk_warning": "WARNING: this connector runs code that your agent can modify",
   "req.summary.plugin": "Activate the plugin {name}",
   "req.summary.mcp": "Add the MCP server {name}",
@@ -207,7 +199,6 @@
   "req.not_found": "there is no valid request with id {id}",
   "req.no_marketplace": "the marketplace '{marketplace}' has not been added; add it first with: hokma ext add-marketplace {marketplace} --github owner/repo",
   "req.not_confirmed": "not confirmed; nothing was changed",
-
   "db.migrate.failed": "The database update failed in {file}: {error}. Nothing was changed; a copy of your data is in the backups folder.",
   "db.migrate.newer": "Your data was created by a newer Hokma (schema {found}, this version knows {known}). Update Hokma.",
   "db.migrate.open_failed": "The database could not be opened ({path}): {error}",
@@ -251,7 +242,6 @@
   "db.switch.failed": "The copy failed and nothing was changed: {detail}",
   "db.switch.busy": "Another change of database is running. Wait for it to finish.",
   "db.status.unreachable": "The database cannot be reached right now: {detail}",
-
   "setup.err.bad_token": "The session key is missing or not valid. Open Hokma with hokma start.",
   "setup.err.path_required": "Type or pick a folder.",
   "setup.err.path_not_absolute": "The folder must be a full path.",
@@ -268,6 +258,7 @@
   "setup.err.no_profile": "Save your name first.",
   "setup.err.claude_missing": "Claude Code is not installed on this computer.",
   "setup.err.login_failed": "Sign-in could not be started: {error}",
+  "setup.err.login_exited": "Sign-in ended with an error (code {code}). Claude Code said: {output}",
   "setup.err.no_login": "There is no sign-in in progress.",
   "setup.err.code_invalid": "The code is not valid.",
   "setup.err.bad_value": "Invalid value: {field}.",
@@ -277,7 +268,6 @@
   "setup.journal.workdir": "Working folder: {path}",
   "setup.journal.database": "Database: {engine}",
   "setup.journal.done": "Initial setup completed",
-
   "projects.err.bad_token": "Invalid session token.",
   "projects.err.bad_path": "That path is not allowed inside a project.",
   "projects.err.folder_missing": "The project folder does not exist on disk.",
@@ -360,7 +350,6 @@
   "connections.error.access_revoked": "Access revoked",
   "connections.error.other_device": "Connected from another device",
   "connections.error.bad_request": "That request is not valid.",
-
   "agents.error.agent_not_found": "That agent does not exist.",
   "agents.error.agent_invalid": "The agent data is not valid.",
   "agents.error.model_invalid": "Choose Haiku, Sonnet or Opus.",
@@ -409,95 +398,90 @@
   "voice.error.offline": "The speech model needs to be downloaded once and there is no internet connection. Connect and try again.",
   "voice.error.disk": "The speech model could not be saved. Free some disk space and try again.",
   "voice.error.download_failed": "The speech model download failed. Try again in a moment.",
-
   "hardblock.delete": "Hokma blocked this: deleting files or folders ({target}).",
-
   "hardblock.truncate": "Hokma blocked this: emptying a file that has content ({target}).",
-
   "hardblock.hokma_internal": "Hokma blocked this: Hokma's own files and settings are not for the agent to read or change ({target}).",
-
   "hardblock.force_push": "Hokma blocked this: forcing or deleting remote Git history ({target}).",
-
   "hardblock.outside_workdir": "Hokma blocked this: writing outside the working folder or touching disks ({target}).",
-
   "hardblock.secrets": "Hokma blocked this: reading stored keys and credentials ({target}).",
-
   "hardblock.real_money": "Hokma blocked this: placing real-money orders ({target}).",
-
   "hardblock.hint.delete": "Do not delete. Move what is no longer needed to the Hokma trash with the trash_move tool; the owner can restore it.",
-
   "hardblock.hint.truncate": "Do not empty files. Write the new content instead, or move the file to the Hokma trash with trash_move.",
-
   "hardblock.hint.hokma_internal": "Work only with the files of the working folder. Settings and Hokma internals are changed by the owner in the app.",
-
   "hardblock.hint.force_push": "Push without force. If history must change, ask the owner to do it.",
-
   "hardblock.hint.outside_workdir": "Write inside the working folder. If the owner wants a file elsewhere, say so and let them move it.",
-
   "hardblock.hint.secrets": "Keys are managed by the owner in the app and are never shown to the agent. Ask the owner to use them from there.",
-
   "hardblock.hint.real_money": "Real orders are placed by the owner in the app, never by the agent. Use paper trading or backtests instead.",
-
   "hardblock.error": "Hokma: protection error ({error}); blocked for safety.",
-
   "permissions.err.bad_mode": "The permission mode must be ask or auto.",
-
   "permissions.err.not_found": "That item does not exist.",
-
   "permissions.err.restore_failed": "It could not be restored: {error}",
-
   "permissions.err.confirm_required": "This action needs the owner's confirmation.",
-
   "permissions.err.no_git": "This folder has no safe Git repository, so there are no restore points.",
-
   "permissions.err.bad_path": "That path is not valid for this restore point.",
-
   "permissions.err.owner_confirmation_required": "Only the owner's open Hokma tab can do this. Shut Hokma down with the Shut down Hokma button and open it again with the Hokma icon.",
-
   "permissions.err.bad_owner_nonce": "That owner confirmation is not valid.",
-
   "permissions.err.owner_secret_required": "This tab cannot confirm the owner: it was not opened with the start link of Hokma. Shut Hokma down with the Shut down Hokma button and open it again with the Hokma icon.",
-
   "permissions.err.owner_already_registered": "Another tab already confirmed the owner for this start of Hokma. Shut Hokma down with the Shut down Hokma button and open it again with the Hokma icon.",
   "permissions.err.resume_denied": "Hokma could not restore your saved session. Open Hokma from its desktop shortcut.",
   "permissions.err.session_revoked": "Hokma closed the saved session because an old copy of it was used. Open Hokma from its desktop shortcut to enter again.",
   "permissions.err.handoff_origin": "Hokma only gives a code to enter from the numeric address of this computer.",
-
   "permissions.err.unknown_point": "That restore point does not exist.",
-
   "permissions.journal.mode": "Permission mode set to {mode}",
-
   "permissions.journal.trash_restored": "Restored from the Hokma trash: {name}",
-
   "permissions.journal.trash_purged": "Deleted for good from the Hokma trash: {name}",
-
   "permissions.journal.trash_emptied": "Hokma trash emptied ({count} items)",
-
   "permissions.journal.checkpoint_restored": "Restored from a restore point: {name}",
-
   "trash.err.outside": "Only files inside the working folder can be moved to the trash.",
-
   "trash.err.protected": "That path belongs to Hokma and cannot be moved.",
-
   "trash.err.repo_folders": "Hokma cannot move this to the trash; it protects repository and settings folders.",
-
   "trash.err.missing": "That path does not exist.",
-
   "trash.err.reason": "Say why in one short sentence.",
-
   "trash.moved": "Moved to the Hokma trash: {path} (id {id}). The owner can restore it from Settings > Trash.",
-
   "protection.delete": "Deleting files or folders",
-
   "protection.truncate": "Emptying files that have content",
-
   "protection.hokma_internal": "Hokma's own files, settings and trash",
-
   "protection.force_push": "Forcing or deleting remote Git history",
-
   "protection.outside_workdir": "Writing outside the working folder and touching disks",
-
   "protection.secrets": "Reading stored keys and credentials",
-
-  "protection.real_money": "Placing real-money orders"
+  "protection.real_money": "Placing real-money orders",
+  "doctor.engines.name": "Engine",
+  "doctor.engines.none": "No engine connected yet. Hokma works; connect one to chat.",
+  "doctor.engines.ok": "Connected.",
+  "doctor.engines.untested": "Not tested yet. Use Test in Settings > Engines.",
+  "engines.title": "Connect your AI",
+  "engines.lead": "Hokma works with the model you already have. We recommend Claude Code, but you can use any and change whenever you want",
+  "engines.recommended": "Recommended",
+  "engines.later": "I will do it later",
+  "engines.none_banner": "Connect an engine to chat. Everything else in Hokma already works",
+  "engines.import.found": "Your Claude works outside Hokma. I can use that same access here",
+  "engines.import.review": "I found this in your Claude: {items}. Secret values stay in your computer's secure store",
+  "engines.switch.notice": "We continue with {engine}. I passed it the thread of this conversation",
+  "engines.err.region": "{provider} does not serve your location. You can connect another engine in Settings > Engines",
+  "engines.err.auth": "{provider} rejected the session or the key. Connect again in Settings > Engines",
+  "engines.err.quota": "The {provider} quota is used up for now. Try another level or another engine",
+  "engines.err.not_found": "I cannot find {cli} on this computer. You can install it from here",
+  "engines.err.region_card": "{provider} refused the connection because it does not serve from the location it sees. Your browser may leave by another route, but Hokma connects from your computer and that connection does not go through there. You can connect another engine now, or try again when your computer connection changes",
+  "engines.err.connection_removed": "The connection of this conversation was removed. Pick another one",
+  "engines.protect.note": "Hokma protections are active with this engine",
+  "engines.bad_request": "The request is not valid",
+  "engines.bad_url": "The address is not valid",
+  "engines.bad_provider": "Unknown provider",
+  "engines.bad_engine": "Unknown engine",
+  "engines.key_required": "The key is required",
+  "engines.not_found": "Connection not found",
+  "engines.store_unavailable": "This computer has no secure store for keys, so nothing was saved",
+  "engines.nothing_to_import": "Nothing to import",
+  "tier.fast": "Fast",
+  "tier.balanced": "Balanced",
+  "tier.deep": "Deep",
+  "status.mcp.unknown": "MCP server \"{name}\" is not an added remote server.",
+  "status.mcp.bad_name": "Name: lowercase letters, digits, - or _ (max 32), and not \"hokma\".",
+  "status.mcp.bad_url": "The address must start with https://",
+  "status.mcp.exists": "A server named \"{name}\" already exists.",
+  "status.mcp.add_failed": "Claude could not add the server: {output}",
+  "status.mcp.login_failed": "The sign-in did not finish: {output}",
+  "status.mcp.paste_invalid": "Paste the full address shown by the browser tab (no spaces).",
+  "status.mcp.no_login": "There is no sign-in in progress. Press Authorize again.",
+  "status.mcp.logout_failed": "Could not revoke access: {output}"
 }

@@ -4,6 +4,9 @@ import type { ToastItem, ToastTone } from "@/design";
 import { getLocale, setLocale as setI18nLocale } from "@/i18n";
 import type { Locale } from "@/i18n";
 import type { TabParams } from "./registry";
+import { conversationOf, draftTab, isDraft, newDraftId, saveLastTabs, saveLayout, saveTabs, startupTabs, tabKeyFor } from "./tabsStorage";
+
+export { tabKeyFor };
 
 export type Theme = "dark" | "light";
 export type SidebarState = 0 | 1 | 2; // 0 expanded, 1 icons only, 2 hidden
@@ -14,6 +17,8 @@ export interface Tab {
   params: TabParams;
   /** Runtime override set by the screen (e.g. conversation name). */
   title?: string;
+  /** A draft chat tab that the engine has given a stored conversation: the key stays, the screen is not remounted. */
+  conversation?: string;
 }
 
 export interface Layout {
@@ -33,10 +38,17 @@ export interface ToastInput {
 export interface ShellApi {
   tabs: readonly Tab[];
   activeKey: string | null;
+  /**
+   * Opens a screen, or activates the tab that already shows it. For "chat": `{ conversation }` finds the tab that shows
+   * that conversation (also a draft bound to it) or opens one; `{ draft }` opens that draft; without params it goes to
+   * the chat tab used last, or opens a draft when there is none.
+   */
   openScreen: (screen: string, params?: TabParams) => void;
   closeTab: (key: string) => void;
   activateTab: (key: string) => void;
   setTabTitle: (key: string, title: string | undefined) => void;
+  /** Ties a draft chat tab to the conversation the engine created for it, without changing its key or remounting it. */
+  bindConversation: (key: string, conversationId: string) => void;
   /**
    * Changes the params of an open tab (the chart's symbol). The key follows the params, so the tab stays reachable by
    * `openScreen` with the same params, and the active tab stays active under its new key. When another tab already has
@@ -73,53 +85,7 @@ export interface ShellApi {
   on: (name: string, handler: (payload: unknown) => void) => () => void;
 }
 
-const UI_KEY = "hokma.ui.v1";
 const THEME_KEY = "hokma.theme";
-
-export function tabKeyFor(screen: string, params: TabParams = {}): string {
-  const entries = Object.entries(params).sort(([a], [b]) => a.localeCompare(b));
-  if (entries.length === 0) return screen;
-  return `${screen}:${entries.map(([k, v]) => `${k}=${v}`).join("&")}`;
-}
-
-const DEFAULT_TABS: Tab[] = [
-  { key: "chat", screen: "chat", params: {} },
-  { key: "panel", screen: "panel", params: {} },
-];
-
-interface Persisted {
-  tabs: Tab[];
-  activeKey: string | null;
-  sidebar: SidebarState;
-  rightPanel: boolean;
-  terminal: boolean;
-}
-
-function isParams(value: unknown): value is TabParams {
-  return !!value && typeof value === "object" && Object.values(value).every((v) => typeof v === "string");
-}
-
-function loadPersisted(): Persisted {
-  const fallback: Persisted = { tabs: DEFAULT_TABS, activeKey: "chat", sidebar: 0, rightPanel: true, terminal: true };
-  try {
-    const raw = localStorage.getItem(UI_KEY);
-    if (!raw) return fallback;
-    const data = JSON.parse(raw) as Partial<Persisted>;
-    const tabs = Array.isArray(data.tabs)
-      ? data.tabs.filter((t): t is Tab => !!t && typeof t.screen === "string" && typeof t.key === "string" && isParams(t.params))
-      : fallback.tabs;
-    const activeKey = typeof data.activeKey === "string" && tabs.some((t) => t.key === data.activeKey) ? data.activeKey : (tabs[tabs.length - 1]?.key ?? null);
-    return {
-      tabs,
-      activeKey,
-      sidebar: data.sidebar === 1 || data.sidebar === 2 ? data.sidebar : 0,
-      rightPanel: typeof data.rightPanel === "boolean" ? data.rightPanel : true,
-      terminal: typeof data.terminal === "boolean" ? data.terminal : true,
-    };
-  } catch {
-    return fallback;
-  }
-}
 
 function loadTheme(): Theme {
   try {
@@ -132,15 +98,15 @@ function loadTheme(): Theme {
 const ShellContext = createContext<ShellApi | null>(null);
 
 export function ShellProvider({ children }: { children: ReactNode }) {
-  const initial = useRef<Persisted | null>(null);
-  if (initial.current === null) initial.current = loadPersisted();
+  const initial = useRef<ReturnType<typeof startupTabs> | null>(null);
+  if (initial.current === null) initial.current = startupTabs();
   const start = initial.current;
 
   const [tabs, setTabs] = useState<Tab[]>(start.tabs);
   const [activeKey, setActiveKey] = useState<string | null>(start.activeKey);
-  const [sidebar, setSidebar] = useState<SidebarState>(start.sidebar);
-  const [rightPanel, setRightPanel] = useState(start.rightPanel);
-  const [terminal, setTerminal] = useState(start.terminal);
+  const [sidebar, setSidebar] = useState<SidebarState>(start.layout.sidebar);
+  const [rightPanel, setRightPanel] = useState(start.layout.rightPanel);
+  const [terminal, setTerminal] = useState(start.layout.terminal);
   const [focus, setFocus] = useState(false);
   const [theme, setThemeState] = useState<Theme>(loadTheme);
   const [locale, setLocaleState] = useState<Locale>(getLocale);
@@ -157,13 +123,23 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   const focusRef = useRef(focus);
   focusRef.current = focus;
 
+  // Tabs and the active one belong to this browser tab (sessionStorage); the last picture is only a seed for a new one.
+  const firstSave = useRef(true);
   useEffect(() => {
-    try {
-      localStorage.setItem(UI_KEY, JSON.stringify({ tabs, activeKey, sidebar, rightPanel, terminal } satisfies Persisted));
-    } catch {
-      /* storage unavailable */
-    }
-  }, [tabs, activeKey, sidebar, rightPanel, terminal]);
+    saveTabs(tabs, activeKey);
+    if (!firstSave.current) saveLastTabs(tabs);
+    firstSave.current = false;
+  }, [tabs, activeKey]);
+  useEffect(() => {
+    saveLayout({ sidebar, rightPanel, terminal });
+  }, [sidebar, rightPanel, terminal]);
+
+  // The chat tab used last: what the "Chat" entry of the sidebar goes back to.
+  const lastChatKey = useRef<string | null>(null);
+  useEffect(() => {
+    const active = tabs.find((t) => t.key === activeKey);
+    if (active?.screen === "chat") lastChatKey.current = active.key;
+  }, [tabs, activeKey]);
 
   const emit = useCallback((name: string, payload?: unknown) => {
     listeners.current.get(name)?.forEach((handler) => handler(payload));
@@ -179,8 +155,25 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openScreen = useCallback((screen: string, params: TabParams = {}) => {
-    const key = tabKeyFor(screen, params);
-    setTabs((current) => (current.some((t) => t.key === key) ? current : [...current, { key, screen, params }]));
+    if (screen === "chat" && Object.keys(params).length === 0) {
+      const chats = tabsRef.current.filter((t) => t.screen === "chat");
+      const last = chats.find((t) => t.key === lastChatKey.current) ?? chats[chats.length - 1];
+      if (last) {
+        setActiveKey(last.key);
+        return;
+      }
+      params = { draft: newDraftId() };
+    }
+    let key = tabKeyFor(screen, params);
+    const conversation = screen === "chat" ? params.conversation : undefined;
+    if (conversation) {
+      key = tabsRef.current.find((t) => conversationOf(t) === conversation)?.key ?? key;
+    }
+    if (!tabsRef.current.some((t) => t.key === key)) {
+      const next = [...tabsRef.current, { key, screen, params }];
+      tabsRef.current = next;
+      setTabs(next);
+    }
     setActiveKey(key);
   }, []);
 
@@ -192,6 +185,14 @@ export function ShellProvider({ children }: { children: ReactNode }) {
 
   const setTabTitle = useCallback((key: string, title: string | undefined) => {
     setTabs((current) => current.map((t) => (t.key === key && t.title !== title ? { ...t, title } : t)));
+  }, []);
+
+  const bindConversation = useCallback((key: string, conversationId: string) => {
+    const current = tabsRef.current;
+    if (!current.some((t) => t.key === key && isDraft(t) && t.conversation !== conversationId)) return;
+    const next = current.map((t) => (t.key === key ? { ...t, conversation: conversationId } : t));
+    tabsRef.current = next;
+    setTabs(next);
   }, []);
 
   const setTabParams = useCallback((key: string, params: TabParams): string | null => {
@@ -257,10 +258,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     requestAnimationFrame(() => document.getElementById("sidebar-search")?.focus());
   }, []);
 
-  const newConversation = useCallback(() => {
-    openScreen("chat");
-    emit("conversation:new");
-  }, [openScreen, emit]);
+  const newConversation = useCallback(() => openScreen("chat", draftTab().params), [openScreen]);
 
   const dismissToast = useCallback((id: number) => setToasts((list) => list.filter((item) => item.id !== id)), []);
   const toast = useCallback(
@@ -281,6 +279,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       closeTab,
       activateTab: setActiveKey,
       setTabTitle,
+      bindConversation,
       setTabParams,
       layout: { sidebar, rightPanel, terminal, focus },
       toggleSidebar,
@@ -305,7 +304,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       on,
     }),
     [
-      tabs, activeKey, openScreen, closeTab, setTabTitle, setTabParams, sidebar, rightPanel, terminal, focus, toggleSidebar, toggleRightPanel,
+      tabs, activeKey, openScreen, closeTab, setTabTitle, bindConversation, setTabParams, sidebar, rightPanel, terminal, focus, toggleSidebar, toggleRightPanel,
       toggleTerminal, toggleFocus, theme, setTheme, locale, setLocale, settings, openSettings, closeSettings, sidebarQuery,
       focusSearch, newConversation, toasts, toast, dismissToast, emit, on,
     ],

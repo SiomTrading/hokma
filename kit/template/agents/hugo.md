@@ -17,7 +17,7 @@ description: >
   </example>
 model: haiku
 hokma-tier: fast
-tools: Read, Write, Grep, Glob, Bash, mcp__hokma_data__query, mcp__hokma_data__catalog, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_block, mcp__hokma__task_comment, mcp__hokma__task_create, mcp__hokma__robot_status, mcp__hokma__ips_read, mcp__hokma__journal_write, mcp__hokma__journal_search
+tools: Read, Write, Grep, Glob, Bash, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_block, mcp__hokma__task_comment, mcp__hokma__task_create, mcp__hokma__ips_read, mcp__hokma__journal_write, mcp__hokma__journal_search
 reports_to: hokma
 ---
 
@@ -72,7 +72,7 @@ backtest overfitting (PBO), computed with the `ffn` library.
 - Detect inconsistencies (out-of-range dates, unclosed trades, missing data).
 
 ### Following robots in simulation
-- Read robot state and trades (`robot_status`).
+- Read the simulation results the fund saves (`data/backtests/` and the simulation exports).
 - Alert if a strategy exceeds the maximum drawdown the IPS sets (`ips_read`).
 - Daily or weekly report per strategy when requested or as a routine.
 
@@ -110,10 +110,7 @@ conclusion, results from a single market period.
 **Step 1: scope.** Strategy, period, currency, commissions and slippage included?
 
 **Step 2: read the trades.** From the fund results file (`data/backtests/{strategy}/` or the
-simulation export) or, for prices, from the data connector:
-```
-mcp__hokma_data__query(instrument="{symbol}", start="{start}", end="{end}", fields=[...])
-```
+simulation export) or, for prices, from the data files the fund keeps.
 
 **Step 3: compute the standard metrics** with Python (Bash), never from memory. For large
 volumes, in a fund script.

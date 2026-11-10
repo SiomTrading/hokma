@@ -20,7 +20,7 @@ $RepoUrl = "https://github.com/SiomTrading/hokma.git"
 $T = @{
     title        = "Instalar Hokma"
     no_git       = "Falta instalar git, y Hokma lo necesita.`r`n`r`nInstálalo desde https://git-scm.com/download/win (todo por defecto, Siguiente hasta el final) y vuelve a abrir este instalador."
-    no_claude    = "Falta instalar Claude Code (claude), y Hokma lo necesita para chatear.`r`n`r`nAbre PowerShell, pega esta línea y presiona Enter:`r`n`r`nirm https://claude.ai/install.ps1 | iex`r`n`r`nLuego cierra esa ventana y vuelve a abrir este instalador."
+    no_claude    = "Recomendamos Claude Code para chatear; puedes instalarlo después.`r`n`r`nCuando quieras, abre PowerShell, pega esta línea y presiona Enter:`r`n`r`nirm https://claude.ai/install.ps1 | iex"
     closing      = "Cerrando Hokma si está abierto..."
     downloading  = "Descargando la última versión de Hokma..."
     installing   = "Instalando Hokma. Puede tardar unos minutos..."
@@ -80,10 +80,10 @@ function Read-Tail([string]$path, [int]$count) {
 $Form.Show()
 Show-Step $T.closing
 
-# ---- 1. git and claude must exist; nothing is installed behind the student's back
+# ---- 1. git must exist (it stops the install); claude is only a warning, shown at the end. Nothing is installed behind the student's back
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail $T.no_git }
 $claudeFile = Join-Path $env:USERPROFILE ".local\bin\claude.exe"
-if (-not (Get-Command claude -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $claudeFile)) { Fail $T.no_claude }
+$claudeMissing = (-not (Get-Command claude -ErrorAction SilentlyContinue)) -and (-not (Test-Path -LiteralPath $claudeFile))
 
 # ---- 2. close a running Hokma: new supervisor (hokma stop) or old engine in a console, only under <data>
 $data = if ($env:HOKMA_DATA_DIR) { $env:HOKMA_DATA_DIR } else { Join-Path $env:LOCALAPPDATA "Hokma" }
@@ -150,4 +150,5 @@ if (-not (Test-Path -LiteralPath $launcher)) { Fail $T.not_found }
 Start-Process -FilePath "cmd.exe" -ArgumentList ('/d /c ""' + $launcher + '" start"') -WindowStyle Hidden
 Start-Sleep -Seconds 2
 $Form.Close()
+if ($claudeMissing) { Show-Box $T.no_claude "Information" }
 exit 0
