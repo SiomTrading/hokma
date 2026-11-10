@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.13
+
+Pictures reach every engine, plugins you install stay, and the panel menu fits small screens.
+
+- Pictures in chat with engines other than Claude Code. With an API key engine (Anthropic or OpenAI compatible) the
+  picture now travels to the model with the message. Before, only Claude Code got it: the other engines kept the
+  text and dropped the picture, so the model answered that it had no way to read images. Engines that cannot take a
+  picture in the message (Codex, Gemini) get it as a file in the project folder, named in the message, so they can
+  open it with their own tools.
+- Plugins and marketplaces installed from inside Claude Code (`/plugin install`, `/plugin marketplace add`) are no
+  longer lost when Hokma starts Claude or updates: they are merged with the student's extensions instead of being
+  replaced. Permissions, sandbox and hooks are still always imposed by Hokma.
+- The panel page is served with `Cache-Control: no-store` (hashed assets stay cached), and a tab that sees the
+  engine come back on another version reloads, so an update no longer leaves a blank page.
+- The left menu fits any window height (it compacts instead of cutting items) and the New conversation entry shows
+  the real shortcut instead of a fixed label.
+
 ## 0.0.12
 
 Updating on Windows no longer fails when a file is in use or the working folder is synced.

@@ -1,9 +1,11 @@
 /* Shell grid. Values come from the approved glass design. */
-.hk { font-family: Montserrat, system-ui, sans-serif; color: var(--t1); background: var(--bg); height: 100vh; height: 100dvh; min-height: 640px; position: relative; overflow: hidden; overflow: clip; }
+.hk { font-family: Montserrat, system-ui, sans-serif; color: var(--t1); background: var(--bg); height: 100vh; height: 100dvh; min-height: 480px; position: relative; overflow: hidden; overflow: clip; }
 
 .app { position: relative; display: grid; grid-template-columns: var(--sbw) minmax(0, 1fr) var(--rpw); grid-template-rows: 42px minmax(0, 1fr) auto 28px; height: 100%; transition: grid-template-columns 220ms var(--ease-out); }
 .top { grid-column: 1 / -1; grid-row: 1; position: relative; z-index: 6; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-bottom: 1px solid var(--border); background: var(--glass-subtle); }
-.side { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 4px; padding: 10px 8px; border-right: 1px solid var(--border); min-width: 0; overflow: hidden; }
+.side { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 4px; padding: 10px 8px; border-right: 1px solid var(--border); min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+/* Only Recents gives up height: every row and the bottom buttons keep theirs, and the menu scrolls before it cuts them. */
+.side > :not(.side-scroll) { flex-shrink: 0; }
 .center { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 8px; padding: 8px; min-width: 0; min-height: 0; }
 .right { grid-column: 3; grid-row: 2; display: flex; flex-direction: column; border-left: 1px solid var(--border); min-width: 0; overflow: hidden; }
 .term { grid-column: 1 / -1; grid-row: 3; border-top: 1px solid var(--border); background: var(--term); display: flex; flex-direction: column; height: 170px; }
@@ -15,6 +17,19 @@
 .hk.sbc .hide-c { display: none; }
 .hk.sbc .nav { justify-content: center; padding: 0; }
 .hk.sbc .side { padding: 10px 6px; }
+
+/* Low menu (small screen or Terminal open): sizes mirrored in sidebarDensity.ts. */
+.side[data-density="compact"], .side[data-density="tight"] { gap: 2px; padding-top: 8px; padding-bottom: 8px; }
+.side[data-density="compact"] .nav { min-height: 30px; }
+.side[data-density="compact"] .sep, .side[data-density="tight"] .sep { margin: 3px 4px; }
+.side[data-density="compact"] .brand { padding-bottom: 6px; }
+.side[data-density="tight"] { padding-top: 6px; padding-bottom: 6px; }
+.side[data-density="tight"] .nav { min-height: 28px; }
+.side[data-density="tight"] .brand { padding-bottom: 4px; }
+.side[data-density="tight"] .side-scroll, .side[data-density="tight"] .side-recents-sep { display: none; }
+/* Icons-only menu stacks the brand: when it is also tight, the logo gives its row to the buttons. */
+.hk.sbc .side[data-density="tight"] .brand-mark { display: none; }
+.hk.sbc .side[data-density="tight"] .brand { gap: 0; }
 
 .top-tabs { display: flex; gap: 4px; align-items: center; min-width: 0; overflow-x: auto; flex: 1; scrollbar-width: none; }
 .top-tabs::-webkit-scrollbar { display: none; }
@@ -38,8 +53,14 @@
   .hk { --rpw: 0px; }
   .right { display: none; }
 }
-@media (max-width: 820px) {
+/* Narrow window: the menu shows icons only, as when it is collapsed by hand. */
+@media (max-width: 899px) {
   .hk { --sbw: 60px; }
   .hk .hide-c { display: none; }
   .hk .nav { justify-content: center; padding: 0; }
+  .hk .side { padding-left: 6px; padding-right: 6px; }
+  .hk .brand { flex-direction: column; gap: 6px; padding-left: 0; padding-right: 0; }
+  .hk .brand-toggle { margin-left: 0; }
+  .hk .side[data-density="tight"] .brand-mark { display: none; }
+  .hk .side[data-density="tight"] .brand { gap: 0; }
 }

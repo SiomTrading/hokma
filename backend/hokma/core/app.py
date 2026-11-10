@@ -3,7 +3,6 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.staticfiles import StaticFiles
 
 from hokma import __version__
 from hokma.agents.api import router as agents_router
@@ -11,6 +10,7 @@ from hokma.connections.api import router as connections_router
 from hokma.connections.runtime import shutdown as connections_shutdown
 from hokma.core import identity
 from hokma.core.config import browser_host, dashboard_dist
+from hokma.core.dashboard_static import DashboardFiles
 from hokma.core.lifecycle import Lifecycle, WebSocketTracker
 from hokma.core.shutdown_api import router as shutdown_router
 from hokma.core.origin import TEST_HOSTS, LocalOnlyMiddleware, hosts_for_port
@@ -93,5 +93,5 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
 
     dist = dashboard_dist()
     if dist.is_dir():
-        app.mount("/", StaticFiles(directory=dist, html=True), name="dashboard")
+        app.mount("/", DashboardFiles(directory=dist, html=True), name="dashboard")
     return app

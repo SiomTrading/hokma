@@ -14,7 +14,7 @@ import os
 import re
 
 
-from hokma.core.config import extensions_mirror_path, extensions_path, hokma_home
+from hokma.core.config import claude_config_dir, extensions_mirror_path, extensions_path, hokma_home
 from hokma.i18n import t
 from hokma.kit import safefs
 from hokma.kit.guard import under_any
@@ -30,6 +30,7 @@ GIT_URL = re.compile(r"^(https://[^\s]+|git@[A-Za-z0-9_.-]+:[^\s]+)$")
 HTTPS_URL = re.compile(r"^https://[^\s]+$")
 SOURCE_KINDS = ("github", "git", "url", "directory", "file")
 SHELL_CHARS = ("$", "%", "~", "`", "\n", "\r", "\0")
+BUILTIN_MARKETPLACES = frozenset({"claude-plugins-official"})
 
 
 def validate_source(source: object) -> dict:
@@ -151,7 +152,9 @@ def remove_plugin(plugin_id: str) -> list[str]:
         raise ValueError(t("ext.plugin_form"))
     data, _ = load()
     data["enabledPlugins"].pop(plugin_id, None)
-    return _save(data)
+    warnings = _save(data)
+    _drop_live_plugin(plugin_id)  # otherwise the next launch would absorb it back from the live settings
+    return warnings
 
 
 def add_marketplace(name: str, source: dict) -> list[str]:
@@ -183,4 +186,93 @@ def set_mcp(name: str, config: dict) -> list[str]:
 def known_marketplaces() -> set[str]:
     """Marketplaces a plugin may come from: the student's own plus Claude's built-in official one."""
     data, _ = load()
-    return set(data["extraKnownMarketplaces"]) | {"claude-plugins-official"}
+    return set(data["extraKnownMarketplaces"]) | set(BUILTIN_MARKETPLACES)
+
+
+# Plugins installed from inside Claude Code (`/plugin install`, `/plugin marketplace add`).
+#
+# Claude Code records them in the files of the isolated CLAUDE_CONFIG_DIR: `enabledPlugins` (and sometimes
+# `extraKnownMarketplaces`) in settings.json, marketplaces in plugins/known_marketplaces.json. Hokma rebuilds
+# settings.json at every launch, so without this step those plugins vanished on the next start or update.
+# The live files are read ONLY for these two keys, every entry goes through the same validation as the
+# dashboard (PLUGIN_ID, NAME, validate_source) and only ADDS entries the authoritative copy does not have:
+# what the student set in Hokma always wins, and no lock (permissions, sandbox, hooks) is read from there.
+
+def _live_settings_path():
+    return claude_config_dir() / "settings.json"
+
+
+def _live_marketplaces_path():
+    return claude_config_dir() / "plugins" / "known_marketplaces.json"
+
+
+def _read_object(path) -> dict:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def live_additions(data: dict | None = None) -> tuple[dict, list[str]]:
+    """Plugins and marketplaces present in Claude's live files and missing from `data` (default: the
+    authoritative copy). Read-only. Returns ({"enabledPlugins": ..., "extraKnownMarketplaces": ...}, problems)."""
+    if data is None:
+        data, _ = load()
+    added: dict = {"enabledPlugins": {}, "extraKnownMarketplaces": {}}
+    problems: list[str] = []
+    live = _read_object(_live_settings_path())
+    for markets in (live.get("extraKnownMarketplaces"), _read_object(_live_marketplaces_path())):
+        if not isinstance(markets, dict):
+            continue
+        for name, entry in markets.items():
+            if name in BUILTIN_MARKETPLACES or name in data["extraKnownMarketplaces"] \
+                    or name in added["extraKnownMarketplaces"]:
+                continue
+            try:
+                if not NAME.match(str(name)) or not isinstance(entry, dict):
+                    raise ValueError(t("ext.invalid_name"))
+                added["extraKnownMarketplaces"][name] = {"source": validate_source(entry.get("source"))}
+            except ValueError as exc:
+                problems.append(t("ext.ignored_marketplace", name=repr(name), error=exc))
+    plugins = live.get("enabledPlugins")
+    for pid, enabled in (plugins.items() if isinstance(plugins, dict) else []):
+        if pid in data["enabledPlugins"]:
+            continue
+        if PLUGIN_ID.match(str(pid)) and isinstance(enabled, bool):
+            added["enabledPlugins"][pid] = enabled
+        else:
+            problems.append(t("ext.ignored_plugin", plugin=repr(pid)))
+    return added, problems
+
+
+def absorb_live() -> list[str]:
+    """Persist `live_additions` into the authoritative copy (and its mirror) so the dashboard sees them and
+    they survive the regeneration of settings.json. Never raises: a problem only becomes a warning."""
+    try:
+        data, _ = load()
+        added, problems = live_additions(data)
+        if not added["enabledPlugins"] and not added["extraKnownMarketplaces"]:
+            return problems
+        data["enabledPlugins"].update(added["enabledPlugins"])
+        data["extraKnownMarketplaces"].update(added["extraKnownMarketplaces"])
+        return problems + _save(data)
+    except (OSError, ValueError) as exc:
+        return [t("ext.unreadable", error=exc)]
+
+
+def _drop_live_plugin(plugin_id: str) -> None:
+    """Remove an uninstalled plugin from the live settings.json too. Best effort: settings.json is rebuilt at
+    the next launch anyway; this only stops `absorb_live` from bringing the plugin back."""
+    path = _live_settings_path()
+    live = _read_object(path)
+    plugins = live.get("enabledPlugins")
+    if not isinstance(plugins, dict) or plugin_id not in plugins:
+        return
+    plugins.pop(plugin_id)
+    tmp = path.with_suffix(".json.tmp")
+    try:
+        tmp.write_text(json.dumps(live, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass

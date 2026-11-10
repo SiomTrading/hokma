@@ -73,6 +73,18 @@ async function probe(): Promise<{ version: string } | null> {
   }
 }
 
+/** Version of the engine that served this page, learned once at start. A crash watch that sees the engine come
+ * back with ANOTHER version (an update applied outside this tab: installer, another tab, `hokma update`) reloads
+ * the page, otherwise the old code would keep running against the new engine. */
+let pageEngineVersion: string | null = null;
+
+export async function learnEngineVersion(): Promise<string | null> {
+  if (pageEngineVersion) return pageEngineVersion;
+  const alive = await probe();
+  if (alive && !pageEngineVersion) pageEngineVersion = alive.version;
+  return pageEngineVersion;
+}
+
 export function stopWatching(): void {
   if (timer) clearInterval(timer);
   timer = null;
@@ -114,7 +126,8 @@ export function watchEngine(options: WatchOptions): void {
         (options.mode === "crash" || (options.expectedVersion ? alive.version === options.expectedVersion : sawDown));
       if (back && alive) {
         stopWatching();
-        if (options.mode === "restart") {
+        const changed = pageEngineVersion !== null && alive.version !== pageEngineVersion;
+        if (options.mode === "restart" || changed) {
           try {
             sessionStorage.setItem(UPDATED_KEY, alive.version);
           } catch {
@@ -168,5 +181,6 @@ export const justUpdated: string | null = takeJustUpdated();
 export function resetRestartForTests(): void {
   stopWatching();
   knownLogPath = null;
+  pageEngineVersion = null;
   set({ phase: "idle", logPath: null });
 }

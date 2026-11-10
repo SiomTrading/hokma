@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearToken, getToken, openSocket } from "@/api";
 import { RestartOverlay } from "@/screens/system/RestartOverlay";
 import { setLocale, t } from "@/i18n";
-import { GIVE_UP_MS, getRestartState, rememberLogPath, resetRestartForTests, takeJustUpdated, watchEngine } from "./restart";
+import { GIVE_UP_MS, getRestartState, learnEngineVersion, rememberLogPath, resetRestartForTests, takeJustUpdated, watchEngine } from "./restart";
 import { setToken } from "./token";
 
 const TOKEN = "abcDEF1234567890_-xyz";
@@ -79,6 +79,26 @@ describe("watching the engine", () => {
     expect(getRestartState().phase).toBe("idle");
     expect(reload).not.toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledTimes(2);                     // and it stopped asking
+  });
+
+  it("a dropped socket whose engine comes back on ANOTHER version reloads the page (no stale code)", async () => {
+    health(["0.0.12", null, "0.0.13"]);
+    await act(async () => void (await learnEngineVersion()));
+    const reload = vi.fn();
+    watchEngine({ mode: "crash", reload });
+    await seconds(3);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem("hokma.updated")).toBe("0.0.13");
+  });
+
+  it("the same version after a dropped socket does not reload", async () => {
+    health(["0.0.12", null, "0.0.12"]);
+    await act(async () => void (await learnEngineVersion()));
+    const reload = vi.fn();
+    watchEngine({ mode: "crash", reload });
+    await seconds(3);
+    expect(reload).not.toHaveBeenCalled();
+    expect(getRestartState().phase).toBe("idle");
   });
 
   it("a dropped socket that never recovers ends in 'could not start'", async () => {

@@ -379,7 +379,7 @@ class ChatEngine:
         project = self._project_of(conv)
         if project is None:
             return await self._error(conn, "unknown_project", "no such project", conv.id)
-        built = self._build_content(text, ids, project)
+        built = self._build_content(text, ids, project, self._inline_images(conv))
         if isinstance(built, str):
             return await self._error(conn, "attachment_not_found", f"unknown attachment {built}", conv.id)
         blocks, meta = built
@@ -389,7 +389,16 @@ class ChatEngine:
         await conn.send(event)
         session.start_turn(conv, project, blocks, text, meta)
 
-    def _build_content(self, text: str, ids: list[str], project: ProjectRecord):
+    def _inline_images(self, conv: ConversationRecord) -> bool:
+        """True when the engine of this conversation takes image blocks. An engine that does not (Codex, Gemini)
+        would drop them without a word, so its images go into the project as files it can open with its tools."""
+        try:
+            adapter = self.resolve_engine(conv)[0]
+            return bool(adapter.caps().get("images", True))
+        except Exception:
+            return True                          # the turn reports the engine problem itself
+
+    def _build_content(self, text: str, ids: list[str], project: ProjectRecord, inline_images: bool = True):
         """(content blocks, message meta), or the id of the attachment that does not exist."""
         blocks: list[dict[str, Any]] = []
         files: list[str] = []
@@ -400,7 +409,7 @@ class ChatEngine:
             if record is None or path is None or not path.is_file():
                 return attachment_id
             data = path.read_bytes()
-            if att.is_image(record.mime) and record.size <= att.MAX_INLINE_IMAGE_BYTES:
+            if inline_images and att.is_image(record.mime) and record.size <= att.MAX_INLINE_IMAGE_BYTES:
                 blocks.append(att.image_block(record, data))
             else:
                 files.append(att.copy_into_project(record, data, Path(project.path)))

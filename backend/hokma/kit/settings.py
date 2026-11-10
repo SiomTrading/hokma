@@ -17,7 +17,8 @@ Controls, from strongest to weakest. None of the first three depends on the text
 
 The student's extensions (`enabledPlugins`, `extraKnownMarketplaces`, from
 <workdir>/.hokma/extensions.json) are merged in AFTER the template and can only add those two keys:
-they never touch permissions, sandbox or hooks.
+they never touch permissions, sandbox or hooks. Plugins installed from inside Claude Code are absorbed from the
+live settings.json before it is rebuilt (`extensions.absorb_live`), so a launch or an update keeps them.
 
 Key names (sandbox.enabled, failIfUnavailable, allowUnsandboxedCommands, filesystem.allowWrite,
 filesystem.denyWrite, filesystem.denyRead) were found in the Claude Code 2.1.317 binary [VERIFIED].
@@ -103,11 +104,14 @@ def build_settings() -> dict:
                 hook["command"] = hook["command"].replace(placeholder, command)
 
     # Student extensions: only these two keys, merged last, never able to touch the locks above.
+    # MERGE, never replace: the authoritative copy wins, and plugins/marketplaces the student installed from
+    # inside Claude Code (live settings.json, plugins/known_marketplaces.json) are kept after validation.
     student, _problems = extensions.load()
-    if student["enabledPlugins"]:
-        settings["enabledPlugins"] = student["enabledPlugins"]
-    if student["extraKnownMarketplaces"]:
-        settings["extraKnownMarketplaces"] = student["extraKnownMarketplaces"]
+    live, _live_problems = extensions.live_additions(student)
+    for key in ("enabledPlugins", "extraKnownMarketplaces"):
+        merged = {**live[key], **student[key]}
+        if merged:
+            settings[key] = merged
     return settings
 
 
@@ -116,8 +120,10 @@ def settings_path() -> Path:
 
 
 def write_settings() -> Path:
-    """Regenerate settings.json from the package template, replacing whatever is there."""
+    """Regenerate settings.json from the package template. Before replacing it, the plugins and marketplaces
+    Claude Code recorded there are absorbed into the student's extensions; nothing else is carried over."""
     path = settings_path()
+    extensions.absorb_live()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(build_settings(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return path

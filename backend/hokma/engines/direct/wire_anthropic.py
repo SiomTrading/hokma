@@ -14,7 +14,8 @@ def messages(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for m in history:
         if m["role"] == "user":
-            out.append({"role": "user", "content": [{"type": "text", "text": m["text"]}]})
+            images = [{"type": "image", "source": dict(i["source"])} for i in m.get("images") or []]
+            out.append({"role": "user", "content": [*images, {"type": "text", "text": m["text"]}]})
         elif m["role"] == "assistant":
             blocks: list[dict[str, Any]] = []
             if m.get("text"):

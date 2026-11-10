@@ -11,7 +11,14 @@ def messages(system: str, history: list[dict[str, Any]]) -> list[dict[str, Any]]
     out: list[dict[str, Any]] = [{"role": "system", "content": system}] if system else []
     for m in history:
         if m["role"] == "user":
-            out.append({"role": "user", "content": m["text"]})
+            images = m.get("images") or []
+            if images:
+                parts: list[dict[str, Any]] = [{"type": "text", "text": m["text"]}]
+                parts += [{"type": "image_url", "image_url": {
+                    "url": f"data:{i['source']['media_type']};base64,{i['source']['data']}"}} for i in images]
+                out.append({"role": "user", "content": parts})
+            else:
+                out.append({"role": "user", "content": m["text"]})
         elif m["role"] == "assistant":
             msg: dict[str, Any] = {"role": "assistant", "content": m.get("text") or None}
             if m.get("calls"):

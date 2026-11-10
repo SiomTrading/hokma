@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { isFirefox, useSessionInfo } from "@/api";
 import { IconButton, Input, Isotype, NavItem, NavLink } from "@/design";
 import { useI18n } from "@/i18n";
 import { ShutdownDialog } from "@/screens/system/ShutdownDialog";
 import { SIDEBAR_SCREENS, BUILTIN_SCREENS } from "./screens";
 import { Slot } from "./Slot";
-import { formatShortcutCompact, getShortcut, isMac } from "./shortcuts";
+import { formatShortcut, formatShortcutCompact, getShortcut, isMac } from "./shortcuts";
+import { useSidebarDensity } from "./sidebarDensity";
 import { isPlainClick } from "./links";
 import { useShell } from "./store";
 
@@ -17,11 +18,13 @@ export function Sidebar() {
   // A new browser tab enters by itself only where Hokma remembers the session (not Firefox, not private mode).
   const canOpenInTab = !isFirefox() && !session.storageUnavailable;
   const activeScreen = shell.tabs.find((tab) => tab.key === shell.activeKey)?.screen;
+  const sideRef = useRef<HTMLElement>(null);
+  const density = useSidebarDensity(sideRef);
 
   return (
-    <aside className="side" aria-label={t("nav.menu")}>
+    <aside ref={sideRef} className="side" data-density={density} aria-label={t("nav.menu")}>
       <div className="brand">
-        <Isotype size={30} />
+        <Isotype size={30} className="brand-mark" />
         <div className="hide-c" style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <span className="brand-name">HOKMA</span>
           <span className="brand-sub">
@@ -41,7 +44,7 @@ export function Sidebar() {
         label={t("nav.newChat")}
         href="#/chat/new"
         title={t(canOpenInTab ? "nav.newChatTitle" : "nav.newChatTitlePlain", { mod: isMac() ? "Cmd" : "Ctrl" })}
-        kbd={formatShortcutCompact(getShortcut("newChat"))}
+        kbd={formatShortcut(getShortcut("newChat"))}
         onClick={(event) => {
           if (!isPlainClick(event)) return; // wheel, Ctrl, Cmd or Shift: the browser opens it in another tab
           event.preventDefault();
@@ -53,7 +56,7 @@ export function Sidebar() {
         const meta = BUILTIN_SCREENS[id]!;
         return <NavItem key={id} icon={meta.icon} label={t(meta.navKey)} active={activeScreen === id} onClick={() => shell.openScreen(id)} />;
       })}
-      <div className="sep" />
+      <div className="sep side-recents-sep" />
       <div className="hide-c side-scroll">
         <label htmlFor="sidebar-search" className="sr-only">
           {t("sidebar.search")}

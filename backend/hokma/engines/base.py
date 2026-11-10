@@ -88,4 +88,10 @@ def user_text(blocks: list[dict[str, Any]]) -> str:
     return "\n".join(str(b.get("text", "")) for b in blocks if isinstance(b, dict) and b.get("type") == "text").strip()
 
 
+def user_images(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The inline image blocks of a message (base64 source), in order."""
+    return [b for b in blocks if isinstance(b, dict) and b.get("type") == "image"
+            and isinstance(b.get("source"), dict) and b["source"].get("type") == "base64"]
+
+
 Launch = Callable[[], Any]

@@ -34,7 +34,7 @@ describe("shell loads", () => {
       expect(within(menu).getByRole(name === t("nav.newChat") ? "link" : "button", { name })).toBeInTheDocument();
     }
     expect(within(menu).getByRole("link", { name: t("nav.newChat") })).toHaveAttribute("href", "#/chat/new");
-    expect(within(menu).getByText("Ctrl⇧O")).toBeInTheDocument(); // the compact label of the narrow menu
+    expect(within(menu).getByText("Ctrl Shift O")).toBeInTheDocument(); // the real shortcut, from SHORTCUTS
     expect(within(menu).getByRole("searchbox", { name: "Buscar conversaciones" })).toBeInTheDocument();
   });
 

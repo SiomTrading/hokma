@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Callable, Iterator
 
 from hokma.core.config import hokma_data_dir, hokma_home
 from hokma.engines import catalog, diagnose, secrets
-from hokma.engines.base import EngineCaps, EngineContext, EngineError, EngineEvent, user_text
+from hokma.engines.base import EngineCaps, EngineContext, EngineError, EngineEvent, user_images, user_text
 from hokma.engines.envfilter import filtered_env
 from hokma.permissions import modes
 from hokma.engines.direct import tools, transcript, wire_anthropic, wire_openai
@@ -76,13 +76,15 @@ class DirectSession:
 
     def _remember(self, message: dict[str, Any]) -> None:
         self.history.append(message)
-        transcript.append(self.key_name, message)
+        # the transcript keeps the text only: an image travels with the turn it was sent in, not on disk
+        transcript.append(self.key_name, {k: v for k, v in message.items() if k != "images"})
 
     # ------------------------------------------------------------------ turn
 
     async def send(self, blocks: list[dict[str, Any]]) -> AsyncIterator[EngineEvent]:
         yield {"type": "session", "ref": self.key_name}
-        self._remember({"role": "user", "text": user_text(blocks)})
+        images = user_images(blocks)
+        self._remember({"role": "user", "text": user_text(blocks), **({"images": images} if images else {})})
         usage = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cost_usd": 0.0}
         defs = tools.definitions() + (self.extra_tools.definitions() if self.extra_tools else [])
         bctx = broker_ctx(self.ctx)
@@ -225,7 +227,7 @@ class DirectAdapter:
         self.toolbox_factory = toolbox_factory
 
     def caps(self) -> EngineCaps:
-        return {"hooks": False, "os_sandbox": False, "native_subagents": False, "resume": True, "images": False,
+        return {"hooks": False, "os_sandbox": False, "native_subagents": False, "resume": True, "images": True,
                 "mcp": True}
 
     def new_ref(self) -> str | None:
