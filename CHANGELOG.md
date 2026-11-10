@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.18
+
+The Windows installer works when it is started from PowerShell 7.
+
+- The installer could stop with "Get-FileHash is not recognized" when the computer had PowerShell 7 open. The
+  installer now starts Windows PowerShell with its own modules, and it calculates SHA256 without that cmdlet.
+
 ## 0.0.17
 
 The Windows installer builds again.

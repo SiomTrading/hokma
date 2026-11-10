@@ -27,8 +27,25 @@ param(
     [switch]$NoApp
 )
 
+# A parent PowerShell 7 hands its PSModulePath down; Windows PowerShell 5.1 then cannot load its own modules
+# (the hashing, web request and JSON cmdlets vanish). Put back the 5.1 default, for this process and its children.
+if ($PSVersionTable.PSEdition -ne "Core") {
+    $env:PSModulePath = (Join-Path $env:USERPROFILE "Documents\WindowsPowerShell\Modules") + ";" +
+        (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules") + ";" +
+        (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\Modules")
+}
+
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+
+# SHA256 with .NET, so it does not depend on the Microsoft.PowerShell.Utility module.
+function Get-Sha256([string]$path) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($path)
+    try { $bytes = $sha.ComputeHash($stream) }
+    finally { $stream.Dispose(); $sha.Dispose() }
+    return (($bytes | ForEach-Object { $_.ToString("x2") }) -join "")
+}
 
 $BinDir = Join-Path $env:USERPROFILE ".local\bin"
 $Launcher = Join-Path $BinDir "hokma.cmd"
@@ -249,7 +266,7 @@ function Install-Git {
     $exe = Join-Path $WorkTmp "git-setup.exe"
     try { Invoke-WebRequest -Uri $entry.url -OutFile $exe -UseBasicParsing }
     catch { Fail ("git download failed: " + $entry.url) }
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLower()
+    $actual = Get-Sha256 $exe
     if ($actual -ne $entry.sha256.ToLower()) { Fail ("git sha256 mismatch: expected " + $entry.sha256 + ", got " + $actual) }
     $proc = Start-Process -FilePath $exe -ArgumentList "/VERYSILENT /NORESTART /CURRENTUSER /SUPPRESSMSGBOXES /NOCANCEL /SP-" -Wait -PassThru
     Write-Log ("git setup exit code " + $proc.ExitCode)

@@ -88,3 +88,15 @@ def test_lock_pins_git_for_windows_with_sha256():
         entry = git[platform]
         assert entry["url"].startswith("https://github.com/git-for-windows/git/releases/download/")
         assert re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+
+
+def test_powershell_scripts_do_not_depend_on_inherited_modules():
+    """Task 3138, 0.0.18: a PowerShell 7 parent leaks PSModulePath and 5.1 loses Get-FileHash; no script uses it."""
+    for path in (INSTALLER / "install.ps1", INSTALLER / "uninstall.ps1", HELPER):
+        text = path.read_text(encoding="utf-8")
+        assert "(Get-FileHash" not in text, path.name
+        assert "$env:PSModulePath =" in text, path.name
+    for path in (INSTALLER / "install.ps1", HELPER):
+        assert "SHA256]::Create()" in path.read_text(encoding="utf-8"), path.name
+    cmd = (INSTALLER / "Instalar-Hokma.cmd").read_text(encoding="utf-8")
+    assert "Remove-Item Env:PSModulePath" in cmd

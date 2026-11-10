@@ -17,6 +17,14 @@ param(
     [switch]$ResetAll
 )
 
+# A parent PowerShell 7 hands its PSModulePath down; Windows PowerShell 5.1 then cannot load its own modules
+# (the hashing, web request and JSON cmdlets vanish). Put back the 5.1 default, for this process and its children.
+if ($PSVersionTable.PSEdition -ne "Core") {
+    $env:PSModulePath = (Join-Path $env:USERPROFILE "Documents\WindowsPowerShell\Modules") + ";" +
+        (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules") + ";" +
+        (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\Modules")
+}
+
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "messages.ps1")
 

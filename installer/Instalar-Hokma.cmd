@@ -141,6 +141,7 @@ try {
         $last = Read-Tail $installLog 1
         if ($last) { $Label.Text = ($last -replace "^\[[^\]]*\]\s*", ""); Pump }
     }
+    Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
     $code = Invoke-Hidden "powershell.exe" ('-NoProfile -ExecutionPolicy Bypass -File "' + $installScript + '" -NoDoctor') $installLog $tick
     if (-not (Test-Succeeded $code $launcher)) {
         $keep = Join-Path $env:TEMP "hokma-install-last.log"
