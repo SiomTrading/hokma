@@ -2,7 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetRestartForTests } from "@/api/restart";
+import { getRestartState, resetRestartForTests } from "@/api/restart";
 import { setLocale, t } from "@/i18n";
 import { SettingsModal } from "@/shell/SettingsModal";
 import { useShell } from "@/shell/store";
@@ -99,6 +99,20 @@ describe.each(["es", "en"] as const)("Novedades (%s)", (locale) => {
     expect(await screen.findByText(T("news.restarting"))).toBeInTheDocument();
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/update")).toBe(true);
     expect(screen.getByRole("button", { name: T("news.check") })).toBeDisabled();
+  });
+
+  it("task 3146: the update runs detached; the tab says 'Updating Hokma, it will restart by itself'", async () => {
+    setLocale(locale);
+    mockApi({
+      "GET /api/news": NEWER,
+      "GET /api/update/state": state({ newer: true }),
+      "POST /api/update": { status: "launched", from_version: "0.0.6", to_version: "0.0.7", restart_required: false, restarting: true },
+      "GET /health": { status: "ok", version: "0.0.6" },
+    });
+    renderWithApp(<NewsSection />);
+    await userEvent.click(await screen.findByRole("button", { name: T("news.update") }));
+    expect(await screen.findByText(T("news.restarting"))).toBeInTheDocument();
+    expect(getRestartState()).toMatchObject({ phase: "restarting", kind: "update" });
   });
 
   it("U7: without a supervisor it says to restart Hokma by hand", async () => {

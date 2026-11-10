@@ -21,6 +21,7 @@ WS_RESTARTING_CODE = 1012            # "service restart"
 WS_RESTARTING_REASON = "restarting"
 WS_SHUTDOWN_CODE = 1001              # "going away"
 WS_SHUTDOWN_REASON = "shutting_down"
+WS_UPDATING_REASON = "updating"      # Hokma ends so a detached updater can replace it; it comes back by itself
 FLUSH_SECONDS = 0.3
 CLOSE_WAIT_SECONDS = 3.0             # a tab that does not answer the close must not hold the shutdown back
 
@@ -90,13 +91,15 @@ class Lifecycle:
         await asyncio.sleep(FLUSH_SECONDS)
         self.stop()
 
-    async def shutdown(self) -> None:
-        """Close the sockets with the reason `shutting_down`, then end the engine the way `hokma stop` does. Only once."""
+    async def shutdown(self, reason: str = WS_SHUTDOWN_REASON) -> None:
+        """Close the sockets with the reason (`shutting_down`, or `updating` when a detached updater takes over), then
+        end the engine the way `hokma stop` does. Only once."""
         if self.shutting_down or self.restarting:
             return
         self.shutting_down = True
         self.exit_code = 0
-        await self._close_sockets(WS_SHUTDOWN_CODE, WS_SHUTDOWN_REASON)
+        code = WS_RESTARTING_CODE if reason == WS_UPDATING_REASON else WS_SHUTDOWN_CODE
+        await self._close_sockets(code, reason)
         await asyncio.sleep(FLUSH_SECONDS)
         if self.supervised:
             reply = await asyncio.to_thread(control.request, "stop")

@@ -1,5 +1,5 @@
 import { getLocale, t } from "@/i18n";
-import { RESTART_REASON, SHUTDOWN_REASON, enterOff, isOff, watchEngine } from "./restart";
+import { RESTART_REASON, SHUTDOWN_REASON, UPDATING_REASON, enterOff, isOff, watchEngine } from "./restart";
 import { clearOwnerOnce, getOwnerNonce, getOwnerOnce } from "./owner";
 import { deleteDeviceKey } from "./devicekey";
 import { forgetSession, onEngineReconnected } from "./session";
@@ -232,7 +232,8 @@ export function openSocket(path: string, handlers: SocketHandlers = {}): Socket 
         return;
       }
       if (isOff()) return;
-      if (event.reason === RESTART_REASON) watchEngine({ mode: "restart" });
+      if (event.reason === UPDATING_REASON) watchEngine({ mode: "update" });
+      else if (event.reason === RESTART_REASON) watchEngine({ mode: "restart" });
       else if (event.code === 1006 && !closedByUser) watchEngine({ mode: "crash" });
       if (event.code === WS_UNAUTHORIZED) {
         clearToken();

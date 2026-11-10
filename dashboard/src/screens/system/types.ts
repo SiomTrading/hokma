@@ -102,7 +102,8 @@ export interface NewsData {
 }
 
 export interface UpdateResult {
-  status: "updated" | "up-to-date";
+  /** "launched": the detached updater runs and Hokma restarts by itself (task 3146). */
+  status: "launched" | "updated" | "up-to-date";
   from_version: string;
   to_version: string;
   restart_required: boolean;

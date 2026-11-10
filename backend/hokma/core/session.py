@@ -119,6 +119,15 @@ def token() -> str:
         return _token
 
 
+def handoff_secrets() -> tuple[str, str, str]:
+    """What a new supervisor needs to serve the same session after an update: the token, the owner confirmation
+    hash ("" when none yet) and the hash of the one-time secret still waiting ("" when consumed). Memory only:
+    it travels on a standard input, never in a file, an argument or the environment."""
+    current = token()
+    with _lock:
+        return current, _owner_hash or "", _owner_secret_hash or ""
+
+
 def supervised() -> bool:
     """True when this process is an engine started by `hokma start` (its restart is automatic)."""
     return _supervised

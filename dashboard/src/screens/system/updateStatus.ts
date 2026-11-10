@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { api, rememberLogPath } from "@/api";
-import type { UpdateStateData } from "./types";
+import { api, ApiError, failUpdate, rememberLogPath, setUpdateHooks, watchEngine } from "@/api";
+import type { UpdateResult, UpdateStateData } from "./types";
 
 /** What the app knows about updates without asking the network: shared by the News screen and the dot. */
 let current: UpdateStateData | null = null;
@@ -37,6 +37,30 @@ export async function refreshUpdateStatus(): Promise<UpdateStateData | null> {
     return current;
   }
 }
+
+/**
+ * Starts an update. The engine answers `launched`, starts the detached updater and goes down by itself; the tab
+ * then waits for it ("Updating Hokma, it will restart by itself") and reconnects when it is back.
+ */
+export async function startUpdate(): Promise<UpdateResult> {
+  const result = await api.post<UpdateResult>("/api/update", undefined, { timeoutMs: 120_000 });
+  if (result.status === "launched") watchEngine({ mode: "update", expectedVersion: result.to_version });
+  return result;
+}
+
+setUpdateHooks({
+  failure: async () => {
+    const next = await refreshUpdateStatus();
+    return next?.phase === "error" && next.error ? next.error : null;
+  },
+  retry: async () => {
+    try {
+      await startUpdate();
+    } catch (cause) {
+      failUpdate(cause instanceof ApiError || cause instanceof Error ? cause.message : "");
+    }
+  },
+});
 
 export function resetUpdateStatusForTests(): void {
   publish(null);

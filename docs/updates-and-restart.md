@@ -34,18 +34,34 @@ at 256 KiB and rotated to `engine.log.1`.
 
 ## Update flow
 
-1. Settings > News calls `POST /api/update`. The engine starts `hokma update` in an isolated child process, which
-   builds the new version in the inactive slot and reports its real stage in `<data>/update-progress.json`
-   (`download`, `unpack`, `python`, `dependencies`, `verify`, `switch`). The screen reads the stage from
-   `GET /api/update/state` once a second and shows a clock that counts live.
-2. On success the engine answers the request, closes every open WebSocket with code 1012 and the reason
-   `restarting`, then stops and exits with code 75.
-3. The supervisor starts the engine from the slot `current` names, on the same port with the same token.
-4. Each tab shows "Restarting Hokma...", asks `/health` once a second for up to 60 s, and when the new version
-   answers it reloads on Settings > News with "Hokma updated to X".
+Since 0.0.14 (task 3146) the update never runs inside the server, nor in any process started from a runtime slot.
+On Windows a file that a running process loaded (a `.pyd` of the server, the venv's Python) cannot be deleted, so an
+update run from inside Hokma could not rebuild the inactive slot (`shutil.rmtree` failed with WinError 5).
 
-If the engine is not running under a supervisor (for example it was started some other way), the update result
-says so and Settings > News shows "Restart Hokma to use the new version".
+1. Settings > News calls `POST /api/update`. The engine asks the update source whether there is something newer; an
+   up-to-date Hokma answers so and keeps running.
+2. Otherwise it starts the **detached updater** (`hokma.update.detached`): the `hokma` package and a small entry
+   script are copied to a new temporary folder outside `runtime/a` and `runtime/b`, and run with the shared Python
+   of `<data>/python`. Windows: DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW and
+   CREATE_BREAKAWAY_FROM_JOB (the supervisor's job allows exactly that, `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, so the updater
+   outlives it); POSIX: a new session. The token and the owner hashes go on its standard input only.
+3. The engine answers `{"status": "launched", "restarting": true}` and shuts down the way "Shut down Hokma" does,
+   closing every WebSocket with code 1012 and the reason `updating`. Each tab shows "Updating Hokma, it will restart
+   by itself" and asks `/health` once a second for up to 30 minutes.
+4. The updater, in order: waits for the engine and the supervisor to end (asks the supervisor to stop if it is still
+   there after 5 s), kills whatever still runs from `runtime/a`, `runtime/b` or `python` (as Instalar-Hokma.cmd
+   does), removes a stale `update.lock`, runs `run_update` (download, unpack, build the inactive slot, verify,
+   switch `current`, with the retries of 0.0.12), writes the outcome to `<data>/update-status.json` and starts
+   Hokma again: a supervisor of the slot `current` names, on the same port, with the same session handed over on
+   its standard input. When the update failed, `current` was not switched and the previous version comes back.
+5. The tab sees `/health` again. A new version reloads the page on Settings > News with "Hokma updated to X". The
+   same version means the update failed: the tab reads `GET /api/update/state`, which reports the message of the
+   status file (phase `error`, for one day), and shows it with "Retry". A traceback only goes to
+   `<data>/logs/updater.log`.
+
+`hokma update` from a terminal: on Windows, when it is the `hokma` of a runtime slot, it uses the same detached
+updater (it stops and restarts Hokma when it was running, with a fresh session) and returns at once, naming the
+status file. Elsewhere, and in a development checkout, it updates in the same process as before.
 
 ## Decision: where the supervisor runs from (two updates in a row)
 

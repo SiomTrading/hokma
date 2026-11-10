@@ -3,8 +3,10 @@
 - `check()` asks the update source for the latest version (through `hokma.status.news`) and remembers when it
   last succeeded in `profile.update_checked_at`.
 - `auto_check_loop()` runs `check()` shortly after the engine starts and then every 24 hours.
-- The update itself runs in a child process (see `hokma.update.api`); it writes its real stage to a small
-  progress file and `snapshot()` reads it, so the screen can show the stage and a live clock.
+- The update itself runs in a detached process outside the runtime slots (see `hokma.update.detached`), while this
+  engine is down. When Hokma comes back, `snapshot()` reads the outcome that process left in
+  `<data>/update-status.json`: a failure becomes the phase `error` with its message, so the panel can show it with
+  "Retry". `hokma update --progress-file` still reports stages to the small progress file read here.
 """
 import asyncio
 import json
@@ -109,12 +111,20 @@ class UpdateState:
 
     def begin_update(self) -> bool:
         with self._lock:
-            if self.phase == "updating":
+            if self.phase in ("updating", "restarting"):
                 return False
             self.phase, self.error, self.target_version = "updating", None, None
             self._began = time.time()
         progress_path().unlink(missing_ok=True)
+        from hokma.update import detached
+
+        detached.clear_status()
         return True
+
+    def launched(self, target_version: str) -> None:
+        """The detached updater is running and this engine is about to shut down for it."""
+        self.target_version = target_version
+        self.phase = "restarting"
 
     def finish_update(self, result: dict, restarting: bool) -> None:
         self.target_version = result.get("to_version")
@@ -127,6 +137,13 @@ class UpdateState:
 
     def snapshot(self, db) -> dict:
         stage, elapsed, stage_elapsed = None, None, None
+        phase, error = self.phase, self.error
+        if phase == "idle":
+            from hokma.update import detached
+
+            failed = detached.failed_outcome()          # the last detached update failed: say why, offer Retry
+            if failed is not None:
+                phase, error = "error", failed
         if self.phase == "updating":
             now = time.time()
             elapsed = max(0, int(now - (self._began or now)))
@@ -146,11 +163,11 @@ class UpdateState:
                 newer = False
         return {
             "version": __version__,
-            "phase": self.phase,
+            "phase": phase,
             "stage": stage,
             "elapsed_s": elapsed,
             "stage_elapsed_s": stage_elapsed,
-            "error": self.error,
+            "error": error,
             "target_version": self.target_version,
             "checked_at": self.checked_at(db),
             "newer": newer,

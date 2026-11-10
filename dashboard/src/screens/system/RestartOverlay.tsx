@@ -1,8 +1,13 @@
 import { Button, Isotype, Pane, cx } from "@/design";
-import { dismissFailure, useRestartState, watchEngine } from "@/api";
+import { dismissFailure, retryUpdate, useRestartState, watchEngine } from "@/api";
 import { useI18n } from "@/i18n";
+// Lends the update hooks (why it failed, start it again) to the watch, wherever the tab is.
+import "./updateStatus";
 
-/** Covers the whole page while the engine restarts after an update, or says why it could not start. */
+/**
+ * Covers the whole page while the engine restarts after an update, or while the detached updater replaces Hokma
+ * ("Updating Hokma, it will restart by itself"), or says why it could not start or why the update failed, with Retry.
+ */
 export function RestartOverlay() {
   const { t } = useI18n();
   const restart = useRestartState();
@@ -23,11 +28,31 @@ export function RestartOverlay() {
     );
   }
   const failed = restart.phase === "failed";
+  const updating = restart.kind === "update";
+  if (failed && updating && restart.message) {
+    return (
+      <div className={cx("hk", document.documentElement.dataset.theme === "light" && "light")} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "grid", placeItems: "center", padding: 16, background: "var(--scrim)", backdropFilter: "blur(6px)" }}>
+        <Pane role="alertdialog" aria-live="polite" aria-label={t("restart.updateFailedTitle")} data-testid="update-failed" style={{ maxWidth: 460, padding: "22px 24px", display: "flex", flexDirection: "column", gap: 12, alignItems: "center", textAlign: "center" }}>
+          <h2 className="h2">{t("restart.updateFailedTitle")}</h2>
+          <p className="p" role="alert">{restart.message}</p>
+          <span style={{ display: "flex", gap: 8 }}>
+            <Button size="sm" variant="primary" onClick={() => retryUpdate()}>
+              {t("news.retry")}
+            </Button>
+            <Button size="sm" onClick={() => dismissFailure()}>
+              {t("restart.close")}
+            </Button>
+          </span>
+        </Pane>
+      </div>
+    );
+  }
+  const title = failed ? t("restart.failedTitle") : updating ? t("restart.updatingTitle") : t("restart.title");
   return (
     <div className={cx("hk", document.documentElement.dataset.theme === "light" && "light")} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "grid", placeItems: "center", padding: 16, background: "var(--scrim)", backdropFilter: "blur(6px)" }}>
-      <Pane role={failed ? "alertdialog" : "status"} aria-live="polite" aria-label={failed ? t("restart.failedTitle") : t("restart.title")} style={{ maxWidth: 460, padding: "22px 24px", display: "flex", flexDirection: "column", gap: 12, alignItems: "center", textAlign: "center" }}>
+      <Pane role={failed ? "alertdialog" : "status"} aria-live="polite" aria-label={title} style={{ maxWidth: 460, padding: "22px 24px", display: "flex", flexDirection: "column", gap: 12, alignItems: "center", textAlign: "center" }}>
         {failed ? null : <span className="spin" aria-hidden="true" />}
-        <h2 className="h2">{failed ? t("restart.failedTitle") : t("restart.title")}</h2>
+        <h2 className="h2">{title}</h2>
         {failed ? (
           <>
             <p className="p">{restart.logPath ? t("restart.failedBody", { path: restart.logPath }) : t("restart.failedBodyNoPath")}</p>
@@ -35,14 +60,14 @@ export function RestartOverlay() {
               size="sm"
               onClick={() => {
                 dismissFailure();
-                watchEngine({ mode: "restart" });
+                watchEngine({ mode: updating ? "update" : "restart" });
               }}
             >
               {t("restart.tryAgain")}
             </Button>
           </>
         ) : (
-          <p className="p">{t("restart.body")}</p>
+          <p className="p">{updating ? t("restart.updatingBody") : t("restart.body")}</p>
         )}
       </Pane>
     </div>

@@ -3,7 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearToken, getToken, openSocket } from "@/api";
 import { RestartOverlay } from "@/screens/system/RestartOverlay";
 import { setLocale, t } from "@/i18n";
-import { GIVE_UP_MS, getRestartState, learnEngineVersion, rememberLogPath, resetRestartForTests, takeJustUpdated, watchEngine } from "./restart";
+import {
+  GIVE_UP_MS,
+  UPDATE_GIVE_UP_MS,
+  getRestartState,
+  learnEngineVersion,
+  rememberLogPath,
+  resetRestartForTests,
+  setUpdateHooks,
+  takeJustUpdated,
+  watchEngine,
+} from "./restart";
 import { setToken } from "./token";
 
 const TOKEN = "abcDEF1234567890_-xyz";
@@ -34,6 +44,39 @@ afterEach(() => {
   resetRestartForTests();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("an update by the detached updater (task 3146)", () => {
+  it("says it is updating, waits minutes without giving up, then reloads on the new version", async () => {
+    health(["0.0.14", null]);
+    const reload = vi.fn();
+    watchEngine({ mode: "update", expectedVersion: "0.0.15", reload });
+    expect(getRestartState()).toMatchObject({ phase: "restarting", kind: "update" });
+    await seconds(GIVE_UP_MS / 1000 + 120);                      // far past the 60 s of a plain restart
+    expect(getRestartState().phase).toBe("restarting");
+    health(["0.0.15"]);
+    await seconds(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(takeJustUpdated()).toBe("0.0.15");
+  });
+
+  it("back on the same version: shows the engine's plain message with Retry, which starts it again", async () => {
+    health(["0.0.14", null, "0.0.14"]);
+    const retry = vi.fn(async () => undefined);
+    setUpdateHooks({ failure: async () => "No pude reemplazar los archivos viejos de Hokma.", retry });
+    const reload = vi.fn();
+    render(<RestartOverlay />);
+    act(() => watchEngine({ mode: "update", expectedVersion: "0.0.15", reload }));
+    expect(screen.getByText(t("restart.updatingTitle"))).toBeTruthy();
+    await seconds(3);
+    expect(reload).not.toHaveBeenCalled();
+    expect(getRestartState()).toMatchObject({ phase: "failed", kind: "update" });
+    expect(screen.getByText("No pude reemplazar los archivos viejos de Hokma.")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Traceback");
+    fireEvent.click(screen.getByText(t("news.retry")));
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(getRestartState().phase).toBe("idle");
+  });
 });
 
 describe("watching the engine", () => {
@@ -146,6 +189,18 @@ describe("sockets", () => {
     FakeSocket.instances[0]!.onclose?.({ code: 1012, reason: "restarting" });
     expect(getRestartState().phase).toBe("restarting");
     expect(getToken()).toBe(TOKEN);                              // the same token still works afterwards
+  });
+
+  it("a close with the reason 'updating' shows 'Updating Hokma' and waits up to 30 minutes", async () => {
+    health([null]);
+    openSocket("/ws/chat");
+    FakeSocket.instances[0]!.onclose?.({ code: 1012, reason: "updating" });
+    expect(getRestartState()).toMatchObject({ phase: "restarting", kind: "update" });
+    await seconds(UPDATE_GIVE_UP_MS / 1000 - 5);
+    expect(getRestartState().phase).toBe("restarting");
+    await seconds(6);
+    expect(getRestartState()).toMatchObject({ phase: "failed", kind: "update" });
+    expect(getToken()).toBe(TOKEN);
   });
 
   it("a close without a reason shows nothing yet", () => {

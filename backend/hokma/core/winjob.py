@@ -2,13 +2,15 @@
 
 `KILL_ON_JOB_CLOSE` makes Windows terminate every process of the job when the last handle to the job closes,
 and the supervisor's own handle closes when the supervisor ends, however it ends (closed terminal, killed
-process, crash). Standard library only (ctypes). The structures are declared with fixed-size types so their
+process, crash). `BREAKAWAY_OK` lets one process leave on purpose: the detached updater, which must outlive the
+supervisor it stops (it asks for it with CREATE_BREAKAWAY_FROM_JOB; nothing else does). Standard library only (ctypes). The structures are declared with fixed-size types so their
 layout can be checked on any 64-bit platform; the calls only run on Windows.
 """
 import ctypes
 import sys
 
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800       # a child started with CREATE_BREAKAWAY_FROM_JOB may leave (the updater)
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
 
 
@@ -45,7 +47,7 @@ class ExtendedLimitInformation(ctypes.Structure):
 
 def kill_on_close_info() -> ExtendedLimitInformation:
     info = ExtendedLimitInformation()
-    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK
     return info
 
 

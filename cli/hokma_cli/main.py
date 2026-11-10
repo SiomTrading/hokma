@@ -285,10 +285,44 @@ def _print_update(result) -> None:
         print(t("cli.update.git_hint"))
 
 
+def _update_detached(args: argparse.Namespace) -> int:
+    """Windows, `hokma` of a runtime slot: this very process holds files of the slots, so the update runs in the
+    detached updater (the same one the panel uses). It stops Hokma if it runs, updates and opens it again; this
+    command only checks there is something to install, starts it and says where the result will be."""
+    from hokma.core.launcher import running_lock
+    from hokma.update import detached
+    from hokma.update.source import UpdateError
+
+    try:
+        target = detached.check_newer(args.source, args.force)
+        if target is None:
+            if args.json:
+                print(json.dumps({"status": "up-to-date", "from_version": __version__, "to_version": __version__}))
+            else:
+                print(t("cli.update.up_to_date", version=__version__))
+            return 0
+        lock = running_lock()
+        detached.launch(handoff=None, port=lock["port"] if lock else None,
+                        wait_pids=[os.getpid()] + ([lock["pid"]] if lock else []), restart=lock is not None,
+                        source=args.source, force=args.force, to_version=target)
+    except UpdateError as exc:
+        print(f"{t('cli.tag.fail')} {t('cli.update.failed', error=exc, version=__version__)}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps({"status": "launched", "from_version": __version__, "to_version": target,
+                          "status_file": str(detached.status_path())}))
+    else:
+        print(t("cli.update.detached", version=target, path=detached.status_path()))
+    return 0
+
+
 def cmd_update(args: argparse.Namespace) -> int:
+    from hokma.core.config import running_slot
     from hokma.update.runner import run_update
     from hokma.update.source import UpdateError, resolve_source
 
+    if sys.platform == "win32" and running_slot() is not None and not args.progress_file:
+        return _update_detached(args)
     progress = None
     if args.progress_file:
         from hokma.update.state import ProgressWriter

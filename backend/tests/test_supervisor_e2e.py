@@ -50,11 +50,25 @@ class Running:
     def api(self, path: str, method: str = "GET"):
         return http_json(f"http://127.0.0.1:{self.port}{path}", self.token, method)
 
-    def stop(self) -> None:
+    def lock_pid(self) -> int | None:
         try:
-            os.killpg(self.sid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+            return json.loads((self.install.data / "engine.lock").read_text())["pid"]
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def stop(self) -> None:
+        sessions = {self.sid}
+        held = self.lock_pid()                     # after an update the updater started a supervisor of its own
+        if held is not None:
+            try:
+                sessions.add(os.getsid(held))
+            except ProcessLookupError:
+                pass
+        for sid in sessions:
+            try:
+                os.killpg(sid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
         self.proc.wait()
 
 
@@ -168,51 +182,60 @@ def test_u6_engine_dies_when_the_supervisor_is_killed_without_a_chance_to_react(
 
 
 def test_u2_u4_two_updates_in_a_row_restart_by_themselves(running):
-    ins, supervisor = running.install, running.proc.pid
+    """Task 3146: the update runs in the detached updater while Hokma is down; it starts a new supervisor with the
+    same session on the same port, and nothing of Hokma keeps running from the slot that is rebuilt."""
+    ins = running.install
     connect = pytest.importorskip("websockets.sync.client").connect
 
     # first update: a -> b, with a tab connected
     ins.publish(V1)
     with connect(f"ws://127.0.0.1:{running.port}/rpc?token={running.token}") as ws:
         result = running.api("/api/update", "POST")
-        assert result["status"] == "updated" and result["to_version"] == V1 and result["restarting"] is True
+        assert result["status"] == "launched" and result["to_version"] == V1 and result["restarting"] is True
         closed = pytest.raises(Exception, ws.recv)         # the open tab learns why the socket closed
-        assert closed.value.rcvd.code == 1012 and closed.value.rcvd.reason == "restarting"
-    assert wait_until(lambda: (health(running.port) or {}).get("version") == V1, 60), "no automatic restart"
+        assert closed.value.rcvd.code == 1012 and closed.value.rcvd.reason == "updating"
+    assert wait_until(lambda: (health(running.port) or {}).get("version") == V1, 180), "no automatic restart"
     assert ins.current() == "b"
     assert running.api("/api/update/state")["version"] == V1            # same token, same port
-    # the supervisor is the same process, now running from slot b and holding nothing in slot a
-    assert running.proc.poll() is None and running.proc.pid == supervisor
-    assert str(ins.slot_dir("b")) in cmdline(supervisor)[0]
-    for pid in session_pids(running.sid):
+    supervisor = running.lock_pid()
+    assert supervisor is not None and str(ins.slot_dir("b")) in " ".join(cmdline(supervisor))
+    for pid in session_pids(os.getsid(supervisor)):
         assert holds_path(pid, ins.slot_dir("a")) == [], (pid, cmdline(pid))
 
     # second update, with no restart by hand in between: b -> a (which is rebuilt from scratch)
     ins.publish(V2)
     result = running.api("/api/update", "POST")
-    assert result["status"] == "updated" and result["to_version"] == V2 and result["restarting"] is True
-    assert wait_until(lambda: (health(running.port) or {}).get("version") == V2, 60), "second restart did not happen"
+    assert result["status"] == "launched" and result["to_version"] == V2 and result["restarting"] is True
+    assert wait_until(lambda: (health(running.port) or {}).get("version") == V2, 180), "second restart did not happen"
     assert ins.current() == "a"
-    assert running.proc.poll() is None and running.proc.pid == supervisor
-    assert str(ins.slot_dir("a")) in cmdline(supervisor)[0]
     assert running.api("/api/update/state")["version"] == V2
-    for pid in session_pids(running.sid):
+    supervisor = running.lock_pid()
+    assert supervisor is not None and str(ins.slot_dir("a")) in " ".join(cmdline(supervisor))
+    for pid in session_pids(os.getsid(supervisor)):
         assert holds_path(pid, ins.slot_dir("b")) == [], (pid, cmdline(pid))
         assert token_in_process(pid, running.token) == []
-    assert "restart after an update" in (ins.data / "logs" / "engine.log").read_text()
+    status = json.loads((ins.data / "update-status.json").read_text())
+    assert status["state"] == "done" and status["to_version"] == V2 and status["started"] is True
 
 
 def test_u3_a_package_with_a_different_sha_is_refused_and_the_app_keeps_working(running):
     running.install.publish(V1, bad_sha=True)
-    with pytest.raises(urllib.error.HTTPError) as err:
-        running.api("/api/update", "POST")
-    assert err.value.code == 502
-    detail = err.value.read().decode()
-    assert t("update.package_sha_mismatch") in detail
+    result = running.api("/api/update", "POST")
+    assert result["status"] == "launched"
+    status_file = running.install.data / "update-status.json"
+
+    def finished():
+        try:
+            return json.loads(status_file.read_text()).get("started") is not None
+        except (OSError, ValueError):
+            return False
+
+    assert wait_until(finished, 180), "the updater never finished"
+    assert wait_until(lambda: health(running.port) is not None, 60)
     assert running.install.current() == "a" and health(running.port)["version"] == BASE_VERSION
-    state = running.api("/api/update/state")
+    state = running.api("/api/update/state")                            # same session after the failed update
     assert state["phase"] == "error" and t("update.package_sha_mismatch") in state["error"]
-    assert children_of(running.proc.pid)                  # the same engine is still there
+    assert "Traceback" not in state["error"]
 
 
 def test_the_updater_reports_its_real_stages_in_order(tmp_path, monkeypatch):

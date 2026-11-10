@@ -15,6 +15,17 @@ export type { RequestOptions, Socket, SocketHandlers } from "./client";
 export { clearToken, getToken, initToken, setToken, startedFromLink, useToken } from "./token";
 export { useApiQuery } from "./useApiQuery";
 export type { QueryState } from "./useApiQuery";
-export { dismissFailure, enterOff, justUpdated, learnEngineVersion, rememberLogPath, useRestartState, watchEngine } from "./restart";
+export {
+  dismissFailure,
+  enterOff,
+  failUpdate,
+  justUpdated,
+  learnEngineVersion,
+  rememberLogPath,
+  retryUpdate,
+  setUpdateHooks,
+  useRestartState,
+  watchEngine,
+} from "./restart";
 export { shutdownFromEntry, shutdownHokma } from "./shutdown";
-export type { RestartState } from "./restart";
+export type { RestartState, UpdateHooks } from "./restart";

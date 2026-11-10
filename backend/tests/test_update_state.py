@@ -37,24 +37,22 @@ def profile(db):  # noqa: F811
     return db
 
 
-def fake_update(monkeypatch, result: dict, code: int = 0, err: bytes = b""):
-    seen = []
+def fake_update(monkeypatch, target: str | None = "9.9.9", error: Exception | None = None):
+    """The update source answers `target` (None: up to date); `launch` records its call instead of starting anything."""
+    launched = []
 
-    class Proc:
-        returncode = code
+    def check(source=None, force=False):
+        if error is not None:
+            raise error
+        return target
 
-        async def communicate(self):
-            return json.dumps(result).encode() + b"\n", err
+    def launch(**kwargs):
+        launched.append(kwargs)
+        return 4242
 
-    async def fake_exec(*argv, **kwargs):
-        seen.append(argv)
-        return Proc()
-
-    monkeypatch.setattr(update_api.asyncio, "create_subprocess_exec", fake_exec)
-    return seen
-
-
-UPDATED = {"status": "updated", "from_version": __version__, "to_version": "9.9.9", "restart_required": True}
+    monkeypatch.setattr(update_api.detached, "check_newer", check)
+    monkeypatch.setattr(update_api.detached, "launch", launch)
+    return launched
 
 
 def test_state_needs_the_token(profile):
@@ -116,41 +114,66 @@ def test_a_second_update_while_one_runs_is_refused(profile):
     assert r.status_code == 409 and r.json()["detail"] == t("update.in_progress")
 
 
-def test_without_a_supervisor_the_user_is_told_to_restart(profile, monkeypatch):
-    fake_update(monkeypatch, UPDATED)
+def test_update_launches_the_detached_updater_and_shuts_down_with_the_reason_updating(profile, monkeypatch):
+    launched = fake_update(monkeypatch)
+    shut = []
+
+    async def fake_shutdown(reason="shutting_down"):
+        shut.append(reason)
+
+    app = create_app()
+    monkeypatch.setattr(app.state.lifecycle, "shutdown", fake_shutdown)
+    r = TestClient(app).post("/api/update", headers=HEADERS)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "launched" and body["to_version"] == "9.9.9" and body["restarting"] is True
+    assert len(launched) == 1 and launched[0]["restart"] is True and launched[0]["to_version"] == "9.9.9"
+    token, _owner, _once = launched[0]["handoff"]
+    assert token == session.token()                                 # the same session comes back after the update
+    assert shut == ["updating"]                                     # shut down AFTER the answer, the clean way
+    assert app.state.updates.snapshot(get_database())["phase"] == "restarting"
+    assert TestClient(app).post("/api/update", headers=HEADERS).status_code == 409   # one launch only
+
+
+def test_up_to_date_never_launches_nor_shuts_down(profile, monkeypatch):
+    launched = fake_update(monkeypatch, target=None)
     app = create_app()
     r = TestClient(app).post("/api/update", headers=HEADERS)
-    assert r.status_code == 200 and r.json()["restarting"] is False and r.json()["restart_required"] is True
-    assert app.state.lifecycle.restarting is False
-    assert app.state.updates.snapshot(get_database())["phase"] == "restart_required"
+    assert r.json()["status"] == "up-to-date" and r.json()["restarting"] is False
+    assert launched == [] and app.state.lifecycle.shutting_down is False
 
 
-def test_under_a_supervisor_a_successful_update_ends_the_engine_with_75(profile, monkeypatch):
-    fake_update(monkeypatch, UPDATED)
-    monkeypatch.setattr(session, "_supervised", True)
-    app = create_app()
-    r = TestClient(app).post("/api/update", headers=HEADERS)
-    assert r.json()["restarting"] is True
-    assert app.state.lifecycle.restarting is True and app.state.lifecycle.exit_code == EXIT_RESTART == 75
+def test_a_check_that_fails_keeps_its_message_for_the_screen(profile, monkeypatch):
+    from hokma.update.source import UpdateError
 
-
-def test_up_to_date_never_restarts(profile, monkeypatch):
-    fake_update(monkeypatch, {"status": "up-to-date", "from_version": __version__, "to_version": __version__})
-    monkeypatch.setattr(session, "_supervised", True)
-    app = create_app()
-    assert TestClient(app).post("/api/update", headers=HEADERS).json()["restarting"] is False
-    assert app.state.lifecycle.restarting is False
-
-
-def test_a_failed_update_keeps_its_message_for_the_screen(profile, monkeypatch):
-    fake_update(monkeypatch, {}, code=1, err=b"[fail] Not updated: boom")
+    fake_update(monkeypatch, error=UpdateError("GitHub is unreachable"))
     app = create_app()
     c = TestClient(app, headers=HEADERS)
-    assert c.post("/api/update").status_code == 502
+    r = c.post("/api/update")
+    assert r.status_code == 502 and r.json()["detail"] == "GitHub is unreachable"
     snap = c.get("/api/update/state").json()
-    assert snap["phase"] == "error" and "boom" in snap["error"]
-    fake_update(monkeypatch, UPDATED)                                              # "Retry" works
+    assert snap["phase"] == "error" and snap["error"] == "GitHub is unreachable"
+    assert "Traceback" not in snap["error"]
+    fake_update(monkeypatch)                                                       # "Retry" works
+
+    async def no_shutdown(reason=""):
+        return None
+
+    monkeypatch.setattr(app.state.lifecycle, "shutdown", no_shutdown)
     assert c.post("/api/update").status_code == 200
+
+
+def test_a_failed_detached_update_is_reported_after_the_restart(profile):
+    from hokma.update import detached
+
+    status = detached.StatusFile()
+    status.write("failed", message="the old files are in use")
+    app = create_app()                                        # the engine that the updater started again
+    snap = TestClient(app, headers=HEADERS).get("/api/update/state").json()
+    assert snap["phase"] == "error" and snap["error"] == "the old files are in use"
+    status.body["updated_at"] = 0                             # a day later it is no longer news
+    detached.status_path().write_text(json.dumps(dict(status.body, updated_at=time.time() - 2 * 86400)))
+    assert TestClient(app, headers=HEADERS).get("/api/update/state").json()["phase"] == "idle"
 
 
 def test_restart_closes_open_sockets_with_the_reason_restarting(profile):

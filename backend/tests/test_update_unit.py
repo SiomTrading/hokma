@@ -233,20 +233,15 @@ def test_extensions_file_is_protected_from_the_agent(env):
 # ---- update endpoint ----------------------------------------------------------------------
 
 def test_update_endpoint_needs_a_token_and_takes_no_source_from_the_request(env, monkeypatch):
-    import asyncio
+    from hokma.update import api as update_api
+
     seen = []
 
-    class FakeProc:
-        returncode = 0
+    def check(source=None, force=False):
+        seen.append(source)
+        return None                                          # up to date: nothing is launched
 
-        async def communicate(self):
-            return b'{"status": "up-to-date", "from_version": "0.1.0", "to_version": "0.1.0"}\n', b""
-
-    async def fake_exec(*argv, **kwargs):
-        seen.append(argv)
-        return FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(update_api.detached, "check_newer", check)
     c = TestClient(create_app())
     assert c.post("/api/update").status_code == 401
     assert c.post("/api/update", headers={"X-Hokma-Token": "wrong"}).status_code == 401
@@ -257,7 +252,7 @@ def test_update_endpoint_needs_a_token_and_takes_no_source_from_the_request(env,
     # a source cannot be injected through the request
     r = c.post("/api/update", headers={"X-Hokma-Token": SESSION_TOKEN}, json={"source": "https://evil.test/m.json"})
     assert r.status_code == 200
-    assert all("evil.test" not in " ".join(map(str, argv)) and "--from" not in argv for argv in seen)
+    assert seen == [None, None]
 
 
 def test_the_cli_error_shown_to_the_student_has_no_internal_tag():

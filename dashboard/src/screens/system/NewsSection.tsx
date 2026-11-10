@@ -3,8 +3,8 @@ import { api, ApiError, justUpdated, watchEngine } from "@/api";
 import { Button, ErrorState, Loading, Pane, Pill } from "@/design";
 import { useI18n } from "@/i18n";
 import { Markdown } from "@/screens/learn/Markdown";
-import type { NewsData, UpdateResult, UpdateStage } from "./types";
-import { refreshUpdateStatus, useUpdateStatus } from "./updateStatus";
+import type { NewsData, UpdateStage } from "./types";
+import { refreshUpdateStatus, startUpdate, useUpdateStatus } from "./updateStatus";
 
 const STAGES: UpdateStage[] = ["download", "unpack", "python", "dependencies", "verify", "switch"];
 const PANE_ROW = { padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" } as const;
@@ -87,7 +87,7 @@ export function NewsSection() {
 
   // The engine announced its own restart (an update started elsewhere): follow it.
   useEffect(() => {
-    if (status?.phase === "restarting") watchEngine({ mode: "restart", expectedVersion: status.target_version });
+    if (status?.phase === "restarting") watchEngine({ mode: "update", expectedVersion: status.target_version });
     if (status?.phase === "restart_required") setOutcome("manual");
   }, [status?.phase, status?.target_version]);
 
@@ -97,8 +97,10 @@ export function NewsSection() {
     setOutcome(null);
     startedAt.current = Date.now();
     try {
-      const result = await api.post<UpdateResult>("/api/update", undefined, { timeoutMs: 0 });
-      if (result.status !== "updated") {
+      const result = await startUpdate();
+      if (result.status === "launched") {
+        setOutcome("restarting");                     // startUpdate() already watches the engine
+      } else if (result.status !== "updated") {
         void check(true);
       } else if (result.restarting) {
         setOutcome("restarting");

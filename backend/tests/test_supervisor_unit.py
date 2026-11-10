@@ -13,8 +13,8 @@ from hokma.core import session
 from hokma.core.engine_main import read_channel_key, read_owner_hash, read_owner_secret_hash, read_token, watch_parent
 from hokma.core.supervisor import (BACKOFF_SECONDS, EXIT_RESTART, MAX_CRASHES, EngineLog, Supervisor, engine_argv,
                                    hand_over)
-from hokma.core.winjob import (BasicLimitInformation, ExtendedLimitInformation, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-                               kill_on_close_info)
+from hokma.core.winjob import (BasicLimitInformation, ExtendedLimitInformation, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+                               JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, kill_on_close_info)
 from hokma.i18n import t
 
 TOKEN = "T" * 32
@@ -323,7 +323,9 @@ def test_job_object_structures_have_the_windows_layout():
     assert ExtendedLimitInformation.ProcessMemoryLimit.offset == 112
     import ctypes
     assert ctypes.sizeof(ExtendedLimitInformation) == 144                  # JOBOBJECT_EXTENDED_LIMIT_INFORMATION, x64
-    assert kill_on_close_info().BasicLimitInformation.LimitFlags == JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE == 0x2000
+    assert JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE == 0x2000 and JOB_OBJECT_LIMIT_BREAKAWAY_OK == 0x800
+    # the job kills everything on close, and lets only a child that asks for it (the detached updater) leave
+    assert kill_on_close_info().BasicLimitInformation.LimitFlags == 0x2000 | 0x800
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="job objects exist only on Windows")

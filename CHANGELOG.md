@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.14
+
+Updating from the panel works on Windows.
+
+- The Update button no longer updates inside the running server. Hokma starts a separate updater that lives outside
+  its own folders (the shared Python of the data folder and a temporary copy of the update code), shuts itself down
+  the same way Shut down Hokma does, and the updater closes whatever was left running from Hokma's folders, updates
+  and opens Hokma again. Before, the server kept its own files open and Windows refused to replace them
+  (`PermissionError [WinError 5]` on a `.pyd` of the old version).
+- While it updates, the panel says "Updating Hokma, it will restart by itself" and reconnects on its own when Hokma
+  is back, with the same session. If the update fails, Hokma comes back on the previous version and the panel shows
+  the reason in plain words with a Retry button; the technical detail goes to `logs/updater.log` in the data folder.
+- `hokma update` from PowerShell uses the same updater when it is run by Hokma's own command, and says where the
+  result will be written.
+
 ## 0.0.13
 
 Pictures reach every engine, plugins you install stay, and the panel menu fits small screens.
