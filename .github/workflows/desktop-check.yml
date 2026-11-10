@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - "desktop/**"
+      - "installer/**"
       - ".github/workflows/desktop-check.yml"
   workflow_dispatch:
 
@@ -38,3 +39,28 @@ jobs:
         run: cargo check --all-targets --manifest-path desktop/src-tauri/Cargo.toml
       - name: cargo test
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
+
+  # Compiles the Windows installer script with Inno Setup and made-up values, so a mistake in the [Code] section
+  # shows here and not when the release is published. Nothing is signed or published; the output is thrown away.
+  inno:
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'SiomTrading/hokma-dev'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inno Setup
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+      - name: Compile hokma-setup.iss
+        run: |
+          $root = (Get-Location).Path
+          $fake = Join-Path $env:RUNNER_TEMP "inno-fake"
+          New-Item -ItemType Directory -Force $fake | Out-Null
+          foreach ($n in "hokma-src.zip", "Hokma.exe", "MicrosoftEdgeWebview2Setup.exe") { Set-Content -Path (Join-Path $fake $n) -Value "fake" }
+          & $env:ISCC /Qp "/DAppVersion=0.0.0-ci" "/DSourceZip=$fake\hokma-src.zip" "/DAppExe=$fake\Hokma.exe" `
+            "/DWebView2Setup=$fake\MicrosoftEdgeWebview2Setup.exe" "/DOutputDir=$fake\out" installer\windows\hokma-setup.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }

@@ -103,7 +103,7 @@ var
   Detected, HasGit, HasClaude: Boolean;
   PrevWorkdir, PrevVersion: String;
   ModePage, ComponentsPage: TInputOptionWizardPage;
-  ProgressPage: TOutputProgressPage;
+  ProgressPage: TOutputProgressWizardPage;
   LogFile, BackupPath, KeptFailedPath, HelperError: String;
   RunDone, ClaudeFailed, RestoreFailed, WebView2Missing: Boolean;
   StageCount: Integer;

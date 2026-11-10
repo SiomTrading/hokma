@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.17
+
+The Windows installer builds again.
+
+- The 0.0.16 Windows installer could not be built because of a wrong type name in the installer script. It is
+  fixed, and every push now compiles the installer script on Windows before anything is published.
+
 ## 0.0.16
 
 Updating from the panel on Windows brings Hokma back by itself again, with no window left behind, the Hokma
