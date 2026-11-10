@@ -275,12 +275,30 @@ def test_approved_mcp_goes_through_a_launcher_with_a_safe_working_folder(env):
     assert s["permissions"]["deny"] and s["sandbox"]["enabled"] and s["hooks"]["PreToolUse"] and "mcpServers" not in s
 
 
-def test_remote_servers_are_passed_as_they_are(env):
+def test_remote_servers_are_passed_as_they_are(env, monkeypatch):
+    """An approved remote server is probed once at launch and passed only when it answers as MCP (task 3152)."""
+    from hokma.status import mcp_oauth
+
+    answer = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-06-18"}}).encode()
+    monkeypatch.setattr(mcp_oauth, "probe", lambda url, token=None: mcp_oauth.Response(
+        200, {"content-type": "application/json"}, answer))
     m = requests.request_mcp("remote", {"type": "http", "url": "https://x.test/mcp"})
     requests.approve_request(m.id, YES)
     spec = prepare_claude_launch()
     servers = json.loads(open(spec.args[spec.args.index("--mcp-config") + 1]).read())["mcpServers"]
     assert servers["remote"] == {"type": "http", "url": "https://x.test/mcp"}
+
+
+def test_an_approved_remote_server_that_is_a_web_page_is_not_passed(env, monkeypatch):
+    from hokma.status import mcp_oauth
+
+    monkeypatch.setattr(mcp_oauth, "probe", lambda url, token=None: mcp_oauth.Response(
+        200, {"content-type": "text/html"}, b"<html></html>"))
+    m = requests.request_mcp("web", {"type": "http", "url": "https://x.test/app/mcp"})
+    requests.approve_request(m.id, YES)
+    spec = prepare_claude_launch()
+    servers = json.loads(open(spec.args[spec.args.index("--mcp-config") + 1]).read())["mcpServers"]
+    assert "web" not in servers
 
 
 # ---- the agent can only ask ---------------------------------------------------------------------------

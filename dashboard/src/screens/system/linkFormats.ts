@@ -33,10 +33,19 @@ export function normalizeServerName(raw: string): string {
     .slice(0, 32);
 }
 
-export function serverProblem(name: string, url: string): "name_empty" | "name_reserved" | "url_empty" | "url_format" | null {
-  const clean = name.trim();
+export type ServerProblem = "name_empty" | "name_reserved" | "name_taken" | "url_empty" | "url_format";
+
+/** Why the add form cannot be sent yet, or null. `taken`: names already in the list (a duplicate says so). */
+export function serverProblem(name: string, url: string, taken: readonly string[] = []): ServerProblem | null {
+  const clean = name.trim().replace(/[-_]+$/, "");
   if (!clean || !NAME_PATTERN.test(clean)) return "name_empty";
   if (clean === "hokma") return "name_reserved";
+  if (taken.includes(clean)) return "name_taken";
+  return urlProblem(url);
+}
+
+/** Why an address cannot be sent yet, or null. */
+export function urlProblem(url: string): "url_empty" | "url_format" | null {
   if (!url.trim()) return "url_empty";
   if (!URL_PATTERN.test(url.trim())) return "url_format";
   return null;

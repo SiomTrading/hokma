@@ -54,6 +54,15 @@ update run from inside Hokma could not rebuild the inactive slot (`shutil.rmtree
    switch `current`, with the retries of 0.0.12), writes the outcome to `<data>/update-status.json` and starts
    Hokma again: a supervisor of the slot `current` names, on the same port, with the same session handed over on
    its standard input. When the update failed, `current` was not switched and the previous version comes back.
+   The restart (0.0.16, task 3151) runs the slot's `pythonw.exe -m hokma_cli.main` on Windows, never `hokma.exe`:
+   that is a console launcher, and started detached its Python child got a new, visible, empty console window.
+   It is started with DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP and CREATE_BREAKAWAY_FROM_JOB (inside the job only
+   when the job forbids leaving), its standard input is closed after the three session lines, and the updater then
+   checks `/health`: an attempt that ends or does not answer in 60 s is cleaned up and tried again, 3 attempts in
+   all. `updater.log` gets each command, pid, exit code, health answer and the last lines of `supervisor.out`; when
+   no attempt answers, `update-status.json` gets `started: false` and the reason in `start_error`. A supervisor of
+   0.0.16 that still finds itself in a console window (started by the updater of 0.0.15) hands the session to a
+   `pythonw.exe` copy and ends, so the update to 0.0.16 closes that window too.
 5. The tab sees `/health` again. A new version reloads the page on Settings > News with "Hokma updated to X". The
    same version means the update failed: the tab reads `GET /api/update/state`, which reports the message of the
    status file (phase `error`, for one day), and shows it with "Retry". A traceback only goes to

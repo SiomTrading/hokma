@@ -115,6 +115,20 @@ def _handoff_token(args: argparse.Namespace) -> tuple[str, str, str] | None:
     return line, owner, once
 
 
+def _leave_console_window(port: int, token: str, owner_hash: str, owner_secret_hash: str) -> bool:
+    """A supervisor that receives a hand over inside a console window (the updater of 0.0.15 and earlier started it
+    with the console launcher `hokma.exe`, task 3151) hands the same session over to a copy run by the slot's
+    `pythonw.exe`, which has no window, and ends: the window closes and Hokma keeps the port and the session. True
+    when it did. Never loops: the copy has no console, and nothing happens when `pythonw.exe` is missing."""
+    from hokma.core import config
+    from hokma.core.supervisor import console_window_shown, hand_over, windowless_python
+
+    slot = config.current_slot()
+    if slot is None or windowless_python(slot) is None or not console_window_shown():
+        return False
+    return hand_over(port, token, owner_hash, owner_secret_hash)
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """`hokma start` runs Hokma in the background and returns at once (see hokma.core.launcher). With
     `--foreground` it is the supervisor itself: it creates the session token, starts the engine as a child and
@@ -132,6 +146,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(f"{t('cli.tag.fail')} {t('cli.start.bad_handoff')}", file=sys.stderr)
         return 2
     token, owner_hash, owner_secret_hash = handoff or (None, "", "")
+    if token and args.port and _leave_console_window(args.port, token, owner_hash, owner_secret_hash):
+        return 0
     return run_supervisor(port=args.port, token=token, print_url=args.no_browser, owner_hash=owner_hash,
                           owner_secret_hash=owner_secret_hash)
 

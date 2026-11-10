@@ -55,8 +55,11 @@ pub struct Inner {
 #[derive(Default)]
 pub struct Shared(pub Mutex<Inner>);
 
-pub fn shared(app: &AppHandle) -> tauri::State<'_, Shared> {
-    app.state::<Shared>()
+/// The window's shared state. Returns a plain reference (`State::inner`), not the `State` wrapper: a `State` is a
+/// temporary, so `let inner = shared(app).0.lock().unwrap();` would keep a lock guard on a value freed at the end of
+/// that line (error E0716, the build of 0.0.15 failed on it). The reference lives as long as `app`.
+pub fn shared(app: &AppHandle) -> &Shared {
+    app.state::<Shared>().inner()
 }
 
 pub fn set_status(app: &AppHandle, state: &str, message: String, line: &str) {

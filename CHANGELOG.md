@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.0.16
+
+Updating from the panel on Windows brings Hokma back by itself again, with no window left behind, the Hokma
+window only opens web and email links, and remote MCP servers only show Connected when they really answer.
+
+- After an update, Hokma starts again with no window at all. Until now an empty black window could appear on
+  Windows and the panel did not come back; the only way out was to restart the computer.
+- The updater starts Hokma on its own, so nothing that ends with the update takes it down, and it checks that the
+  panel answers. If it does not, it tries again (three times in all); when it still cannot, the panel says that
+  Hokma was updated but did not open by itself, and the reason is kept for support.
+- Every step of that start is written to the update log (`logs/updater.log`): what was started, its process
+  number, how it ended and whether the panel answered.
+- The update from 0.0.15 to 0.0.16 still runs the 0.0.15 updater: if the empty window shows up one last time, it
+  closes by itself in a few seconds and Hokma keeps running.
+- The Hokma window only sends links to web pages (http, https) and email addresses (mailto) to your browser or
+  mail app. Any other kind of link, such as one to a file on your computer, is ignored, so a link in an answer can
+  never open a file or start a program.
+- The Hokma window for Windows and Mac builds again. The 0.0.15 installers could not be built because of an error
+  in how the window reads its own state; it is fixed, and every change to the window is now compiled and tested
+  on Windows and Mac before a release is published.
+- Settings > Extensions > MCP: every remote server has Remove, Revoke and Edit URL. Remove asks first, revokes
+  the access and stops offering the server to every engine; Edit URL checks the new address and starts without
+  the old sign-in.
+- Before an address is saved, Hokma asks it to start an MCP session. Only a real MCP answer, or a request to sign
+  in, is accepted; a web page (for example https://lauz.io/app/mcp instead of https://mcp.lauz.io/mcp), a redirect
+  or an error is refused with the reason, and nothing is saved.
+- A server shows Connected only when it answered as an MCP server at its current address: open, or with a valid
+  sign-in. A server that 0.0.15 marked Connected by mistake now shows the error with its reason, and is not handed
+  to any engine until its address is fixed.
+- Adding a server with a name already in the list says the name is taken, instead of asking for a name.
+- Servers that Hokma 0.0.10 to 0.0.12 also registered in Claude Code's own settings are removed from there when
+  Hokma starts, so Claude Code always uses the address and sign-in you see in the panel.
+
 ## 0.0.15
 
 Connect an MCP server from the panel and sign in with the browser, whatever engine you use. Hokma also gets a

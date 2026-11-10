@@ -1,10 +1,11 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, t } from "@/i18n";
 import { renderWithApp } from "@/test/utils";
 import { RemoteServers } from "./RemoteServers";
 import { failure, mockApi } from "./testkit";
+import type { Call } from "./testkit";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -77,7 +78,7 @@ describe.each(["es", "en"] as const)("Remote MCP servers (%s)", (locale) => {
     expect(tab.close).toHaveBeenCalled();
   });
 
-  it("an error state offers Retry and a server without sign-in has no buttons", async () => {
+  it("an error state offers Retry, every card can be edited and removed, and an open server has no Revoke", async () => {
     setLocale(locale);
     mockApi({
       "GET /api/extensions/servers": { servers: [
@@ -89,6 +90,96 @@ describe.each(["es", "en"] as const)("Remote MCP servers (%s)", (locale) => {
     expect(await screen.findByRole("button", { name: t("mcp.retry") })).toBeInTheDocument();
     expect(screen.getByText("HTTP 503")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: t("mcp.revoke") })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: t("mcp.edit") })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: t("mcp.remove") })).toHaveLength(2);
+  });
+
+  it("a web page saved as the address shows the error and never Connected (task 3152)", async () => {
+    setLocale(locale);
+    const message = "That address is not an MCP server: it answered HTTP 200 text/html.";
+    mockApi({
+      "GET /api/extensions/servers": { servers: [
+        { name: "lauz", url: "https://lauz.io/app/mcp", state: "error", message, auth: false, signed_in: false },
+      ] },
+    });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(t("mcp.state.connected"))).not.toBeInTheDocument();
+    expect(screen.getByText(t("mcp.state.error"))).toBeInTheDocument();
+  });
+
+  it("the engine refuses an address that is not MCP and the form keeps it", async () => {
+    setLocale(locale);
+    const message = "That address is not an MCP server: it answered HTTP 200 text/html.";
+    const calls = mockApi({
+      "GET /api/extensions/servers": { servers: [] },
+      "POST /api/extensions/servers": () => failure(400, message),
+    });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    await userEvent.type(await screen.findByLabelText(t("mcp.name")), "lauz");
+    await userEvent.type(screen.getByLabelText(t("mcp.url")), "https://lauz.io/app/mcp");
+    await userEvent.click(screen.getByRole("button", { name: t("mcp.add") }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getByLabelText(t("mcp.url"))).toHaveValue("https://lauz.io/app/mcp");
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("a duplicate name says it is taken, not that the name is missing", async () => {
+    setLocale(locale);
+    const calls = mockApi({ "GET /api/extensions/servers": { servers: [{ ...LAUZ, state: "connected" }] } });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    await screen.findByText(t("mcp.state.connected"));
+    await userEvent.type(screen.getByLabelText(t("mcp.name")), "lauz");
+    await userEvent.type(screen.getByLabelText(t("mcp.url")), "https://mcp.lauz.io/mcp");
+    expect(screen.getByText(t("mcp.why.name_taken", { name: "lauz" }))).toBeInTheDocument();
+    expect(screen.queryByText(t("mcp.why.name_empty"))).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("mcp.add") })).toBeDisabled();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+  });
+
+  it("removes a server after confirming", async () => {
+    setLocale(locale);
+    let known = true;
+    const calls = mockApi({
+      "GET /api/extensions/servers": () => ({ servers: known ? [{ ...LAUZ, state: "connected", signed_in: true }] : [] }),
+      "DELETE /api/extensions/servers/lauz": () => { known = false; return { name: "lauz", removed: true }; },
+    });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: t("mcp.remove") }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(t("mcp.confirmRemoveBody"))).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: t("mcp.remove") }));
+    await waitFor(() => expect(screen.queryByText(LAUZ.url)).not.toBeInTheDocument());
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("edits the address of a server", async () => {
+    setLocale(locale);
+    let url = "https://lauz.io/app/mcp";
+    const calls = mockApi({
+      "GET /api/extensions/servers": () => ({ servers: [{ ...LAUZ, url, state: url.includes("/app/") ? "error" : "needs_auth" }] }),
+      "PUT /api/extensions/servers/lauz": (call: Call) => { url = (call.body as { url: string }).url; return { ...LAUZ, url, state: "needs_auth" }; },
+    });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: t("mcp.edit") }));
+    const field = screen.getByLabelText(t("mcp.editLabel", { name: "lauz" }));
+    expect(field).toHaveValue("https://lauz.io/app/mcp");
+    await userEvent.clear(field);
+    await userEvent.type(field, "http://x");
+    expect(screen.getByRole("button", { name: t("mcp.save") })).toBeDisabled();
+    await userEvent.clear(field);
+    await userEvent.type(field, "https://mcp.lauz.io/mcp");
+    await userEvent.click(screen.getByRole("button", { name: t("mcp.save") }));
+    expect(await screen.findByText("https://mcp.lauz.io/mcp")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ url: "https://mcp.lauz.io/mcp" });
+    expect(await screen.findByText(t("mcp.state.needs_auth"))).toBeInTheDocument();
+  });
+
+  it("offers Revoke whenever there is a token to revoke", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/extensions/servers": { servers: [{ ...LAUZ, state: "error", message: "HTTP 500", signed_in: true }] } });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    expect(await screen.findByRole("button", { name: t("mcp.revoke") })).toBeInTheDocument();
   });
 
   it("rejects hokma and http addresses before sending anything", async () => {

@@ -1,0 +1,40 @@
+name: desktop-check
+# Compiles and tests the desktop window (desktop/src-tauri) on Windows and macOS before anything is published
+# (task 3138). The installers of 0.0.15 failed at release time with Rust errors nobody had compiled before; this
+# job catches them on every push to a branch of the development repository, and by hand (workflow_dispatch).
+# Read-only: no secrets, only the automatic GITHUB_TOKEN with contents: read.
+on:
+  push:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo:
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'SiomTrading/hokma-dev'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: cargo check
+        run: cargo check --all-targets --manifest-path desktop/src-tauri/Cargo.toml
+      - name: cargo test
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml

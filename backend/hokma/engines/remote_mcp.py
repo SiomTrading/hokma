@@ -33,20 +33,22 @@ TIMEOUT = 60
 
 
 def ready_servers() -> list[dict[str, Any]]:
-    """[{name, url, auth}] for remote servers that are open or signed in."""
-    from hokma.status import mcp_oauth
+    """[{name, url, auth}] for remote servers that are open or signed in, and that answered as an MCP server at this
+    address (`verified_url`, task 3152): a web page saved by mistake never reaches an engine. A server nobody has
+    probed or confirmed yet (approved from an agent's request, or signed in with 0.0.15) is checked here once."""
+    from hokma.status import mcp_auth, mcp_oauth
 
     data, _ = extensions.load()
-    state = mcp_oauth.load_state()
     out = []
     for name, cfg in sorted(data["mcpServers"].items()):
         if not isinstance(cfg, dict) or cfg.get("type") != "http" or name == "hokma":
             continue
-        entry = state.get(name, {})
-        if "auth" not in entry or entry.get("auth") is False:
+        mcp_auth.ensure_checked(name, cfg["url"])
+        entry = mcp_oauth.load_state().get(name, {})
+        if not _same_url(entry.get("url"), cfg["url"]) or not _same_url(entry.get("verified_url"), cfg["url"]):
+            continue                      # the address changed or never answered as MCP: the token never follows a name
+        if entry.get("auth") is False:
             out.append({"name": name, "url": cfg["url"], "auth": False})
-        elif not _same_url(entry.get("url"), cfg["url"]):
-            continue                      # the address changed after the sign-in: the token never follows a name
         elif entry.get("auth") and mcp_oauth.has_tokens(name):
             out.append({"name": name, "url": cfg["url"], "auth": True})
     return out
@@ -170,25 +172,9 @@ class RemoteClient:
 
 
 def _messages(resp) -> list[dict[str, Any]]:
-    text = resp.body.decode("utf-8", "replace")
-    if "text/event-stream" in resp.headers.get("content-type", ""):
-        out, data = [], []
-        for line in text.splitlines() + [""]:
-            if line.startswith("data:"):
-                data.append(line[5:].lstrip())
-            elif not line.strip() and data:
-                try:
-                    msg = json.loads("\n".join(data))
-                    out.extend(msg if isinstance(msg, list) else [msg])
-                except ValueError:
-                    pass
-                data = []
-        return [m for m in out if isinstance(m, dict)]
-    try:
-        msg = json.loads(text)
-    except ValueError:
-        return []
-    return [m for m in (msg if isinstance(msg, list) else [msg]) if isinstance(m, dict)]
+    from hokma.status.mcp_oauth import rpc_messages
+
+    return rpc_messages(resp)
 
 
 class RemoteToolBox:

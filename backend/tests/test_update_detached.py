@@ -43,6 +43,9 @@ class FakePopen:
     def wait(self, timeout=None):
         return 0
 
+    def poll(self):
+        return None
+
 
 @pytest.fixture
 def installed(env, monkeypatch):  # noqa: F811
@@ -269,18 +272,168 @@ def test_stop_asks_the_supervisor_only_when_it_does_not_end_by_itself(installed,
 
 def test_start_hands_the_same_session_to_the_new_supervisor(installed):
     FakePopen.calls = []
-    assert detached.start_hokma(8765, (TOKEN, OWNER, ""), popen=FakePopen, healthy=lambda port: True) is True
+    notes: list = []
+    assert detached.start_hokma(8765, (TOKEN, OWNER, ""), popen=FakePopen, healthy=lambda port: True,
+                                note=notes.append) is True
     proc = FakePopen.calls[0]
     assert proc.argv[0] == str(config.slot_exe("a"))
     assert proc.argv[1:] == ["start", "--port", "8765", "--no-browser", "--handoff-stdin"]
     assert proc.stdin.getvalue() == f"{TOKEN}\n{OWNER}\n\n".encode()
+    assert proc.kwargs["start_new_session"] is True
+    assert any("start attempt 1/3" in n for n in notes) and any("pid 4321" in n for n in notes)
+    assert not any(TOKEN in n for n in notes)
 
 
-def test_start_without_a_session_is_a_plain_start(installed):
+def test_start_without_a_session_is_a_plain_start_and_says_why_it_failed(installed):
     FakePopen.calls = []
-    assert detached.start_hokma(None, None, popen=FakePopen, healthy=lambda port: True,
-                                clock=iter([0, 0, 999]).__next__, sleep=lambda s: None) is False
+    now = [0.0]
+
+    def sleep(seconds):
+        now[0] += 100
+
+    with pytest.raises(detached.StartFailed, match="no engine.lock"):
+        detached.start_hokma(None, None, popen=FakePopen, healthy=lambda port: True, clock=lambda: now[0],
+                             sleep=sleep, note=lambda text: None, kill=lambda: [])
     assert FakePopen.calls[0].argv[1:] == ["start"]
+    assert len(FakePopen.calls) == detached.START_ATTEMPTS
+
+
+# ---- task 3151: the restart on Windows opened an empty console window and Hokma did not come back -------------
+
+@pytest.fixture
+def windows_slot(installed, monkeypatch):
+    """Slot a on Windows, with the venv's pythonw.exe (what uv sync leaves next to the console launcher hokma.exe)."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    scripts = installed / "runtime" / "a" / "venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    for name in ("hokma.exe", "python.exe", "pythonw.exe"):
+        (scripts / name).write_text("")
+    return scripts
+
+
+def test_3151_the_restart_on_windows_runs_pythonw_never_the_console_launcher(windows_slot):
+    """The cause: 0.0.15 restarted `venv\\Scripts\\hokma.exe` with DETACHED_PROCESS. hokma.exe is a console launcher
+    that runs python.exe as its child; with no console to share, Windows gave that child a new, visible, empty
+    console window, and the supervisor lived inside it. The restart must use the slot's pythonw.exe."""
+    FakePopen.calls = []
+    assert detached.start_hokma(8765, (TOKEN, OWNER, ""), popen=FakePopen, healthy=lambda port: True,
+                                note=lambda text: None) is True
+    proc = FakePopen.calls[0]
+    assert proc.argv[0] == str(windows_slot / "pythonw.exe")
+    assert not any(part.lower().endswith("hokma.exe") for part in proc.argv)
+    assert proc.argv[1:] == ["-m", "hokma_cli.main", "start", "--port", "8765", "--no-browser", "--handoff-stdin"]
+    flags = proc.kwargs["creationflags"]
+    for flag in (DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, detached.CREATE_BREAKAWAY_FROM_JOB):
+        assert flags & flag                                          # no window, own group, outside the updater's job
+    assert proc.stdin.getvalue() == f"{TOKEN}\n{OWNER}\n\n".encode()
+
+
+def test_3151_a_job_that_forbids_leaving_still_restarts_hokma(windows_slot):
+    FakePopen.calls = []
+
+    class Picky(FakePopen):
+        def __init__(self, argv, **kwargs):
+            if kwargs["creationflags"] & detached.CREATE_BREAKAWAY_FROM_JOB:
+                raise PermissionError(5, "Access is denied")
+            super().__init__(argv, **kwargs)
+
+    assert detached.start_hokma(8765, (TOKEN, OWNER, ""), popen=Picky, healthy=lambda port: True,
+                                note=lambda text: None) is True
+    assert FakePopen.calls[0].kwargs["creationflags"] & DETACHED_PROCESS
+
+
+def test_3151_the_session_pipe_is_closed_after_the_three_lines(installed):
+    closed = []
+
+    class Closing(FakePopen):
+        def __init__(self, argv, **kwargs):
+            super().__init__(argv, **kwargs)
+            self.stdin.close = lambda: closed.append(True)
+
+    detached.start_hokma(8765, (TOKEN, OWNER, ""), popen=Closing, healthy=lambda port: True, note=lambda text: None)
+    assert closed == [True]
+
+
+def test_3151_a_start_that_dies_is_cleaned_up_and_tried_again(installed):
+    FakePopen.calls = []
+    answers = iter([False, False, True])
+    cleaned, notes = [], []
+
+    class DiesFirst(FakePopen):
+        def poll(self):
+            return 1 if len(FakePopen.calls) == 1 else None
+
+    assert detached.start_hokma(8765, (TOKEN, OWNER, ""), popen=DiesFirst, healthy=lambda port: next(answers),
+                                sleep=lambda s: None, note=notes.append, kill=lambda: cleaned.append(1)) is True
+    assert len(FakePopen.calls) == 2 and cleaned == [1]
+    assert any("exit code 1" in n for n in notes) and any("start attempt 2/3" in n for n in notes)
+
+
+def test_3151_when_every_attempt_fails_the_reason_reaches_the_status_file(installed):
+    FakePopen.calls = []
+    now = [0.0]
+
+    def sleep(seconds):
+        now[0] += 30
+
+    def start(port, handoff):
+        return detached.start_hokma(port, handoff, popen=FakePopen, healthy=lambda p: False, clock=lambda: now[0],
+                                    sleep=sleep, note=lambda text: None, kill=lambda: [])
+
+    steps = recording_steps([])._replace(start=start)
+    log = io.StringIO()
+    assert Updater(port=8765, wait_pids=[], restart=True, handoff=(TOKEN, OWNER, ""), steps=steps, log=log).run() == 1
+    body = json.loads(detached.status_path().read_text())
+    assert body["state"] == "failed" and body["started"] is False
+    assert body["start_error"] == "no answer on port 8765 after 60 s"
+    assert body["message"] == t("update.detached.not_started", version="9.9.9")
+    assert "no answer on port 8765" in log.getvalue()
+    assert len(FakePopen.calls) == detached.START_ATTEMPTS
+
+
+def test_3151_a_supervisor_inside_a_console_window_moves_to_pythonw_and_ends(windows_slot, monkeypatch):
+    """The 0.0.15 updater (it runs the old code) still starts hokma.exe: the new supervisor notices its console
+    window and hands the same session to a copy without one, so the update to 0.0.16 does not leave the window."""
+    import argparse
+
+    from hokma.core import supervisor
+    from hokma_cli import main as cli
+
+    started = []
+    monkeypatch.setattr(supervisor, "console_window_shown", lambda: True)
+    monkeypatch.setattr(supervisor, "hand_over", lambda *a, **k: started.append(a) or True)
+    monkeypatch.setattr(supervisor, "run_supervisor", lambda **k: pytest.fail("must not serve from the console"))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{TOKEN}\n{OWNER}\n\n"))
+    args = argparse.Namespace(foreground=False, no_browser=True, handoff_fd=None, handoff_stdin=True, port=8765)
+    assert cli.cmd_start(args) == 0
+    assert started == [(8765, TOKEN, OWNER, "")]
+
+
+def test_3151_without_a_console_window_the_supervisor_serves(windows_slot, monkeypatch):
+    import argparse
+
+    from hokma.core import supervisor
+    from hokma_cli import main as cli
+
+    served = []
+    monkeypatch.setattr(supervisor, "console_window_shown", lambda: False)
+    monkeypatch.setattr(supervisor, "hand_over", lambda *a, **k: pytest.fail("no hand over without a window"))
+    monkeypatch.setattr(supervisor, "run_supervisor", lambda **k: served.append(k) or 0)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{TOKEN}\n{OWNER}\n\n"))
+    args = argparse.Namespace(foreground=False, no_browser=True, handoff_fd=None, handoff_stdin=True, port=8765)
+    assert cli.cmd_start(args) == 0 and served[0]["token"] == TOKEN
+
+
+def test_3151_the_supervisor_hand_over_on_windows_has_no_window_either(windows_slot):
+    from hokma.core.supervisor import hand_over
+
+    FakePopen.calls = []
+    assert hand_over(8765, TOKEN, OWNER, "", popen=FakePopen) is True
+    proc = FakePopen.calls[0]
+    assert proc.argv[0] == str(windows_slot / "pythonw.exe") and "--handoff-stdin" in proc.argv
+    assert proc.kwargs["creationflags"] & detached.CREATE_BREAKAWAY_FROM_JOB
+    assert proc.kwargs["creationflags"] & DETACHED_PROCESS
+    assert TOKEN not in " ".join(proc.argv)
 
 
 def test_the_handoff_lines_are_checked(installed):

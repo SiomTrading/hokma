@@ -214,6 +214,8 @@ def test_u2_u4_two_updates_in_a_row_restart_by_themselves(running):
     for pid in session_pids(os.getsid(supervisor)):
         assert holds_path(pid, ins.slot_dir("b")) == [], (pid, cmdline(pid))
         assert token_in_process(pid, running.token) == []
+    # the updater writes `started` right after /health answers: wait for that write, not for /health
+    assert wait_until(lambda: "started" in json.loads((ins.data / "update-status.json").read_text()), 30)
     status = json.loads((ins.data / "update-status.json").read_text())
     assert status["state"] == "done" and status["to_version"] == V2 and status["started"] is True
 

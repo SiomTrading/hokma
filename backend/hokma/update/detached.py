@@ -16,7 +16,10 @@ both slots:
 - `Updater.run()` runs in the detached process, in this order: stop Hokma (wait for the engine and the supervisor to
   end, asking the supervisor to stop if it is still there), kill whatever still runs from runtime/a, runtime/b or
   python (as Instalar-Hokma.cmd does), remove a stale `update.lock`, run `run_update` (same code and retries as
-  before), then start Hokma again: the new version, or the previous one when the update failed.
+  before), then start Hokma again: the new version, or the previous one when the update failed. The restart runs
+  the slot's `pythonw.exe` on Windows (never the console launcher `hokma.exe`, whose Python child got a visible empty
+  console window, task 3151), detached and outside the updater's job, then waits for /health and tries again up to
+  START_ATTEMPTS times; each command, pid, exit code and the reason of a failure go to the updater log.
 - Every step is written to `<data>/update-status.json`. The outcome is written BEFORE Hokma starts again, so the
   restarted engine can already tell the panel how it went. People read catalog messages; a traceback goes only to
   `<data>/logs/updater.log`.
@@ -53,8 +56,9 @@ WAIT_EXIT_SECONDS = 30.0             # the engine and the supervisor end by them
 ASK_STOP_AFTER_SECONDS = 5.0         # a supervisor still alive after this is asked to stop on its control channel
 KILL_ROUNDS = 2
 KILL_PAUSE_SECONDS = 0.8
-HEALTH_WAIT_SECONDS = 90.0
-START_WAIT_SECONDS = 70.0
+START_ATTEMPTS = 3                   # the restart is tried this many times before the update is reported as not started
+ATTEMPT_HEALTH_SECONDS = 60.0        # one attempt waits this long for /health (the engine migrates the database first)
+RETRY_PAUSE_SECONDS = 2.0
 FAILED_SHOWN_SECONDS = 24 * 60 * 60  # a failed outcome is shown to the panel for one day
 POWERSHELL_LIST = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ExecutablePath,CommandLine | "
                    "ConvertTo-Json -Compress")
@@ -415,51 +419,137 @@ def _healthy(port: int) -> bool:
         return False
 
 
+class StartFailed(Exception):
+    """Hokma did not answer after every start attempt. The text says why, for the log and update-status.json."""
+
+
+def _note_stderr(text: str) -> None:
+    """One stamped line in the updater log (the detached process's standard error is `<data>/logs/updater.log`)."""
+    try:
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        print(f"{stamp} {text}", file=sys.stderr, flush=True)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def restart_command(slot: str, port: int | None, handoff: tuple[str, str, str] | None) -> list[str]:
+    """With the session and the port: the supervisor itself, which reads the session on its standard input (hand
+    over). Otherwise a plain `hokma start`, which opens the browser. On Windows both run with the slot's
+    `pythonw.exe`, never with the console launcher `hokma.exe` (task 3151, see `supervisor.slot_command`)."""
+    from hokma.core.supervisor import slot_command
+
+    if handoff and handoff[0] and port:
+        return slot_command(slot, ["start", "--port", str(port), "--no-browser", "--handoff-stdin"])
+    return slot_command(slot, ["start"] + (["--port", str(port)] if port else []))
+
+
+def _output_tail(lines: int = 8) -> str:
+    """The last lines the supervisor wrote, for the updater log. A session address is never copied."""
+    import re
+
+    try:
+        with open(config.supervisor_out_path(), "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 4096))
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    text = re.sub(r"#t=[^\s]*", "#t=***", text)
+    return " | ".join(line.strip() for line in text.splitlines()[-lines:] if line.strip())
+
+
+def _stop_attempt(pid: int, kill: Callable[[], object], note: Callable[[str], None]) -> None:
+    """Before trying again: end what the failed attempt left (its process and anything from the slots) and the
+    stale `engine.lock`, so the next attempt finds the port free."""
+    _kill(pid)
+    try:
+        killed = kill()
+        note(f"cleaned up the failed start (killed: {killed or 'nothing'})")
+    except Exception as exc:                               # noqa: BLE001  a cleanup error must not stop the retry
+        note(f"cleanup after the failed start did not finish: {exc!r}")
+    clear_stale_locks()
+
+
 def start_hokma(port: int | None, handoff: tuple[str, str, str] | None, *,
                 popen: Callable[..., subprocess.Popen] = subprocess.Popen,
                 healthy: Callable[[int], bool] = _healthy, clock: Callable[[], float] = time.monotonic,
-                sleep: Callable[[float], object] = time.sleep) -> bool:
-    """Start the Hokma of the slot `current` names. With the session secrets and the port it is a hand over: the new
-    supervisor serves the same session on the same port, so the open tab reconnects by itself. Otherwise it is a
-    plain `hokma start`, which opens the browser. True once /health answers."""
+                sleep: Callable[[float], object] = time.sleep, note: Callable[[str], None] = _note_stderr,
+                kill: Callable[[], object] = kill_leftovers) -> bool:
+    """Start the Hokma of the slot `current` names, as a process of its own: no window, its own process group,
+    outside any job of this updater, standard input closed after the session lines. With the session secrets and
+    the port it is a hand over: the new supervisor serves the same session on the same port, so the open tab
+    reconnects by itself. Otherwise it is a plain `hokma start`, which opens the browser.
+
+    Then it checks actively that /health answers. An attempt whose process ends, or that does not answer within
+    ATTEMPT_HEALTH_SECONDS, is cleaned up and tried again, START_ATTEMPTS times in all. Every step goes to the
+    updater log: command, pid, exit code, health, the supervisor's last output. True once /health answers; raises
+    StartFailed with the reason otherwise."""
+    from hokma.core import enginelock
+    from hokma.core.supervisor import detached_popen
+
     slot = config.current_slot()
     if slot is None:
-        return False
-    exe = str(config.slot_exe(slot))
-    env = child_env()
-    out = _open_append(config.supervisor_out_path())
-    try:
-        if handoff and handoff[0] and port:
-            proc = popen([exe, "start", "--port", str(port), "--no-browser", "--handoff-stdin"], stdin=subprocess.PIPE,
-                         stdout=out, stderr=out, cwd=str(config.hokma_data_dir()), env=env, close_fds=True,
-                         **spawn_kwargs(detached=True))
-            try:
-                proc.stdin.write(handoff_lines(handoff))
-                proc.stdin.flush()
-            except (OSError, ValueError, AttributeError):
-                pass
-        else:
-            proc = popen([exe, "start"] + (["--port", str(port)] if port else []), stdin=subprocess.DEVNULL,
-                         stdout=out, stderr=out, cwd=str(config.hokma_data_dir()), env=env, close_fds=True,
-                         **spawn_kwargs())
-            try:
-                proc.wait(START_WAIT_SECONDS)
-            except subprocess.TimeoutExpired:
-                pass
-    finally:
-        out.close()
-    deadline = clock() + HEALTH_WAIT_SECONDS
-    while clock() < deadline:
-        target = port
-        if target is None:
-            from hokma.core import enginelock
+        raise StartFailed("no runtime slot is marked as current")
+    argv = restart_command(slot, port, handoff)
+    hand_over = argv[-1] == "--handoff-stdin"
+    reason = "not started"
+    for attempt in range(1, START_ATTEMPTS + 1):
+        note(f"start attempt {attempt}/{START_ATTEMPTS}: {subprocess.list2cmdline(argv)}")
+        used: dict = {}
 
-            lock = enginelock.read()
-            target = lock["port"] if lock else None
-        if target is not None and healthy(target):
-            return True
-        sleep(0.5)
-    return False
+        def recording_popen(args, **kwargs):
+            used.clear()
+            used.update(kwargs)
+            return popen(args, **kwargs)
+
+        out = _open_append(config.supervisor_out_path())
+        try:
+            proc = detached_popen(argv, popen=recording_popen, stdin=subprocess.PIPE if hand_over else subprocess.DEVNULL,
+                                  stdout=out, stderr=out, cwd=str(config.hokma_data_dir()), env=child_env(),
+                                  close_fds=True)
+        except OSError as exc:
+            proc = None
+            reason = f"could not run {argv[0]}: {exc}"
+        finally:
+            out.close()
+        if proc is not None:
+            how = (f"creationflags {hex(used['creationflags'])}" if "creationflags" in used
+                   else f"new session {bool(used.get('start_new_session'))}")
+            note(f"started pid {proc.pid} ({how})")
+            if hand_over:
+                try:
+                    proc.stdin.write(handoff_lines(handoff))
+                    proc.stdin.flush()
+                    proc.stdin.close()                         # nothing else will come: no read waits for more
+                except (OSError, ValueError, AttributeError) as exc:
+                    note(f"the session could not be handed over on standard input: {exc!r}")
+            deadline = clock() + ATTEMPT_HEALTH_SECONDS
+            target = port
+            while True:
+                if target is None:
+                    lock = enginelock.read()
+                    target = lock["port"] if lock else None
+                if target is not None and healthy(target):
+                    note(f"Hokma answers on port {target} (/health), pid {proc.pid}")
+                    return True
+                code = proc.poll()
+                if code is not None and (hand_over or code != 0):
+                    reason = f"the process ended with exit code {code} before answering"
+                    break
+                if clock() >= deadline:
+                    reason = (f"no answer on port {target} after {int(ATTEMPT_HEALTH_SECONDS)} s"
+                              if target else f"no engine.lock after {int(ATTEMPT_HEALTH_SECONDS)} s")
+                    break
+                sleep(0.5)
+        note(f"start attempt {attempt} failed: {reason}")
+        tail = _output_tail()
+        if tail:
+            note(f"supervisor output: {tail}")
+        if attempt < START_ATTEMPTS:
+            if proc is not None:
+                _stop_attempt(proc.pid, kill, note)
+            sleep(RETRY_PAUSE_SECONDS)
+    raise StartFailed(reason)
 
 
 def _run_update(source: str | None, force: bool, progress: Callable[[str], None]):
@@ -532,15 +622,20 @@ class Updater:
                      restarting=self.restart)
         if not self.restart:
             return 1 if failure else 0
+        start_error: str | None = None
         try:
             self._note("starting Hokma again")
             started = bool(self.steps.start(self.port, self.handoff))
-        except BaseException:                                  # noqa: BLE001
+        except StartFailed as exc:
+            start_error, started = str(exc), False
+        except BaseException as exc:                           # noqa: BLE001
             self._note("Hokma could not be started again:\n" + traceback.format_exc())
-            started = False
-        st.write(st.body["state"], restarting=False, started=started)
+            start_error, started = f"unexpected error: {exc!r}", False
+        if not started and start_error is None:
+            start_error = "Hokma did not answer on /health"
+        st.write(st.body["state"], restarting=False, started=started, start_error=start_error)
         if not started:
-            self._note("Hokma did not answer after the restart")
+            self._note(f"Hokma did not answer after the restart: {start_error}")
             if failure is None:
                 st.write("failed", message=t("update.detached.not_started", version=to_version or __version__))
         return 1 if failure or not started else 0

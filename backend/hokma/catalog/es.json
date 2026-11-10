@@ -489,6 +489,8 @@
   "status.mcp.no_store": "Este equipo no tiene un almacén seguro de credenciales disponible. Hokma no guarda el acceso en ningún otro lugar.",
   "status.mcp.connect_failed": "No se pudo iniciar la conexión: {output}",
   "status.mcp.no_registration": "Este servidor no permite que Hokma se registre solo ({output}). Pide al proveedor un acceso con registro dinámico.",
+  "status.mcp.not_mcp": "Esa dirección no es un servidor MCP: respondió {output}. Revisa que sea la dirección del servidor MCP (por ejemplo https://mcp.lauz.io/mcp) y no la de la página web.",
+  "status.mcp.unreachable": "No se pudo contactar el servidor ({output}). Revisa la dirección y tu conexión.",
   "status.mcp.rejected": "El servidor rechazó el acceso recién obtenido (HTTP {status}). Pulsa Conectar otra vez.",
   "status.mcp.page.ok_title": "Conectado a {name}",
   "status.mcp.page.ok_text": "Conectado, puedes cerrar esta pestaña. Hokma ya se actualizó.",

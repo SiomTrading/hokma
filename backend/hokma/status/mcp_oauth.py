@@ -2,7 +2,8 @@
 
 Flow, following the MCP authorization spec:
 1. Probe: POST `initialize` to the server. A 401 with `WWW-Authenticate: Bearer resource_metadata=...` (or the well-known
-   fallbacks) means it needs a sign-in; any other answer means it is open.
+   fallbacks) means it needs a sign-in; a 2xx carrying the JSON-RPC result of `initialize` means it is open. Anything
+   else (a web page, a redirect, an error) is not an MCP server and is refused (task 3152).
 2. Discovery: the protected resource metadata (RFC 9728) names the authorization server; its metadata is read with the
    RFC 8414 path insertion (`/.well-known/oauth-authorization-server/<issuer path>`), then the appended and OpenID
    variants. The issuer in the document must match.
@@ -175,6 +176,52 @@ def probe(url: str, token: str | None = None) -> Response:
     return http("POST", url, headers=headers, data=_initialize_body())
 
 
+def rpc_messages(resp: Response) -> list[dict]:
+    """JSON-RPC messages of an MCP answer: a JSON body (one message or a batch) or Server-Sent Events `data:` lines."""
+    text = resp.body.decode("utf-8", "replace")
+    if "text/event-stream" in resp.headers.get("content-type", "").lower():
+        out, data = [], []
+        for line in text.splitlines() + [""]:
+            if line.startswith("data:"):
+                data.append(line[5:].lstrip())
+            elif not line.strip() and data:
+                try:
+                    msg = json.loads("\n".join(data))
+                    out.extend(msg if isinstance(msg, list) else [msg])
+                except ValueError:
+                    pass
+                data = []
+        return [m for m in out if isinstance(m, dict)]
+    try:
+        msg = json.loads(text)
+    except ValueError:
+        return []
+    return [m for m in (msg if isinstance(msg, list) else [msg]) if isinstance(m, dict)]
+
+
+def is_mcp_answer(resp: Response) -> bool:
+    """A 2xx that really comes from an MCP server: JSON or an event stream carrying the JSON-RPC result of
+    `initialize`. A web page (HTML), an empty body or any other JSON is not one (task 3152)."""
+    if not 200 <= resp.status < 300:
+        return False
+    kind = resp.headers.get("content-type", "").lower()
+    if "application/json" not in kind and "text/event-stream" not in kind:
+        return False
+    return any(m.get("jsonrpc") == "2.0" and m.get("id") == 1 and isinstance(m.get("result"), dict)
+               for m in rpc_messages(resp))
+
+
+def asks_for_sign_in(resp: Response) -> bool:
+    """A 401 with a Bearer challenge in `WWW-Authenticate`: an MCP server that needs a sign-in."""
+    return resp.status == 401 and "bearer" in resp.headers.get("www-authenticate", "").lower()
+
+
+def not_mcp(resp: Response) -> OAuthError:
+    """The error for an address that answered, but not as an MCP server. Names the status and type, never the body."""
+    kind = resp.headers.get("content-type", "").split(";")[0].strip() or "no content type"
+    return OAuthError(f"HTTP {resp.status} {kind}", "not_mcp")
+
+
 def _well_known(base: str, name: str) -> list[str]:
     """RFC 8414 / RFC 9728 path insertion first, then the root, then the appended legacy form."""
     parts = urllib.parse.urlsplit(base)
@@ -209,10 +256,10 @@ def authorization_server_metadata(issuer: str) -> dict:
 def discover(url: str) -> dict:
     """{'auth': False} for an open server, else everything needed to sign in (no secrets)."""
     resp = probe(url)
-    if resp.status != 401:
-        if 200 <= resp.status < 300:
-            return {"auth": False}
-        raise OAuthError(f"the server answered HTTP {resp.status}", "probe")
+    if is_mcp_answer(resp):
+        return {"auth": False}
+    if not asks_for_sign_in(resp):
+        raise not_mcp(resp)                # a web page, a redirect, an error page: never "connected" (task 3152)
     challenge = parse_www_authenticate(resp.headers.get("www-authenticate", ""))
     prm = None
     if challenge.get("resource_metadata"):
@@ -419,7 +466,7 @@ def start(name: str, url: str, redirect_uri: str) -> str:
         _wipe(name)                        # a token is bound to the address it was issued for, never to the name
     meta = discover(url)
     if not meta["auth"]:
-        update_entry(name, url=url, auth=False, error=None)
+        update_entry(name, url=url, auth=False, error=None, verified_url=url)
         return ""
     entry = load_state().get(name, {})
     if entry.get("issuer") and not _same(entry.get("issuer"), meta["issuer"]):
@@ -568,7 +615,7 @@ def forget_tokens(name: str) -> None:
     access, refresh_account, _ = _accounts(name)
     secret_delete(access)
     secret_delete(refresh_account)
-    update_entry(name, expires_at=None, connected_at=None, granted_scope=None)
+    update_entry(name, expires_at=None, connected_at=None, granted_scope=None, verified_url=None)
 
 
 def revoke(name: str) -> None:

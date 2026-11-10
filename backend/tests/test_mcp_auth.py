@@ -150,6 +150,16 @@ class FakeAuth:
                     fake.access.discard(form.get("token", ""))
                     fake.refresh.discard(form.get("token", ""))
                     return self._json(200, {})
+                if self.path == "/app/mcp":                       # the web app, not the MCP server (task 3152)
+                    data = b"<!doctype html><html><body>Lauz</body></html>"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=UTF-8")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                if self.path == "/bare401":                       # a 401 with no Bearer challenge
+                    return self._json(401, {"error": "nope"})
                 if self.path == "/mcp":
                     auth = self.headers.get("Authorization", "")
                     if auth[7:] not in fake.access:
@@ -368,10 +378,153 @@ def test_revoke_calls_the_server_and_forgets_the_tokens(client, fake, store):
 # ----------------------------------------------------------------- discovery edge cases
 
 def test_open_server_needs_no_sign_in(client, monkeypatch):
-    monkeypatch.setattr(mcp_oauth, "probe", lambda url, token=None: mcp_oauth.Response(200, {}, b"{}"))
+    answer = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-06-18"}}).encode()
+    monkeypatch.setattr(mcp_oauth, "probe", lambda url, token=None: mcp_oauth.Response(
+        200, {"content-type": "application/json"}, answer))
     r = client.post("/api/extensions/servers", json={"name": "open", "url": "http://127.0.0.1:1/mcp"},
                     headers=HEADERS)
     assert r.json()["state"] == "connected" and r.json()["auth"] is False
+
+
+# ----------------------------------------------------------------- task 3152: only real MCP answers count
+
+def _servers(client):
+    return client.get("/api/extensions/servers", headers=HEADERS).json()["servers"]
+
+
+@pytest.mark.parametrize("answer", [
+    mcp_oauth.Response(200, {"content-type": "application/json"}, b"{}"),
+    mcp_oauth.Response(200, {"content-type": "application/json"}, b'{"jsonrpc": "2.0", "id": 1, "error": {}}'),
+    mcp_oauth.Response(200, {"content-type": "text/html"}, b'{"jsonrpc": "2.0", "id": 1, "result": {}}'),
+    mcp_oauth.Response(204, {}, b""),
+    mcp_oauth.Response(401, {"content-type": "application/json"}, b"{}"),
+    mcp_oauth.Response(302, {"location": "https://lauz.io/login"}, b""),
+])
+def test_only_an_initialize_result_or_a_bearer_challenge_is_mcp(answer):
+    assert not mcp_oauth.is_mcp_answer(answer) and not mcp_oauth.asks_for_sign_in(answer)
+    assert mcp_oauth.not_mcp(answer).code == "not_mcp"
+
+
+def test_an_initialize_result_as_json_or_event_stream_is_mcp():
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-06-18"}})
+    assert mcp_oauth.is_mcp_answer(mcp_oauth.Response(200, {"content-type": "application/json"}, body.encode()))
+    stream = ("event: message\ndata: " + body + "\n\n").encode()
+    assert mcp_oauth.is_mcp_answer(mcp_oauth.Response(200, {"content-type": "text/event-stream"}, stream))
+    assert mcp_oauth.asks_for_sign_in(mcp_oauth.Response(401, {"www-authenticate": 'Bearer realm="x"'}, b""))
+
+
+@pytest.mark.parametrize("path", ["/app/mcp", "/bare401", "/nothing-here"])
+def test_an_address_that_is_not_mcp_is_never_saved(client, fake, path):
+    r = client.post("/api/extensions/servers", json={"name": "lauz", "url": fake.base + path}, headers=HEADERS)
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "MCP" in detail and "HTTP" in detail and "<html" not in detail
+    assert "lauz" not in extensions.load()[0]["mcpServers"] and _servers(client) == []
+
+
+def test_an_unreachable_address_is_not_saved(client):
+    r = client.post("/api/extensions/servers", json={"name": "lauz", "url": "http://127.0.0.1:1/mcp"},
+                    headers=HEADERS)
+    assert r.status_code == 400 and "lauz" not in extensions.load()[0]["mcpServers"]
+
+
+def test_a_015_entry_on_a_web_page_shows_an_error_and_never_reaches_an_engine(client, fake):
+    """The real case: 0.0.15 saved lauz on https://lauz.io/app/mcp (HTML 200) and showed it Connected."""
+    page = fake.base + "/app/mcp"
+    extensions.set_mcp("lauz", {"type": "http", "url": page})
+    mcp_oauth.update_entry("lauz", url=page, auth=False)                 # what 0.0.15 wrote
+    [server] = _servers(client)
+    assert server["state"] == "error" and "text/html" in server["message"]
+    from hokma.engines import remote_mcp
+    assert remote_mcp.ready_servers() == []
+    assert "lauz" not in json.loads(open(launch.write_mcp_config()).read())["mcpServers"]
+
+
+def test_a_015_sign_in_is_confirmed_with_the_token_once(client, fake):
+    client.get(fake.authorize(connect(client, fake)))
+    mcp_oauth.update_entry("lauz", verified_url=None, checked_at=None)   # signed in with 0.0.15: never confirmed
+    assert _servers(client)[0]["state"] == "connected"
+    assert mcp_oauth.load_state()["lauz"]["verified_url"] == fake.base + "/mcp"
+
+
+def test_a_token_the_server_refuses_is_not_connected(client, fake):
+    client.get(fake.authorize(connect(client, fake)))
+    mcp_oauth.update_entry("lauz", verified_url=None, checked_at=None)
+    fake.access.clear()                                                    # the server forgot every token
+    server = _servers(client)[0]
+    assert server["state"] == "needs_auth" and server["signed_in"] is False
+
+
+def test_signed_in_but_the_address_does_not_answer_mcp_is_refused(client, fake, monkeypatch):
+    auth_url = connect(client, fake)
+    real = mcp_oauth.probe
+    monkeypatch.setattr(mcp_oauth, "probe", lambda url, token=None: mcp_oauth.Response(
+        200, {"content-type": "text/html"}, b"<html></html>") if token else real(url, token))
+    page = client.get(fake.authorize(auth_url))
+    assert page.status_code == 400 and "text/html" in page.text
+    server = _servers(client)[0]
+    assert server["state"] == "error" and not mcp_oauth.has_tokens("lauz")
+
+
+def test_remove_revokes_and_takes_the_server_out_everywhere(client, fake, store):
+    client.get(fake.authorize(connect(client, fake)))
+    r = client.delete("/api/extensions/servers/lauz", headers=HEADERS)
+    assert r.status_code == 200 and r.json()["removed"] is True
+    assert fake.revoked == ["refresh_token", "access_token"]
+    assert "lauz" not in extensions.load()[0]["mcpServers"] and _servers(client) == []
+    assert "lauz" not in mcp_oauth.load_state() and not [k for k in store.store if k[1].startswith("lauz:")]
+    assert client.delete("/api/extensions/servers/lauz", headers=HEADERS).status_code == 404
+
+
+def test_edit_url_checks_the_new_address_and_drops_the_old_sign_in(client, fake):
+    client.get(fake.authorize(connect(client, fake)))
+    good = fake.base + "/mcp"
+    bad = client.put("/api/extensions/servers/lauz", json={"url": fake.base + "/app/mcp"}, headers=HEADERS)
+    assert bad.status_code == 400 and "text/html" in bad.json()["detail"]
+    assert extensions.load()[0]["mcpServers"]["lauz"]["url"] == good and _servers(client)[0]["state"] == "connected"
+
+    same = client.put("/api/extensions/servers/lauz", json={"url": good}, headers=HEADERS)
+    assert same.status_code == 200 and same.json()["state"] == "connected"          # same address keeps the sign-in
+
+    other = FakeAuth()
+    try:
+        r = client.put("/api/extensions/servers/lauz", json={"url": other.base + "/mcp"}, headers=HEADERS)
+        assert r.status_code == 200, r.text
+        assert r.json()["state"] == "needs_auth" and r.json()["signed_in"] is False
+        assert fake.revoked == ["refresh_token", "access_token"] and not mcp_oauth.has_tokens("lauz")
+        assert extensions.load()[0]["mcpServers"]["lauz"]["url"] == other.base + "/mcp"
+    finally:
+        other.close()
+
+
+def test_a_duplicate_name_says_so(client, fake):
+    connect(client, fake)
+    r = client.post("/api/extensions/servers", json={"name": "lauz", "url": fake.base + "/mcp"}, headers=HEADERS)
+    assert r.status_code == 409 and "lauz" in r.json()["detail"]
+
+
+def test_legacy_claude_registrations_of_our_servers_are_removed_at_start(client, fake, env, monkeypatch):
+    """0.0.10-0.0.12 also ran `claude mcp add --scope user <name> <url>`; that copy won over Hokma's own."""
+    from hokma.core.config import claude_config_dir
+
+    connect(client, fake)
+    path = claude_config_dir() / ".claude.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"mcpServers": {
+        "lauz": {"type": "http", "url": "https://lauz.io/app/mcp"},
+        "mine": {"type": "stdio", "command": "x"}}}), encoding="utf-8")
+    removed = []
+
+    def fake_remove(name):
+        removed.append(name)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["mcpServers"].pop(name, None)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    monkeypatch.setattr(mcp_auth, "_forget_claude_registration", fake_remove)
+    assert mcp_auth.cleanup_legacy_registrations() == ["lauz"]
+    assert removed == ["lauz"] and mcp_auth.claude_registrations() == {"mine"}
+    assert mcp_auth.cleanup_legacy_registrations() == []
 
 
 def test_without_dynamic_registration_the_error_says_so(client, store):

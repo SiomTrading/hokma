@@ -183,6 +183,14 @@ def set_mcp(name: str, config: dict) -> list[str]:
     return _save(data)
 
 
+def remove_mcp(name: str) -> list[str]:
+    if not SERVER_NAME.match(name):
+        raise ValueError(t("ext.server_name"))
+    data, _ = load()
+    data["mcpServers"].pop(name, None)
+    return _save(data)
+
+
 def known_marketplaces() -> set[str]:
     """Marketplaces a plugin may come from: the student's own plus Claude's built-in official one."""
     data, _ = load()

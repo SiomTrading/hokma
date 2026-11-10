@@ -141,31 +141,89 @@ def handoff_payload(token: str, owner_hash: str, owner_secret_hash: str = "", ch
     return "\n".join((token, owner_hash, owner_secret_hash, channel_key)).encode("ascii") + b"\n"
 
 
-def hand_over(port: int, token: str, owner_hash: str = "", owner_secret_hash: str = "") -> bool:
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
+def windowless_python(slot: str) -> Path | None:
+    """The slot's `pythonw.exe` on Windows (a Python with no console at all), or None (other systems, or missing)."""
+    if sys.platform != "win32":
+        return None
+    candidate = config.slot_dir(slot) / "venv" / "Scripts" / "pythonw.exe"
+    return candidate if candidate.is_file() else None
+
+
+def slot_command(slot: str, args: list[str]) -> list[str]:
+    """How to run `hokma <args>` from a slot without any window (task 3151).
+
+    Windows: the slot's `pythonw.exe -m hokma_cli.main`, as `hokma start` already does. Never `hokma.exe`: it is a
+    console launcher that runs the venv's `python.exe` as its child, and when the launcher is started detached (no
+    console to share) Windows gives that child a NEW console window, empty and visible, that holds the supervisor.
+    Other systems, or a slot without `pythonw.exe`: the slot's `hokma`."""
+    pythonw = windowless_python(slot)
+    if pythonw is not None:
+        return [str(pythonw), "-m", "hokma_cli.main", *args]
+    return [str(config.slot_exe(slot)), *args]
+
+
+def detached_popen(argv: list[str], *, popen: Callable[..., subprocess.Popen] | None = None,
+                   **kwargs) -> subprocess.Popen:
+    """Start `argv` on its own: no window, its own process group and, on Windows, outside any job of this process
+    (CREATE_BREAKAWAY_FROM_JOB), so it outlives whoever started it. A job that does not allow leaving refuses that
+    flag; the start is then tried inside the job."""
+    popen = popen or subprocess.Popen
+    if sys.platform == "win32":
+        try:
+            return popen(argv, **kwargs, **spawn_kwargs(detached=True, extra_flags=CREATE_BREAKAWAY_FROM_JOB))
+        except OSError:
+            pass
+    return popen(argv, **kwargs, **spawn_kwargs(detached=True))
+
+
+def console_window_shown() -> bool:
+    """True on Windows when this process is attached to a console that has a window (it should never have one)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.kernel32.GetConsoleWindow())
+    except (AttributeError, OSError):
+        return False
+
+
+def hand_over(port: int, token: str, owner_hash: str = "", owner_secret_hash: str = "", *,
+              popen: Callable[..., subprocess.Popen] | None = None) -> bool:
     """Start the `hokma` of the current slot as the new supervisor with the same port and token.
 
     POSIX: this process BECOMES the new supervisor (exec); the token travels in a pipe whose number is passed,
     not the token. Windows: the new supervisor is started with the token on its standard input and this one
-    ends (the terminal prompt may come back; the new supervisor keeps running). The second line carries the owner
-    confirmation hash (empty when none), the third the hash of the one-time owner secret (empty once used). Returns True when the caller
-    must end this supervisor (Windows), False when the hand over was not possible."""
+    ends (the terminal prompt may come back; the new supervisor keeps running). It runs with the slot's
+    `pythonw.exe`, detached and outside this process's job, so no console window appears and it does not end with
+    this one (task 3151). The second line carries the owner confirmation hash (empty when none), the third the hash
+    of the one-time owner secret (empty once used). Returns True when the caller must end this supervisor
+    (Windows), False when the hand over was not possible."""
     slot = config.current_slot()
     if slot is None:
         return False
-    exe = str(config.slot_exe(slot))
-    base = [exe, "start", "--port", str(port), "--no-browser"]
+    args = ["start", "--port", str(port), "--no-browser"]
     try:
         if sys.platform == "win32":
-            proc = subprocess.Popen(base + ["--handoff-stdin"], stdin=subprocess.PIPE, **spawn_kwargs(detached=True))
+            out_path = config.supervisor_out_path()
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "ab") as out:
+                proc = detached_popen(slot_command(slot, args + ["--handoff-stdin"]), popen=popen,
+                                      stdin=subprocess.PIPE, stdout=out, stderr=out, close_fds=True)
             assert proc.stdin is not None
             proc.stdin.write(handoff_payload(token, owner_hash, owner_secret_hash))
             proc.stdin.flush()
+            proc.stdin.close()
             return True
+        exe = str(config.slot_exe(slot))
         read_end, write_end = os.pipe()
         os.write(write_end, handoff_payload(token, owner_hash, owner_secret_hash))
         os.close(write_end)
         os.set_inheritable(read_end, True)
-        os.execv(exe, base + ["--handoff-fd", str(read_end)])
+        os.execv(exe, [exe, *args, "--handoff-fd", str(read_end)])
     except OSError:
         return False
     return False

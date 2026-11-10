@@ -30,6 +30,8 @@ export interface RemoteServer {
   auth?: boolean;
   /** A sign-in started from the panel is waiting for the browser. */
   pending?: boolean;
+  /** There is a token of this address to revoke. */
+  signed_in?: boolean;
 }
 
 export interface MarketplaceSource {

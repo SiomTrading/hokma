@@ -489,6 +489,8 @@
   "status.mcp.no_store": "This computer has no secure credential store available. Hokma does not keep the access anywhere else.",
   "status.mcp.connect_failed": "The connection could not start: {output}",
   "status.mcp.no_registration": "This server does not let Hokma register by itself ({output}). Ask the provider for access with dynamic registration.",
+  "status.mcp.not_mcp": "That address is not an MCP server: it answered {output}. Check that it is the MCP server address (for example https://mcp.lauz.io/mcp) and not the web page.",
+  "status.mcp.unreachable": "The server could not be reached ({output}). Check the address and your connection.",
   "status.mcp.rejected": "The server rejected the access it just issued (HTTP {status}). Press Connect again.",
   "status.mcp.page.ok_title": "Connected to {name}",
   "status.mcp.page.ok_text": "Connected, you can close this tab. Hokma is already up to date.",

@@ -52,9 +52,10 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
         async with database_lifespan(app):
             checker = None
             if auto_update_check:
-                from hokma.status.mcp_auth import start_refresher
+                from hokma.status.mcp_auth import start_legacy_cleanup, start_refresher
 
                 start_refresher()                  # remote MCP tokens, refreshed before they end
+                start_legacy_cleanup()             # Claude's own copies of remote servers from 0.0.10-0.0.12
                 checker = asyncio.create_task(app.state.updates.auto_check_loop(lambda: app.state.db))
             try:
                 yield

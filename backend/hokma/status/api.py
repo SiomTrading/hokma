@@ -35,6 +35,10 @@ class McpServerBody(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
 
 
+class McpUrlBody(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+
+
 class McpOpenBody(BaseModel):
     url: str = Field(min_length=1, max_length=8000)
 
@@ -83,6 +87,16 @@ def remote_servers() -> dict:
 @router.post("/api/extensions/servers", status_code=201, summary="Add a remote MCP server (name and https address)")
 def add_remote_server(body: McpServerBody) -> dict:
     return _call(mcp_auth.add_server, body.name, body.url)
+
+
+@router.put("/api/extensions/servers/{name}", summary="Change the address of a remote MCP server (checked first)")
+def edit_remote_server(body: McpUrlBody, name: str = MCP_NAME) -> dict:
+    return _call(mcp_auth.update_server_url, name, body.url)
+
+
+@router.delete("/api/extensions/servers/{name}", summary="Remove a remote MCP server and revoke its access")
+def remove_remote_server(name: str = MCP_NAME) -> dict:
+    return _call(mcp_auth.remove_server, name)
 
 
 @router.post("/api/extensions/servers/{name}/connect",

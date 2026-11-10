@@ -61,6 +61,13 @@ fn stays_in_window(url: &Url) -> bool {
     }
 }
 
+/// Links that leave the window and may go to the system: web pages and an email address (task 3150). Any other
+/// scheme (`file:`, an app's own scheme, `javascript:`, a `ms-` handler) is blocked without a message, so a link in
+/// an agent's answer can never open a local file or start a program.
+fn opens_outside(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https" | "mailto")
+}
+
 #[derive(Serialize)]
 struct Messages {
     lang: &'static str,
@@ -206,7 +213,9 @@ fn main() {
                     if stays_in_window(url) {
                         return true;
                     }
-                    let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                    if opens_outside(url) {
+                        let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                    }
                     false
                 });
             #[cfg(windows)]
@@ -271,6 +280,37 @@ mod tests {
             "mailto:support@example.com",
         ] {
             assert!(!stays_in_window(&Url::parse(url).unwrap()), "{url}");
+        }
+    }
+
+    #[test]
+    fn only_web_pages_and_email_go_to_the_system() {
+        for url in [
+            "https://github.com/SiomTrading/hokma",
+            "http://example.com/",
+            "mailto:support@example.com",
+            "HTTPS://EXAMPLE.COM/",
+        ] {
+            assert!(opens_outside(&Url::parse(url).unwrap()), "{url}");
+        }
+    }
+
+    #[test]
+    fn other_schemes_are_blocked() {
+        for url in [
+            "file:///C:/Windows/System32/calc.exe",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ms-settings:privacy",
+            "ms-msdt:/id",
+            "search-ms:query=x",
+            "vscode://file/c:/x",
+            "smb://server/share",
+            "ftp://example.com/",
+            "tel:+1555",
+            "data:text/html,hi",
+        ] {
+            assert!(!opens_outside(&Url::parse(url).unwrap()), "{url}");
         }
     }
 }
