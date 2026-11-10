@@ -102,7 +102,7 @@ describe("slash commands", () => {
 
   it("completes command names, models, agents and projects", () => {
     expect(suggestionsFor("hello", t, options)).toBeNull();
-    expect(suggestionsFor("/", t, options)!.map((s) => s.label)).toEqual(["/modelo", "/agente", "/proyecto"]);
+    expect(suggestionsFor("/", t, options)!.map((s) => s.label)).toEqual(["/modelo", "/agente", "/proyecto", "/mcp"]);
     expect(suggestionsFor("/ag", t, options)!.map((s) => s.label)).toEqual(["/agente"]);
     expect(suggestionsFor("/modelo o", t, options)!.map((s) => s.value)).toEqual(["/modelo opus"]);
     expect(suggestionsFor("/agente ", t, options)!.map((s) => s.key)).toEqual(["none", "risk"]);

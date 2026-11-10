@@ -23,6 +23,16 @@ export function parseCommand(text: string): { name: CommandName; arg: string | n
   return { name, arg: (match[2] ?? "").trim() || null };
 }
 
+/**
+ * `/mcp` is a panel command: Hokma opens its own MCP panel and the text is never sent to the engine, so it behaves the
+ * same with every engine and never reaches Claude Code's interactive /mcp (task 3158). Unlike the others it is not in the
+ * engine's command list on purpose.
+ */
+export function isPanelCommand(text: string): boolean {
+  const match = COMMAND_LINE.exec(text.trim());
+  return match !== null && match[1]!.toLowerCase() === "mcp" && !(match[2] ?? "").trim();
+}
+
 export interface Suggestion {
   key: string;
   /** Text that replaces the whole input when picked. */
@@ -41,10 +51,11 @@ const MODEL_DOT: Record<string, string> = { haiku: "var(--ok)", sonnet: "var(--a
 export function suggestionsFor(text: string, t: Translate, options: ChatOptions | null): Suggestion[] | null {
   if (!text.startsWith("/")) return null;
   const head = /^\/([A-Za-z]*)$/.exec(text);
-  const names: Array<{ name: CommandName; key: string }> = [
+  const names: Array<{ name: CommandName | "mcp"; key: string }> = [
     { name: "model", key: "chat.cmd.model" },
     { name: "agent", key: "chat.cmd.agent" },
     { name: "project", key: "chat.cmd.project" },
+    { name: "mcp", key: "chat.cmd.mcp" },
   ];
   if (head) {
     const typed = head[1]!.toLowerCase();

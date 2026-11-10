@@ -12,6 +12,7 @@ router = APIRouter(dependencies=[Depends(require_token)])
 
 PLUGIN_ID = r"^[A-Za-z0-9._-]{1,100}@[A-Za-z0-9._-]{1,100}$"
 REQUEST_ID = r"^([0-9a-f]{8}|db-[0-9]{1,9})$"
+MARKETPLACE_NAME = r"^[A-Za-z0-9._-]{1,100}$"
 GITHUB_REPO = r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
 
 
@@ -76,7 +77,7 @@ def anthropic_marketplace(q: str = Query(default="", max_length=100), limit: int
 
 @router.post("/api/extensions/marketplace", status_code=201, summary="Add the Anthropic marketplace to your list")
 def add_anthropic_marketplace() -> dict:
-    return _call(service.add_marketplace, catalog.REPO)
+    return _call(service.add_official)
 
 
 @router.get("/api/extensions/servers", summary="State of each remote MCP server: needs authorization, connected or error")
@@ -143,9 +144,19 @@ def toggle_extension(body: ToggleBody) -> dict:
     return _call(service.toggle_plugin, body.id, body.enabled)
 
 
-@router.post("/api/extensions/marketplaces", status_code=201, summary="Add a GitHub marketplace by owner/repo")
+@router.post("/api/extensions/marketplaces", status_code=201, summary="Add a GitHub repository (marketplace or plugin) by owner/repo; a one-plugin repo is installed")
 def add_marketplace(body: MarketplaceBody) -> dict:
     return _call(service.add_marketplace, body.repo)
+
+
+@router.get("/api/extensions/marketplaces/{name}/plugins", summary="Plugins a registered marketplace offers")
+def marketplace_plugins(name: str = Path(pattern=MARKETPLACE_NAME)) -> dict:
+    return _call(service.marketplace_plugins, name)
+
+
+@router.delete("/api/extensions/marketplaces/{name}", summary="Remove a marketplace and the plugins installed from it")
+def remove_marketplace(name: str = Path(pattern=MARKETPLACE_NAME)) -> dict:
+    return _call(service.remove_marketplace, name)
 
 
 @router.post("/api/extensions/requests/{request_id}/approve", summary="Approve a request made by an agent")

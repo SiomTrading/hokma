@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.0.19
+
+Plugins by link: you see what got installed, whether it is on, and each repository appears once.
+
+- Adding a repository by its address now looks at what it is. A marketplace with one plugin installs that plugin
+  right away; one with several shows its plugins with an Install button; a repository that is a plugin on its own
+  is installed. If the repository is neither, Hokma says so and saves nothing.
+- Settings > Extensions > Plugins starts with "Installed": every plugin shows Active, Off or Error (with the
+  reason), and a switch. The state comes from what the engine really has on disk, not only from your saved list.
+  A plugin that is on but not unpacked yet says "To install" and is unpacked the next time you open a conversation.
+- One repository is one marketplace, however it was written (owner/repo or a GitHub link) and whatever name it
+  came with. The duplicates already saved, like claude-mem twice, are merged when you open the panel. Every
+  marketplace has a Remove button (it also removes the plugins installed from it) and a button to see its plugins.
+- In the plugin list of every marketplace each plugin has Install or Uninstall in that same menu (Uninstall asks
+  first), and in "Installed" each plugin has Uninstall next to its switch. A plugin added by link ends installed
+  and on.
+- New quick command /mcp in the chat: it opens Hokma's own panel (not the interactive /mcp of Claude Code) with every
+  remote and local MCP server and its state (Connected, Needs sign-in, Error with the reason). Connect or Reconnect
+  starts Hokma's own sign-in, Revoke removes the access, and a link goes to Settings > Extensions > MCP. The text
+  is never sent to the engine, so it works the same with Claude Code, Codex, Gemini and the API. The panel and
+  Settings share one sign-in code and one extensions API.
+- Windows installer, from Nathaly's real logs: a second Hokma-Setup now says an installation is already in progress and
+  does not start. Downloads of uv, Git and Claude Code force TLS 1.2, give up only when no data arrives for 45 seconds
+  (a slow but alive download is never cut), retry 3 times with a wait, and say clearly when the retries run out. The
+  setup window shows the last real line, such as the MB downloaded or the package uv is fetching, instead of staying
+  on "Downloading uv".
+- It does not depend on the engine you use: the screen reads Hokma's own files, the same for Claude Code, Codex,
+  Gemini and the API. Only Claude Code unpacks plugins today.
+
 ## 0.0.18
 
 The Windows installer works when it is started from PowerShell 7.

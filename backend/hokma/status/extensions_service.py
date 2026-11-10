@@ -7,7 +7,8 @@ import re
 
 from hokma.db import Actor, Database, NotFound, RuleViolation, get_database
 from hokma.i18n import t
-from hokma.kit import extensions, requests
+from hokma.kit import extensions, plugin_state, requests
+from hokma.status import catalog, plugin_sources
 
 LOCAL_MARKETPLACE = "local"
 DB_REQUEST = re.compile(r"^db-(\d{1,9})$")
@@ -64,6 +65,8 @@ def _describe_source(source: dict) -> str:
     kind = source.get("source")
     if kind == "github":
         return f"github:{source.get('repo')}"
+    if kind == "directory" and extensions.shim_repo(str(source.get("path"))):
+        return f"github:{extensions.shim_repo(str(source.get('path')))}"
     return str(source.get("url") or source.get("path") or kind)
 
 
@@ -85,21 +88,27 @@ def _db_requests() -> list[dict]:
 
 
 def listing() -> dict:
+    extensions.migrate()                 # a repository saved under two names becomes one entry
     data, problems = extensions.load()
     if database_ready():
         db = get_database()
         with db.write() as unit:
             sync_table(unit, data)
     plugins = []
+    installs = plugin_state.engine_installs()
     for plugin_id, enabled in sorted(data["enabledPlugins"].items()):
         name, marketplace = _split(plugin_id)
         summary = requests.Request("", "plugin", plugin_id, None, "").summary()
         plugins.append({"id": plugin_id, "name": name, "marketplace": marketplace, "kind": "plugin",
-                        "enabled": enabled, "summary": summary})
+                        "enabled": enabled, "summary": summary,
+                        **plugin_state.state_of(plugin_id, enabled, data, installs)})
     servers = [{"id": f"mcp:{name}", "name": name, "kind": "mcp", "enabled": True, "target": _server_target(entry),
                 "remote": entry.get("type") == "http"}
                for name, entry in sorted(data["mcpServers"].items())]
-    marketplaces = [{"name": name, "source": _describe_source(entry["source"])}
+    marketplaces = [{"name": name, "source": _describe_source(entry["source"]),
+                     "repo": extensions.source_key(entry["source"]).removeprefix("github:")
+                     if extensions.source_key(entry["source"]).startswith("github:") else None,
+                     "plugins": sum(1 for pid in data["enabledPlugins"] if pid.endswith("@" + name))}
                     for name, entry in sorted(data["extraKnownMarketplaces"].items())]
     inbox = [{"id": r.id, "origin": "inbox", "kind": r.kind, "name": r.name, "requested_at": r.requested_at,
               "reason": None, "risks": r.risks, "summary": r.summary()} for r in requests.list_pending()]
@@ -153,13 +162,122 @@ def uninstall_plugin(plugin_id: str) -> dict:
     return {"id": plugin_id, "uninstalled": True, "warnings": warnings}
 
 
+def _market_plugins(marketplace: str, found: list[dict], data: dict) -> list[dict]:
+    return [{**item, "id": f"{item['name']}@{marketplace}", "installed": f"{item['name']}@{marketplace}" in data["enabledPlugins"],
+             "enabled": data["enabledPlugins"].get(f"{item['name']}@{marketplace}", False)} for item in found]
+
+
+def _source_error(exc: plugin_sources.SourceError):
+    return ServiceError(exc.status, exc.message)
+
+
 def add_marketplace(repo: str) -> dict:
-    name = repo.split("/", 1)[1]
+    """Add a GitHub repository by its address. A repository that is a marketplace is registered once (the same
+    repository under another name is the same entry) and, when it has one plugin only, that plugin is installed
+    right away; with several, they come back to be installed one by one. A repository that is a plugin on its own
+    is installed. Needs the database like any install."""
     try:
-        warnings = extensions.add_marketplace(name, {"source": "github", "repo": repo})
+        found = plugin_sources.inspect(repo)
+    except plugin_sources.SourceError as exc:
+        raise _source_error(exc) from None
+    source: dict = {"source": "github", "repo": repo}
+    if found["kind"] == "plugin":
+        shim = plugin_sources.write_shim(repo, found["name"])
+        source = {"source": "directory", "path": shim}
+    install_now = found["kind"] == "plugin" or len(found["plugins"]) == 1
+    if install_now:
+        _db()                                        # fail before changing anything
+    existing = extensions.find_marketplace(source)
+    name = existing or found["name"]
+    try:
+        warnings = list(extensions.add_marketplace(name, source))
+        if existing and existing != found["name"] and found["kind"] == "marketplace":
+            renamed = extensions.rename_marketplace(existing, found["name"])
+            if extensions.find_marketplace(source) == found["name"]:
+                warnings += renamed
+                name = found["name"]
+    except extensions.NameTaken as exc:
+        raise ServiceError(409, str(exc)) from exc
     except ValueError as exc:
         raise ServiceError(400, str(exc)) from exc
-    return {"name": name, "source": f"github:{repo}", "warnings": warnings}
+    names = [found["name"]] if found["kind"] == "plugin" else [p["name"] for p in found["plugins"]]
+    installed: list[str] = []
+    if install_now:
+        plugin_id = f"{names[0]}@{name}"
+        warnings += toggle_plugin(plugin_id, True)["warnings"]
+        installed.append(plugin_id)
+    data, _ = extensions.load()
+    plugins = _market_plugins(name, found["plugins"], data) if found["kind"] == "marketplace" else []
+    return {"name": name, "source": f"github:{repo}", "kind": found["kind"], "installed": installed,
+            "plugins": plugins, "warnings": warnings}
+
+
+def add_official() -> dict:
+    """Register Anthropic's marketplace without reading it: the panel already lists it from `catalog`."""
+    source = {"source": "github", "repo": catalog.REPO}
+    name = extensions.find_marketplace(source) or catalog.MARKETPLACE_NAME
+    try:
+        warnings = extensions.add_marketplace(name, source)
+    except ValueError as exc:
+        raise ServiceError(400, str(exc)) from exc
+    return {"name": name, "source": f"github:{catalog.REPO}", "warnings": warnings}
+
+
+def marketplace_plugins(name: str) -> dict:
+    """The plugins a registered marketplace offers, each with whether it is installed and on."""
+    data, _ = extensions.load()
+    entry = data["extraKnownMarketplaces"].get(name)
+    if entry is None and name in extensions.BUILTIN_MARKETPLACES:
+        entry = {"source": {"source": "github", "repo": catalog.REPO}}
+    if entry is None:
+        raise ServiceError(404, t("status.ext.unknown_marketplace", name=name))
+    source = entry["source"]
+    repo = source.get("repo") or extensions.source_key(source).removeprefix("github:")
+    if not extensions.GITHUB_REPO.match(repo or ""):
+        raise ServiceError(400, t("status.ext.source_unreadable", name=name))
+    try:
+        found = plugin_sources.inspect(repo)
+    except plugin_sources.SourceError as exc:
+        raise _source_error(exc) from None
+    if found["kind"] == "plugin":
+        found = {"plugins": [{"name": found["name"], "display_name": found["name"],
+                              "description": found["description"], "category": ""}]}
+    return {"name": name, "plugins": _market_plugins(name, found["plugins"], data)}
+
+
+def remove_marketplace(name: str) -> dict:
+    """Take a marketplace out of the list together with the plugins installed from it."""
+    data, _ = extensions.load()
+    if name not in data["extraKnownMarketplaces"]:
+        raise ServiceError(404, t("status.ext.unknown_marketplace", name=name))
+    removed = sorted(pid for pid in data["enabledPlugins"] if pid.endswith("@" + name))
+    db = _db() if removed else None
+    if db is None:
+        gone, warnings = _remove_market(name)
+    else:
+        with db.write() as unit:
+            owner = _owner(unit)
+            sync_table(unit, data)
+            requests_made = []
+            for pid in removed:
+                plugin, market = _split(pid)
+                row = unit.extensions.find(market, plugin) or unit.extensions.add(plugin, market, "plugin")
+                req = unit.extension_requests.create("uninstall", "plugin", plugin, market,
+                                                     f"dashboard: remove marketplace {name}", actor=Actor.human(owner))
+                unit.extension_requests.approve(req.id, decided_by=owner)
+                requests_made.append((req.id, row.id))
+            gone, warnings = _remove_market(name)
+            for req_id, row_id in requests_made:
+                unit.extensions.set_enabled(row_id, False)
+                unit.extension_requests.mark_applied(req_id, row_id)
+    return {"name": name, "removed": True, "plugins_removed": gone, "warnings": warnings}
+
+
+def _remove_market(name: str) -> tuple[list[str], list[str]]:
+    try:
+        return extensions.remove_marketplace(name)
+    except ValueError as exc:
+        raise ServiceError(400, str(exc)) from exc
 
 
 def _request_target(req: requests.Request) -> tuple[str, str]:

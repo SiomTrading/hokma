@@ -1,24 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
-import { api, ApiError, useApiQuery } from "@/api";
+import { api, useApiQuery } from "@/api";
 import { Button, Field, Glyph, Input, Loading, Modal, Pane, Pill, Row } from "@/design";
 import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
 import { normalizeServerName, serverProblem, urlProblem } from "./linkFormats";
 import type { RemoteServer, RemoteState } from "./types";
-
+import { errorText, useRemoteSignIn } from "./useRemoteSignIn";
 
 const TONE: Record<RemoteState, "ok" | "org" | "bad"> = { connected: "ok", needs_auth: "org", error: "bad" };
-const POLL_MS = 2000;
-
-function errorText(cause: unknown, fallback: string): string {
-  return cause instanceof ApiError || cause instanceof Error ? cause.message : fallback;
-}
-
-/** True inside the desktop app, whose window cannot open a browser tab by itself. */
-function inDesktopApp(): boolean {
-  return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
-}
 
 /**
  * Settings > Extensions: remote MCP servers. Add (name + address), then Connect opens the system browser on the
@@ -34,11 +24,9 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [waiting, setWaiting] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [removing, setRemoving] = useState<RemoteServer | null>(null);
-  const seenPending = useRef(false);
   const servers = list.data?.servers ?? [];
   const problem = serverProblem(name, url, servers.map((s) => s.name));
   const valid = problem === null;
@@ -49,31 +37,7 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
     onChanged();
   };
 
-  // While a sign-in is open in the browser, look again every two seconds and when the window gets the focus back.
-  useEffect(() => {
-    if (!waiting) return undefined;
-    const timer = window.setInterval(() => list.reload(), POLL_MS);
-    const onFocus = () => list.reload();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [waiting]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!waiting) return;
-    const server = servers.find((s) => s.name === waiting);
-    if (!server) return;
-    if (server.pending) seenPending.current = true;
-    if (server.state === "connected") {
-      setWaiting(null);
-      shell.toast({ tone: "ok", text: t("mcp.connected", { name: server.name }) });
-      onChanged();
-    } else if (server.state === "error" || (seenPending.current && !server.pending)) {
-      setWaiting(null);
-    }
-  }, [servers, waiting]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { waiting, setWaiting, connect, cancel, revoke } = useRemoteSignIn({ servers, reload: list.reload, onChanged, setBusy, setError });
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -86,56 +50,6 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
       shell.toast({ tone: "ok", text: t(added.state === "connected" ? "mcp.addedOpen" : "mcp.added", { name: cleanName }) });
       setName("");
       setUrl("");
-      refresh();
-    } catch (cause) {
-      setError(errorText(cause, t("api.error")));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const connect = async (server: RemoteServer) => {
-    setBusy(server.name);
-    setError(null);
-    // A tab opened now, inside the click, is not blocked; it gets its address once the server answers.
-    const tab = inDesktopApp() ? null : window.open("about:blank", "_blank");
-    try {
-      const started = await api.post<{ auth_url: string | null }>(`/api/extensions/servers/${server.name}/connect`);
-      if (!started.auth_url) {
-        tab?.close();
-        refresh();
-        return;
-      }
-      if (tab) {
-        tab.opener = null;
-        tab.location.href = started.auth_url;
-      } else {
-        await api.post(`/api/extensions/servers/${server.name}/open`, { url: started.auth_url });
-      }
-      seenPending.current = false;
-      setWaiting(server.name);
-      list.reload();
-    } catch (cause) {
-      tab?.close();
-      setError(errorText(cause, t("api.error")));
-      list.reload();
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const cancel = async (server: RemoteServer) => {
-    setWaiting(null);
-    await api.post(`/api/extensions/servers/${server.name}/connect/cancel`).catch(() => undefined);
-    list.reload();
-  };
-
-  const revoke = async (server: RemoteServer) => {
-    setBusy(server.name);
-    setError(null);
-    try {
-      await api.post(`/api/extensions/servers/${server.name}/logout`);
-      shell.toast({ tone: "ok", text: t("mcp.revoked", { name: server.name }) });
       refresh();
     } catch (cause) {
       setError(errorText(cause, t("api.error")));

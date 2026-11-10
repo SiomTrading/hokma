@@ -264,8 +264,9 @@ function Install-Git {
     $entry = $lock.git_for_windows.(Get-Platform)
     if (-not $entry) { Fail "lock.json has no git_for_windows entry for this platform" }
     $exe = Join-Path $WorkTmp "git-setup.exe"
-    try { Invoke-WebRequest -Uri $entry.url -OutFile $exe -UseBasicParsing }
-    catch { Fail ("git download failed: " + $entry.url) }
+    if (-not (Invoke-HokmaDownload $entry.url $exe "Git" { param($t) Emit ("LINE:" + $t) })) {
+        Fail ("git download failed after 3 attempts: " + $entry.url + " (" + $script:DownloadError + ")")
+    }
     $actual = Get-Sha256 $exe
     if ($actual -ne $entry.sha256.ToLower()) { Fail ("git sha256 mismatch: expected " + $entry.sha256 + ", got " + $actual) }
     $proc = Start-Process -FilePath $exe -ArgumentList "/VERYSILENT /NORESTART /CURRENTUSER /SUPPRESSMSGBOXES /NOCANCEL /SP-" -Wait -PassThru
@@ -279,7 +280,9 @@ function Install-Claude {
     if (Test-Claude) { Emit "RESULT:claude=present"; return }
     $script = Join-Path $WorkTmp "claude-install.ps1"
     try {
-        Invoke-WebRequest -Uri "https://claude.ai/install.ps1" -OutFile $script -UseBasicParsing
+        if (-not (Invoke-HokmaDownload "https://claude.ai/install.ps1" $script "Claude Code" { param($t) Emit ("LINE:" + $t) })) {
+            throw ("download failed after 3 attempts: " + $script:DownloadError)
+        }
         $code = Invoke-Logged "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $script)
         Write-Log ("claude install exit code " + $code)
     }
@@ -399,6 +402,7 @@ try {
     if ($Mode -eq "update") { Remove-StaleLock }
 
     Expand-Archive -LiteralPath $Src -DestinationPath $SrcDir -Force
+    . (Join-Path $SrcDir "installer\download.ps1")
     if (-not (Test-Path -LiteralPath (Join-Path $SrcDir "installer\install.ps1"))) { Fail "the source package has no installer\install.ps1" }
 
     $backup = ""

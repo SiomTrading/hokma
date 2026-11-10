@@ -100,3 +100,39 @@ def test_powershell_scripts_do_not_depend_on_inherited_modules():
         assert "SHA256]::Create()" in path.read_text(encoding="utf-8"), path.name
     cmd = (INSTALLER / "Instalar-Hokma.cmd").read_text(encoding="utf-8")
     assert "Remove-Item Env:PSModulePath" in cmd
+
+
+def test_second_setup_is_refused_by_a_mutex():
+    """Task 3160: two Hokma-Setup at once would fight over the same folders."""
+    iss = ISS.read_text(encoding="utf-8")
+    assert re.search(r"^SetupMutex=\S+", iss, re.M)
+    assert "CheckForMutexes('HokmaSetupGuard')" in iss and "CreateMutex('HokmaSetupGuard')" in iss
+    for lang in ("es", "en"):
+        isl = (INSTALLER / "messages" / f"setup-{lang}.isl").read_text(encoding="utf-8")
+        assert "AlreadyRunning=" in isl
+
+
+def test_downloads_share_one_function_with_timeouts_retries_and_progress():
+    """Task 3160: uv, Git and Claude download through Invoke-HokmaDownload (TLS 1.2, no-data timeout, 3 tries, MB)."""
+    func = (INSTALLER / "download.ps1").read_text(encoding="utf-8")
+    assert "Tls12" in func and ".Timeout =" in func and ".ReadWriteTimeout =" in func
+    assert "[int]$Retries = 3" in func and "Start-Sleep" in func and " MB" in func
+    assert "Invoke-WebRequest" not in func and "Get-FileHash" not in func
+    install = (INSTALLER / "install.ps1").read_text(encoding="utf-8")
+    helper = HELPER.read_text(encoding="utf-8")
+    assert 'download.ps1' in install and "Invoke-HokmaDownload $entry.url $archive" in install
+    assert "download.ps1" in helper and helper.count("Invoke-HokmaDownload") >= 2
+    for text in (install, helper):
+        assert "Invoke-WebRequest" not in text
+    assert 'Invoke-HokmaDownload "https://claude.ai/install.ps1"' in helper
+    assert 'Emit ("LINE:" + $t)' in helper
+    assert "$script:DownloadError" in install
+
+
+def test_setup_window_shows_the_last_line_on_both_pages():
+    iss = ISS.read_text(encoding="utf-8")
+    block = iss[iss.index("'LINE:'"):iss.index("'RESULT:'")]
+    assert "FilenameLabel.Caption := Copy(S, 6, MaxInt)" in block
+    assert "ProgressPage.SetText(ProgressPage.Msg1Label.Caption, Copy(S, 6, MaxInt))" in block
+    for lang in ("es", "en"):
+        assert "{2}" in (INSTALLER / "messages" / f"{lang}.properties").read_text(encoding="utf-8").split("inst.download_failed=")[1].splitlines()[0]

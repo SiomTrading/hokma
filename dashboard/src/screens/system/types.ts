@@ -8,7 +8,12 @@ export interface PluginItem {
   enabled: boolean;
   /** What turning it on does, as the CLI shows it. */
   summary: string;
+  /** What the engine really has: active, disabled, pending (on, not unpacked yet) or error (see `reason`). */
+  state: PluginState;
+  reason: string;
 }
+
+export type PluginState = "active" | "disabled" | "pending" | "error";
 
 export interface ServerItem {
   id: string;
@@ -37,6 +42,31 @@ export interface RemoteServer {
 export interface MarketplaceSource {
   name: string;
   source: string;
+  /** owner/repo when it comes from GitHub. */
+  repo?: string | null;
+  /** Plugins installed from it. */
+  plugins?: number;
+}
+
+/** A plugin a marketplace offers. */
+export interface OfferedPlugin {
+  id: string;
+  name: string;
+  display_name: string;
+  description: string;
+  category: string;
+  installed: boolean;
+  enabled: boolean;
+}
+
+/** POST /api/extensions/marketplaces: what the repository turned out to be and what was installed. */
+export interface AddResult {
+  name: string;
+  source: string;
+  kind: "marketplace" | "plugin";
+  installed: string[];
+  plugins: OfferedPlugin[];
+  warnings: string[];
 }
 
 export interface ExtensionRequest {

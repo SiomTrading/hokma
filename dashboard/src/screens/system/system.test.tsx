@@ -14,13 +14,13 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const PLUGIN = { id: "tool@acme", name: "tool", marketplace: "acme", kind: "plugin" as const, enabled: false, summary: 'Plugin "tool@acme" will be activated' };
+const PLUGIN = { id: "tool@acme", name: "tool", marketplace: "acme", kind: "plugin" as const, enabled: false, summary: 'Plugin "tool@acme" will be activated', state: "disabled" as const, reason: "" };
 
 function extensionsData(over: Partial<ExtensionsData> = {}): ExtensionsData {
   return {
     plugins: [PLUGIN],
     servers: [{ id: "mcp:files", name: "files", kind: "mcp", enabled: true, target: "/usr/bin/files" }],
-    marketplaces: [{ name: "acme", source: "github:acme/plugins" }],
+    marketplaces: [{ name: "acme", source: "github:acme/plugins", repo: "acme/plugins", plugins: 1 }],
     requests: [],
     problems: [],
     database: true,
@@ -186,7 +186,7 @@ describe.each([
     setLocale(locale);
     const calls = mockApi({
       "GET /api/extensions": extensionsData(),
-      "POST /api/extensions/marketplaces": { name: "plugins", source: "github:acme/plugins", warnings: [] },
+      "POST /api/extensions/marketplaces": { name: "plugins", source: "github:acme/plugins", kind: "marketplace", installed: [], plugins: [], warnings: [] },
     });
     renderWithApp(<ExtensionsSection />);
     await userEvent.click(await screen.findByRole("button", { name: words.add }));
@@ -201,7 +201,7 @@ describe.each([
     setLocale(locale);
     const calls = mockApi({
       "GET /api/extensions": extensionsData(),
-      "POST /api/extensions/marketplaces": { name: "plugins", source: "github:acme/plugins", warnings: [] },
+      "POST /api/extensions/marketplaces": { name: "plugins", source: "github:acme/plugins", kind: "marketplace", installed: [], plugins: [], warnings: [] },
     });
     renderWithApp(<ExtensionsSection />);
     await userEvent.click(await screen.findByRole("button", { name: words.add }));
@@ -214,6 +214,98 @@ describe.each([
     expect(submit).toBeEnabled();
     await userEvent.click(submit);
     await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/marketplaces")?.body).toEqual({ repo: "acme/plugins" }));
+  });
+});
+
+describe("Extensions plugins (task 3156)", () => {
+  const states = [
+    { ...PLUGIN, id: "a@m", name: "alpha", marketplace: "m", enabled: true, state: "active" as const },
+    { ...PLUGIN, id: "b@m", name: "beta", marketplace: "m", enabled: false, state: "disabled" as const },
+    { ...PLUGIN, id: "c@m", name: "gamma", marketplace: "m", enabled: true, state: "error" as const, reason: "Plugin files are gone" },
+  ];
+
+  it("shows Installed first, each plugin with its real state and the reason of an error", async () => {
+    setLocale("en");
+    mockApi({ "GET /api/extensions": extensionsData({ plugins: states }) });
+    renderWithApp(<ExtensionsSection />);
+    await screen.findByText("alpha");
+    expect(screen.getByLabelText("Status of alpha")).toHaveTextContent("Active");
+    expect(screen.getByLabelText("Status of beta")).toHaveTextContent("Off");
+    expect(screen.getByLabelText("Status of gamma")).toHaveTextContent("Error");
+    expect(screen.getByText("Plugin files are gone")).toBeInTheDocument();
+    const installed = screen.getByText("Installed");
+    const sources = screen.getByText("Marketplaces you added");
+    expect(installed.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("lists the plugins of a marketplace repo with several and installs one", async () => {
+    setLocale("en");
+    const offered = { name: "acme", plugins: [
+      { id: "one@acme", name: "one", display_name: "one", description: "First", category: "", installed: false, enabled: false },
+      { id: "two@acme", name: "two", display_name: "two", description: "Second", category: "", installed: true, enabled: true },
+    ] };
+    const calls = mockApi({
+      "GET /api/extensions": extensionsData(),
+      "GET /api/extensions/marketplaces/acme/plugins": offered,
+      "POST /api/extensions/toggle": { id: "one@acme", enabled: true, warnings: [] },
+    });
+    renderWithApp(<ExtensionsSection />);
+    await userEvent.click(await screen.findByRole("button", { name: "Plugins of acme" }));
+    expect(await screen.findByText("First")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Install one" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/toggle")?.body).toEqual({ id: "one@acme", enabled: true, confirmed: true }));
+    expect(calls.some((c) => c.path === "/api/extensions/marketplace" && c.method === "POST")).toBe(false);
+  });
+
+  it("in a marketplace catalog every plugin has Install or Uninstall, and uninstalling asks first", async () => {
+    setLocale("en");
+    const offered = { name: "acme", plugins: [
+      { id: "one@acme", name: "one", display_name: "one", description: "First", category: "", installed: false, enabled: false },
+      { id: "two@acme", name: "two", display_name: "two", description: "Second", category: "", installed: true, enabled: true },
+    ] };
+    const calls = mockApi({
+      "GET /api/extensions": extensionsData(),
+      "GET /api/extensions/marketplaces/acme/plugins": offered,
+      "POST /api/extensions/uninstall": { id: "two@acme", uninstalled: true, warnings: [] },
+    });
+    renderWithApp(<ExtensionsSection />);
+    await userEvent.click(await screen.findByRole("button", { name: "Plugins of acme" }));
+    expect(await screen.findByText("Second")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install one" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Install two" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: T("ext.uninstall.of", "en", { name: "two" }) }));
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/uninstall")?.body).toEqual({ id: "two@acme", confirmed: true }));
+  });
+
+  it("opens the plugin list right after adding a repo that offers several", async () => {
+    setLocale("en");
+    const calls = mockApi({
+      "GET /api/extensions": extensionsData(),
+      "POST /api/extensions/marketplaces": { name: "acme", source: "github:acme/plugins", kind: "marketplace", installed: [], plugins: [{}, {}], warnings: [] },
+      "GET /api/extensions/marketplaces/acme/plugins": { name: "acme", plugins: [{ id: "one@acme", name: "one", display_name: "one", description: "First", category: "", installed: false, enabled: false }] },
+    });
+    renderWithApp(<ExtensionsSection />);
+    await userEvent.click(await screen.findByRole("button", { name: "Add by link" }));
+    await userEvent.type(screen.getByPlaceholderText("owner/repo"), "acme/plugins");
+    await userEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
+    expect(await screen.findByText("First")).toBeInTheDocument();
+    expect(calls.some((c) => c.path.startsWith("/api/extensions/marketplaces/acme/plugins"))).toBe(true);
+  });
+
+  it("removes a marketplace after the owner confirms", async () => {
+    setLocale("en");
+    const calls = mockApi({
+      "GET /api/extensions": extensionsData(),
+      "DELETE /api/extensions/marketplaces/acme": { name: "acme", removed: true, plugins_removed: [], warnings: [] },
+    });
+    renderWithApp(<ExtensionsSection />);
+    await userEvent.click(await screen.findByRole("button", { name: "Remove the marketplace acme" }));
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/extensions/marketplaces/acme")).toBe(true));
   });
 });
 

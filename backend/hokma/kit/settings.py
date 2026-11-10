@@ -108,10 +108,11 @@ def build_settings() -> dict:
     # inside Claude Code (live settings.json, plugins/known_marketplaces.json) are kept after validation.
     student, _problems = extensions.load()
     live, _live_problems = extensions.live_additions(student)
-    for key in ("enabledPlugins", "extraKnownMarketplaces"):
-        merged = {**live[key], **student[key]}
-        if merged:
-            settings[key] = merged
+    merged = {key: {**live[key], **student[key]} for key in ("enabledPlugins", "extraKnownMarketplaces")}
+    extensions.dedupe_marketplaces(merged)       # one entry per repository
+    for key, value in merged.items():
+        if value:
+            settings[key] = value
     return settings
 
 

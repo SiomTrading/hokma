@@ -8,11 +8,12 @@ import { openDialog, getSnapshot as projectsSnapshot, subscribe as subscribeProj
 import type { ScreenProps } from "@/shell/registry";
 import "./chat.css";
 import { USAGE_WARN_PCT, chatOptions, errorText, saveToProject, weeklyUsagePct } from "./chatApi";
-import { parseCommand } from "./commands";
+import { isPanelCommand, parseCommand } from "./commands";
 import { Composer } from "./Composer";
 import type { ComposerHandle } from "./Composer";
 import { getHub } from "./hub";
 import type { HubClient } from "./hub";
+import { McpPanel } from "./McpPanel";
 import { MessageItem } from "./Messages";
 import { ProjectScope } from "./ProjectScope";
 import { initialState, reducer } from "./state";
@@ -49,6 +50,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
   const [optionsTick, setOptionsTick] = useState(0);
   const [usagePct, setUsagePct] = useState<number | null>(null);
   const [confirmOpus, setConfirmOpus] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const [modelMenuRequest, setModelMenuRequest] = useState(0);
   const [dragging, setDragging] = useState(false);
   const composer = useRef<ComposerHandle>(null);
@@ -179,6 +181,10 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
   const send = (text: string, attachments: AttachmentChip[]): boolean => {
     const self = client.current!;
     const current = stateRef.current;
+    if (attachments.length === 0 && isPanelCommand(text)) {
+      setMcpOpen(true); // Hokma's own panel: the text never goes to the engine, whichever engine is in use
+      return true;
+    }
     const command = attachments.length === 0 ? parseCommand(text) : null;
     if (command?.name === "model" && command.arg?.toLowerCase() === "opus" && current.model !== "opus") {
       setConfirmOpus(true); // nothing changes until the owner confirms
@@ -354,6 +360,8 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
           </div>
         </Modal>
       ) : null}
+
+      {mcpOpen ? <McpPanel onClose={() => setMcpOpen(false)} /> : null}
 
       {dragging ? (
         <div className="chat-drop" aria-hidden="true">

@@ -30,6 +30,7 @@ AppVerName=Hokma {#AppVersion}
 AppPublisher=SiomTrading USA LLC
 AppPublisherURL=https://github.com/SiomTrading/hokma
 PrivilegesRequired=lowest
+SetupMutex=HokmaSetupRunning
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DefaultDirName={%USERPROFILE}\Hokma
@@ -231,6 +232,13 @@ var
   OutFile: String;
 begin
   Result := True;
+  { A second Hokma-Setup warns and stops: two installs at once would fight over the same folders (task 3160). }
+  if CheckForMutexes('HokmaSetupGuard') then begin
+    if not WizardSilent then MsgBox(CustomMessage('AlreadyRunning'), mbInformation, MB_OK);
+    Result := False;
+    exit;
+  end;
+  CreateMutex('HokmaSetupGuard');
   ForceDirectories(ExpandConstant('{localappdata}\Hokma-Setup'));
   LogFile := ExpandConstant('{localappdata}\Hokma-Setup\setup-') + GetDateTimeString('yyyymmdd-hhnnss', #0, #0) + '.log';
   ExtractTemporaryFile('setup-helper.ps1');
@@ -363,8 +371,15 @@ begin
     if (not WizardSilent) and (WizardForm.CurPageID <> wpInstalling) then ProgressPage.SetProgress(StageCount, StageTotal);
   end
   else if Copy(S, 1, 5) = 'LINE:' then begin
-    if (not WizardSilent) and (WizardForm.CurPageID <> wpInstalling) then
-      ProgressPage.SetText(ProgressPage.Msg1Label.Caption, Copy(S, 6, MaxInt));
+    { The last real line (uv: package and MB; Git and Claude: MB) replaces the stage detail, on either page. }
+    if Trim(Copy(S, 6, MaxInt)) <> '' then begin
+      if not WizardSilent then begin
+        if WizardForm.CurPageID = wpInstalling then
+          WizardForm.FilenameLabel.Caption := Copy(S, 6, MaxInt)
+        else
+          ProgressPage.SetText(ProgressPage.Msg1Label.Caption, Copy(S, 6, MaxInt));
+      end;
+    end;
   end
   else if Copy(S, 1, 7) = 'RESULT:' then ReadResult(Copy(S, 8, MaxInt))
   else if Copy(S, 1, 6) = 'ERROR:' then HelperError := Copy(S, 7, MaxInt);

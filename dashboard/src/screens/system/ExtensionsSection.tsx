@@ -5,10 +5,12 @@ import { Button, EmptyState, ErrorState, Field, Glyph, Input, Loading, Modal, Pa
 import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
 import { normalizeRepo, repoProblem } from "./linkFormats";
+import { readTab, storeTab } from "./extTab";
+import type { ExtTab } from "./extTab";
 import { RemoteServers } from "./RemoteServers";
-import type { ExtensionRequest, ExtensionsData, MarketData, MarketItem, PluginItem } from "./types";
+import type { AddResult, ExtensionRequest, ExtensionsData, MarketData, MarketItem, MarketplaceSource, OfferedPlugin, PluginItem, PluginState } from "./types";
 
-type PendingAction = "toggle" | "install" | "uninstall";
+type PendingAction = "toggle" | "install" | "uninstall" | "removeMarket";
 
 interface Pending {
   action: PendingAction;
@@ -17,25 +19,6 @@ interface Pending {
   enabled: boolean;
   /** What turning it on does, as the CLI shows it. Empty for plugins from the marketplace list. */
   summary: string;
-}
-
-type ExtTab = "plugins" | "mcp";
-const TAB_KEY = "hokma.extensions.tab";
-
-function readTab(): ExtTab {
-  try {
-    return localStorage.getItem(TAB_KEY) === "mcp" ? "mcp" : "plugins";
-  } catch {
-    return "plugins";
-  }
-}
-
-function storeTab(tab: ExtTab): void {
-  try {
-    localStorage.setItem(TAB_KEY, tab);
-  } catch {
-    /* storage blocked: the tab is just not remembered */
-  }
 }
 
 const MARKETPLACE_NAME = "claude-plugins-official";
@@ -52,6 +35,7 @@ export function ExtensionsSection() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [tab, setTab] = useState<ExtTab>(readTab);
   const [linking, setLinking] = useState(false);
+  const [openMarket, setOpenMarket] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,12 +54,15 @@ export function ExtensionsSection() {
   const confirmPending = () =>
     pending &&
     run(async () => {
-      if (pending.action === "uninstall") {
+      if (pending.action === "removeMarket") {
+        await api.delete(`/api/extensions/marketplaces/${encodeURIComponent(pending.id)}`);
+        shell.toast({ tone: "ok", text: t("ext.changed.marketRemoved", { name: pending.name }) });
+      } else if (pending.action === "uninstall") {
         await api.post("/api/extensions/uninstall", { id: pending.id, confirmed: true });
         shell.toast({ tone: "ok", text: t("ext.changed.uninstalled", { name: pending.name }) });
       } else {
         // Installing is one step for the owner: the marketplace joins the list first when it is not there yet.
-        if (pending.action === "install" && !list.data?.marketplaces.some((m) => m.name === MARKETPLACE_NAME)) {
+        if (pending.action === "install" && pending.id.endsWith(`@${MARKETPLACE_NAME}`) && !list.data?.marketplaces.some((m) => m.name === MARKETPLACE_NAME)) {
           await api.post("/api/extensions/marketplace");
         }
         await api.post("/api/extensions/toggle", { id: pending.id, enabled: pending.enabled, confirmed: true });
@@ -134,24 +121,6 @@ export function ExtensionsSection() {
       <div role="tabpanel" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {tab === "plugins" ? (
           <>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button size="sm" variant="ghost" onClick={() => setLinking((open) => !open)} aria-pressed={linking}>
-                {t("ext.add")}
-              </Button>
-            </div>
-
-            {linking ? <AddByLink onDone={() => { setLinking(false); list.reload(); }} /> : null}
-
-            <MarketplaceList
-              disabled={busy || !data.database}
-              onInstall={(item) => setPending({ action: "install", id: item.id, name: item.display_name, enabled: true, summary: "" })}
-              onToggle={(item, enabled) => setPending({ action: "toggle", id: item.id, name: item.display_name, enabled, summary: "" })}
-              onUninstall={(item) => askUninstall(item.id, item.display_name)}
-              refreshKey={data.plugins.map((p) => `${p.id}:${p.enabled}`).join("|")}
-            />
-
-            {requestsBlock(false)}
-
             <span className="lbl">{t("ext.installed")}</span>
             {data.plugins.length === 0 ? (
               <Pane>
@@ -165,19 +134,51 @@ export function ExtensionsSection() {
               </Pane>
             )}
 
-            {data.marketplaces.length > 0 ? (
-              <>
-                <span className="lbl">{t("ext.sources")}</span>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {data.marketplaces.map((source) => (
-                    <div key={source.name} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                      <Pill>{source.name}</Pill>
-                      <span className="p mono" style={{ fontSize: 12 }}>{source.source}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
+            {requestsBlock(false)}
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button size="sm" variant="ghost" onClick={() => setLinking((open) => !open)} aria-pressed={linking}>
+                {t("ext.add")}
+              </Button>
+            </div>
+
+            {linking ? (
+              <AddByLink
+                onDone={(result) => {
+                  setLinking(false);
+                  setOpenMarket(result.kind === "marketplace" && result.installed.length === 0 ? result.name : null);
+                  list.reload();
+                  shell.emit("extensions:changed");
+                }}
+              />
             ) : null}
+
+            {data.marketplaces.length > 0 ? (
+              <section style={{ display: "flex", flexDirection: "column", gap: 8 }} aria-label={t("ext.sources")}>
+                <span className="lbl">{t("ext.sources")}</span>
+                {data.marketplaces.map((source) => (
+                  <MarketplaceEntry
+                    key={source.name}
+                    source={source}
+                    open={openMarket === source.name}
+                    onOpen={(open) => setOpenMarket(open ? source.name : null)}
+                    disabled={busy || !data.database}
+                    onInstall={(item) => setPending({ action: "install", id: item.id, name: item.display_name, enabled: true, summary: "" })}
+                    onUninstall={(item) => askUninstall(item.id, item.display_name)}
+                    onRemove={() => setPending({ action: "removeMarket", id: source.name, name: source.name, enabled: false, summary: String(source.plugins ?? 0) })}
+                    refreshKey={data.plugins.map((p) => `${p.id}:${p.enabled}`).join("|")}
+                  />
+                ))}
+              </section>
+            ) : null}
+
+            <MarketplaceList
+              disabled={busy || !data.database}
+              onInstall={(item) => setPending({ action: "install", id: item.id, name: item.display_name, enabled: true, summary: "" })}
+              onToggle={(item, enabled) => setPending({ action: "toggle", id: item.id, name: item.display_name, enabled, summary: "" })}
+              onUninstall={(item) => askUninstall(item.id, item.display_name)}
+              refreshKey={data.plugins.map((p) => `${p.id}:${p.enabled}`).join("|")}
+            />
           </>
         ) : (
           <>
@@ -219,7 +220,7 @@ export function ExtensionsSection() {
       {pending ? (
         <Modal label={t(`ext.confirm.${pending.action === "toggle" ? (pending.enabled ? "enable" : "disable") : pending.action}`, { name: pending.name })} onClose={() => setPending(null)} style={{ flexDirection: "column", width: "min(560px, 100%)", padding: 22, gap: 14 }}>
           <h2 className="h1" style={{ fontSize: 17 }}>{t(`ext.confirm.${pending.action === "toggle" ? (pending.enabled ? "enable" : "disable") : pending.action}`, { name: pending.name })}</h2>
-          <p className="p">{t(`ext.confirm.${pending.action === "toggle" ? (pending.enabled ? "enable" : "disable") : pending.action}Body`)}</p>
+          <p className="p">{t(`ext.confirm.${pending.action === "toggle" ? (pending.enabled ? "enable" : "disable") : pending.action}Body`, { count: pending.action === "removeMarket" ? pending.summary : "" })}</p>
           {pending.enabled ? (
             <pre className="mono" style={{ margin: 0, fontSize: 12, lineHeight: 1.7, color: "var(--t1)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
               {pending.summary || pending.id}
@@ -236,6 +237,8 @@ export function ExtensionsSection() {
   );
 }
 
+const STATE_TONE: Record<PluginState, "ok" | "warn" | "bad" | "default"> = { active: "ok", pending: "warn", error: "bad", disabled: "default" };
+
 function PluginRow({ plugin, disabled, onToggle, onUninstall }: { plugin: PluginItem; disabled: boolean; onToggle: (enabled: boolean) => void; onUninstall: () => void }) {
   const { t } = useI18n();
   return (
@@ -243,11 +246,59 @@ function PluginRow({ plugin, disabled, onToggle, onUninstall }: { plugin: Plugin
       <Glyph initial={plugin.name.slice(0, 1).toUpperCase()} size={34} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
         <span className="h2">{plugin.name}</span>
+        {plugin.reason ? <span className="p" style={{ fontSize: 12, overflowWrap: "anywhere" }}>{plugin.reason}</span> : null}
       </div>
       <Pill>{plugin.marketplace}</Pill>
+      <Pill tone={STATE_TONE[plugin.state]} aria-label={t("ext.state.of", { name: plugin.name })}>{t(`ext.state.${plugin.state}`)}</Pill>
       <Toggle checked={plugin.enabled} disabled={disabled} label={t("ext.toggle", { name: plugin.name })} onChange={onToggle} />
       <Button size="sm" variant="ghost" disabled={disabled} aria-label={t("ext.uninstall.of", { name: plugin.name })} onClick={onUninstall}>{t("ext.uninstall")}</Button>
     </Row>
+  );
+}
+
+function MarketplaceEntry({ source, open, onOpen, disabled, onInstall, onUninstall, onRemove, refreshKey }: { source: MarketplaceSource; open: boolean; onOpen: (open: boolean) => void; disabled: boolean; onInstall: (item: OfferedPlugin) => void; onUninstall: (item: OfferedPlugin) => void; onRemove: () => void; refreshKey: string }) {
+  const { t } = useI18n();
+  return (
+    <Pane style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <Pill>{source.name}</Pill>
+        <span className="p mono" style={{ fontSize: 12, flex: 1, overflowWrap: "anywhere" }}>{source.source}</span>
+        <Button size="sm" variant="ghost" aria-expanded={open} aria-label={t("ext.market.plugins.of", { name: source.name })} onClick={() => onOpen(!open)}>
+          {t(open ? "ext.market.hide" : "ext.market.show")}
+        </Button>
+        <Button size="sm" variant="ghost" disabled={disabled} aria-label={t("ext.market.remove.of", { name: source.name })} onClick={onRemove}>{t("ext.market.remove")}</Button>
+      </div>
+      {open ? <OfferedPlugins name={source.name} disabled={disabled} onInstall={onInstall} onUninstall={onUninstall} refreshKey={refreshKey} /> : null}
+    </Pane>
+  );
+}
+
+function OfferedPlugins({ name, disabled, onInstall, onUninstall, refreshKey }: { name: string; disabled: boolean; onInstall: (item: OfferedPlugin) => void; onUninstall: (item: OfferedPlugin) => void; refreshKey: string }) {
+  const { t } = useI18n();
+  const result = useApiQuery<{ plugins: OfferedPlugin[] }>(`/api/extensions/marketplaces/${encodeURIComponent(name)}/plugins?r=${encodeURIComponent(refreshKey)}`);
+  if (result.loading && !result.data) return <Loading inline />;
+  if (result.error || !result.data) return <ErrorState message={result.error?.message} onRetry={result.reload} />;
+  if (result.data.plugins.length === 0) return <p className="p">{t("ext.market.none")}</p>;
+  return (
+    <div style={{ borderTop: "1px solid var(--border)" }}>
+      {result.data.plugins.map((item) => (
+        <Row key={item.id}>
+          <Glyph initial={item.display_name.slice(0, 1).toUpperCase()} size={34} />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+            <span className="h2">{item.display_name}</span>
+            <span className="p" style={{ fontSize: 12 }}>{item.description}</span>
+          </div>
+          {item.installed ? (
+            <>
+              <Pill tone={item.enabled ? "ok" : "default"}>{t(item.enabled ? "ext.market.installedOn" : "ext.market.installedOff")}</Pill>
+              <Button size="sm" variant="ghost" disabled={disabled} aria-label={t("ext.uninstall.of", { name: item.display_name })} onClick={() => onUninstall(item)}>{t("ext.uninstall")}</Button>
+            </>
+          ) : (
+            <Button size="sm" variant="primary" disabled={disabled} aria-label={t("ext.install.of", { name: item.display_name })} onClick={() => onInstall(item)}>{t("ext.install")}</Button>
+          )}
+        </Row>
+      ))}
+    </div>
   );
 }
 
@@ -280,7 +331,7 @@ function RequestCard({ request, busy, onDecide }: { request: ExtensionRequest; b
   );
 }
 
-function AddByLink({ onDone }: { onDone: () => void }) {
+function AddByLink({ onDone }: { onDone: (result: AddResult) => void }) {
   const { t } = useI18n();
   const shell = useShell();
   const [repo, setRepo] = useState("");
@@ -295,9 +346,10 @@ function AddByLink({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const added = await api.post<{ name: string }>("/api/extensions/marketplaces", { repo: normalizeRepo(repo) });
-      shell.toast({ tone: "ok", text: t("ext.link.added", { name: added.name }) });
-      onDone();
+      const added = await api.post<AddResult>("/api/extensions/marketplaces", { repo: normalizeRepo(repo) });
+      const installed = added.installed[0]?.split("@")[0];
+      shell.toast({ tone: "ok", text: installed ? t("ext.link.installed", { name: installed }) : added.plugins.length > 1 ? t("ext.link.choose", { name: added.name, count: added.plugins.length }) : t("ext.link.added", { name: added.name }) });
+      onDone(added);
     } catch (cause) {
       setError(errorText(cause, t("api.error")));
     } finally {

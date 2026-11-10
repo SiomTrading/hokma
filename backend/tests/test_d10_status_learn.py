@@ -102,7 +102,7 @@ def test_extensions_listing_matches_the_file_and_the_table(client, db):  # noqa:
     body = client.get("/api/extensions").json()
     assert [p["id"] for p in body["plugins"]] == ["tool@acme"] and body["plugins"][0]["enabled"] is False
     assert "tool@acme" in body["plugins"][0]["summary"]
-    assert body["servers"][0]["name"] == "files" and body["marketplaces"][0] == {"name": "acme", "source": "github:acme/plugins"}
+    assert body["servers"][0]["name"] == "files" and body["marketplaces"][0]["name"] == "acme" and body["marketplaces"][0]["source"] == "github:acme/plugins"
     with db.read() as u:
         assert {(e.name, e.kind) for e in u.extensions.list()} == {("tool", "plugin"), ("files", "mcp")}
 
@@ -190,10 +190,12 @@ def test_unknown_request_ids(client):
     assert client.post("/api/extensions/requests/not-an-id/approve").status_code == 422
 
 
-def test_add_marketplace_by_link(client):
+def test_add_marketplace_by_link(client, monkeypatch):
+    from hokma.status import plugin_sources
+    monkeypatch.setattr(plugin_sources, "fetch_json", lambda url: {"name": "acme-market", "plugins": [{"name": "a"}, {"name": "b"}]})
     ok = client.post("/api/extensions/marketplaces", json={"repo": "acme/plugins"})
-    assert ok.status_code == 201 and ok.json()["name"] == "plugins"
-    assert "plugins" in extensions.load()[0]["extraKnownMarketplaces"]
+    assert ok.status_code == 201 and ok.json()["name"] == "acme-market"
+    assert "acme-market" in extensions.load()[0]["extraKnownMarketplaces"]
     assert client.post("/api/extensions/marketplaces", json={"repo": "not a repo"}).status_code == 422
 
 

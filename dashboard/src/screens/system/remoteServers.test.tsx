@@ -44,7 +44,7 @@ describe.each(["es", "en"] as const)("Remote MCP servers (%s)", (locale) => {
     state = "connected";                                       // the browser came back to Hokma
     pending = false;
     expect(await screen.findByText(t("mcp.state.connected"), {}, { timeout: 4000 })).toBeInTheDocument();
-    expect(screen.queryByText(t("mcp.waiting"))).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(t("mcp.waiting"))).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: t("mcp.revoke") })).toBeInTheDocument();
     expect(calls.some((c) => c.path.includes("/login"))).toBe(false);
   });

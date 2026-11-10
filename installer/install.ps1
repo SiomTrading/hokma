@@ -28,6 +28,7 @@ if ($PSVersionTable.PSEdition -ne "Core") {
 }
 
 . (Join-Path $PSScriptRoot "messages.ps1")
+. (Join-Path $PSScriptRoot "download.ps1")
 if ($Lang) {
     if (@("es", "en") -notcontains $Lang) { Die "inst.lang_invalid" $Lang }
     $script:LangCode = $Lang
@@ -117,8 +118,9 @@ New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 try {
     $archive = Join-Path $Tmp "uv.zip"
     Info "inst.download_uv" $UvVersion
-    try { Invoke-WebRequest -Uri $entry.url -OutFile $archive -UseBasicParsing }
-    catch { Die "inst.download_failed" $entry.url }
+    if (-not (Invoke-HokmaDownload $entry.url $archive ("uv " + $UvVersion) { param($t) Write-Host $t })) {
+        Die "inst.download_failed" $entry.url $script:DownloadError
+    }
     $actual = Get-Sha256 $archive
     if ($actual -ne $entry.sha256.ToLower()) { Die "inst.sha_mismatch" $entry.sha256 $actual }
     Expand-Archive -Path $archive -DestinationPath $Tmp -Force

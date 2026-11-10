@@ -21,6 +21,7 @@ GitPresent=Git: instalado.
 GitWillInstall=Git: se instalará.
 InstallClaude=Instalar Claude Code (recomendado para chatear con los agentes).
 ClaudePresent=Claude Code: ya está instalado.
+AlreadyRunning=Ya hay una instalación de Hokma en curso. Espera a que termine o ciérrala antes de abrir otra.
 OneDriveRejected=Esa carpeta está en OneDrive y OneDrive borra archivos que Hokma necesita. Elige una fuera de OneDrive.
 ReadyFolder=Carpeta: %1
 ReadyModeFresh=Modo: instalación nueva
