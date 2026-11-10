@@ -178,7 +178,12 @@ class AcpSession:
         wanted = "gemini-api-key" if (self.ctx.connection or {}).get("auth_kind") == "api_key" else "oauth-personal"
         if wanted in methods:
             await self._call("authenticate", {"methodId": wanted})
-        result = await self._call("session/new", {"cwd": self.ctx.cwd, "mcpServers": self.ctx.extra.get("acp_mcp") or _acp_mcp(self.ctx)})
+        servers = self.ctx.extra.get("acp_mcp") or _acp_mcp(self.ctx)
+        if "acp_mcp" not in self.ctx.extra and ((init.get("agentCapabilities") or {}).get("mcpCapabilities") or {}).get("http"):
+            from hokma.engines.remote_mcp import acp_servers
+
+            servers = servers + await asyncio.to_thread(acp_servers)   # remote servers, token in a header over stdin
+        result = await self._call("session/new", {"cwd": self.ctx.cwd, "mcpServers": servers})
         self.session_ref = str(result.get("sessionId") or "")
         self._ready = True
 

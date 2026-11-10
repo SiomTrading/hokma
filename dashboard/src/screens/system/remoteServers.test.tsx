@@ -3,25 +3,31 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, t } from "@/i18n";
 import { renderWithApp } from "@/test/utils";
-import * as terminalStore from "../terminal/store";
 import { RemoteServers } from "./RemoteServers";
 import { failure, mockApi } from "./testkit";
 
 afterEach(() => vi.unstubAllGlobals());
 
 const LAUZ = { name: "lauz", url: "https://mcp.lauz.io/mcp", message: "" };
-const REDIRECT = "http://localhost:51234/callback?code=ABC&state=XYZ";
+const AUTH = "https://api.lauz.io/oauth/auth?client_id=c&state=s";
+
+function fakeTab() {
+  const tab = { opener: {} as unknown, location: { href: "about:blank" }, close: vi.fn() };
+  vi.stubGlobal("open", vi.fn(() => tab));
+  return tab;
+}
 
 describe.each(["es", "en"] as const)("Remote MCP servers (%s)", (locale) => {
-  it("adds a server, authorizes with the pasted address and shows it connected", async () => {
+  it("adds a server, Connect opens the sign-in in a browser tab and the list turns Connected by itself", async () => {
     setLocale(locale);
     let state = "needs_auth";
+    let pending = false;
     let known = false;
+    const tab = fakeTab();
     const calls = mockApi({
-      "GET /api/extensions/servers": () => ({ servers: known ? [{ ...LAUZ, state }] : [] }),
-      "POST /api/extensions/servers": () => { known = true; return { name: "lauz" }; },
-      "POST /api/extensions/servers/lauz/login": { auth_url: "https://api.lauz.io/oauth/auth?x=1" },
-      "POST /api/extensions/servers/lauz/login/code": () => { state = "connected"; return { state }; },
+      "GET /api/extensions/servers": () => ({ servers: known ? [{ ...LAUZ, state, pending }] : [] }),
+      "POST /api/extensions/servers": () => { known = true; return { ...LAUZ, state }; },
+      "POST /api/extensions/servers/lauz/connect": () => { pending = true; return { auth_url: AUTH }; },
     });
     renderWithApp(<RemoteServers onChanged={() => undefined} />);
     await userEvent.type(await screen.findByLabelText(t("mcp.name")), "lauz");
@@ -29,13 +35,60 @@ describe.each(["es", "en"] as const)("Remote MCP servers (%s)", (locale) => {
     await userEvent.click(screen.getByRole("button", { name: t("mcp.add") }));
     expect(await screen.findByText(t("mcp.state.needs_auth"))).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: t("mcp.authorize") }));
-    const open = await screen.findByRole("link", { name: t("mcp.modal.open") });
-    expect(open).toHaveAttribute("href", "https://api.lauz.io/oauth/auth?x=1");
-    await userEvent.type(screen.getByLabelText(t("mcp.modal.paste")), REDIRECT);
-    await userEvent.click(screen.getByRole("button", { name: t("mcp.modal.connect") }));
-    expect(await screen.findByText(t("mcp.state.connected"))).toBeInTheDocument();
-    expect(calls.find((c) => c.path.endsWith("/login/code"))?.body).toEqual({ pasted: REDIRECT });
+    await userEvent.click(screen.getByRole("button", { name: t("mcp.connect") }));
+    await waitFor(() => expect(tab.location.href).toBe(AUTH));
+    expect(tab.opener).toBeNull();
+    expect(await screen.findByText(t("mcp.waiting"))).toBeInTheDocument();
+
+    state = "connected";                                       // the browser came back to Hokma
+    pending = false;
+    expect(await screen.findByText(t("mcp.state.connected"), {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.queryByText(t("mcp.waiting"))).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("mcp.revoke") })).toBeInTheDocument();
+    expect(calls.some((c) => c.path.includes("/login"))).toBe(false);
+  });
+
+  it("inside the desktop app the server opens the system browser", async () => {
+    setLocale(locale);
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    const calls = mockApi({
+      "GET /api/extensions/servers": { servers: [{ ...LAUZ, state: "needs_auth" }] },
+      "POST /api/extensions/servers/lauz/connect": { auth_url: AUTH },
+      "POST /api/extensions/servers/lauz/open": { opened: true },
+    });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: t("mcp.connect") }));
+    await waitFor(() => expect(calls.find((c) => c.path.endsWith("/open"))?.body).toEqual({ url: AUTH }));
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("shows the error when the server cannot start the sign-in and closes the empty tab", async () => {
+    setLocale(locale);
+    const tab = fakeTab();
+    mockApi({
+      "GET /api/extensions/servers": { servers: [{ ...LAUZ, state: "needs_auth" }] },
+      "POST /api/extensions/servers/lauz/connect": () => failure(400, "No automatic registration"),
+    });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: t("mcp.connect") }));
+    await waitFor(() => expect(screen.getByText("No automatic registration")).toBeInTheDocument());
+    expect(tab.close).toHaveBeenCalled();
+  });
+
+  it("an error state offers Retry and a server without sign-in has no buttons", async () => {
+    setLocale(locale);
+    mockApi({
+      "GET /api/extensions/servers": { servers: [
+        { ...LAUZ, state: "error", message: "HTTP 503" },
+        { name: "open", url: "https://open.test/mcp", message: "", state: "connected", auth: false },
+      ] },
+    });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    expect(await screen.findByRole("button", { name: t("mcp.retry") })).toBeInTheDocument();
+    expect(screen.getByText("HTTP 503")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: t("mcp.revoke") })).not.toBeInTheDocument();
   });
 
   it("rejects hokma and http addresses before sending anything", async () => {
@@ -47,7 +100,6 @@ describe.each(["es", "en"] as const)("Remote MCP servers (%s)", (locale) => {
     expect(screen.getByRole("button", { name: t("mcp.add") })).toBeDisabled();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
   });
-
   it("normalizes the name by itself and says why the button is off", async () => {
     setLocale(locale);
     mockApi({ "GET /api/extensions/servers": { servers: [] } });
@@ -63,37 +115,6 @@ describe.each(["es", "en"] as const)("Remote MCP servers (%s)", (locale) => {
     await userEvent.type(name, "Hokma");
     expect(screen.getByText(t("mcp.why.name_reserved"))).toBeInTheDocument();
   });
-
-  it("when the server asks for the Terminal (Windows), it opens it with the login command and sends nothing else", async () => {
-    setLocale(locale);
-    const calls = mockApi({
-      "GET /api/extensions/servers": { servers: [{ ...LAUZ, state: "needs_auth" }] },
-      "POST /api/extensions/servers/lauz/login": { auth_url: null, terminal_command: "claude mcp login lauz" },
-    });
-    const launch = vi.spyOn(terminalStore, "launchTerminal").mockReturnValue("t1");
-    renderWithApp(<RemoteServers onChanged={() => undefined} />);
-    await userEvent.click(await screen.findByRole("button", { name: t("mcp.authorize") }));
-    await waitFor(() => expect(launch).toHaveBeenCalledWith({ command: "claude mcp login lauz" }));
-    expect(screen.queryByRole("link", { name: t("mcp.modal.open") })).not.toBeInTheDocument();
-    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
-    launch.mockRestore();
-  });
-
-  it("shows the error of a bad paste inside the modal and keeps it open", async () => {
-    setLocale(locale);
-    mockApi({
-      "GET /api/extensions/servers": { servers: [{ ...LAUZ, state: "needs_auth" }] },
-      "POST /api/extensions/servers/lauz/login": { auth_url: "https://api.lauz.io/oauth/auth" },
-      "POST /api/extensions/servers/lauz/login/code": () => failure(400, "The sign-in did not finish"),
-    });
-    renderWithApp(<RemoteServers onChanged={() => undefined} />);
-    await userEvent.click(await screen.findByRole("button", { name: t("mcp.authorize") }));
-    await userEvent.type(await screen.findByLabelText(t("mcp.modal.paste")), "garbage");
-    await userEvent.click(screen.getByRole("button", { name: t("mcp.modal.connect") }));
-    await waitFor(() => expect(screen.getByText("The sign-in did not finish")).toBeInTheDocument());
-    expect(screen.getByLabelText(t("mcp.modal.paste"))).toBeInTheDocument();
-  });
-
   it("revokes a connected server", async () => {
     setLocale(locale);
     let state = "connected";

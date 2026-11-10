@@ -1,4 +1,5 @@
-"""HTTP surface of the extensions, news and system status screens. Every route needs the session token."""
+"""HTTP surface of the extensions, news and system status screens. Every route needs the session token, except the
+OAuth callback of remote MCP servers (`oauth_router`), which is authorized by its one-use state."""
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
@@ -34,8 +35,8 @@ class McpServerBody(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
 
 
-class McpPasteBody(BaseModel):
-    pasted: str = Field(min_length=1, max_length=4000)
+class McpOpenBody(BaseModel):
+    url: str = Field(min_length=1, max_length=8000)
 
 
 MCP_NAME = Path(pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
@@ -84,23 +85,27 @@ def add_remote_server(body: McpServerBody) -> dict:
     return _call(mcp_auth.add_server, body.name, body.url)
 
 
-@router.post("/api/extensions/servers/{name}/login", summary="Start the sign-in; returns the authorization link")
-def login_remote_server(name: str = MCP_NAME) -> dict:
-    return _call(mcp_auth.start_login, name)
+@router.post("/api/extensions/servers/{name}/connect",
+             summary="Start the sign-in; returns the authorization page to open in the system browser")
+def connect_remote_server(request: Request, name: str = MCP_NAME) -> dict:
+    server = request.scope.get("server")
+    if not server:
+        raise HTTPException(status_code=400, detail=t("status.mcp.connect_failed", output="no port"))
+    return _call(mcp_auth.start_connect, name, int(server[1]))
 
 
-@router.post("/api/extensions/servers/{name}/login/code", summary="Send the pasted final address to finish the sign-in")
-def finish_remote_login(body: McpPasteBody, name: str = MCP_NAME) -> dict:
-    return _call(mcp_auth.submit_login, name, body.pasted)
-
-
-@router.post("/api/extensions/servers/{name}/login/cancel", summary="Cancel a sign-in in progress")
-def cancel_remote_login(name: str = MCP_NAME) -> dict:
-    mcp_auth.stop_login()
+@router.post("/api/extensions/servers/{name}/connect/cancel", summary="Cancel a sign-in in progress")
+def cancel_remote_connect(name: str = MCP_NAME) -> dict:
+    mcp_auth.cancel_connect(name)
     return {"cancelled": True}
 
 
-@router.post("/api/extensions/servers/{name}/logout", summary="Revoke the stored access of a remote MCP server")
+@router.post("/api/extensions/servers/{name}/open", summary="Open the sign-in page in the system browser")
+def open_remote_connect(body: McpOpenBody, name: str = MCP_NAME) -> dict:
+    return {"opened": _call(mcp_auth.open_in_browser, name, body.url)}
+
+
+@router.post("/api/extensions/servers/{name}/logout", summary="Revoke and forget the stored access of a remote MCP server")
 def revoke_remote_server(name: str = MCP_NAME) -> dict:
     return _call(mcp_auth.revoke, name)
 
@@ -137,3 +142,35 @@ def approve_request(request_id: str = Path(pattern=REQUEST_ID)) -> dict:
 @router.post("/api/extensions/requests/{request_id}/reject", summary="Reject a request made by an agent")
 def reject_request(request_id: str = Path(pattern=REQUEST_ID)) -> dict:
     return _call(service.reject, request_id)
+
+
+# The browser comes back here from the authorization server. It carries no session token (it is a plain navigation in
+# the system browser): the one-use `state` of a sign-in started from the panel is what authorizes it.
+oauth_router = APIRouter()
+
+_PAGE = """<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><title>Hokma</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">
+<style>body{{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;display:flex;align-items:center;
+justify-content:center;height:100vh;margin:0}}main{{max-width:440px;padding:28px;text-align:center}}
+h1{{font-size:20px;margin:0 0 10px}}p{{opacity:.8;line-height:1.5}}</style></head>
+<body><main><h1>{title}</h1><p>{text}</p></main></body></html>"""
+
+
+@oauth_router.get("/oauth/mcp/callback", include_in_schema=False)
+def oauth_callback(request: Request):
+    import html
+
+    from fastapi.responses import HTMLResponse
+
+    from hokma.i18n import language
+
+    params = {k: v[:4000] for k, v in request.query_params.items()
+              if k in ("code", "state", "iss", "error", "error_description")}
+    ok, detail = mcp_auth.finish_connect(params)
+    if ok:
+        title, text = t("status.mcp.page.ok_title", name=detail), t("status.mcp.page.ok_text")
+    else:
+        title, text = t("status.mcp.page.fail_title"), t("status.mcp.page.fail_text", output=detail)
+    body = _PAGE.format(lang=language(), title=html.escape(title), text=html.escape(text))
+    return HTMLResponse(body, status_code=200 if ok else 400,
+                        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})

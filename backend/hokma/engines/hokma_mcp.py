@@ -111,8 +111,19 @@ class HokmaToolBox:
         self.client.close()
 
 
-def hokma_toolbox(ctx: EngineContext) -> HokmaToolBox | None:
+def hokma_toolbox(ctx: EngineContext):
+    """Hokma's tools plus the remote MCP servers the student connected in the panel."""
+    from hokma.engines.remote_mcp import CompositeToolBox, remote_toolboxes
+
+    boxes: list = []
     try:
-        return HokmaToolBox(ctx)
+        boxes.append(HokmaToolBox(ctx))
     except Exception:                                # the model still works with its native tools
+        pass
+    try:
+        boxes += remote_toolboxes()
+    except Exception:
+        pass
+    if not boxes:
         return None
+    return boxes[0] if len(boxes) == 1 else CompositeToolBox(boxes)

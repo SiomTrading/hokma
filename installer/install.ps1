@@ -59,6 +59,12 @@ if ($dataSlash.StartsWith($dirSlash, [System.StringComparison]::OrdinalIgnoreCas
     $dirSlash.StartsWith($dataSlash, [System.StringComparison]::OrdinalIgnoreCase)) {
     Die "inst.overlap" $HokmaData $Dir
 }
+# OneDrive deletes and locks files that Hokma needs (temporary files, the database): never install inside it.
+foreach ($oneDrive in @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial)) {
+    if (-not $oneDrive) { continue }
+    $oneDriveSlash = [System.IO.Path]::GetFullPath($oneDrive).TrimEnd("\") + "\"
+    if ($dirSlash.StartsWith($oneDriveSlash, [System.StringComparison]::OrdinalIgnoreCase)) { Die "inst.onedrive" $Dir }
+}
 $BinDir = Join-Path $env:USERPROFILE ".local\bin"
 $ConfigDir = Join-Path $HokmaData "claude-config"
 
@@ -76,6 +82,9 @@ $PyVersion = $lockData.python_version
 Info "inst.platform" $platform $Dir
 
 # ---- Stage 2: dependencies (never installed behind the student's back) ------
+# Hokma-Setup.exe may have installed Git a moment ago: read PATH again from the registry (machine and user).
+$env:Path = (@([Environment]::GetEnvironmentVariable("Path", "Machine"),
+               [Environment]::GetEnvironmentVariable("Path", "User"), $env:Path) | Where-Object { $_ }) -join ";"
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Die "inst.git_missing_win" }
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
     Warn "inst.claude_missing"

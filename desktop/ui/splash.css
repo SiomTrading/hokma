@@ -1,0 +1,40 @@
+/* Start screen of the desktop window. Same palette as the panel (dashboard/src/design/tokens.css, dark). */
+:root {
+  --bg: #101516;
+  --t1: #f0f5f8;
+  --t2: #a8b3b8;
+  --acc: #00cccc;
+  --acc-h: #33dada;
+  --on-acc: #101516;
+  --border: rgba(240, 245, 248, 0.09);
+  --glass: rgba(240, 245, 248, 0.04);
+  --bad: #ff8a73;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--t1);
+  font: 15px/1.5 "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; }
+.splash { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; padding: 32px; text-align: center; }
+.logo { width: 96px; height: 96px; }
+.message { margin: 0; font-size: 18px; max-width: 560px; }
+.message.error { color: var(--bad); }
+.line { margin: 0; min-height: 1.5em; color: var(--t2); font-size: 13px; max-width: 640px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--border);
+  border-top-color: var(--acc); animation: spin 0.9s linear infinite; }
+.spinner[hidden] { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.actions[hidden], [hidden] { display: none !important; }
+button { font: inherit; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--glass); color: var(--t1); cursor: pointer; }
+button:hover { border-color: var(--acc); }
+button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+button.primary { background: var(--acc); color: var(--on-acc); border-color: var(--acc); }
+button.primary:hover { background: var(--acc-h); }
+.detail { width: min(900px, 100%); display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.detail pre { width: 100%; max-height: 40vh; overflow: auto; margin: 0; padding: 12px; text-align: left;
+  background: rgba(0, 0, 0, 0.38); border: 1px solid var(--border); border-radius: 8px;
+  font: 12px/1.45 Consolas, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }

@@ -1,6 +1,17 @@
 {
   "uv_version": "0.11.2",
   "python_version": "3.12",
+  "git_for_windows": {
+    "version": "2.56.0.4",
+    "windows-x86_64": {
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/Git-2.56.0.4-64-bit.exe",
+      "sha256": "4961a4a8cc778d8b6e00a5819e5fe4d078b754555aff7aedc2d77a5d74c2de80"
+    },
+    "windows-aarch64": {
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/Git-2.56.0.4-arm64.exe",
+      "sha256": "e7dcc4adbb0eb373064598cd18bc75e60128707d816ead51cd9bd98e356f0075"
+    }
+  },
   "platforms": {
     "linux-x86_64": {
       "url": "https://github.com/astral-sh/uv/releases/download/0.11.2/uv-x86_64-unknown-linux-gnu.tar.gz",

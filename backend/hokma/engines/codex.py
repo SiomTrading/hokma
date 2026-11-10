@@ -75,8 +75,15 @@ def write_config(ctx: EngineContext, mcp: dict[str, Any] | None = None) -> Path:
     home.mkdir(parents=True, exist_ok=True)
     lines = ['approval_policy = "untrusted"', 'sandbox_mode = "workspace-write"',
              f'model_reasoning_effort = "{EFFORT.get(ctx.tier, "medium")}"', ""]
+    lines += ["[shell_environment_policy]", 'exclude = ["HOKMA_MCP_TOKEN_*"]', ""]   # remote MCP tokens stay in Codex
     for name, spec in (mcp or {}).items():
         lines.append(f"[mcp_servers.{name}]")
+        if spec.get("url"):                  # a remote server; the token is in the Codex environment, not in this file
+            lines.append(f"url = {json.dumps(spec['url'])}")
+            if spec.get("bearer_token_env_var"):
+                lines.append(f"bearer_token_env_var = {json.dumps(spec['bearer_token_env_var'])}")
+            lines.append("")
+            continue
         lines.append(f"command = {json.dumps(spec['command'])}")
         lines.append("args = " + json.dumps(spec.get("args", [])))
         if spec.get("env"):
@@ -327,9 +334,12 @@ class CodexAdapter:
         if not binary:
             raise EngineError("codex_not_found", "the `codex` command is not installed or not on PATH")
         from hokma.engines.hokma_mcp import server_spec
+        from hokma.engines.remote_mcp import codex_servers
 
-        write_config(ctx, ctx.extra.get("mcp_servers") or {"hokma": server_spec(ctx)})
+        remote, remote_env = ({}, {}) if ctx.extra.get("mcp_servers") else await asyncio.to_thread(codex_servers)
+        write_config(ctx, ctx.extra.get("mcp_servers") or {**remote, "hokma": server_spec(ctx)})
         env = filtered_env()
+        env.update(remote_env)
         env["CODEX_HOME"] = str(codex_home_dir())
         env.update(modes.work_env(ctx.cwd, ctx.conversation_id, ctx.task_id, ctx.agent or ""))
         conn = ctx.connection or {}

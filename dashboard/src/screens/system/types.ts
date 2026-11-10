@@ -19,13 +19,17 @@ export interface ServerItem {
   remote?: boolean;
 }
 
-export type RemoteState = "needs_auth" | "connected" | "error" | "no_cli";
+export type RemoteState = "needs_auth" | "connected" | "error";
 
 export interface RemoteServer {
   name: string;
   url: string;
   state: RemoteState;
   message: string;
+  /** false: the server needs no sign-in. */
+  auth?: boolean;
+  /** A sign-in started from the panel is waiting for the browser. */
+  pending?: boolean;
 }
 
 export interface MarketplaceSource {

@@ -5,14 +5,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, Request
 
 from hokma import __version__
-from hokma.agents.api import router as agents_router
+from hokma.agents.api import current_scheduler, router as agents_router
 from hokma.connections.api import router as connections_router
 from hokma.connections.runtime import shutdown as connections_shutdown
 from hokma.core import identity
 from hokma.core.config import browser_host, dashboard_dist
 from hokma.core.dashboard_static import DashboardFiles
 from hokma.core.lifecycle import Lifecycle, WebSocketTracker
-from hokma.core.shutdown_api import router as shutdown_router
+from hokma.core.shutdown_api import router as shutdown_router, turns_running
 from hokma.core.origin import TEST_HOSTS, LocalOnlyMiddleware, hosts_for_port
 from hokma.db.api import database_lifespan, router as database_router
 from hokma.engines.api import router as engines_router
@@ -25,11 +25,19 @@ from hokma.market.ws import router as market_ws_router
 from hokma.projects.api import router as projects_router
 from hokma.rpc.ws import router as rpc_router
 from hokma.setup import router as setup_router
-from hokma.status.api import router as status_router
+from hokma.status.api import oauth_router, router as status_router
 from hokma.terminal.api import router as terminal_router
 from hokma.update.api import router as update_router
 from hokma.update.state import UpdateState
 from hokma.voice.api import router as voice_router
+
+
+def agent_working() -> bool:
+    """A chat turn or a scheduled job is running right now."""
+    if turns_running() > 0:
+        return True
+    active = current_scheduler()
+    return bool(active and active.running_ids())
 
 
 def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
@@ -44,6 +52,9 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
         async with database_lifespan(app):
             checker = None
             if auto_update_check:
+                from hokma.status.mcp_auth import start_refresher
+
+                start_refresher()                  # remote MCP tokens, refreshed before they end
                 checker = asyncio.create_task(app.state.updates.auto_check_loop(lambda: app.state.db))
             try:
                 yield
@@ -61,7 +72,8 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "version": __version__}
+        """`busy` tells the desktop window to ask before closing: a chat turn or a scheduled job is running."""
+        return {"status": "ok", "version": __version__, "busy": agent_working()}
 
     @app.get(identity.ROUTE)
     def engine_proof(request: Request, nonce: str = Query(default="")) -> dict:
@@ -84,6 +96,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     app.include_router(terminal_router)
     app.include_router(conversations_router)
     app.include_router(status_router)
+    app.include_router(oauth_router)
     app.include_router(learn_router)
     app.include_router(market_router)
     app.include_router(market_ws_router)

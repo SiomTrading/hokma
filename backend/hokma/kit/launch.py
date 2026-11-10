@@ -4,7 +4,9 @@ The settings file is rebuilt from the package template each time and passed expl
 --settings; --setting-sources user keeps project/local settings of the working folder (which the
 agent could edit) from loosening anything. The MCP servers the student approved are written to
 <config>/hokma-mcp.json from the protected extensions file and passed with --mcp-config (servers the
-student added themselves with `claude mcp add` keep working: they live in <config>/.claude.json).
+student added themselves with `claude mcp add` keep working: they live in <config>/.claude.json). Remote servers
+signed in from the panel get a `headersHelper` that reads their token from the credential store (engines/remote_mcp.py):
+the file never holds a token.
 """
 import json
 import sys
@@ -52,29 +54,21 @@ def hokma_server() -> dict:
                     "HOKMA_TASK_ID": "${HOKMA_TASK_ID:-}", "HOKMA_AGENT": "${HOKMA_AGENT:-}"}}
 
 
-def _user_registered_servers() -> set[str]:
-    """Remote servers Hokma registered in Claude's own user config (needed for `claude mcp login`)."""
-    try:
-        data = json.loads((claude_config_dir() / ".claude.json").read_text(encoding="utf-8"))
-        return {n for n, c in (data.get("mcpServers") or {}).items() if isinstance(c, dict) and c.get("type") == "http"}
-    except (OSError, ValueError, AttributeError):
-        return set()
-
-
 def write_mcp_config() -> str:
     """Approved servers for --mcp-config. stdio servers go through mcp_run.py so they start in a folder the agent
     cannot write (Claude's MCP config has no cwd); the real definition stays in the protected extensions file."""
     data, _ = extensions.load()
+    from hokma.engines.remote_mcp import claude_entry, ready_servers
+
     servers = {}
-    registered = _user_registered_servers()
     for name, cfg in data["mcpServers"].items():
-        if cfg.get("type", "stdio") != "stdio" and name in registered:
-            continue                      # registered with `claude mcp add --scope user`: Claude owns its sign-in
         if cfg.get("type", "stdio") == "stdio":
             servers[name] = {"type": "stdio", "command": sys.executable,
                             "args": ["-I", str(MCP_RUN), "--data", str(hokma_data_dir()), "--name", name]}
-        else:
+        elif cfg.get("type") == "sse":
             servers[name] = cfg
+    for server in ready_servers():        # http servers: only open or signed in, never one Claude would sign in to
+        servers[server["name"]] = claude_entry(server)
     servers[HOKMA_SERVER] = hokma_server()                  # last: a student's server cannot take this name over
     path = claude_config_dir() / "hokma-mcp.json"
     path.parent.mkdir(parents=True, exist_ok=True)

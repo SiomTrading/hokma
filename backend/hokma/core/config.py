@@ -97,6 +97,16 @@ def launcher_path() -> Path:
     return Path.home() / ".local" / "bin" / name
 
 
+def desktop_app_path() -> Path:
+    """The desktop window, outside the data and working folders. Windows: `Hokma.exe`, installed by Hokma-Setup.exe.
+    macOS: `Hokma.app`, dragged from Hokma.dmg to /Applications (or ~/Applications); the first existing one."""
+    if sys.platform == "darwin":
+        candidates = [Path("/Applications/Hokma.app"), Path.home() / "Applications" / "Hokma.app"]
+        return next((c for c in candidates if c.is_dir()), candidates[0])
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    return Path(base) / "Programs" / "Hokma" / "Hokma.exe"
+
+
 def runtime_root() -> Path:
     return hokma_data_dir() / "runtime"
 

@@ -1,6 +1,8 @@
 """The one shortcut that opens Hokma, created from one place.
 
-"Hokma" runs `hokma start`. Shutting down happens inside the panel (the "Shut down Hokma" button), so the old "Shut down
+"Hokma" runs `hokma start`. With the desktop window installed it opens the window instead: on Windows the shortcut
+points at `Hokma.exe`; on macOS `Hokma.app` is the icon and no AppleScript application is made. Shutting down happens
+inside the panel (the "Shut down Hokma" button), so the old "Shut down
 Hokma" and "Restart Hokma" shortcuts of earlier versions are deleted on every install, reinstall and `hokma update`.
 Hokma has no start at login: it starts when the owner opens the "Hokma" shortcut. No shortcut opens a console window,
 and it points at the stable launcher (`~/.local/bin/hokma[.cmd]`), never at a runtime slot that the next update
@@ -171,7 +173,21 @@ def _remove_legacy_macos() -> list[Path]:
     return left
 
 
+def _remove_macos_start_apps(names: dict[str, list[str]]) -> None:
+    """With the desktop window installed, the AppleScript "Hokma" application would be a second icon that opens the
+    browser: it is removed (every language)."""
+    folder = macos_applications_dir()
+    for action in ACTIONS:
+        for name in names[action]:
+            app = folder / f"{name}.app"
+            if app.is_dir() and not app.is_symlink():
+                shutil.rmtree(app, ignore_errors=True)
+
+
 def _install_macos(launcher: Path, names: dict[str, list[str]], only_missing: bool) -> list[Path]:
+    if config.desktop_app_path().is_dir():
+        _remove_macos_start_apps(names)
+        return []
     folder = macos_applications_dir()
     folder.mkdir(parents=True, exist_ok=True)
     icon = _asset("hokma.icns")
@@ -248,7 +264,18 @@ def _stable_icon(name: str) -> Path | None:
     return dest
 
 
-def windows_spec(launcher: Path, names: dict[str, list[str]], only_missing: bool, vbs: Path, icon: Path | None) -> dict:
+def windows_spec(launcher: Path, names: dict[str, list[str]], only_missing: bool, vbs: Path, icon: Path | None,
+                 app: Path | None = None) -> dict:
+    """With the desktop window installed (`app`), the shortcut opens it: the window starts and stops the engine."""
+    if app is not None:
+        return {
+            "target": str(app),
+            "workdir": str(Path.home()),
+            "icon": f"{app},0",
+            "only_missing": only_missing,
+            "remove": legacy_labels(),
+            "items": [{"action": a, "names": names[a], "arguments": ""} for a in ACTIONS],
+        }
     system = os.environ.get("SystemRoot") or r"C:\Windows"
     return {
         "target": str(Path(system) / "System32" / "wscript.exe"),
@@ -264,7 +291,8 @@ def _install_windows(launcher: Path, names: dict[str, list[str]], only_missing: 
     vbs = config.hokma_data_dir() / "bin" / "hokma-hidden.vbs"
     vbs.parent.mkdir(parents=True, exist_ok=True)
     vbs.write_text(VBS.format(launcher=str(launcher)), encoding="utf-16")     # UTF-16 with BOM: accents survive
-    spec = windows_spec(launcher, names, only_missing, vbs, _stable_icon("hokma.ico"))
+    app = config.desktop_app_path()
+    spec = windows_spec(launcher, names, only_missing, vbs, _stable_icon("hokma.ico"), app if app.is_file() else None)
     encoded = base64.b64encode(POWERSHELL.encode("utf-16-le")).decode("ascii")
     env = dict(os.environ, HOKMA_LNK_SPEC=json.dumps(spec))
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",

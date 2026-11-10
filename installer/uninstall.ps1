@@ -3,14 +3,18 @@
 # The student's working folder (and the Claude session kept in Hokma's config dir)
 # are NEVER deleted without confirmation.
 #
-# Usage: powershell -ExecutionPolicy Bypass -File installer\uninstall.ps1 [-Dir <workdir>] [-Lang es|en] [-Purge]
+# Usage: powershell -ExecutionPolicy Bypass -File installer\uninstall.ps1 [-Dir <workdir>] [-Lang es|en] [-Purge | -ResetAll]
 #   -Purge   also delete the working folder and the Claude session; type the word shown in the prompt, or set
 #            HOKMA_CONFIRM_PURGE to it when not interactive.
+#   -ResetAll  used by Hokma-Setup.exe ("Reinstall from scratch"): delete the WHOLE data folder (runtime, Python,
+#            cache, update.lock and the Claude session) without asking. The working folder is NEVER touched (the
+#            setup already moved it to a backup). Exit code 1 when the data folder could not be deleted.
 
 param(
     [string]$Dir = $(if ($env:HOKMA_DIR) { $env:HOKMA_DIR } else { Join-Path $env:USERPROFILE "Hokma" }),
     [string]$Lang = "",
-    [switch]$Purge
+    [switch]$Purge,
+    [switch]$ResetAll
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,6 +71,19 @@ if ($userPath) {
     $parts = $userPath -split ";" | Where-Object { $_ -and ($_ -ne $BinDir) }
     [Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")
     Info "un.path_removed_win" $BinDir
+}
+
+if ($ResetAll) {
+    # Processes may need a moment to release their files after being closed: up to 5 attempts, 1 second apart.
+    for ($attempt = 1; ($attempt -le 5) -and (Test-Path -LiteralPath $Data); $attempt++) {
+        try { Remove-Item -LiteralPath $Data -Recurse -Force -ErrorAction Stop }
+        catch { Start-Sleep -Seconds 1 }
+    }
+    if (Test-Path -LiteralPath $Data) { Die "un.reset_failed" $Data }
+    Info "un.reset_done" $Data
+    Info "un.workdir_kept" $Dir
+    Info "un.done"
+    exit 0
 }
 
 # Ask for the destructive confirmation once.

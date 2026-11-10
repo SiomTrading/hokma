@@ -1,0 +1,226 @@
+name: release-installers
+# Builds the one-click installers and attaches them to the GitHub Release (task 3138):
+#   Hokma-Setup.exe (Windows, Inno Setup, with the Hokma.exe desktop window inside)
+#   Hokma.dmg       (macOS, the Hokma.app desktop window, which installs the engine on its first start)
+# Fixed names, so these links always serve the latest published release:
+#   https://github.com/SiomTrading/hokma/releases/latest/download/Hokma-Setup.exe
+#   https://github.com/SiomTrading/hokma/releases/latest/download/Hokma.dmg
+# Each release also gets Hokma-Setup-X.Y.Z.exe, Hokma-X.Y.Z.dmg and a .sha256 for every file.
+#
+# Runs when a release is published on the public repository (scripts/publish_release.py creates it), or by hand
+# (workflow_dispatch) to build the files as workflow artifacts; by hand with a tag it also uploads them.
+# No secrets beyond the automatic GITHUB_TOKEN. Signing (Windows) and signing plus notarization (macOS) are
+# prepared and OFF: they only run when the repository variable HOKMA_SIGNING is "on" and the secrets exist.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and upload to (vX.Y.Z). Empty: build the current branch, artifacts only."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-installers-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  windows:
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'SiomTrading/hokma'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG || github.ref }}
+
+      - name: Version
+        id: version
+        run: |
+          $line = Select-String -Path backend/hokma/__init__.py -Pattern '__version__\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"'
+          $version = $line.Matches[0].Groups[1].Value
+          if ($env:TAG -and ("v" + $version) -ne $env:TAG) { throw "tag $env:TAG does not match __version__ $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: PowerShell scripts parse
+        run: |
+          $bad = 0
+          foreach ($file in Get-ChildItem installer -Recurse -Filter *.ps1) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) { Write-Host "::error file=$($file.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Desktop window unit tests
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
+
+      - name: Build the desktop window (Hokma.exe)
+        working-directory: desktop
+        run: |
+          # The version goes in a file: a JSON string loses its quotes on the way to a native command.
+          $config = Join-Path $env:RUNNER_TEMP "tauri-version.json"
+          Set-Content -Path $config -Value '{"version":"${{ steps.version.outputs.version }}"}' -Encoding ascii
+          npx --yes @tauri-apps/cli@^2 build --no-bundle --config $config
+          New-Item -ItemType Directory -Force -Path ../build | Out-Null
+          Copy-Item src-tauri/target/release/hokma-desktop.exe ../build/Hokma.exe
+
+      - name: Source package and WebView2 bootstrapper
+        run: |
+          git archive --format=zip -o build/hokma-src.zip HEAD
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile build/MicrosoftEdgeWebview2Setup.exe
+          $sig = Get-AuthenticodeSignature build/MicrosoftEdgeWebview2Setup.exe
+          if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+            throw "the WebView2 bootstrapper is not signed by Microsoft: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          }
+
+      - name: Inno Setup
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+
+      # Signing: OFF. To turn it on, set the variable HOKMA_SIGNING=on and the Azure Trusted Signing secrets, and
+      # complete this step (sign Hokma.exe, then pass /DSignTool and /Shokma=... to ISCC below).
+      - name: Sign Hokma.exe (off)
+        if: vars.HOKMA_SIGNING == 'on'
+        run: |
+          throw "signing is not configured yet (decision D1 pending)"
+
+      - name: Build Hokma-Setup.exe
+        run: |
+          $root = (Get-Location).Path
+          & $env:ISCC /Qp "/DAppVersion=${{ steps.version.outputs.version }}" "/DSourceZip=$root\build\hokma-src.zip" `
+            "/DAppExe=$root\build\Hokma.exe" "/DWebView2Setup=$root\build\MicrosoftEdgeWebview2Setup.exe" `
+            "/DOutputDir=$root\dist" installer\windows\hokma-setup.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+          $version = "${{ steps.version.outputs.version }}"
+          Copy-Item dist/Hokma-Setup.exe "dist/Hokma-Setup-$version.exe"
+          foreach ($f in Get-ChildItem dist -Filter *.exe) {
+            $hash = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLower()
+            [System.IO.File]::WriteAllText("$($f.FullName).sha256", "$hash  $($f.Name)`n")
+          }
+
+      # CA12: the silent install works on a clean runner and passes `hokma doctor`. The runner user is an
+      # administrator, which install.ps1 refuses for students; HOKMA_ALLOW_ADMIN lifts that here only.
+      - name: Silent install test (CA12)
+        env:
+          HOKMA_ALLOW_ADMIN: "1"
+        run: |
+          $work = Join-Path $env:RUNNER_TEMP "HokmaWork"
+          $proc = Start-Process -FilePath dist/Hokma-Setup.exe -Wait -PassThru -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/MODE=reinstall", "/NOCLAUDE", "/DIR=$work",
+            "/LOG=$env:RUNNER_TEMP\inno-setup.log")
+          Get-ChildItem "$env:LOCALAPPDATA\Hokma-Setup" -Filter setup-*.log -ErrorAction SilentlyContinue | Get-Content
+          if ($proc.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\inno-setup.log"; throw "setup exit code $($proc.ExitCode)" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Hokma\Hokma.exe")) { throw "Hokma.exe was not installed" }
+          & "$env:USERPROFILE\.local\bin\hokma.cmd" doctor
+          if ($LASTEXITCODE -ne 0) { throw "hokma doctor failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/Hokma-Setup*.exe
+            dist/Hokma-Setup*.exe.sha256
+          if-no-files-found: error
+
+  macos:
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'SiomTrading/hokma'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG || github.ref }}
+
+      - name: Version
+        id: version
+        run: |
+          version=$(sed -nE 's/^__version__ *= *"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' backend/hokma/__init__.py)
+          if [ -n "$TAG" ] && [ "v$version" != "$TAG" ]; then echo "tag $TAG does not match __version__ $version"; exit 1; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Source package inside the app
+        run: |
+          mkdir -p desktop/src-tauri/resources
+          git archive --format=tar.gz -o desktop/src-tauri/resources/hokma-src.tar.gz HEAD
+
+      # Signing and notarization: OFF (Apple Developer account pending). With HOKMA_SIGNING=on, Tauri signs and
+      # notarizes by itself when APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_ID,
+      # APPLE_PASSWORD and APPLE_TEAM_ID are in the environment of the build step.
+      - name: Build Hokma.dmg
+        working-directory: desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ vars.HOKMA_SIGNING == 'on' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_CERTIFICATE: ${{ vars.HOKMA_SIGNING == 'on' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ vars.HOKMA_SIGNING == 'on' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ vars.HOKMA_SIGNING == 'on' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ vars.HOKMA_SIGNING == 'on' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ vars.HOKMA_SIGNING == 'on' && secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          for name in APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!name}" ] || unset "$name"
+          done
+          config='{"version":"${{ steps.version.outputs.version }}","bundle":{"resources":{"resources/hokma-src.tar.gz":"hokma-src.tar.gz"}}}'
+          npx --yes @tauri-apps/cli@^2 build --target universal-apple-darwin --bundles dmg --config "$config"
+          mkdir -p ../dist
+          dmg=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -n 1)
+          cp "$dmg" ../dist/Hokma.dmg
+          cp "$dmg" "../dist/Hokma-${{ steps.version.outputs.version }}.dmg"
+          cd ../dist
+          for f in *.dmg; do shasum -a 256 "$f" > "$f.sha256"; done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            dist/Hokma*.dmg
+            dist/Hokma*.dmg.sha256
+          if-no-files-found: error
+
+  upload:
+    needs: [windows, macos]
+    if: (github.event_name == 'release' || inputs.tag != '') && github.repository == 'SiomTrading/hokma'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"

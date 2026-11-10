@@ -1,21 +1,29 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiError, useApiQuery } from "@/api";
-import { Button, Field, Glyph, Input, Loading, Modal, Pane, Pill, Row } from "@/design";
+import { Button, Field, Glyph, Input, Loading, Pane, Pill, Row } from "@/design";
 import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
-import { launchTerminal } from "../terminal/store";
 import { normalizeServerName, serverProblem } from "./linkFormats";
 import type { RemoteServer, RemoteState } from "./types";
 
 
-const TONE: Record<RemoteState, "ok" | "org" | "bad"> = { connected: "ok", needs_auth: "org", error: "bad", no_cli: "bad" };
+const TONE: Record<RemoteState, "ok" | "org" | "bad"> = { connected: "ok", needs_auth: "org", error: "bad" };
+const POLL_MS = 2000;
 
 function errorText(cause: unknown, fallback: string): string {
   return cause instanceof ApiError || cause instanceof Error ? cause.message : fallback;
 }
 
-/** Settings > Extensions: remote MCP servers with sign-in (name + address, then Authorize / Revoke). */
+/** True inside the desktop app, whose window cannot open a browser tab by itself. */
+function inDesktopApp(): boolean {
+  return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+}
+
+/**
+ * Settings > Extensions: remote MCP servers. Add (name + address), then Connect opens the system browser on the
+ * provider's sign-in page; when the browser comes back to Hokma the list turns to Connected by itself.
+ */
 export function RemoteServers({ onChanged }: { onChanged: () => void }) {
   const { t } = useI18n();
   const shell = useShell();
@@ -24,16 +32,42 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [auth, setAuth] = useState<{ name: string; url: string } | null>(null);
-  const [pasted, setPasted] = useState("");
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState<string | null>(null);
+  const seenPending = useRef(false);
   const problem = serverProblem(name, url);
   const valid = problem === null;
+  const servers = list.data?.servers ?? [];
 
   const refresh = () => {
     list.reload();
     onChanged();
   };
+
+  // While a sign-in is open in the browser, look again every two seconds and when the window gets the focus back.
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const timer = window.setInterval(() => list.reload(), POLL_MS);
+    const onFocus = () => list.reload();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [waiting]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!waiting) return;
+    const server = servers.find((s) => s.name === waiting);
+    if (!server) return;
+    if (server.pending) seenPending.current = true;
+    if (server.state === "connected") {
+      setWaiting(null);
+      shell.toast({ tone: "ok", text: t("mcp.connected", { name: server.name }) });
+      onChanged();
+    } else if (server.state === "error" || (seenPending.current && !server.pending)) {
+      setWaiting(null);
+    }
+  }, [servers, waiting]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -42,8 +76,8 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
     setError(null);
     try {
       const cleanName = name.trim().replace(/[-_]+$/, "");
-      await api.post("/api/extensions/servers", { name: cleanName, url: url.trim() });
-      shell.toast({ tone: "ok", text: t("mcp.added", { name: cleanName }) });
+      const added = await api.post<RemoteServer>("/api/extensions/servers", { name: cleanName, url: url.trim() });
+      shell.toast({ tone: "ok", text: t(added.state === "connected" ? "mcp.addedOpen" : "mcp.added", { name: cleanName }) });
       setName("");
       setUrl("");
       refresh();
@@ -54,51 +88,40 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
     }
   };
 
-  const authorize = async (server: RemoteServer) => {
+  const connect = async (server: RemoteServer) => {
     setBusy(server.name);
     setError(null);
+    // A tab opened now, inside the click, is not blocked; it gets its address once the server answers.
+    const tab = inDesktopApp() ? null : window.open("about:blank", "_blank");
     try {
-      const started = await api.post<{ auth_url: string | null; terminal_command?: string }>(`/api/extensions/servers/${server.name}/login`);
+      const started = await api.post<{ auth_url: string | null }>(`/api/extensions/servers/${server.name}/connect`);
       if (!started.auth_url) {
-        // Windows without a usable hidden console: the sign-in runs in Hokma's own Terminal, one click, no typing.
-        if (!started.terminal_command) throw new Error(t("api.error"));
-        if (!shell.layout.terminal) shell.toggleTerminal();
-        launchTerminal({ command: started.terminal_command });
-        shell.closeSettings();
-        shell.toast({ tone: "ok", text: t("mcp.viaTerminal", { name: server.name }) });
+        tab?.close();
+        refresh();
         return;
       }
-      setPasted("");
-      setAuthError(null);
-      setAuth({ name: server.name, url: started.auth_url });
+      if (tab) {
+        tab.opener = null;
+        tab.location.href = started.auth_url;
+      } else {
+        await api.post(`/api/extensions/servers/${server.name}/open`, { url: started.auth_url });
+      }
+      seenPending.current = false;
+      setWaiting(server.name);
+      list.reload();
     } catch (cause) {
+      tab?.close();
       setError(errorText(cause, t("api.error")));
+      list.reload();
     } finally {
       setBusy(null);
     }
   };
 
-  const closeAuth = () => {
-    if (auth) void api.post(`/api/extensions/servers/${auth.name}/login/cancel`).catch(() => undefined);
-    setAuth(null);
-    setAuthError(null);
-    refresh();
-  };
-
-  const connect = async () => {
-    if (!auth || !pasted.trim()) return;
-    setBusy(auth.name);
-    setAuthError(null);
-    try {
-      await api.post(`/api/extensions/servers/${auth.name}/login/code`, { pasted: pasted.trim() });
-      shell.toast({ tone: "ok", text: t("mcp.connected", { name: auth.name }) });
-      setAuth(null);
-      refresh();
-    } catch (cause) {
-      setAuthError(errorText(cause, t("api.error")));
-    } finally {
-      setBusy(null);
-    }
+  const cancel = async (server: RemoteServer) => {
+    setWaiting(null);
+    await api.post(`/api/extensions/servers/${server.name}/connect/cancel`).catch(() => undefined);
+    list.reload();
   };
 
   const revoke = async (server: RemoteServer) => {
@@ -113,6 +136,27 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
     } finally {
       setBusy(null);
     }
+  };
+
+  const actions = (server: RemoteServer) => {
+    if (waiting === server.name || server.pending) {
+      return (
+        <>
+          <span className="hint" role="status">{t("mcp.waiting")}</span>
+          <Button size="sm" variant="ghost" onClick={() => void cancel(server)}>{t("mcp.cancel")}</Button>
+        </>
+      );
+    }
+    if (server.state === "connected") {
+      return server.auth === false ? null : (
+        <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void revoke(server)}>{t("mcp.revoke")}</Button>
+      );
+    }
+    return (
+      <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => void connect(server)}>
+        {t(server.state === "error" ? "mcp.retry" : "mcp.connect")}
+      </Button>
+    );
   };
 
   return (
@@ -134,7 +178,7 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
       </Pane>
       {error ? <p className="p" role="alert" style={{ color: "var(--bad)" }}>{error}</p> : null}
       {list.loading && !list.data ? <Loading inline /> : null}
-      {list.data?.servers.map((server) => (
+      {servers.map((server) => (
         <Pane key={server.name} style={{ padding: 0 }}>
           <Row>
             <Glyph initial={server.name.slice(0, 1).toUpperCase()} size={34} />
@@ -144,37 +188,10 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
               {server.state === "error" && server.message ? <span className="p" style={{ fontSize: 12, color: "var(--bad)" }}>{server.message}</span> : null}
             </div>
             <Pill tone={TONE[server.state]}>{t(`mcp.state.${server.state}`)}</Pill>
-            {server.state === "connected" ? (
-              <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void revoke(server)}>{t("mcp.revoke")}</Button>
-            ) : (
-              <Button size="sm" variant="primary" disabled={busy !== null || server.state === "no_cli"} onClick={() => void authorize(server)}>
-                {t(server.state === "error" ? "mcp.retry" : "mcp.authorize")}
-              </Button>
-            )}
+            {actions(server)}
           </Row>
         </Pane>
       ))}
-
-      {auth ? (
-        <Modal label={t("mcp.modal.title", { name: auth.name })} onClose={closeAuth} style={{ flexDirection: "column", width: "min(560px, 100%)", padding: 22, gap: 14 }}>
-          <h2 className="h1" style={{ fontSize: 17 }}>{t("mcp.modal.title", { name: auth.name })}</h2>
-          <ol className="p" style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
-            <li>{t("mcp.modal.step1")}</li>
-            <li>{t("mcp.modal.step2")}</li>
-            <li>{t("mcp.modal.step3")}</li>
-          </ol>
-          <div>
-            <a className="btn" href={auth.url} target="_blank" rel="noopener noreferrer">{t("mcp.modal.open")}</a>
-          </div>
-          <Field label={t("mcp.modal.paste")} error={authError ?? undefined}>
-            {(control) => <Input {...control} value={pasted} onChange={(event) => setPasted(event.target.value)} placeholder="http://localhost:.../callback?code=..." autoComplete="off" spellCheck={false} />}
-          </Field>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button variant="ghost" onClick={closeAuth}>{t("ext.confirm.cancel")}</Button>
-            <Button variant="primary" disabled={busy !== null || !pasted.trim()} onClick={() => void connect()}>{t("mcp.modal.connect")}</Button>
-          </div>
-        </Modal>
-      ) : null}
     </section>
   );
 }

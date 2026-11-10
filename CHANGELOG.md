@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.0.15
+
+Connect an MCP server from the panel and sign in with the browser, whatever engine you use. Hokma also gets a
+one-click installer and its own window on Windows and Mac.
+
+- Settings > Extensions > MCP: add a server with a name and its address. If it asks for a sign-in, Connect opens your
+  browser on the provider's page; when you accept, the tab says "Connected, you can close this tab" and the panel
+  turns to Connected by itself. No terminal, no pasted address, and no Claude window opens when you use ChatGPT
+  (Codex) or Gemini. Revoke forgets the access.
+- Hokma signs in by itself (OAuth 2.1): it finds the authorization server from the MCP address, registers itself,
+  uses PKCE and comes back to its own server on this computer with a one-use code that expires in ten minutes.
+  Tested against Lauz (https://mcp.lauz.io/mcp).
+- The access and refresh tokens live only in the system credential store (Windows Credential Manager, macOS
+  Keychain, Secret Service on Linux), never in the database, the logs or a settings file, and are renewed before
+  they end.
+- Every engine gets the connected servers: Claude Code through a header helper that reads the store (the MCP file
+  holds no token), Codex through its own process environment (hidden from the commands the agent runs), Gemini
+  through a header when the session starts, and API key engines through Hokma's own MCP client. A server that still
+  needs a sign-in is not passed to any engine, so none of them starts its own sign-in.
+- Replaces the `claude mcp login` flow and the "paste the final address" window of 0.0.10 to 0.0.14. Servers added
+  back then show Needs to connect once: press Connect.
+- Windows: `Hokma-Setup.exe`, an Inno Setup installer. Double click, no terminal and no administrator rights; it
+  installs Hokma for the current user and opens the Hokma window when it ends.
+- Mac: `Hokma.dmg` with the `Hokma.app` window; on its first start it installs the engine from the package it
+  carries.
+- The Hokma window is a Tauri app that starts the engine, waits for it and shows the panel. It cleans its cache
+  whenever the engine version changes, without losing the panel's saved settings, and updates Hokma with the same
+  detached updater as the panel's Update button.
+- The installers are built by the `release-installers.yml` workflow when a release tag is pushed; it reads the
+  version from `backend/hokma/__init__.py` and refuses a tag that does not match it.
+
 ## 0.0.14
 
 Updating from the panel works on Windows.

@@ -48,6 +48,7 @@ MAX_PHRASE_WORDS = 4
 SPANISH_ALLOWED = (
     "backend/hokma/catalog/",
     "installer/messages/",
+    "desktop/messages/",
     "installer/Instalar-Hokma.cmd",
     "dashboard/src/i18n/",
     "kit/template/docs/learn/es/",

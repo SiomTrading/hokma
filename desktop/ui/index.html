@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hokma</title>
+  <link rel="stylesheet" href="splash.css">
+</head>
+<body>
+  <main class="splash" aria-live="polite">
+    <img class="logo" src="hokma.png" alt="" width="96" height="96">
+    <div class="spinner" id="spinner" role="progressbar" aria-label="Hokma"></div>
+    <p class="message" id="message"></p>
+    <p class="line" id="line"></p>
+    <div class="actions" id="actions" hidden>
+      <button type="button" class="primary" id="retry" hidden></button>
+      <button type="button" class="primary" id="kill" hidden></button>
+      <button type="button" id="detail-toggle" hidden></button>
+    </div>
+    <section class="detail" id="detail" hidden>
+      <pre id="detail-text"></pre>
+      <button type="button" id="copy"></button>
+    </section>
+  </main>
+  <script src="splash.js"></script>
+</body>
+</html>
