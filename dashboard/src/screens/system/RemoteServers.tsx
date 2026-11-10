@@ -4,10 +4,10 @@ import { api, ApiError, useApiQuery } from "@/api";
 import { Button, Field, Glyph, Input, Loading, Modal, Pane, Pill, Row } from "@/design";
 import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
+import { launchTerminal } from "../terminal/store";
+import { normalizeServerName, serverProblem } from "./linkFormats";
 import type { RemoteServer, RemoteState } from "./types";
 
-const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
-const URL_PATTERN = /^https:\/\/\S+$/;
 
 const TONE: Record<RemoteState, "ok" | "org" | "bad"> = { connected: "ok", needs_auth: "org", error: "bad", no_cli: "bad" };
 
@@ -27,7 +27,8 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
   const [auth, setAuth] = useState<{ name: string; url: string } | null>(null);
   const [pasted, setPasted] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
-  const valid = NAME_PATTERN.test(name.trim()) && name.trim() !== "hokma" && URL_PATTERN.test(url.trim());
+  const problem = serverProblem(name, url);
+  const valid = problem === null;
 
   const refresh = () => {
     list.reload();
@@ -40,8 +41,9 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
     setBusy("add");
     setError(null);
     try {
-      await api.post("/api/extensions/servers", { name: name.trim(), url: url.trim() });
-      shell.toast({ tone: "ok", text: t("mcp.added", { name: name.trim() }) });
+      const cleanName = name.trim().replace(/[-_]+$/, "");
+      await api.post("/api/extensions/servers", { name: cleanName, url: url.trim() });
+      shell.toast({ tone: "ok", text: t("mcp.added", { name: cleanName }) });
       setName("");
       setUrl("");
       refresh();
@@ -56,7 +58,16 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
     setBusy(server.name);
     setError(null);
     try {
-      const started = await api.post<{ auth_url: string }>(`/api/extensions/servers/${server.name}/login`);
+      const started = await api.post<{ auth_url: string | null; terminal_command?: string }>(`/api/extensions/servers/${server.name}/login`);
+      if (!started.auth_url) {
+        // Windows without a usable hidden console: the sign-in runs in Hokma's own Terminal, one click, no typing.
+        if (!started.terminal_command) throw new Error(t("api.error"));
+        if (!shell.layout.terminal) shell.toggleTerminal();
+        launchTerminal({ command: started.terminal_command });
+        shell.closeSettings();
+        shell.toast({ tone: "ok", text: t("mcp.viaTerminal", { name: server.name }) });
+        return;
+      }
       setPasted("");
       setAuthError(null);
       setAuth({ name: server.name, url: started.auth_url });
@@ -110,13 +121,14 @@ export function RemoteServers({ onChanged }: { onChanged: () => void }) {
       <Pane style={{ padding: 14 }}>
         <form onSubmit={(event) => void add(event)} style={{ display: "flex", flexDirection: "column", gap: 10 }} aria-label={t("mcp.form")}>
           <Field label={t("mcp.name")} hint={t("mcp.nameHint")}>
-            {(control) => <Input {...control} value={name} onChange={(event) => setName(event.target.value)} placeholder="lauz" autoComplete="off" spellCheck={false} />}
+            {(control) => <Input {...control} value={name} onChange={(event) => setName(normalizeServerName(event.target.value))} placeholder="lauz" autoComplete="off" spellCheck={false} />}
           </Field>
           <Field label={t("mcp.url")} hint={t("mcp.urlHint")}>
             {(control) => <Input {...control} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://mcp.lauz.io/mcp" autoComplete="off" spellCheck={false} />}
           </Field>
           <div>
             <Button type="submit" size="sm" variant="primary" disabled={!valid || busy !== null}>{t("mcp.add")}</Button>
+            {problem ? <span className="hint" role="status" style={{ marginLeft: 10 }}>{t("mcp.why." + problem)}</span> : null}
           </div>
         </form>
       </Pane>

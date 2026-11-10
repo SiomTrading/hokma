@@ -147,3 +147,47 @@ def test_clean_output_hides_redirect_secrets():
 def test_the_module_never_logs_or_stores_tokens():
     source = open(mcp_auth.__file__, encoding="utf-8").read()
     assert "logging" not in source and "print(" not in source and ".credentials" not in source
+
+
+def test_windows_without_a_usable_console_falls_back_to_the_panel_terminal(client, monkeypatch):
+    """A Windows pseudo-terminal that cannot start (or claude saying it is not interactive) never shows the owner
+    an error: the panel gets the command to run in Hokma's own Terminal."""
+    client.post("/api/extensions/servers", json={"name": "lauz", "url": URL}, headers=HEADERS)
+    monkeypatch.setattr(mcp_auth, "IS_WINDOWS", True)
+
+    def broken(*args, **kwargs):
+        raise ImportError("No module named 'winpty'")
+    monkeypatch.setattr(mcp_auth, "_Pty", broken)
+    reply = client.post("/api/extensions/servers/lauz/login", headers=HEADERS)
+    assert reply.status_code == 200
+    assert reply.json() == {"auth_url": None, "terminal_command": "claude mcp login lauz"}
+
+
+def test_windows_claude_that_exits_without_a_link_also_falls_back(client, monkeypatch, tmp_path):
+    client.post("/api/extensions/servers", json={"name": "lauz", "url": URL}, headers=HEADERS)
+    monkeypatch.setattr(mcp_auth, "IS_WINDOWS", True)
+    quitter = tmp_path / "bin" / "claude-notty"
+    quitter.write_text("#!" + sys.executable + "\nprint('Raw mode is not supported: not an interactive session')\n", encoding="utf-8")
+    quitter.chmod(quitter.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setattr(mcp_auth, "claude_path", lambda: str(quitter))
+    reply = client.post("/api/extensions/servers/lauz/login", headers=HEADERS)
+    assert reply.status_code == 200 and reply.json()["terminal_command"] == "claude mcp login lauz"
+
+
+def test_windows_cmd_shims_are_run_through_cmd(monkeypatch):
+    """pywinpty (ConPTY) cannot start an npm .cmd shim directly; it goes through cmd /d /c."""
+    seen = {}
+
+    class FakeProc:
+        @staticmethod
+        def spawn(argv, cwd=None, env=None, dimensions=None):
+            seen["argv"] = argv
+            return object()
+
+    import types
+    monkeypatch.setitem(sys.modules, "winpty", types.SimpleNamespace(PtyProcess=FakeProc))
+    monkeypatch.setattr(mcp_auth.sys, "platform", "win32")
+    mcp_auth._Pty(["C:\\npm\\claude.cmd", "mcp", "login", "lauz"], ".", {})
+    assert seen["argv"][1:4] == ["/d", "/c", "C:\\npm\\claude.cmd"]
+    mcp_auth._Pty(["C:\\bin\\claude.exe", "mcp"], ".", {})
+    assert seen["argv"][0] == "C:\\bin\\claude.exe"

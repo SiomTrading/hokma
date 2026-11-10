@@ -23,12 +23,14 @@ from typing import Callable
 from hokma import __version__
 from hokma.core.proc import spawn_kwargs
 from hokma.core.config import (current_pointer, current_slot, hokma_data_dir, hokma_home, other_slot,
-                               slot_dir, slot_exe)
+                               running_slot, slot_dir, slot_exe)
 from hokma.i18n import t
 from hokma.update.archive import extract, fetch_archive
 from hokma.update.source import ManifestSource, UpdateError, UpdateSource, parse_version
 
 LOCK_STALE_SECONDS = 30 * 60
+REMOVE_ATTEMPTS = 5
+REMOVE_WAIT_SECONDS = 1.0
 VERSION_LINE = re.compile(r'^__version__\s*=\s*"(\d+\.\d+\.\d+)"', re.M)
 
 
@@ -69,6 +71,21 @@ def _run(cmd: list[str], what: str, env: dict[str, str], timeout: int = 900) -> 
         tail = (r.stderr or r.stdout).strip().splitlines()[-3:]
         raise UpdateError(t("update.step_failed", step=what, detail=" | ".join(tail)))
     return r.stdout
+
+
+def _remove_slot(path: Path) -> None:
+    """Delete the inactive slot. On Windows a file in use (a leftover process, a scanner) cannot be deleted: wait and
+    retry, and if it stays locked say so in plain words instead of a traceback."""
+    for attempt in range(1, REMOVE_ATTEMPTS + 1):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            if attempt == REMOVE_ATTEMPTS:
+                raise UpdateError(t("update.slot_busy", path=path)) from exc
+            time.sleep(REMOVE_WAIT_SECONDS)
 
 
 def write_pointer(slot: str) -> None:
@@ -119,11 +136,16 @@ def run_update(source: UpdateSource | str, *, force: bool = False,
     if parse_version(manifest.version) < parse_version(__version__) and not force:
         raise UpdateError(t("update.older", new=manifest.version, current=__version__))
 
+    target = other_slot(active)
+    if running_slot() == target:
+        # This process lives in the slot that the update must rebuild (it kept running after an earlier update
+        # moved `current`). Its files are in use: never try to delete them.
+        raise UpdateError(t("update.running_old_slot"))
+
     with _Lock():
         tmp_root = hokma_data_dir() / "tmp"
         tmp_root.mkdir(parents=True, exist_ok=True)
         work = Path(tempfile.mkdtemp(prefix="update-", dir=tmp_root))
-        target = other_slot(active)
         target_dir = slot_dir(target)
         flipped = False
         try:
@@ -145,7 +167,7 @@ def run_update(source: UpdateSource | str, *, force: bool = False,
 
             # Build the new version in the inactive slot, at its final path.
             if target_dir.exists():
-                shutil.rmtree(target_dir)          # leftovers from an earlier failed or interrupted update
+                _remove_slot(target_dir)           # leftovers from an earlier failed or interrupted update
             (target_dir).mkdir(parents=True)
             shutil.copytree(release, target_dir / "app", symlinks=False)
             env = _env()

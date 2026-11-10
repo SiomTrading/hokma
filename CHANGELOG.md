@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.12
+
+Updating on Windows no longer fails when a file is in use or the working folder is synced.
+
+- `hokma update` refuses, with a plain message, to rebuild the slot that its own process is running from, and waits
+  and retries when a file of the old slot is locked, instead of ending in `PermissionError [WinError 32]`.
+- Writing a kit file retries with a new temporary name when OneDrive, an antivirus or the indexer touches the file
+  or the folder at the same instant.
+
 ## 0.0.11
 
 Settings > Extensions is tidy again, and installing a plugin takes one click.

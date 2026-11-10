@@ -23,8 +23,11 @@ from hokma.i18n import t
 from hokma.kit import extensions
 from hokma.kit.mcp_config import HTTPS_URL
 from hokma.setup.claude import _clean_output, claude_path
+from hokma.terminal.session import build_env as terminal_env
 from hokma.status.extensions_service import LOCAL_MARKETPLACE, ServiceError, _db, _owner, sync_table
 
+IS_WINDOWS = sys.platform == "win32"
+SHIMS = (".cmd", ".bat")
 NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 RESERVED = ("hokma",)
 CMD_TIMEOUT = 10
@@ -147,7 +150,9 @@ class _Pty:
         self._win = None
         self.proc = None
         if sys.platform == "win32":
-            from winpty import PtyProcess      # pywinpty, installed only on Windows
+            from winpty import PtyProcess      # pywinpty (ConPTY), the same mechanism the panel terminal uses
+            if argv[0].lower().endswith(SHIMS):      # CreateProcess cannot run an npm .cmd shim directly
+                argv = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", *argv]
             self._win = PtyProcess.spawn(argv, cwd=cwd, env=env, dimensions=(30, 200))
             return
         import pty
@@ -234,15 +239,24 @@ def stop_login() -> None:
         login.pty.kill()
 
 
+def terminal_login(name: str) -> dict:
+    """Fallback for Windows when the hidden pseudo-terminal does not give claude a real console: the panel types
+    this command in its own Terminal, which is interactive there, and the browser sign-in finishes by itself."""
+    return {"auth_url": None, "terminal_command": "claude mcp login " + name}
+
+
 def start_login(name: str) -> dict:
     global _login
     _server(name)
     path = _require_claude()
     stop_login()
     claude_config_dir().mkdir(parents=True, exist_ok=True)
+    env = {**_env(), **{k: v for k, v in terminal_env().items() if k in ("TERM", "COLORTERM", "PATH")}}
     try:
-        child = _Pty([path, "mcp", "login", name, "--no-browser"], str(hokma_data_dir()), _env())
+        child = _Pty([path, "mcp", "login", name, "--no-browser"], str(hokma_data_dir()), env)
     except (OSError, ImportError) as exc:
+        if IS_WINDOWS:
+            return terminal_login(name)
         raise ServiceError(500, t("status.mcp.login_failed", output=str(exc))) from exc
     login = _Login(name, child)
     with _lock:
@@ -255,6 +269,8 @@ def start_login(name: str) -> dict:
         with _lock:
             shown = _clean_output(_strip(login.output))
         stop_login()
+        if IS_WINDOWS:
+            return terminal_login(name)
         raise ServiceError(500, t("status.mcp.login_failed", output=shown or "-"))
     return {"auth_url": login.url}
 

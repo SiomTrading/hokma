@@ -11,6 +11,8 @@ realpath of the folder is still inside the root, then `os.replace`. This variant
 """
 import os
 import stat
+import time
+import uuid
 from pathlib import Path
 
 from hokma.i18n import t
@@ -156,26 +158,57 @@ def _read_generic(root: Path, rel: str) -> bytes | None:
     return (root / rel).read_bytes()
 
 
-def _write_generic(root: Path, rel: str, data: bytes, mode: int) -> None:
+# OneDrive, antivirus and the search indexer open files the instant they appear, so on Windows a write that is
+# correct can fail once (the folder is briefly gone, the temp file is locked). Retry with a fresh temp name.
+WRITE_ATTEMPTS = 6
+WRITE_BACKOFF = 0.2          # seconds, multiplied by the attempt number
+
+
+def _transient(exc: OSError) -> bool:
+    """Missing file or folder, access denied or sharing violation: what a sync client or scanner causes."""
+    return isinstance(exc, (FileNotFoundError, PermissionError)) or getattr(exc, "winerror", None) in (5, 32, 33)
+
+
+def _write_generic_once(root: Path, rel: str, data: bytes, mode: int, tmp_name: str) -> None:
     parts = _parts(rel)
     cur = root
     for part in parts[:-1]:
         cur = cur / part
-        if not cur.exists() and not os.path.islink(cur):
-            cur.mkdir()
+        if not os.path.islink(cur):
+            try:
+                cur.mkdir()
+            except FileExistsError:
+                pass
     if _chain_generic(root, parts) == "unsafe":
         raise UnsafePath(t("fs.unsafe_path", path=rel))
     dst = root / rel
-    tmp = dst.with_name(f".{dst.name}.hokma-tmp-{os.getpid()}")
-    tmp.write_bytes(data)
+    tmp = dst.with_name(tmp_name)
     try:
+        tmp.write_bytes(data)
         if not _inside(tmp.parent, root) or os.path.islink(tmp):
             raise UnsafePath(t("fs.escapes", path=rel))
         os.chmod(tmp, mode)
         os.replace(tmp, dst)
     except BaseException:
-        tmp.unlink(missing_ok=True)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise
+
+
+def _write_generic(root: Path, rel: str, data: bytes, mode: int) -> None:
+    name = _parts(rel)[-1]
+    for attempt in range(1, WRITE_ATTEMPTS + 1):
+        tmp_name = f".{name}.hokma-tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        try:
+            return _write_generic_once(root, rel, data, mode, tmp_name)
+        except UnsafePath:
+            raise
+        except OSError as exc:
+            if not _transient(exc) or attempt == WRITE_ATTEMPTS:
+                raise
+            time.sleep(WRITE_BACKOFF * attempt)
 
 
 # ---- public API ---------------------------------------------------------------------------

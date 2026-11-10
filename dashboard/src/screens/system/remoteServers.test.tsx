@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, t } from "@/i18n";
 import { renderWithApp } from "@/test/utils";
+import * as terminalStore from "../terminal/store";
 import { RemoteServers } from "./RemoteServers";
 import { failure, mockApi } from "./testkit";
 
@@ -45,6 +46,37 @@ describe.each(["es", "en"] as const)("Remote MCP servers (%s)", (locale) => {
     await userEvent.type(screen.getByLabelText(t("mcp.url")), "http://x.test/mcp");
     expect(screen.getByRole("button", { name: t("mcp.add") })).toBeDisabled();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+  });
+
+  it("normalizes the name by itself and says why the button is off", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/extensions/servers": { servers: [] } });
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    const name = await screen.findByLabelText(t("mcp.name"));
+    await userEvent.type(name, "Mi \u00d1and\u00fa Caf\u00e9");
+    expect(name).toHaveValue("mi-nandu-cafe");
+    expect(screen.getByRole("button", { name: t("mcp.add") })).toBeDisabled();
+    expect(screen.getByText(t("mcp.why.url_empty"))).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(t("mcp.url")), "http://x.test");
+    expect(screen.getByText(t("mcp.why.url_format"))).toBeInTheDocument();
+    await userEvent.clear(name);
+    await userEvent.type(name, "Hokma");
+    expect(screen.getByText(t("mcp.why.name_reserved"))).toBeInTheDocument();
+  });
+
+  it("when the server asks for the Terminal (Windows), it opens it with the login command and sends nothing else", async () => {
+    setLocale(locale);
+    const calls = mockApi({
+      "GET /api/extensions/servers": { servers: [{ ...LAUZ, state: "needs_auth" }] },
+      "POST /api/extensions/servers/lauz/login": { auth_url: null, terminal_command: "claude mcp login lauz" },
+    });
+    const launch = vi.spyOn(terminalStore, "launchTerminal").mockReturnValue("t1");
+    renderWithApp(<RemoteServers onChanged={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: t("mcp.authorize") }));
+    await waitFor(() => expect(launch).toHaveBeenCalledWith({ command: "claude mcp login lauz" }));
+    expect(screen.queryByRole("link", { name: t("mcp.modal.open") })).not.toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+    launch.mockRestore();
   });
 
   it("shows the error of a bad paste inside the modal and keeps it open", async () => {

@@ -94,6 +94,8 @@
   "update.in_progress": "ya hay una actualización en curso",
   "update.not_installed": "Hokma no está instalado con el instalador (no hay runtime activo); no hay nada que actualizar",
   "update.older": "la versión {new} es anterior a la instalada ({current})",
+  "update.running_old_slot": "Hokma sigue abierto con la versión anterior. Ciérralo por completo, ábrelo de nuevo y actualiza otra vez.",
+  "update.slot_busy": "No pude reemplazar los archivos viejos de Hokma en {path}: otro programa los está usando. Cierra Hokma, sus terminales y las ventanas de Claude, y actualiza de nuevo.",
   "update.version_mismatch": "la versión dentro del paquete no coincide con la del manifiesto",
   "update.no_lock": "el paquete no trae un installer/lock.json válido",
   "update.no_uv": "no encuentro uv en {path}; vuelve a ejecutar el instalador",

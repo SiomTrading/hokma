@@ -4,6 +4,7 @@ import { api, ApiError, useApiQuery } from "@/api";
 import { Button, EmptyState, ErrorState, Field, Glyph, Input, Loading, Modal, Pane, Pill, Row, Toggle } from "@/design";
 import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
+import { normalizeRepo, repoProblem } from "./linkFormats";
 import { RemoteServers } from "./RemoteServers";
 import type { ExtensionRequest, ExtensionsData, MarketData, MarketItem, PluginItem } from "./types";
 
@@ -38,7 +39,6 @@ function storeTab(tab: ExtTab): void {
 }
 
 const MARKETPLACE_NAME = "claude-plugins-official";
-const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 function errorText(cause: unknown, fallback: string): string {
   return cause instanceof ApiError || cause instanceof Error ? cause.message : fallback;
@@ -286,7 +286,8 @@ function AddByLink({ onDone }: { onDone: () => void }) {
   const [repo, setRepo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const valid = REPO_PATTERN.test(repo.trim());
+  const problem = repoProblem(repo);
+  const valid = problem === null;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -294,7 +295,7 @@ function AddByLink({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const added = await api.post<{ name: string }>("/api/extensions/marketplaces", { repo: repo.trim() });
+      const added = await api.post<{ name: string }>("/api/extensions/marketplaces", { repo: normalizeRepo(repo) });
       shell.toast({ tone: "ok", text: t("ext.link.added", { name: added.name }) });
       onDone();
     } catch (cause) {
@@ -307,11 +308,12 @@ function AddByLink({ onDone }: { onDone: () => void }) {
   return (
     <Pane style={{ padding: 14 }}>
       <form onSubmit={(event) => void submit(event)} style={{ display: "flex", flexDirection: "column", gap: 10 }} aria-label={t("ext.link.title")}>
-        <Field label={t("ext.link.label")} hint={t("ext.link.hint")} error={error ?? undefined}>
+        <Field label={t("ext.link.label")} hint={t("ext.link.hint")} error={error ?? (problem === "format" ? t("ext.link.badFormat") : undefined)}>
           {(control) => <Input {...control} value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="owner/repo" autoComplete="off" spellCheck={false} />}
         </Field>
         <div>
           <Button type="submit" size="sm" variant="primary" disabled={!valid || busy}>{t("ext.link.submit")}</Button>
+          {problem === "empty" ? <span className="hint" style={{ marginLeft: 10 }}>{t("ext.link.empty")}</span> : null}
         </div>
       </form>
     </Pane>

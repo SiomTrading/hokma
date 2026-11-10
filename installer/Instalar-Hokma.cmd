@@ -62,6 +62,7 @@ function Fail([string]$text) { Show-Box $text "Error"; $Form.Close(); exit 1 }
 function Invoke-Hidden([string]$file, [string]$argLine, [string]$log, [scriptblock]$onTick) {
     $p = Start-Process -FilePath $file -ArgumentList $argLine -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $log -RedirectStandardError ($log + ".err")
+    $null = $p.Handle     # keeps the process handle so ExitCode is not $null on Windows PowerShell 5.1
     while (-not $p.HasExited) {
         Start-Sleep -Milliseconds 200
         Pump
@@ -69,6 +70,12 @@ function Invoke-Hidden([string]$file, [string]$argLine, [string]$log, [scriptblo
     }
     $p.WaitForExit()
     return $p.ExitCode
+}
+# Success is decided by the exit code, never by what the program wrote to stderr (git prints "Cloning into" there).
+# If Windows gives no exit code at all, the proof file decides.
+function Test-Succeeded($code, [string]$proof) {
+    if ($null -eq $code) { return (Test-Path -LiteralPath $proof) }
+    return ([int]$code -eq 0)
 }
 function Read-Tail([string]$path, [int]$count) {
     if (-not (Test-Path -LiteralPath $path)) { return "" }
@@ -120,21 +127,22 @@ try {
     Show-Step $T.downloading
     $src = Join-Path $work "src"
     $cloneLog = Join-Path $work "clone.log"
-    $code = Invoke-Hidden "git" ('clone --depth 1 --branch main "' + $RepoUrl + '" "' + $src + '"') $cloneLog $null
-    if ($code -ne 0) {
-        Fail ($T.dl_failed + "`r`n" + (Read-Tail ($cloneLog + ".err") 4))
+    $installScript = Join-Path $src "installer\install.ps1"
+    $code = Invoke-Hidden "git" ('-c core.longpaths=true clone --quiet --depth 1 --branch main "' + $RepoUrl + '" "' + $src + '"') $cloneLog $null
+    if (-not (Test-Succeeded $code $installScript)) {
+        $detail = (Read-Tail ($cloneLog + ".err") 6) + "`r`n" + (Read-Tail $cloneLog 4)
+        Fail ($T.dl_failed + "`r`n" + $detail.Trim() + "`r`n(git: " + $code + ")")
     }
 
     # ---- 4. the real installer
     Show-Step $T.installing
     $installLog = Join-Path $work "install.log"
-    $installScript = Join-Path $src "installer\install.ps1"
     $tick = {
         $last = Read-Tail $installLog 1
         if ($last) { $Label.Text = ($last -replace "^\[[^\]]*\]\s*", ""); Pump }
     }
     $code = Invoke-Hidden "powershell.exe" ('-NoProfile -ExecutionPolicy Bypass -File "' + $installScript + '" -NoDoctor') $installLog $tick
-    if ($code -ne 0) {
+    if (-not (Test-Succeeded $code $launcher)) {
         $keep = Join-Path $env:TEMP "hokma-install-last.log"
         Copy-Item -LiteralPath $installLog -Destination $keep -Force -ErrorAction SilentlyContinue
         Fail ($T.inst_failed + "`r`n" + (Read-Tail $installLog 6) + "`r`n" + (Read-Tail ($installLog + ".err") 4) + "`r`n`r`n" + $T.log_at + " " + $keep)

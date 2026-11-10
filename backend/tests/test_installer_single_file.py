@@ -55,3 +55,19 @@ def test_missing_claude_is_a_warning_and_the_install_goes_on():
 def test_it_opens_hokma_at_the_end():
     assert POWERSHELL.rstrip().endswith("exit 0")
     assert '" start' in POWERSHELL
+
+
+def test_clone_success_is_decided_by_exit_code_not_by_stderr():
+    # git writes "Cloning into ..." to stderr even when it works: that text must never decide anything.
+    assert "clone --quiet" in POWERSHELL
+    assert "function Test-Succeeded" in POWERSHELL
+    assert "if (-not (Test-Succeeded $code $installScript))" in POWERSHELL
+    assert "$null = $p.Handle" in POWERSHELL          # ExitCode is reliable on Windows PowerShell 5.1
+    assert "-RedirectStandardError ($log" in POWERSHELL    # stderr goes to a file, never into the error stream
+    assert "2>&1" not in POWERSHELL
+    assert "NativeCommandError" not in POWERSHELL
+    assert "core.longpaths=true" in POWERSHELL
+
+
+def test_failure_message_carries_the_real_detail_and_the_git_code():
+    assert '"`r`n(git: " + $code + ")"' in POWERSHELL

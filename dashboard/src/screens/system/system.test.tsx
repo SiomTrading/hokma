@@ -196,6 +196,25 @@ describe.each([
     await userEvent.click(submit);
     await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/marketplaces")?.body).toEqual({ repo: "acme/plugins" }));
   });
+
+  it("accepts a GitHub link, normalizes it, and explains a format it cannot use", async () => {
+    setLocale(locale);
+    const calls = mockApi({
+      "GET /api/extensions": extensionsData(),
+      "POST /api/extensions/marketplaces": { name: "plugins", source: "github:acme/plugins", warnings: [] },
+    });
+    renderWithApp(<ExtensionsSection />);
+    await userEvent.click(await screen.findByRole("button", { name: words.add }));
+    const submit = screen.getAllByRole("button", { name: /^(Agregar|Add)$/ })[0]!;
+    await userEvent.type(screen.getByPlaceholderText("owner/repo"), "https://gitlab.com/acme/plugins");
+    expect(submit).toBeDisabled();
+    expect(screen.getByText(T("ext.link.badFormat", locale))).toBeInTheDocument();
+    await userEvent.clear(screen.getByPlaceholderText("owner/repo"));
+    await userEvent.type(screen.getByPlaceholderText("owner/repo"), "https://github.com/acme/plugins.git/");
+    expect(submit).toBeEnabled();
+    await userEvent.click(submit);
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/marketplaces")?.body).toEqual({ repo: "acme/plugins" }));
+  });
 });
 
 describe("Extensions states", () => {
