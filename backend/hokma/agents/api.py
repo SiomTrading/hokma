@@ -37,6 +37,14 @@ class NewAgent(_Body):
     instructions: str = Field(max_length=50000)
 
 
+class EditAgent(_Body):
+    description: str | None = Field(default=None, max_length=5000)
+    model: str | None = Field(default=None, max_length=20)
+    instructions: str | None = Field(default=None, max_length=50000)
+    tools: str | None = Field(default=None, max_length=2000)
+    active: bool | None = None
+
+
 class ModelBody(_Body):
     model: str = Field(max_length=20)
 
@@ -92,6 +100,15 @@ def create_router() -> APIRouter:
         _auth(x_hokma_token, token)
         try:
             return agents.create(body.name, body.description, body.model, body.instructions)
+        except AgentsError as exc:
+            raise _fail(exc) from exc
+
+    @router.put("/api/agents/{slug}")
+    def edit_agent(slug: str, body: EditAgent, x_hokma_token: str = Header(default=""), token: str = Query(default="")):
+        _auth(x_hokma_token, token)
+        try:
+            return agents.update(slug, description=body.description, model=body.model, instructions=body.instructions,
+                                 tools=body.tools, active=body.active)
         except AgentsError as exc:
             raise _fail(exc) from exc
 

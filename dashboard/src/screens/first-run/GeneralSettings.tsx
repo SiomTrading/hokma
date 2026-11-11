@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, deviceKeySupported, isFirefox, logoutSession, useSessionInfo } from "@/api";
+import { ApiError, deviceKeySupported, getBrowserPref, openInBrowser, setBrowserPref, isFirefox, logoutSession, useSessionInfo } from "@/api";
 import { Button, ErrorState, Input, Loading, Segmented, Toggle } from "@/design";
 import { useI18n } from "@/i18n";
 import type { Locale } from "@/i18n";
@@ -36,6 +36,15 @@ export function GeneralSettings() {
   const [error, setError] = useState<string | null>(null);
   const session = useSessionInfo();
   const firefox = isFirefox();
+  const [always, setAlways] = useState(false);
+  useEffect(() => {
+    getBrowserPref().then(setAlways, () => undefined);
+  }, []);
+  const changeAlways = (on: boolean) =>
+    run(async () => {
+      await setBrowserPref(on);
+      setAlways(on);
+    });
 
   const apply = useCallback((next: SetupState) => {
     setState(next);
@@ -215,6 +224,20 @@ export function GeneralSettings() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span className="p">{t("general.light")}</span>
         <Toggle label={t("general.light")} checked={shell.theme === "light"} onChange={(on) => shell.setTheme(on ? "light" : "dark")} />
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="browser-section">
+        <span className="p">{t("browser.openDescription")}</span>
+        <div>
+          <Button size="sm" disabled={busy} onClick={() => void run(openInBrowser)} data-testid="browser-open">
+            {t("browser.open")}
+          </Button>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="p">{t("browser.always")}</span>
+          <Toggle label={t("browser.always")} checked={always} onChange={(on) => void changeAlways(on)} />
+        </div>
+        <span className="p">{t("browser.alwaysDescription")}</span>
       </div>
 
       <PermissionsSettings />

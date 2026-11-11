@@ -42,6 +42,7 @@ verifies. A further parser finding is classified B unless it breaks one of those
 
 Standard library plus `hokma.i18n` and `hokma.kit.guard` only.
 """
+import fnmatch
 import json
 import ntpath
 import os
@@ -52,7 +53,7 @@ from datetime import datetime, timezone
 from urllib.parse import unquote
 
 from hokma.i18n import t
-from hokma.kit.guard import under_any
+from hokma.kit.guard import _fold, under_any
 
 BLOCK = 2
 RULES = ("delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money")
@@ -132,9 +133,9 @@ def norm_text(s: str) -> str:
 
 
 _SLASHES = re.compile(r"/{2,}")
-SHUTDOWN_ROUTE_RE = re.compile(r"/api/system/shutdown")
+SHUTDOWN_ROUTE_RE = re.compile(r"/api/system/(?:shutdown|browser)")
 # The backstop: the three words in order, whatever sits between them (spaces, control characters, a stray segment).
-SHUTDOWN_WORDS_RE = re.compile(r"api.{0,64}?system.{0,64}?shutdown", re.S)
+SHUTDOWN_WORDS_RE = re.compile(r"api.{0,64}?system.{0,64}?(?:shutdown|browser)", re.S)
 _WHITESPACE = re.compile(r"[\s\x00-\x1f\x7f]+")
 
 
@@ -273,20 +274,40 @@ SECRET_RE = re.compile("|".join([
     # process's secrets are read): `self` is the agent's own process and stays free.
     r"/proc/(?!self/|thread-self/)[^/\s\"']+/(?:mem|environ|cmdline|maps|smaps)(?:\s|$|[\"'])",
 ]))
-INTERNAL_RE = re.compile("|".join([
+INTERNAL_READ_RE = re.compile("|".join([
     _B + r"\.hokma" + _E,
     # Hokma's own API: the session header, the owner confirmation and the calls that change the permission mode or
     # touch the Trash and the restore points. Those belong to the owner at the screen; an agent that names them is
     # trying to call them.
     r"x-hokma-token", r"x-hokma-owner", r"/api/profile/permission-mode", r"/api/session/owner-nonce",
-    r"/api/system/shutdown",
+    r"/api/system/(?:shutdown|browser)",
     r"/api/trash/(?:empty|\d+/(?:restore|purge))", r"/api/checkpoints/[^/\s\"']+/restore-",
-    r"(?:localappdata%?|appdata/local|application support|\.local/share|xdg_data_home\}?)/hokma" + r"(?:/|\s|$|[\"'])",
     # The remembered session belongs to the owner: sign-in resume and sign-out calls, and the control channel and
     # lock file of the background engine (a Unix socket, a Windows pipe and the lock with pid and port).
     r"/api/session/(?:resume|logout|challenge|enter|handoff-code)", r"control\.sock", r"hokma-control-", r"engine\.lock",
 ]))
+# Everything above stays hidden when it is only read. Writing, moving or deleting also refuses the data folder itself.
+INTERNAL_RE = re.compile(INTERNAL_READ_RE.pattern + "|" + (
+    r"(?:localappdata%?|appdata/local|application support|\.local/share|xdg_data_home\}?)/hokma"
+    r"(?:/|\s|$|[\"'])"))
 # The restore point refs live in the project's Git; an agent that writes them (or packs them) could forge a point.
+# Reading is free in the data folder, but not these (named by their default places): the database and its copies and
+# the Codex sign-in. `check_read_path` judges the real data folder by identity.
+# Deny by default: inside the data folder only these first-level names may be read (everything else, such as the
+# database, `identity.key`, `codex-home`, `acp-home`, backups and the trash, and any future secret, stays hidden).
+READABLE_DATA_TOPS = ("claude-config", "logs", "runtime", "bin", "python", "cache", "models", "plugin-shims",
+                      "plugin-installs.json", "kit-report.json",
+                      "kit-baseline.json", "owner.json", "language", "agents-state.json", "workdir", "active-project",
+                      "update-status.json", "update-progress.json", "current", "update.lock", "engine", "market-cache",
+                      "attachments")
+# The same inside claude-config: the plugins, the settings and the logs, not the sign-in, the session file or its backups.
+READABLE_CONFIG_TOPS = ("plugins", "settings.json", "logs", "debug", "skills", "agents", "commands", "todos")
+_CONFIG = "|".join(re.escape(x) for x in READABLE_CONFIG_TOPS)
+_TOPS = "|".join(re.escape(x) for x in READABLE_DATA_TOPS)
+_HIDDEN_AFTER = r"/(?!(?:" + _TOPS + r")(?:/|\s|$|[\"']))[^\s\"'/*?\[]+"
+HIDDEN_DATA_RE = re.compile(r"(?:localappdata%?|appdata/local|application support|\.local/share|xdg_data_home\}?)/hokma"
+                            + _HIDDEN_AFTER
+                            + r"|claude-config/(?!(?:" + _CONFIG + r")(?:/|\s|$|[\"']))[^\s\"'/*?\[]+")
 GIT_REFS_RE = re.compile(_B + r"\.git/(?:refs/hokma|packed-refs)" + r"(?:/|\s|$|[\"'])")
 RAW_DATA_RE = re.compile(r"(?:localappdata%?|appdata/local|application support|\.local/share|xdg_data_home\}?)/hokma"
                          r"(?:/|\s|$|[\"'])")
@@ -316,8 +337,11 @@ def scan_secret_text(text: str) -> str | None:
     return m.group(0).strip(" \"'=:;,()<>|&/@") if m else None
 
 
-def check_text_markers(text: str, ctx: Ctx, *, settings: bool = True) -> None:
-    """Secrets and Hokma-internal markers in a text that names a path (or in code)."""
+def check_text_markers(text: str, ctx: Ctx, *, settings: bool = True, reading: bool = False) -> None:
+    """Secrets and Hokma-internal markers in a text that names a path (or in code). `reading`: the text belongs to a
+    command or tool that only reads, so naming Hokma's data folder is not a marker (what is inside is judged by
+    `check_read_path`)."""
+    internal = INTERNAL_READ_RE if reading else INTERNAL_RE
     expanded = expand(text, ctx)
     for candidate in (text, expanded):
         hit = scan_secret_text(candidate)
@@ -325,28 +349,83 @@ def check_text_markers(text: str, ctx: Ctx, *, settings: bool = True) -> None:
             raise Block("secrets", short(text))
     low = norm_text(expanded) if expanded != text else norm_text(text)
     for candidate in (norm_text(text), low):
-        if INTERNAL_RE.search(candidate) or GIT_REFS_RE.search(candidate) or (settings and SETTINGS_RE.search(candidate)):
+        if internal.search(candidate) or GIT_REFS_RE.search(candidate) or (settings and SETTINGS_RE.search(candidate)):
+            raise Block("hokma_internal", short(text))
+        if reading and HIDDEN_DATA_RE.search(candidate):
             raise Block("hokma_internal", short(text))
     if names_shutdown_route(text) or names_shutdown_route(expanded):
         raise Block("hokma_internal", short(text))
 
 
-def check_real_path(path: str, ctx: Ctx, *, settings: bool = True) -> None:
-    """Resolve a path (relative to the call's folder) and refuse the secret and internal places by identity."""
+def check_real_path(path: str, ctx: Ctx, *, settings: bool = True, reading: bool = False, here: str | None = None) -> None:
+    """Resolve a path (relative to the call's folder) and refuse the secret and internal places by identity.
+    `reading`: the data folder is judged by `check_read_path` instead of being refused whole."""
     if unresolved(path) and not path.startswith("~"):
         return
-    full = clean_path(joined(expand(path, ctx), ctx.cwd))
+    protect = [p for p in ctx.protect if not under_any(p, [ctx.data])] if reading else ctx.protect
+    full = clean_path(joined(expand(path, ctx), here or ctx.cwd))
     if is_win_abs(full) and os.name != "nt":
         return                                                  # a Windows path on another system: text markers only
     for candidate in {full, os.path.realpath(full)}:
         low = norm_text(candidate)
         if SECRET_RE.search(low) or re.search(r"/database\.json$", low) and under_any(candidate, [ctx.data]):
             raise Block("secrets", short(path))
-        if under_any(candidate, ctx.protect):
+        if under_any(candidate, protect):
             raise Block("hokma_internal", short(path))
         if SETTINGS_RE.search(low) and settings:
             raise Block("hokma_internal", short(path))
         if GIT_REFS_RE.search(low + "/"):                       # the file itself, wherever a link or `..` led to it
+            raise Block("hokma_internal", short(path))
+
+
+# Names that stay hidden inside the data folder even for reading: the database and its copies, the Codex sign-in.
+GLOB_CHARS = "*?["
+
+
+def read_hidden(candidate: str, ctx: Ctx, *, content: bool) -> bool:
+    """True when `candidate` (a real path under the data folder) is not for reading: the database and its copies, the
+    sign-in folders, and, when the command reads CONTENT, a folder that holds any of them (the data folder and the
+    claude-config folder), because a recursive search or a glob would walk into the credentials."""
+    data = _fold(os.path.realpath(ctx.data))                    # case-folded where the file system ignores case
+    try:
+        rel = os.path.relpath(_fold(candidate), data)
+    except ValueError:
+        return True
+    if rel == ".":
+        return content
+    if rel.startswith(".."):
+        return True                                             # judged inside the data folder but not below it: hide
+    parts = rel.replace("\\", "/").lower().split("/")
+    if parts[0] not in READABLE_DATA_TOPS:
+        return True
+    if parts[0] == "claude-config":
+        if len(parts) == 1:
+            return content
+        if parts[1] not in READABLE_CONFIG_TOPS or any(
+                x.startswith((".claude.json", ".credentials", "credentials.json")) for x in parts[1:]):
+            return True                                         # the session file, its backups and the sign-in files
+    return False
+
+
+def check_read_path(path: str, ctx: Ctx, here: str, *, content: bool) -> None:
+    """A path that a read-only command or tool names. Under the data folder it is readable unless it is a secret
+    (SECRET_RE, already checked by the markers) or `read_hidden`. A glob is judged by the folder before its first
+    wildcard."""
+    text = expand(path, ctx)
+    if unresolved(text) and not text.startswith("~"):
+        return
+    full = clean_path(joined(text, here))
+    if is_win_abs(full) and os.name != "nt":
+        return
+    cut = min((full.find(c) for c in GLOB_CHARS if c in full), default=-1)
+    if cut >= 0:
+        tail = full[cut:].replace("\\", "/")
+        if ".." in tail.split("/") or any(part.startswith(".") for part in (full[:cut].replace("\\", "/").rsplit("/", 1)[-1] + tail).split("/")):
+            if under_any(os.path.dirname(full[:cut]) or "/", [ctx.data]):
+                raise Block("hokma_internal", short(path))      # a glob that can reach dot files or climb out of its folder
+        full = os.path.dirname(full[:cut]) or "/"
+    for candidate in {full, os.path.realpath(full)}:
+        if under_any(candidate, [ctx.data]) and read_hidden(candidate, ctx, content=content):
             raise Block("hokma_internal", short(path))
 
 
@@ -863,6 +942,7 @@ class Run:
 
     def __init__(self, ctx: Ctx, cwd: str, strict: bool = True) -> None:
         self.ctx, self.cwd, self.strict = ctx, [cwd], strict
+        self.reading = False                    # the whole command only reads: Hokma's data folder may be read
 
     @property
     def here(self) -> str:
@@ -980,7 +1060,7 @@ def check_redirections(cmd: Cmd, words: list[Word], prev: Cmd | None, mode: str,
         if op in ("<", "<<", "<<<", "<&"):
             check_path_arg(w.text, ctx, settings=True)
             continue
-        if op == ">&":
+        if op == ">&" and (w.text.isdigit() or w.text == "-"):
             continue
         full = check_write_dest(w.text, ctx, run.here)
         if op in (">", ">|") and producer and full and os.path.isfile(full) and os.path.getsize(full) > 0:
@@ -1055,6 +1135,142 @@ def launcher_call(name: str, words: list[Word], cmd: Cmd) -> str | None:
     return None
 
 
+# Tools that walk a whole tree. Pointed at a folder that CONTAINS the data folder (`~`, `~/.local/share`,
+# `%LOCALAPPDATA%`, `/`) they read the database and the credentials, so that is a read of the data folder's content.
+RECURSIVE_ALWAYS = {"ugrep", "ug", "rg", "find", "tree", "fd", "ag", "ack", "rgrep", "ugrep", "ug", "dir", "findstr", "gci", "get-childitem",
+                    "select-string", "sls"}
+RECURSIVE_FLAG = {"grep": "rRd", "egrep": "rRd", "fgrep": "rRd", "ls": "R", "cp": "rRa", "scp": "r", "rsync": "ra",
+                  "zip": "rR", "7z": "", "7za": "", "tar": "", "pax": "", "cpio": "", "xcopy": "", "robocopy": "",
+                  "copy-item": "", "cpi": "", "compress-archive": "", "du": "", "zipinfo": ""}
+NEEDS_OPERAND = {"cp", "scp", "rsync", "zip", "7z", "7za", "tar", "pax", "cpio", "xcopy", "robocopy", "copy-item",
+                 "cpi", "compress-archive"}
+
+
+def _recursive_call(name: str, words: list[Word]) -> bool:
+    if name in RECURSIVE_ALWAYS:
+        return not (name == "dir" and not any(w.text.lower() in ("/s", "-recurse") for w in words[1:])) and not (
+            name in ("gci", "get-childitem") and not any(w.text.lower().startswith(("-r", "-recurse")) for w in words[1:])
+        ) and not (name in ("select-string", "sls") and not any(
+            w.text.lower() == "-recurse" for w in words[1:])) and not (
+            name == "findstr" and not any(w.text.lower().startswith("/s") for w in words[1:]))
+    if name in RECURSIVE_FLAG:
+        letters = RECURSIVE_FLAG[name]
+        for w in words[1:]:
+            t = w.text
+            if t in ("-recurse",) or (t.startswith("--") and (t[2:].startswith(("rec", "dereference-rec", "arch"))
+                                                                or t.startswith("--dir"))) or (
+                    letters and re.match(r"^-[A-Za-z]+$", t) and any(c in t[1:] for c in letters)) or (
+                    name == "grep" and t.startswith("--directories=recurse")) or (
+                    False):
+                return True
+        return name in ("tar", "pax", "cpio", "7z", "7za", "xcopy", "robocopy", "copy-item", "cpi", "compress-archive")
+    return False
+
+
+def _contains_data(full: str, ctx: Ctx) -> bool:
+    """True when the folder `full` is, or is an ancestor of, the real data folder, or a glob of it can match it."""
+    data = _fold(os.path.realpath(ctx.data))
+    cut = min((full.find(c) for c in GLOB_CHARS if c in full), default=-1)
+    glob_part = ""
+    if cut >= 0:
+        seg = max(full.rfind("/", 0, cut), full.rfind("\\", 0, cut))     # the whole segment that holds the glob
+        glob_part = full[seg + 1:].replace("\\", "/")
+        full = full[:seg] or "/"
+    for candidate in {full, os.path.realpath(full)}:
+        base = _fold(os.path.realpath(candidate)) if not glob_part else _fold(candidate)
+        try:
+            rel = os.path.relpath(data, base)
+        except ValueError:
+            continue
+        if rel.startswith(".."):
+            continue
+        if not glob_part:
+            return True
+        first = rel.replace("\\", "/").split("/")[0]
+        if first == "." or fnmatch.fnmatch(first, _fold(glob_part.split("/")[0])):
+            return True
+    return False
+
+
+def _exclude_value(v: str) -> str:
+    v = _fold(v.strip("\"'").lstrip("!"))                       # case-folded only where the file system ignores case
+    for prefix in ("**/", "*/", "./"):
+        while v.startswith(prefix):
+            v = v[len(prefix):]
+    for suffix in ("/**", "/*", "/"):
+        while v.endswith(suffix):
+            v = v[:-len(suffix)]
+    return v
+
+
+def _excludes_data(name: str, words: list[Word], base: str) -> bool:
+    """True only for a (tool, option) pair that cuts a whole directory tree out and whose value is exactly the data
+    folder's name: grep and rg `--exclude-dir=hokma`, rg `-g '!hokma'`, tar and rsync `--exclude=hokma`, zip
+    `-x '*/hokma/*'`. Anything else (`find -prune`, grep `--exclude`, an include glob, a looser mention) is not."""
+    texts = [w.text for w in words]
+    if any(t.lower().startswith(("--include", "--iglob", "--files-from", "--filter", "--anchored", "--no-ignore",
+                                 "-T", "--from-file", "-f", "-F")) for t in texts) or any(
+            t in ("-g", "--glob") and i + 1 < len(texts) and not texts[i + 1].strip("\"'").startswith("!")
+            or t.startswith("--glob=") and not t[7:].strip("\"'").startswith("!") for i, t in enumerate(texts)):
+        return False                                             # an include or a file list can undo the exclusion
+    for i, t in enumerate(texts):
+        low = t.lower()
+        opt, value = (low.split("=", 1)[0], t.split("=", 1)[1]) if low.startswith("--") and "=" in low else (
+            low, texts[i + 1] if i + 1 < len(texts) else None)
+        if value is None:
+            continue
+        if name in ("grep", "egrep", "fgrep", "rgrep", "rg", "ag", "ack") and opt == "--exclude-dir":
+            ok = _exclude_value(value) == base
+        elif name == "rg" and opt in ("-g", "--glob"):
+            ok = value.strip("\"'").startswith("!") and _exclude_value(value) == base
+        elif name in ("tar", "rsync") and opt == "--exclude":
+            ok = _exclude_value(value) == base
+        else:
+            continue
+        if ok:
+            return True
+    return False
+
+
+def check_recursive(name: str, words: list[Word], run: Run) -> None:
+    ctx = run.ctx
+    if not _recursive_call(name, words):
+        return
+    # Fail closed: EVERY non-option word is a possible root (a pattern given with -e/-f, `find -H`, option values).
+    operands = [w for w in words[1:] if not w.text.startswith("-") or w.text == "-"]
+    extra = [Word(w.text.split("=", 1)[1], False, False, False) for w in words[1:]
+             if w.text.startswith("--") and "=" in w.text and not w.text.endswith("=")]   # `--directory=x`
+    extra += [Word(v, False, False, False) for w in words[1:] if w.text.startswith("-") and not w.text.startswith("--")
+              for v in _option_values(w.text)]               # `-C/dir`, `-Cdir` glued to a short option
+    operands += extra
+    if name in ("grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls", "ag", "ack", "rgrep", "fd"):
+        if len(operands) <= 1:
+            operands = operands + [Word(".", False, False, False)]      # no path: it walks the folder it runs in
+    elif name in ("find", "tree", "ls", "dir", "gci", "get-childitem", "du") and not operands:
+        operands = [Word(".", False, False, False)]
+    excluded = _excludes_data(name, words, _fold(os.path.basename(os.path.realpath(ctx.data))))
+    follows = any(w.text in ("-R", "-L", "-h", "-follow", "-H", "--follow", "--dereference", "--copy-links",
+                             "--dereference-recursive") or w.text.startswith(("--deref", "--follow"))
+                  or re.match(r"^-[A-Za-z]*[RLh][A-Za-z]*$", w.text) and name in ("grep", "egrep", "fgrep", "tar", "rg",
+                                                                               "rsync", "cp") for w in words[1:])
+    if name == "tar" and len(words) > 1 and re.match(r"^[A-Za-z]*h[A-Za-z]*$", words[1].text):
+        follows = True                                           # old style `tar chf`
+    if follows:
+        excluded = False                                         # a link can lead into the folder by another name
+    for w in operands:
+        text = expand(w.text, ctx)
+        if w.text.startswith("~") and not re.match(r"^~(?:$|[/\\])", w.text) and w not in extra:
+            raise Block("hokma_internal", short(w.text))         # `~user`, `~+`: a home the check cannot see
+        if (unresolved(text) and not text.startswith("~")) or re.search(r"\{[^}]*(?:,|\.\.)[^}]*\}", text):
+            raise Block("hokma_internal", short(w.text))         # built at run time or by brace expansion: fail closed
+        full = clean_path(joined(text, run.here))
+        if is_win_abs(full) and os.name != "nt":
+            continue                                             # a Windows path on another system: text markers only
+        if _contains_data(full, ctx) and (
+                not excluded or _fold(os.path.realpath(full)) == _fold(os.path.realpath(ctx.data))):
+            raise Block("hokma_internal", short(w.text))
+
+
 def scan_words(name: str, words: list[Word], cmd: Cmd, run: Run) -> None:
     """Markers of secrets and Hokma internals anywhere in the arguments, plus the host list of brokers."""
     ctx = run.ctx
@@ -1067,10 +1283,34 @@ def scan_words(name: str, words: list[Word], cmd: Cmd, run: Run) -> None:
         scan = list(words)
     text = " ".join(w.text for w in scan)
     if text:
-        check_text_markers(text, ctx)
-        for w in scan:
-            if any(ch in w.text for ch in "/\\") or w.text.startswith(("~", ".", "$", "%")):
-                check_real_path(w.text, ctx)
+        check_text_markers(text, ctx, reading=run.reading)
+        content = name in CONTENT_READERS
+        for index, w in enumerate(scan):
+            if run.reading and w is not words[0]:
+                if unresolved(expand(w.text, ctx)) and not w.text.startswith("~"):
+                    raise Block("hokma_internal", short(w.text))          # built at run time: could name a secret
+                if (w.text.startswith("~") and not re.match(r"^~(?:$|[/\\])", w.text)) or (
+                        "," in w.text and any(ch in w.text for ch in "/\\")):
+                    raise Block("hokma_internal", short(w.text))          # `~+`, `~user`, a PowerShell path list
+                if "{" in w.text or "}" in w.text:
+                    raise Block("hokma_internal", short(w.text))          # brace expansion builds names the check cannot see
+                if w.text.startswith("-"):
+                    for value in _option_values(w.text):
+                        check_read_path(value, ctx, run.here, content=content)
+                if not w.text.startswith("-") and name not in CD_NAMES:
+                    check_read_path(w.text, ctx, run.here, content=content)
+                if name in SEARCHERS:
+                    check_read_path(run.here, ctx, run.here, content=True)   # `grep -r x` with no path searches here
+                elif name in CD_NAMES and not w.text.startswith("-"):
+                    check_read_path(w.text, ctx, run.here, content=False)
+            # Judged from the TRACKED folder (`cd x && cat y`) and by real path (links), also for a bare name.
+            if any(ch in w.text for ch in "/\\") or w.text.startswith(("~", ".", "$", "%")) or (
+                    w is not words[0] and not w.text.startswith("-") and not run.reading):
+                check_real_path(w.text, ctx, reading=run.reading, here=run.here)
+            if w.text.startswith("-") and not run.reading:
+                for value in _option_values(w.text):
+                    check_real_path(value, ctx, here=run.here)
+        check_recursive(name, words, run)
         if ENV_REDEFINE.search(text) or GIT_ENV_RE.search(text):
             raise Block("hokma_internal", short(text))
     full = " ".join(w.text for w in words)
@@ -1905,17 +2145,28 @@ def check_file_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
 
 
 def check_read_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
+    """Read, Grep and Glob. Hokma's data folder may be read (plugins, settings, logs) except its secrets and hidden
+    names; `Glob` only lists names, so it may also list a folder that holds secrets."""
     candidates = []
     if tool == "Read":
-        candidates.append(tool_input.get("file_path"))
+        candidates.append((tool_input.get("file_path"), True))
     elif tool == "Grep":
-        candidates += [tool_input.get("path"), tool_input.get("glob")]
+        candidates += [(tool_input.get("path"), True), (tool_input.get("glob"), False)]
     else:
-        candidates += [tool_input.get("path"), tool_input.get("pattern")]
-    for item in candidates:
+        candidates += [(tool_input.get("path"), False), (tool_input.get("pattern"), False)]
+    if tool in ("Grep", "Glob") and not tool_input.get("path"):
+        check_read_path(cwd, ctx, cwd, content=tool == "Grep")      # the implicit search root is the folder it runs in
+    if tool == "Grep":                                              # a search over a folder that holds the data folder
+        root = expand(tool_input.get("path") or cwd, ctx)
+        if isinstance(root, str) and not unresolved(root) and not (is_win_abs(root) and os.name != "nt") and _contains_data(
+                clean_path(joined(root, cwd)), ctx):
+            raise Block("hokma_internal", short(root))
+    for item, content in candidates:
         if isinstance(item, str) and item:
-            check_text_markers(item, ctx, settings=False)
-            check_real_path(item, ctx, settings=False)
+            check_text_markers(item, ctx, settings=False, reading=True)
+            check_real_path(item, ctx, settings=False, reading=True)
+            if tool != "Grep" or content:
+                check_read_path(item, ctx, cwd, content=content)
 
 
 SECRET_FILES = re.compile(r"database\.json|claude-config/(?:\.credentials\.json|\.claude\.json)")
@@ -1936,12 +2187,93 @@ def raw_data_rule(low: str, ctx: Ctx) -> str | None:
     return "secrets" if any(SECRET_FILES.search(s) for s in spots) else "hokma_internal"
 
 
+# Commands that only read. Any of them over Hokma's data folder is allowed (`ls`, `cat`, `grep` of plugins, settings
+# and logs); a command line is read-only only when EVERY command in it is one of these.
+LIST_COMMANDS = {"ls", "dir", "stat", "du", "pwd", "get-childitem", "gci", "get-item", "gi", "test-path",
+                 "get-location", "realpath", "readlink", "basename", "dirname", "which", "where", "find", "echo", "printf",
+                 "true", "false", "write-output", "write-host"}
+CONTENT_READERS = {"cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "type", "get-content", "gc", "select-string",
+                   "sls", "strings", "cmp", "md5sum", "sha1sum", "sha256sum", "wc", "cut", "nl", "tac",
+                   "get-filehash", "diff"}
+LISTERS = {"ls", "dir", "get-childitem", "gci", "get-item", "gi", "find"}
+SEARCHERS = {"grep", "egrep", "fgrep", "rg", "select-string", "sls"}
+BAD_READ_FLAGS = ("--pre",)
+READ_COMMANDS = LIST_COMMANDS | CONTENT_READERS
+FIND_WRITERS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
+
+
+def only_reads(command: str, mode: str, depth: int = 0) -> bool:
+    """True when every command in the line only reads: known read commands, no `find -exec/-delete`, no output
+    redirection except to a device, no here-document, no command substitution that is not itself read-only."""
+    if depth > 3:
+        return False
+    try:
+        cmds = lex(command, mode)
+    except Exception:
+        return False
+    cds = 0
+    tainted = False                                             # an upstream command of this pipeline lists or emits files
+    for cmd in cmds:
+        if cmd.heredocs or cmd.herestrs:
+            return False
+        first = base_name(significant(cmd.words, mode)[0].text) if significant(cmd.words, mode) else ""
+        tainted = tainted and cmd.pipe_in
+        if mode == "ps" and tainted and first in CONTENT_READERS:
+            return False                                        # `Get-ChildItem | Get-Content`: reads what it lists
+        tainted = tainted or first in LISTERS or first in ("echo", "write-output", "write-host", "printf")
+        for op, w in cmd.redirs:
+            if (op == ">&" and (w.text.isdigit() or w.text == "-")) or (
+                    op in (">", ">>", ">|") and is_device(w.text)):
+                continue
+            return False
+        if not all(only_reads(inner, mode, depth + 1) for inner in cmd.subs):
+            return False
+        words = significant(cmd.words, mode)
+        if mode == "ps" and any(any(x in w.text for x in ("(", ")", "::", "@", "+")) for w in words):
+            return False                                        # PowerShell expressions build values the check cannot see
+        if any(ASSIGNMENT.match(w.text) and not w.quoted for w in cmd.words[:len(cmd.words) - len(words)]):
+            return False                                        # `x=...; cat $x/..`: the value could name a secret
+        if not words:
+            continue
+        name = base_name(words[0].text)
+        if any(ch in words[0].text for ch in "/\\") or words[0].text.startswith(("~", ".")):
+            return False                                        # a script of the working folder named like a reader
+        if name in CD_NAMES:
+            cds += 1
+            if cds > 1 or cmd.pipe_in or any(w.text in ("-", "$OLDPWD") for w in words[1:]):
+                return False                                    # the folder the next words run in must be certain
+            continue
+        if name not in READ_COMMANDS:
+            return False
+        if any(w.text.lower().startswith(BAD_READ_FLAGS) for w in words[1:]):
+            return False
+        if name == "find" and any(w.text.lower() in FIND_WRITERS for w in words[1:]):
+            return False
+    return True
+
+
+def _option_values(text: str) -> list[str]:
+    """The paths an option word may carry: `--file=x`, PowerShell `-Path:x`, a short option glued to its value (`-fx`)."""
+    found = [text.split(sep, 1)[1] for sep in ("=", ":") if sep in text]
+    if not text.startswith("--") and len(text) > 2:
+        found.append(text[2:])
+    return [x for x in found if x]
+
+
 def check_command(tool: str, command: object, cwd: str, ctx: Ctx) -> None:
     if not isinstance(command, str):
         raise Block("delete", "command is not text")
     run = Run(ctx, cwd)
     mode = SHELL_TOOLS[tool]
     rule = raw_data_rule(norm_text(command), ctx)              # backslashes may be eaten by the shell reading below
+    if under_any(cwd, [ctx.data]) and not only_reads(command, mode):
+        raise Block("hokma_internal", short(command))          # the call itself runs inside the data folder
+    if (rule == "hokma_internal" or under_any(cwd, [ctx.data])) and only_reads(command, mode):
+        raw = norm_text(command)                               # the raw text too: a shell eats backslashes
+        data = norm_text(ctx.data)
+        if HIDDEN_DATA_RE.search(raw) or re.search(re.escape(data) + _HIDDEN_AFTER, raw):
+            raise Block("hokma_internal", short(command))
+        run.reading, rule = True, None                         # read-only: the data folder may be read, not its secrets
     if rule:
         raise Block(rule, short(command))
     if ENV_REDEFINE.search(command) or GIT_ENV_RE.search(command):

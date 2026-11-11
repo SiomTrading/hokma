@@ -144,6 +144,11 @@ def toggle_extension(body: ToggleBody) -> dict:
     return _call(service.toggle_plugin, body.id, body.enabled)
 
 
+@router.post("/api/extensions/retry", summary="Install a plugin for real again (Retry on a card in Error)")
+def retry_extension(body: UninstallBody) -> dict:
+    return _call(service.retry_plugin, body.id)
+
+
 @router.post("/api/extensions/marketplaces", status_code=201, summary="Add a GitHub repository (marketplace or plugin) by owner/repo; a one-plugin repo is installed")
 def add_marketplace(body: MarketplaceBody) -> dict:
     return _call(service.add_marketplace, body.repo)

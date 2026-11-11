@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.0.20
+
+Hokma can be used in the browser as an alternative to the app.
+
+- The browser screen that sent you to the app now also has "Use Hokma here in the browser". It opens the panel in your
+  default browser with a valid session, with the same safety as shutting down from that screen (a single-use code,
+  nobody inside, one call every 30 seconds).
+- In the app, Settings > General has "Open in the browser" and the preference "Always open Hokma in the browser". With
+  it on, the Hokma icon opens the browser instead of the app window; `hokma start` always opens the browser. The
+  session is never put in a file: the supervisor makes a new one-time code and the browser enters with it.
+
+Plugins are really installed now. In 0.0.19 caveman, claude-mem and cmem-pro showed Error "The plugin files are not on
+the disk": Hokma only wrote them to its list and nothing ever downloaded them.
+
+- Installing a plugin runs Claude Code itself with Hokma's own config folder and the same filtered environment the
+  engines get: `claude plugin marketplace add` (only when that marketplace is not known yet) and
+  `claude plugin install <plugin>@<marketplace>`. No shell, arguments checked first, a 5 minute limit, and what
+  Claude Code printed goes to Hokma's log (logs/engine.log). Uninstall runs `claude plugin uninstall`; removing a
+  marketplace uninstalls its plugins and forgets it in Claude Code too.
+- The result is confirmed in plugins/installed_plugins.json. If it fails (no network, plugin not found, timeout) the
+  card shows Error with the real reason and a Retry button that installs again. A plugin that is on but not installed
+  yet shows "To install" with the same button; an install in progress shows "Installing".
+- On the first start of 0.0.20 every plugin you approved that is on in your list without files is installed for real,
+  in the background and only once, with a line per plugin in the log. Entries that only appeared in Claude's own
+  settings without your approval are not downloaded.
+- Plugins work with Claude Code only. If your default engine is Codex, Gemini or an API connection, the card says
+  "Claude Code only" and never reads Active.
+- claude-mem needs its worker and its hooks: when the files are there but the worker does not answer (default port
+  37777) or hooks/hooks.json is missing, the card says "Check" with the reason instead of Active.
+
+The agent can read Hokma's own files.
+
+- Reading is allowed in Hokma's data folder and its claude-config (plugins, installed_plugins.json, settings, logs):
+  `ls`, `cat`, `grep`, `find`, `tail` and the Read, Grep and Glob tools. This lets the chat check things like whether
+  claude-mem is installed.
+- Still hidden (deny by default): only a list of known folders and files can be read inside the data folder (claude-config,
+  logs, runtime, kit reports and similar). Credentials and tokens (`.credentials.json`, `.claude.json` and
+  its backups, `extensions.json` (it can hold server environment values), `database.json`, `identity.key`, keys, the Codex and ACP sign-in folders), the database, its backups, the
+  trash, the control channel and the lock file, and anything new that is not on the list, are refused. A search that
+  would walk into them (`grep -r` over the data folder or claude-config, `cat claude-config/.*`, brace or variable
+  tricks, `Get-ChildItem | Get-Content`) is refused too; name a subfolder such as plugins.
+- Writing, deleting and moving there is still blocked, and the message now says the agent can read but that the owner
+  changes Hokma's settings, plugins and data from Settings. The permission rule that denied any `Bash` command naming
+  the data folder is gone; the hook decides.
+- Hardened after QA: the database and the credentials can no longer be reached with a relative path after `cd`, with a
+  recursive search over a folder that holds the data folder (`grep -r`, `rg`, `find`, `ls -R`, `tar`, `cp -r`, `zip` on
+  `~`, `~/.local/share` or `%LOCALAPPDATA%`, unless it excludes the data folder), or through a link in the working
+  folder. Every path is judged by its real location from the folder the line is in at that point. The conversation
+  transcripts (`claude-config/projects`) and the guard log are no longer readable. The browser routes
+  (`/api/system/browser`, `browser-pref`) are as untouchable for the agent as the shutdown, and opening the browser
+  waits for running turns even with a session. The supervisor no longer restarts the engine twice when there was none.
+
+Agents and skills made from the chat show up at once.
+
+- New tools in Hokma's MCP: `agent_save` creates an agent (name, role, model, tools) with the same logic as the Create
+  agent button, or edits one you created, and `skill_save` writes a skill to `.claude/skills/<name>/SKILL.md` in the
+  working folder. The agent is on unless the chat is told to leave it off, and appears in Settings > Agents without
+  restarting Hokma. The kit's own agents are not rewritten by the tool.
+- An agent file written straight into `agents/` (by the chat, an editor or by hand) is picked up when the panel asks
+  for the list: it is added, loaded and turned on like the ones made with the button. The Agents screen refreshes
+  by itself every few seconds.
+- Tests prove that no lock (guard.py, hardblock.py) stops writing agents, skills or the project instructions file
+  (CLAUDE.md, HOKMA.md) in the working folder, with POSIX and Windows paths; the settings and the data folder stay
+  locked.
+
 ## 0.0.19
 
 Plugins by link: you see what got installed, whether it is on, and each repository appears once.

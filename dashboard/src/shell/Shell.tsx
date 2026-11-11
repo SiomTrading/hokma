@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSessionInfo } from "@/api";
+import { openInBrowserFromEntry, useSessionInfo } from "@/api";
 import { Button, EmptyState, IconButton, Isotype, Pane, Toaster, cx } from "@/design";
 import { useI18n } from "@/i18n";
 import { ShutdownDialog } from "@/screens/system/ShutdownDialog";
@@ -192,6 +192,18 @@ export function NoToken() {
   const { t } = useI18n();
   const session = useSessionInfo();
   const [confirmingShutdown, setConfirmingShutdown] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const openBrowser = async () => {
+    setOpening(true);
+    setProblem(null);
+    try {
+      await openInBrowserFromEntry();
+    } catch (error) {
+      setProblem(error instanceof Error && error.message ? error.message : t("browser.failed"));
+      setOpening(false);
+    }
+  };
   return (
     <div className="hk" data-testid="no-token">
       <div className="blob" aria-hidden="true" style={{ width: 640, height: 640, background: "var(--blob1)", top: -280, left: "8%", opacity: 0.75 }} />
@@ -203,6 +215,14 @@ export function NoToken() {
           {session.revoked ? (
             <p className="p" role="alert" data-testid="session-revoked">
               {t("session.revokedNotice")}
+            </p>
+          ) : null}
+          <Button size="sm" variant="primary" disabled={opening} onClick={() => void openBrowser()} data-testid="no-token-browser">
+            {t("browser.use")}
+          </Button>
+          {problem ? (
+            <p className="p" role="alert" data-testid="no-token-problem">
+              {problem}
             </p>
           ) : null}
           <Button size="sm" onClick={() => setConfirmingShutdown(true)} data-testid="no-token-shutdown">

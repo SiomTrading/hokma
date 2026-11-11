@@ -31,7 +31,7 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "task_request_review", "task_review_approve", "task_request_changes", "task_block", "task_unblock",
                 "task_comment", "task_archive", "task_reopen", "project_list", "project_show", "project_create",
                 "journal_write", "journal_search", "ips_read", "decision_propose", "decision_list", "schedule_create",
-                "schedule_list", "extension_request", "agents_list", "bug_report", "bug_update", "bug_list",
+                "schedule_list", "extension_request", "agents_list", "agent_save", "skill_save", "bug_report", "bug_update", "bug_list",
                 "trash_move"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]

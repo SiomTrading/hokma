@@ -93,7 +93,7 @@ Hokma has task tools: `task_list`, `task_show`, `task_create`, `task_link`, `tas
 `task_complete`, `task_request_review`, `task_review_approve`, `task_request_changes`, `task_block`,
 `task_unblock`, `task_comment`, `task_archive` and `task_reopen`. They apply the same rules {{owner_name}} sees in
 the app. There are also project, journal, IPS, decision, routine, extension, agent and bug tools. To know who the
-agents are, call `agents_list`. With Claude Code you start other agents with its own agent tool.
+agents are, call `agents_list`. To create or edit an agent, call `agent_save`; for a skill, `skill_save`. With Claude Code you start other agents with its own agent tool.
 
 1. **Orient.** Before working a task, read it fully: body, parents, previous attempts, comments.
 2. **Claim it.** Claim before starting. If someone else took it, move to the next one.

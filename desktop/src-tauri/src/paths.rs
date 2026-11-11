@@ -66,6 +66,11 @@ pub fn data_dir() -> PathBuf {
     }
 }
 
+/// The owner chose "Always open Hokma in the browser" (marker file of the engine's data folder).
+pub fn browser_preferred() -> bool {
+    data_dir().join("open-in-browser").is_file()
+}
+
 /// True when an installed engine is there: the launcher and an active runtime slot.
 pub fn engine_installed() -> bool {
     launcher().is_file() && data_dir().join("current").is_file()

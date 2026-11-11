@@ -8,7 +8,7 @@ import re
 from hokma.db import Actor, Database, NotFound, RuleViolation, get_database
 from hokma.i18n import t
 from hokma.kit import extensions, plugin_state, requests
-from hokma.status import catalog, plugin_sources
+from hokma.status import catalog, plugin_install, plugin_sources
 
 LOCAL_MARKETPLACE = "local"
 DB_REQUEST = re.compile(r"^db-(\d{1,9})$")
@@ -87,6 +87,27 @@ def _db_requests() -> list[dict]:
     } for r in rows]
 
 
+def default_engine() -> str | None:
+    """Kind of the default engine connection ("claude_code", "codex", ...), None when there is none or no database."""
+    if not database_ready():
+        return None
+    try:
+        with get_database().read() as unit:
+            default = unit.engine_connections.default()
+        return default.engine if default is not None else None
+    except Exception:
+        return None
+
+
+def _install_for_real(plugin_id: str) -> str | None:
+    """Run the real installation; returns the reason when it failed (also kept for the card), None when it worked."""
+    try:
+        plugin_install.install(plugin_id)
+    except plugin_install.InstallError as exc:
+        return str(exc)
+    return None
+
+
 def listing() -> dict:
     extensions.migrate()                 # a repository saved under two names becomes one entry
     data, problems = extensions.load()
@@ -96,12 +117,14 @@ def listing() -> dict:
             sync_table(unit, data)
     plugins = []
     installs = plugin_state.engine_installs()
+    extra = {"failures": plugin_install.failures(), "installing": plugin_install.installing(), "engine": default_engine(),
+             "companion": plugin_install.companion_problem}
     for plugin_id, enabled in sorted(data["enabledPlugins"].items()):
         name, marketplace = _split(plugin_id)
         summary = requests.Request("", "plugin", plugin_id, None, "").summary()
         plugins.append({"id": plugin_id, "name": name, "marketplace": marketplace, "kind": "plugin",
                         "enabled": enabled, "summary": summary,
-                        **plugin_state.state_of(plugin_id, enabled, data, installs)})
+                        **plugin_state.state_of(plugin_id, enabled, data, installs, **extra)})
     servers = [{"id": f"mcp:{name}", "name": name, "kind": "mcp", "enabled": True, "target": _server_target(entry),
                 "remote": entry.get("type") == "http"}
                for name, entry in sorted(data["mcpServers"].items())]
@@ -137,7 +160,21 @@ def toggle_plugin(plugin_id: str, enabled: bool) -> dict:
             raise ServiceError(400, str(exc)) from exc
         unit.extensions.set_enabled(row.id, enabled)
         unit.extension_requests.mark_applied(request.id, row.id)
-    return {"id": plugin_id, "enabled": enabled, "warnings": warnings}
+    # The saved list is not an installation: Claude Code downloads the plugin only when told to, outside the database
+    # transaction because a download can take minutes. A failure stays on the card (Error and Retry).
+    failed = _install_for_real(plugin_id) if enabled and plugin_install.installed_folder(plugin_id) is None else None
+    return {"id": plugin_id, "enabled": enabled, "warnings": warnings, "install_error": failed}
+
+
+def retry_plugin(plugin_id: str) -> dict:
+    """The Retry button of a card in Error or "To install": the real installation again, with its real reason."""
+    data, _ = extensions.load()
+    if plugin_id not in data["enabledPlugins"]:
+        raise ServiceError(404, t("status.ext.unknown_plugin", plugin=plugin_id))
+    failed = _install_for_real(plugin_id)
+    if failed:
+        raise ServiceError(502, t("status.ext.install.failed", plugin=plugin_id, reason=failed))
+    return {"id": plugin_id, "installed": True}
 
 
 def uninstall_plugin(plugin_id: str) -> dict:
@@ -146,6 +183,7 @@ def uninstall_plugin(plugin_id: str) -> dict:
     if plugin_id not in data["enabledPlugins"]:
         raise ServiceError(404, t("status.ext.unknown_plugin", plugin=plugin_id))
     db = _db()
+    gone = plugin_install.uninstall(plugin_id)         # Claude Code deletes the files; a failure is a warning
     with db.write() as unit:
         owner = _owner(unit)
         sync_table(unit, data)
@@ -159,7 +197,7 @@ def uninstall_plugin(plugin_id: str) -> dict:
             raise ServiceError(400, str(exc)) from exc
         unit.extensions.set_enabled(row.id, False)
         unit.extension_requests.mark_applied(request.id, row.id)
-    return {"id": plugin_id, "uninstalled": True, "warnings": warnings}
+    return {"id": plugin_id, "uninstalled": True, "warnings": gone + warnings}
 
 
 def _market_plugins(marketplace: str, found: list[dict], data: dict) -> list[dict]:
@@ -204,7 +242,10 @@ def add_marketplace(repo: str) -> dict:
     installed: list[str] = []
     if install_now:
         plugin_id = f"{names[0]}@{name}"
-        warnings += toggle_plugin(plugin_id, True)["warnings"]
+        done = toggle_plugin(plugin_id, True)
+        warnings += done["warnings"]
+        if done["install_error"]:
+            warnings.append(t("status.ext.install.failed", plugin=plugin_id, reason=done["install_error"]))
         installed.append(plugin_id)
     data, _ = extensions.load()
     plugins = _market_plugins(name, found["plugins"], data) if found["kind"] == "marketplace" else []
@@ -252,6 +293,8 @@ def remove_marketplace(name: str) -> dict:
         raise ServiceError(404, t("status.ext.unknown_marketplace", name=name))
     removed = sorted(pid for pid in data["enabledPlugins"] if pid.endswith("@" + name))
     db = _db() if removed else None
+    claude_warnings = [w for pid in removed for w in plugin_install.uninstall(pid)]
+    plugin_install.forget_marketplace(name)          # before Hokma drops its own record of it
     if db is None:
         gone, warnings = _remove_market(name)
     else:
@@ -270,7 +313,7 @@ def remove_marketplace(name: str) -> dict:
             for req_id, row_id in requests_made:
                 unit.extensions.set_enabled(row_id, False)
                 unit.extension_requests.mark_applied(req_id, row_id)
-    return {"name": name, "removed": True, "plugins_removed": gone, "warnings": warnings}
+    return {"name": name, "removed": True, "plugins_removed": gone, "warnings": claude_warnings + warnings}
 
 
 def _remove_market(name: str) -> tuple[list[str], list[str]]:
@@ -294,6 +337,17 @@ def reject(request_id: str) -> dict:
     return _reject_db(int(match.group(1))) if match else _reject_inbox(request_id)
 
 
+def _install_after_approval(kind: str, plugin_id: str) -> list[str]:
+    """An approved plugin request is only a line in the list until Claude Code installs it."""
+    if kind != "plugin" or plugin_install.installed_folder(plugin_id) is not None:
+        return []
+    data, _ = extensions.load()
+    if not data["enabledPlugins"].get(plugin_id):
+        return []
+    failed = _install_for_real(plugin_id)
+    return [t("status.ext.install.failed", plugin=plugin_id, reason=failed)] if failed else []
+
+
 def _approve_inbox(request_id: str) -> dict:
     try:
         req = requests.get(request_id)
@@ -314,6 +368,7 @@ def _approve_inbox(request_id: str) -> dict:
         sync_table(unit, data)
         ext = unit.extensions.find(marketplace, name)
         unit.extension_requests.mark_applied(row.id, ext.id)
+    warnings = list(warnings) + _install_after_approval(req.kind, f"{name}@{marketplace}")
     return {"id": request_id, "status": "applied", "warnings": warnings}
 
 
@@ -368,7 +423,8 @@ def _approve_db(number: int) -> dict:
             unit.extension_requests.mark_failed(number, error)
     if error:
         raise ServiceError(400, error)
-    return {"id": f"db-{number}", "status": "applied", "warnings": []}
+    warnings = _install_after_approval(row.kind, f"{row.name}@{row.marketplace}") if row.action not in ("disable", "uninstall") else []
+    return {"id": f"db-{number}", "status": "applied", "warnings": warnings}
 
 
 def _reject_db(number: int) -> dict:

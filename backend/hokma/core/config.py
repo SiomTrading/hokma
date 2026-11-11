@@ -97,6 +97,15 @@ def launcher_path() -> Path:
     return Path.home() / ".local" / "bin" / name
 
 
+def browser_pref_path() -> Path:
+    """Marker file: when it exists the owner chose to always open Hokma in the browser (the icon and `hokma start`)."""
+    return hokma_data_dir() / "open-in-browser"
+
+
+def browser_preferred() -> bool:
+    return browser_pref_path().is_file()
+
+
 def desktop_app_path() -> Path:
     """The desktop window, outside the data and working folders. Windows: `Hokma.exe`, installed by Hokma-Setup.exe.
     macOS: `Hokma.app`, dragged from Hokma.dmg to /Applications (or ~/Applications); the first existing one."""

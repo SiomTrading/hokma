@@ -298,6 +298,48 @@ def agents_list(u, c: Caller, a: dict) -> str:
                    "model_tier": g.model_tier} for g in u.agents.list(status=a.get("status", "active"))])
 
 
+def agent_save(u, c: Caller, a: dict) -> str:
+    """Create an agent (or edit one the owner made) with the same logic as the Create agent button, so it shows in
+    Settings > Agents at once and is on unless `active` is false."""
+    from hokma.agents.service import AgentService, AgentsError
+    from hokma.agents import files as fl, errors
+
+    service = AgentService()
+    slug = fl.slugify(fl.clean_name(a["name"]))
+    try:
+        with get_db().read() as unit:
+            exists = unit.agents.find(slug) is not None
+        if exists:
+            item = service.update(slug, description=a.get("description"), model=a.get("model"),
+                                  instructions=a.get("instructions"), tools=a.get("tools"), active=a.get("active"))
+        else:
+            for key in ("description", "model", "instructions"):
+                if not a.get(key):
+                    raise ValueError(f"missing argument for a new agent: {key}")
+            item = service.create(a["name"], a["description"], a["model"], a["instructions"], a.get("tools"),
+                                  a.get("active", True))
+    except AgentsError as exc:
+        raise ValueError(errors.message(exc.code, str(exc))) from exc
+    return _dump({"agent": item, "created": not exists})
+
+
+def skill_save(u, c: Caller, a: dict) -> str:
+    """Create or replace a skill: `.claude/skills/<name>/SKILL.md` in the working folder."""
+    from hokma.agents.service import AgentService, AgentsError
+    from hokma.agents import errors
+
+    try:
+        return _dump(AgentService().save_skill(a["name"], a["description"], a["instructions"]))
+    except AgentsError as exc:
+        raise ValueError(errors.message(exc.code, str(exc))) from exc
+
+
+def get_db():
+    from hokma.db import get_database
+
+    return get_database()
+
+
 # ---------------------------------------------------------------------------- bugs
 
 BUG_KEYS = ("id", "title", "severity", "status", "project_id", "description")
@@ -326,7 +368,7 @@ def bug_list(u, c: Caller, a: dict) -> str:
 # ---------------------------------------------------------------------------- table
 
 Handler = Callable[[Any, Caller, dict], str]
-NO_UNIT = {"project_create"}          # these open their own database units
+NO_UNIT = {"project_create", "agent_save", "skill_save"}          # these open their own database units
 TASK_ID = {"task_id": _i("Task id.")}
 
 TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
@@ -384,6 +426,17 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
         "name": _s(), "marketplace": _s(), "reason": _s(), "version": _s(), "task_id": _i()},
                           ["action", "kind", "name", "reason"], extension_request, True),
     "agents_list": ("List the agents.", {"status": _s("active (default), off...")}, [], agents_list, False),
+    "agent_save": ("Create an agent, or edit one you created, with the same logic as the Create agent button. It shows "
+                   "in Settings > Agents at once and is on unless active is false. For a new agent give name, "
+                   "description (its role), model and instructions; tools is an optional comma list.", {
+        "name": _s("Display name, up to 60 characters."), "description": _s("What the agent is for (its role)."),
+        "model": _s("haiku (fast), sonnet (balanced) or opus (deep).", enum=["haiku", "sonnet", "opus"]),
+        "instructions": _s("The agent's instructions (the body of its file)."),
+        "tools": _s("Comma list of tool names. Default: read, search, write, journal and tasks."),
+        "active": _b("On (default) or off.")}, ["name"], agent_save, True),
+    "skill_save": ("Create or replace a skill in the working folder (.claude/skills/<name>/SKILL.md).", {
+        "name": _s(), "description": _s("When to use the skill."), "instructions": _s("The body of SKILL.md.")},
+                   ["name", "description", "instructions"], skill_save, True),
     "bug_report": ("Report a bug.", {"title": _s(), "severity": _s(enum=["low", "medium", "high", "critical"]),
                                      "description": _s(), "project_id": _i()}, ["title"], bug_report, True),
     "bug_update": ("Update a bug or move its status.", {

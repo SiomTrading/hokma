@@ -257,6 +257,35 @@ class Supervisor:
         self._force_timer: threading.Timer | None = None
         self._started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.handed_over = False
+        self._reopening = False                      # the engine is ended on purpose to start a new browser session
+        self._last_browser: float | None = None
+
+    # ---- a new browser session -------------------------------------------------------------------------
+
+    BROWSER_MIN_SECONDS = 5.0
+
+    def open_browser(self) -> bool:
+        """Open Hokma in the default browser with a session of its own (the `browser` word of the control channel).
+        The one-time secret of the first window is gone, so a new one is made and the engine starts again with it
+        (same token; the window that held the old owner confirmation stops being the owner). The secrets exist only in
+        this process, the engine's standard input and the address the browser is opened on. At most one every 5 s."""
+        now = self._clock()
+        if self.stopping or self._graceful or (self._last_browser is not None and now - self._last_browser < self.BROWSER_MIN_SECONDS):
+            return False
+        self._last_browser = now
+        once = new_owner_secret()
+        self.owner_hash, self.owner_secret_hash = "", secret_hash(once)
+        child = self._child
+        if child is not None and child.poll() is None:
+            self._reopening = True                   # only when there is an engine to end: otherwise no extra restart
+            try:
+                child.terminate()
+            except OSError:
+                pass
+        base = f"http://{config.DEFAULT_HOST}:{self.port}/"
+        threading.Thread(target=open_when_ready, args=(f"{base}#t={self.token}&o={once}", base + "health"),
+                         daemon=True).start()
+        return True
 
     # ---- stopping ---------------------------------------------------------------------------------------
 
@@ -419,6 +448,10 @@ class Supervisor:
                     return 0
                 self.log.write("the hand over was not possible; staying in this slot")
             code, tail = self._run_engine()
+            if self._reopening and not self.stopping:
+                self._reopening = False
+                self.log.write("engine restarted for a new browser session")
+                continue
             if self.stopping or code == 0 or code in user_ends:
                 self.log.write(f"engine ended (code {code}); supervisor stops")
                 return 0
@@ -491,7 +524,7 @@ def run_supervisor(*, port: int | None, token: str | None = None, print_url: boo
 
         sup = Supervisor(port=port, token=token, job=job, owner_hash=owner_hash, before_force=release,
                          owner_secret_hash=owner_secret_hash or (secret_hash(once) if once else ""))
-        server = control.ControlServer(sup.status, sup.request_shutdown)
+        server = control.ControlServer(sup.status, sup.request_shutdown, sup.open_browser)
         try:
             server.start()
         except OSError as exc:

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, useApiQuery } from "@/api";
 import { Button, Dot, EmptyState, ErrorState, Glyph, Loading, Pane, Pill, Toggle } from "@/design";
 import { useI18n } from "@/i18n";
@@ -22,6 +22,13 @@ export function AgentsSettings() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opusFor, setOpusFor] = useState<AgentItem | null>(null);
+
+  // An agent the chat creates or edits shows up here without leaving the screen.
+  const { reload } = list;
+  useEffect(() => {
+    const timer = window.setInterval(reload, 4000);
+    return () => window.clearInterval(timer);
+  }, [reload]);
 
   const change = async (agent: AgentItem, work: () => Promise<AgentItem>, toastKey: string) => {
     setBusy(agent.slug);

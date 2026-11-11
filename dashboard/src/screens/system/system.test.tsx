@@ -238,6 +238,24 @@ describe("Extensions plugins (task 3156)", () => {
     expect(installed.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("a card in Error shows the real reason and Retry installs again; other states never read Active (task 3161)", async () => {
+    setLocale("en");
+    const cards = [
+      { ...PLUGIN, id: "c@m", name: "gamma", marketplace: "m", enabled: true, state: "error" as const, reason: "git clone failed: no network", retry: true },
+      { ...PLUGIN, id: "d@m", name: "delta", marketplace: "m", enabled: true, state: "claude_only" as const, reason: "This plugin works with Claude Code." },
+      { ...PLUGIN, id: "e@m", name: "mem", marketplace: "m", enabled: true, state: "attention" as const, reason: "its worker does not answer on port 37777" },
+    ];
+    const calls = mockApi({ "GET /api/extensions": extensionsData({ plugins: cards }), "POST /api/extensions/retry": { id: "c@m", installed: true } });
+    renderWithApp(<ExtensionsSection />);
+    await screen.findByText("gamma");
+    expect(screen.getByText("git clone failed: no network")).toBeInTheDocument();
+    expect(screen.getByLabelText("Status of delta")).toHaveTextContent("Claude Code only");
+    expect(screen.getByLabelText("Status of mem")).toHaveTextContent("Check");
+    expect(screen.getAllByRole("button", { name: /^Retry the installation of/ })).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Retry the installation of gamma" }));
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/retry")?.body).toEqual({ id: "c@m" }));
+  });
+
   it("lists the plugins of a marketplace repo with several and installs one", async () => {
     setLocale("en");
     const offered = { name: "acme", plugins: [

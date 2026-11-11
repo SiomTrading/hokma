@@ -7,7 +7,8 @@
   current user, remote clients refused, and as the FIRST instance of that name, so nobody can take the name first.
 
 The protocol is one line each way. The client sends a command word; the server answers one line of JSON. The
-server knows exactly two words: `stop` and `status`. Anything else is answered with an error and nothing else
+server knows exactly three words: `stop`, `status` and `browser` (open Hokma in the default browser with a fresh
+session; the reply is only `ok`). Anything else is answered with an error and nothing else
 happens. The answers are built from a fixed list of keys (pid, port, start time, engine state): they can never
 carry the session token, the one-time code or the owner confirmation, because the server never has them.
 
@@ -26,7 +27,8 @@ from typing import Callable
 
 from hokma.core import config
 
-COMMANDS = ("stop", "status")
+COMMANDS = ("stop", "status", "browser")
+_browser: list[Callable[[], bool] | None] = [None]   # set by `ControlServer`: opens the browser with a fresh session
 STATUS_KEYS = ("pid", "port", "started_at", "engine")
 MAX_REQUEST_BYTES = 64
 MAX_REPLY_BYTES = 4096
@@ -53,6 +55,8 @@ def answer(raw: bytes, status: Callable[[], dict], stop: Callable[[], None]) -> 
     elif word == "stop":
         stop()
         reply = {"ok": True, "stopping": True}
+    elif word == "browser" and _browser[0] is not None:
+        reply = {"ok": bool(_browser[0]())}
     else:
         reply = {"ok": False, "error": "unknown_command"}
     return json.dumps(reply).encode("ascii") + b"\n"
@@ -336,7 +340,9 @@ class ControlServer:
     """Open it in the supervisor: `ControlServer(status, stop).start()`. `status()` returns a dict with the keys of
     STATUS_KEYS; `stop()` starts a clean shutdown and returns at once."""
 
-    def __init__(self, status: Callable[[], dict], stop: Callable[[], None]) -> None:
+    def __init__(self, status: Callable[[], dict], stop: Callable[[], None],
+                 browser: Callable[[], bool] | None = None) -> None:
+        _browser[0] = browser
         self._impl = (_PipeServer if sys.platform == "win32" else _UnixServer)(status, stop)
 
     def start(self) -> None:

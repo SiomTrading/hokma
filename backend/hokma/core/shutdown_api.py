@@ -101,6 +101,80 @@ async def shutdown_nonce(request: Request) -> JSONResponse:
     return JSONResponse({"nonce": _issue_nonce(request)}, headers={"Cache-Control": "no-store"})
 
 
+def _guard(request: Request, token: str, nonce: str, gap_attr: str) -> bool:
+    """The checks of the shutdown for the browser call; True when it came with a session."""
+    state, headers = request.app.state, request.headers
+    if headers.get("sec-fetch-site", "").lower() != "same-origin":
+        raise _fail(403, "shutdown.origin", t("shutdown.err.origin"))
+    if token:
+        if not token_matches(token, SESSION_TOKEN):
+            raise _fail(401, "shutdown.unauthorized", t("shutdown.err.unauthorized"))
+        return True
+    origin = headers.get("origin", "").lower()
+    if not origin or origin not in origins_for(state.allowed_hosts):
+        raise _fail(403, "shutdown.origin", t("shutdown.err.origin"))
+    if not _spend_nonce(request, nonce):
+        raise _fail(403, "shutdown.nonce", t("shutdown.err.nonce"))
+    stamp, last = now(), getattr(state, gap_attr, None)
+    if last is not None and stamp - last < NO_SESSION_MIN_GAP_SECONDS:
+        raise _fail(429, "shutdown.too_soon", t("shutdown.err.too_soon"))
+    if state.lifecycle.open_sockets > 0 or turns_running() > 0:
+        raise _fail(409, "shutdown.in_use", t("shutdown.err.in_use"))
+    setattr(state, gap_attr, stamp)
+    return False
+
+
+async def _ask_supervisor_for_browser() -> None:
+    import asyncio
+
+    from hokma.core import control
+
+    await asyncio.to_thread(control.request, "browser")
+
+
+@router.post("/api/system/browser", status_code=202)
+async def open_in_browser(request: Request, x_hokma_token: str = Header(default=""),
+                          x_hokma_shutdown_nonce: str = Header(default="")) -> JSONResponse:
+    """"Use Hokma here in the browser": the supervisor opens the default browser with a fresh session (same rules
+    as the shutdown: with a session, or from the entry screen with a nonce and nobody inside)."""
+    _guard(request, x_hokma_token, x_hokma_shutdown_nonce, "browser_at")
+    if turns_running() > 0:                      # the engine restarts: not while a turn is running, with a session either
+        raise _fail(409, "shutdown.in_use", t("shutdown.err.in_use"))
+    return JSONResponse({"opening": True}, status_code=202, headers={"Cache-Control": "no-store"},
+                        background=BackgroundTask(_ask_supervisor_for_browser))
+
+
+@router.get("/api/system/browser-pref")
+async def browser_pref_get(request: Request, x_hokma_token: str = Header(default="")) -> JSONResponse:
+    from hokma.core import config
+
+    _guard_session(x_hokma_token)
+    return JSONResponse({"always": config.browser_preferred()}, headers={"Cache-Control": "no-store"})
+
+
+@router.put("/api/system/browser-pref")
+async def browser_pref_put(request: Request, x_hokma_token: str = Header(default="")) -> JSONResponse:
+    from hokma.core import config
+
+    _guard_session(x_hokma_token)
+    body = await request.json()
+    always = body.get("always") if isinstance(body, dict) else None
+    if not isinstance(always, bool):
+        raise _fail(422, "browser.bad_value", t("shutdown.err.origin"))
+    path = config.browser_pref_path()
+    if always:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("1", encoding="ascii")
+    else:
+        path.unlink(missing_ok=True)
+    return JSONResponse({"always": always}, headers={"Cache-Control": "no-store"})
+
+
+def _guard_session(token: str) -> None:
+    if not token_matches(token, SESSION_TOKEN):
+        raise _fail(401, "shutdown.unauthorized", t("shutdown.err.unauthorized"))
+
+
 @router.post("/api/system/shutdown", status_code=202)
 async def shutdown(request: Request, x_hokma_token: str = Header(default=""),
                    x_hokma_shutdown_nonce: str = Header(default="")) -> JSONResponse:

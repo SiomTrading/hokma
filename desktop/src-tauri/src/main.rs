@@ -198,6 +198,12 @@ fn main() {
         .invoke_handler(tauri::generate_handler![messages, current_status, retry, kill_and_retry, engine_log])
         .setup(|app| {
             let handle = app.handle().clone();
+            // The owner prefers the browser: the icon runs `hokma start` (opens the browser) and this window closes.
+            if paths::browser_preferred() && paths::engine_installed() {
+                if engine::launcher_command(&["start"]).spawn().is_ok() {
+                    std::process::exit(0);
+                }
+            }
             // Before the webview opens its cache: drop it when the engine version changed.
             cache::prune_if_version_changed();
             #[allow(unused_mut)]

@@ -18,6 +18,9 @@ ORCHESTRATOR_SLUG = "hokma"
 BASE_KIT = frozenset({"hokma", "diego", "joel", "vera"})
 
 
+_synced: dict[str, tuple] = {}
+
+
 class AgentsError(Exception):
     """`code` is translated by the API layer; `status` is the HTTP status."""
 
@@ -80,6 +83,10 @@ class AgentService:
                 "is_orchestrator": orchestrator, "enabled_session": agent.enabled_session, "role": role}
 
     def list(self) -> dict[str, Any]:
+        try:
+            self.sync_folder()
+        except Exception:
+            log.exception("agents folder not synced")
         with self.db.read() as u:
             agents = u.agents.list()
             active, total = u.agents.count("active"), u.agents.count()
@@ -135,7 +142,8 @@ class AgentService:
             raise _wrap(exc) from exc
         return self._item(updated)
 
-    def create(self, name: str, description: str, model: str, instructions: str) -> dict[str, Any]:
+    def create(self, name: str, description: str, model: str, instructions: str, tools: str | None = None,
+               active: bool = True) -> dict[str, Any]:
         display = fl.clean_name(name)
         text = fl.clean_text(description, fl.MAX_DESCRIPTION)
         body = fl.clean_text(instructions, fl.MAX_INSTRUCTIONS)
@@ -154,14 +162,14 @@ class AgentService:
         try:
             if taken or self.files.read_source(slug, rel) is not None:
                 raise AgentsError("agent_exists", 409)
-            self.files.write_source(slug, rel, fl.build_custom_agent(slug, display, text, model, body))
-            self.files.apply(slug, rel, active=True, model=model)
+            self.files.write_source(slug, rel, fl.build_custom_agent(slug, display, text, model, body, tools))
+            self.files.apply(slug, rel, active=active, model=model)
         except fl.AgentFileError as exc:
             raise AgentsError(exc.code, 409, str(exc)) from exc
         try:
             with self.db.write() as u:
                 u.agents.create_custom(slug, display, description=text, model_tier=fl.MODEL_TIER[model], file_path=rel)
-                created = u.agents.set_status(slug, "active")
+                created = u.agents.set_status(slug, "active" if active else "off")
         except DbError as exc:
             for rel_dir in (fl.LOADED_DIR, fl.OFF_DIR):                  # no row: do not leave a loadable file behind
                 try:
@@ -173,6 +181,89 @@ class AgentService:
         state.add(slug)
         _save_initialized(state)
         return self._item(created)
+
+    def update(self, slug: str, *, description: str | None = None, model: str | None = None,
+               instructions: str | None = None, tools: str | None = None, active: bool | None = None) -> dict[str, Any]:
+        """Edit an agent the owner made (a field not given stays as it is). The kit's own agents change only their
+        model and their switch, from the panel."""
+        agent = self._get(slug)
+        if not agent.is_custom:
+            raise AgentsError("agent_not_custom", 409, "only agents you created can be edited")
+        try:
+            current = fl.read_custom_agent(self.files.read_source(slug, agent.file_path) or "")
+        except fl.AgentFileError as exc:
+            raise AgentsError(exc.code, 409, str(exc)) from exc
+        if current is None:
+            raise AgentsError("agent_file_invalid", 409)
+        text = fl.clean_text(description, fl.MAX_DESCRIPTION) if description is not None else current["description"]
+        body = fl.clean_text(instructions, fl.MAX_INSTRUCTIONS) if instructions is not None else current["instructions"]
+        chosen = model if model is not None else current["model"]
+        if chosen not in fl.MODELS:
+            raise AgentsError("model_invalid", 422)
+        if not text:
+            raise AgentsError("description_required", 422)
+        if not body:
+            raise AgentsError("instructions_required", 422)
+        status = agent.status if active is None else ("active" if active else "off")
+        rel = self.files.source_rel(slug, agent.file_path)
+        keep_tools = fl.clean_tools(tools) if tools else (current["tools"] or fl.CUSTOM_TOOLS)
+        try:
+            self.files.write_source(slug, rel, fl.build_custom_agent(
+                slug, current["display_name"] or agent.display_name, text, chosen, body, keep_tools))
+            self.files.apply(slug, rel, active=status == "active", model=chosen)
+        except fl.AgentFileError as exc:
+            raise AgentsError(exc.code, 409, str(exc)) from exc
+        try:
+            with self.db.write() as u:
+                u.agents.update(slug, description=text)
+                u.agents.set_model_tier(slug, fl.MODEL_TIER[chosen])
+                updated = u.agents.set_status(slug, status)
+        except DbError as exc:
+            raise _wrap(exc) from exc
+        return self._item(updated)
+
+    def save_skill(self, name: str, description: str, instructions: str) -> dict[str, Any]:
+        """Create or replace `.claude/skills/<slug>/SKILL.md` in the working folder (what Claude Code loads)."""
+        display = fl.clean_name(name)
+        slug = fl.slugify(display)
+        text = fl.clean_text(description, fl.MAX_DESCRIPTION)
+        body = fl.clean_text(instructions, fl.MAX_SKILL)
+        if not display or len(slug) < 2:
+            raise AgentsError("name_invalid", 422)
+        if not text:
+            raise AgentsError("description_required", 422)
+        if not body:
+            raise AgentsError("instructions_required", 422)
+        try:
+            existed = self.files.read_skill(slug) is not None
+            self.files.write_skill(slug, fl.build_skill(slug, text, body))
+        except fl.AgentFileError as exc:
+            raise AgentsError(exc.code, 409, str(exc)) from exc
+        return {"slug": slug, "path": f"{fl.SKILLS_DIR}/{slug}/SKILL.md", "updated": existed}
+
+    # ------------------------------------------------------------------ folder changes
+
+    def folder_signature(self) -> tuple:
+        try:
+            root = self.files.root / fl.SOURCE_DIR
+            return tuple(sorted((p.name, p.stat().st_mtime_ns, p.stat().st_size) for p in root.glob("*.md")))
+        except OSError:
+            return ()
+
+    def sync_folder(self, *, force: bool = False) -> bool:
+        """An agent written straight into `agents/` (by the chat, with the editor, by hand) shows up in the panel and
+        starts on, like the ones made with the Create button. Runs only when the folder changed since the last run."""
+        from hokma.db.seeds import seed_agents
+
+        key = str(self.files.root)
+        signature = self.folder_signature()
+        if not force and _synced.get(key) == signature:
+            return False
+        with self.db.write() as u:
+            seed_agents(u.session)
+        self.reconcile()
+        _synced[key] = signature
+        return True
 
     # ------------------------------------------------------------------ startup
 

@@ -46,6 +46,19 @@ describe("shell loads", () => {
     expect(screen.queryByTestId("shell")).not.toBeInTheDocument();
   });
 
+  it("offers to use Hokma in the browser from the entry screen: nonce first, then the call", async () => {
+    clearToken();
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      calls.push(url);
+      return url.endsWith("nonce") ? new Response(JSON.stringify({ nonce: "n" })) : new Response("{}", { status: 202 });
+    }));
+    render(<App />);
+    await userEvent.click(screen.getByTestId("no-token-browser"));
+    expect(calls).toEqual(["/api/system/shutdown-nonce", "/api/system/browser"]);
+    vi.unstubAllGlobals();
+  });
+
   it("shows the app when a token exists", () => {
     renderShell();
     expect(screen.queryByTestId("no-token")).not.toBeInTheDocument();

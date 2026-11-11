@@ -22,6 +22,7 @@ from hokma.kit import safefs
 SOURCE_DIR = "agents"
 LOADED_DIR = ".claude/agents"
 OFF_DIR = ".claude/agents.off"
+SKILLS_DIR = ".claude/skills"
 
 TIER_MODEL = {"fast": "haiku", "balanced": "sonnet", "deep": "opus"}
 MODEL_TIER = {model: tier for tier, model in TIER_MODEL.items()}
@@ -32,6 +33,9 @@ MAX_DESCRIPTION = 500
 MAX_INSTRUCTIONS = 8000
 CUSTOM_TOOLS = ("Read, Grep, Glob, Write, Edit, mcp__hokma__journal_write, mcp__hokma__journal_search, "
                 "mcp__hokma__task_list, mcp__hokma__task_show, mcp__hokma__task_create")
+
+MAX_SKILL = 20000
+_TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_\-*().:]{0,100}$")
 
 # Characters that would turn a plain YAML value into something else (or inject a marker).
 _FORBIDDEN_NAME = re.compile(r"[:#{}\[\]|<>&*!%@`'\"\\\x00-\x1f\x7f]")
@@ -107,11 +111,50 @@ def frontmatter_value(text: str, key: str) -> str | None:
     return None
 
 
-def build_custom_agent(slug: str, name: str, description: str, model: str, instructions: str) -> str:
+def clean_tools(value: object) -> str:
+    """The `tools:` line of an agent: a comma list (or a list) of plain tool names; empty or odd input gives the default."""
+    items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
+    names: list[str] = []
+    for item in items:
+        name = str(item).strip()
+        if name and _TOOL_NAME.match(name) and name not in names:
+            names.append(name)
+    return ", ".join(names[:40]) or CUSTOM_TOOLS
+
+
+def build_custom_agent(slug: str, name: str, description: str, model: str, instructions: str,
+                       tools: str | None = None) -> str:
     """Text of the .md of an agent the owner creates. The description is a folded block, so any text is valid YAML."""
     wrapped = "\n".join("  " + line for line in " ".join(description.split()).splitlines() or [""])
     return (f"---\nname: {slug}\ndisplay_name: {name}\nrole: custom\nslug: {slug}\ndescription: >\n{wrapped}\n"
-            f"model: {model}\nhokma-tier: {MODEL_TIER[model]}\ntools: {CUSTOM_TOOLS}\n---\n\n{instructions.strip()}\n")
+            f"model: {model}\nhokma-tier: {MODEL_TIER[model]}\ntools: {clean_tools(tools) if tools else CUSTOM_TOOLS}\n"
+            f"---\n\n{instructions.strip()}\n")
+
+
+def read_custom_agent(text: str) -> dict[str, str] | None:
+    """Fields of an agent file built by `build_custom_agent` (None when it has no frontmatter)."""
+    parts = split_frontmatter(text)
+    if parts is None:
+        return None
+    head, body = parts
+    description, folded = [], False
+    for line in head:
+        if line.startswith((" ", "\t")):
+            if folded:
+                description.append(line.strip())
+            continue
+        folded = line.startswith("description:") and line.split(":", 1)[1].strip() in (">", "|", ">-", "|-")
+        if line.startswith("description:") and not folded:
+            description = [line.split(":", 1)[1].strip().strip("'\"")]
+    return {"display_name": frontmatter_value(text, "display_name") or "", "description": " ".join(description),
+            "model": frontmatter_value(text, "model") or "sonnet", "tools": frontmatter_value(text, "tools") or "",
+            "instructions": body.strip()}
+
+
+def build_skill(slug: str, description: str, instructions: str) -> str:
+    """SKILL.md: `name` is the folder name, the description is a folded block."""
+    wrapped = "\n".join("  " + line for line in " ".join(description.split()).splitlines() or [""])
+    return f"---\nname: {slug}\ndescription: >\n{wrapped}\n---\n\n{instructions.strip()}\n"
 
 
 class AgentFiles:
@@ -182,6 +225,17 @@ class AgentFiles:
                 self._write(f"{OFF_DIR}/{slug}.md", text)
             self._remove(f"{LOADED_DIR}/{slug}.md")
         return True
+
+    def skill_rel(self, slug: str) -> str:
+        if not slug or slug != slugify(slug):
+            raise AgentFileError("agent_file_unsafe", f"unexpected skill name {slug!r}")
+        return f"{SKILLS_DIR}/{slug}/SKILL.md"
+
+    def read_skill(self, slug: str) -> str | None:
+        return self._read(self.skill_rel(slug))
+
+    def write_skill(self, slug: str, text: str) -> None:
+        self._write(self.skill_rel(slug), text)
 
     def model_of(self, slug: str, file_path: str | None) -> str | None:
         text = self.read_source(slug, file_path)

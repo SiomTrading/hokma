@@ -45,7 +45,7 @@ def test_marketplace_with_one_plugin_installs_it_right_away(client):
     assert data["enabledPlugins"] == {"claude-mem@thedotmack": True}
     listed = client.get("/api/extensions").json()
     assert [(p["id"], p["enabled"]) for p in listed["plugins"]] == [("claude-mem@thedotmack", True)]
-    assert listed["plugins"][0]["state"] == "pending"          # the engine has not unpacked it yet: never "active" on faith
+    assert listed["plugins"][0]["state"] == "active"           # Claude Code installed it and installed_plugins.json says so (task 3161)
 
 
 def test_a_plugin_added_by_url_is_on_and_can_be_uninstalled_from_the_catalog(client):

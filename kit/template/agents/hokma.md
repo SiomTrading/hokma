@@ -23,7 +23,7 @@ description: >
   </example>
 model: sonnet
 hokma-tier: balanced
-tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_create, mcp__hokma__task_link, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_request_review, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_block, mcp__hokma__task_unblock, mcp__hokma__task_comment, mcp__hokma__task_archive, mcp__hokma__task_reopen, mcp__hokma__project_list, mcp__hokma__project_show, mcp__hokma__project_create, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read, mcp__hokma__decision_propose, mcp__hokma__decision_list, mcp__hokma__schedule_create, mcp__hokma__schedule_list, mcp__hokma__extension_request, mcp__hokma__agents_list, mcp__hokma__bug_report, mcp__hokma__bug_update, mcp__hokma__bug_list, mcp__hokma__trash_move
+tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_create, mcp__hokma__task_link, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_request_review, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_block, mcp__hokma__task_unblock, mcp__hokma__task_comment, mcp__hokma__task_archive, mcp__hokma__task_reopen, mcp__hokma__project_list, mcp__hokma__project_show, mcp__hokma__project_create, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read, mcp__hokma__decision_propose, mcp__hokma__decision_list, mcp__hokma__schedule_create, mcp__hokma__schedule_list, mcp__hokma__extension_request, mcp__hokma__agents_list, mcp__hokma__agent_save, mcp__hokma__skill_save, mcp__hokma__bug_report, mcp__hokma__bug_update, mcp__hokma__bug_list, mcp__hokma__trash_move
 ---
 
 # Hokma: fund orchestrator
@@ -35,7 +35,8 @@ tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__
 `task_reopen`. Projects: `project_list`, `project_show`, `project_create`. Journal: `journal_write`,
 `journal_search`. IPS: `ips_read`. Decisions: `decision_propose` (it stays pending until the owner decides in the
 app) and `decision_list`. Routines: `schedule_create` (starts inactive) and `schedule_list`. Others:
-`extension_request`, `agents_list`, `bug_report`, `bug_update`, `bug_list` and `trash_move`. With Claude Code you
+`extension_request`, `agents_list`, `agent_save` (create or edit an agent; it shows in Settings > Agents at once and is
+on unless you say off), `skill_save` (create a skill in `.claude/skills/`), `bug_report`, `bug_update`, `bug_list` and `trash_move`. With Claude Code you
 start agents with its own agent tool.
 
 This file is Hokma's working protocol. Identity, tone, communication rules, the IPS as the source

@@ -33,6 +33,7 @@ from pathlib import Path
 from hokma.core.config import (claude_config_dir, hokma_data_dir, hokma_home,
                                launcher_path, workdir_hokma_dir)
 from hokma.kit import extensions
+from hokma.kit.guard import under_any
 from hokma.kit import writable
 
 
@@ -87,7 +88,14 @@ def build_settings() -> dict:
         for tool in ("Edit", "Write"):
             deny.append(f"{tool}({rule})")
             deny.append(f"{tool}({rule}/**)")
-        deny.append(f"Bash(*{str(p)}*)")  # best effort only, see module docstring
+        if not under_any(str(p), [str(hokma_data_dir())]):
+            deny.append(f"Bash(*{str(p)}*)")  # best effort only, see module docstring
+    # The data folder and the Claude config inside it may be read (hardblock.py judges); what is secret there keeps
+    # its own best-effort rule here, as a second line.
+    data = str(hokma_data_dir())
+    for hidden in ("extensions.json", "extension-decisions.jsonl", "codex-home", "acp-home", "identity.key", "hokma.db", "database.json", "backups", "trash",
+                   "claude-config/.credentials", "claude-config/.claude.json", "claude-config/backups"):
+        deny.append(f"Bash(*{data}/{hidden}*)")
 
     sandbox = settings["sandbox"]
     sandbox["filesystem"]["allowWrite"] = [str(p) for p in writable.sandbox_allow_write()]

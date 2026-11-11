@@ -65,8 +65,10 @@ export function ExtensionsSection() {
         if (pending.action === "install" && pending.id.endsWith(`@${MARKETPLACE_NAME}`) && !list.data?.marketplaces.some((m) => m.name === MARKETPLACE_NAME)) {
           await api.post("/api/extensions/marketplace");
         }
-        await api.post("/api/extensions/toggle", { id: pending.id, enabled: pending.enabled, confirmed: true });
-        shell.toast({ tone: "ok", text: t(pending.action === "install" ? "ext.changed.installed" : pending.enabled ? "ext.changed.on" : "ext.changed.off", { name: pending.name }) });
+        const done = await api.post<{ install_error?: string | null }>("/api/extensions/toggle", { id: pending.id, enabled: pending.enabled, confirmed: true });
+        if (done?.install_error) {
+          shell.toast({ tone: "bad", text: t("ext.install.failed", { name: pending.name, reason: done.install_error }) });
+        } else shell.toast({ tone: "ok", text: t(pending.action === "install" ? "ext.changed.installed" : pending.enabled ? "ext.changed.on" : "ext.changed.off", { name: pending.name }) });
       }
       setPending(null);
       list.reload();
@@ -93,6 +95,20 @@ export function ExtensionsSection() {
   const requestsOf = (mcp: boolean) => data.requests.filter((r) => (r.kind === "mcp") === mcp);
   const localServers = data.servers.filter((s) => !s.remote);
   const askToggle = (plugin: PluginItem, enabled: boolean) => setPending({ action: "toggle", id: plugin.id, name: plugin.name, enabled, summary: plugin.summary });
+  const retry = async (plugin: PluginItem) => {
+    setBusy(true);
+    try {
+      await api.post("/api/extensions/retry", { id: plugin.id });
+      shell.toast({ tone: "ok", text: t("ext.changed.installed", { name: plugin.name }) });
+    } catch (cause) {
+      shell.toast({ tone: "bad", text: errorText(cause, t("api.error")) });
+    } finally {
+      setBusy(false);
+      list.reload();
+      shell.emit("extensions:changed");
+    }
+  };
+
   const askUninstall = (id: string, name: string) => setPending({ action: "uninstall", id, name, enabled: false, summary: "" });
 
   const requestsBlock = (mcp: boolean) =>
@@ -129,7 +145,7 @@ export function ExtensionsSection() {
             ) : (
               <Pane style={{ padding: "4px 0" }}>
                 {data.plugins.map((plugin) => (
-                  <PluginRow key={plugin.id} plugin={plugin} disabled={busy || !data.database} onToggle={(enabled) => askToggle(plugin, enabled)} onUninstall={() => askUninstall(plugin.id, plugin.name)} />
+                  <PluginRow key={plugin.id} plugin={plugin} disabled={busy || !data.database} onToggle={(enabled) => askToggle(plugin, enabled)} onUninstall={() => askUninstall(plugin.id, plugin.name)} onRetry={() => void retry(plugin)} />
                 ))}
               </Pane>
             )}
@@ -237,9 +253,9 @@ export function ExtensionsSection() {
   );
 }
 
-const STATE_TONE: Record<PluginState, "ok" | "warn" | "bad" | "default"> = { active: "ok", pending: "warn", error: "bad", disabled: "default" };
+const STATE_TONE: Record<PluginState, "ok" | "warn" | "bad" | "default"> = { active: "ok", pending: "warn", installing: "warn", attention: "warn", claude_only: "warn", error: "bad", disabled: "default" };
 
-function PluginRow({ plugin, disabled, onToggle, onUninstall }: { plugin: PluginItem; disabled: boolean; onToggle: (enabled: boolean) => void; onUninstall: () => void }) {
+function PluginRow({ plugin, disabled, onToggle, onUninstall, onRetry }: { plugin: PluginItem; disabled: boolean; onToggle: (enabled: boolean) => void; onUninstall: () => void; onRetry: () => void }) {
   const { t } = useI18n();
   return (
     <Row>
@@ -250,6 +266,7 @@ function PluginRow({ plugin, disabled, onToggle, onUninstall }: { plugin: Plugin
       </div>
       <Pill>{plugin.marketplace}</Pill>
       <Pill tone={STATE_TONE[plugin.state]} aria-label={t("ext.state.of", { name: plugin.name })}>{t(`ext.state.${plugin.state}`)}</Pill>
+      {plugin.retry ? <Button size="sm" variant="primary" disabled={disabled} aria-label={t("ext.retry.of", { name: plugin.name })} onClick={onRetry}>{t("ext.retry")}</Button> : null}
       <Toggle checked={plugin.enabled} disabled={disabled} label={t("ext.toggle", { name: plugin.name })} onChange={onToggle} />
       <Button size="sm" variant="ghost" disabled={disabled} aria-label={t("ext.uninstall.of", { name: plugin.name })} onClick={onUninstall}>{t("ext.uninstall")}</Button>
     </Row>

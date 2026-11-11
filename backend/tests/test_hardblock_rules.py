@@ -203,7 +203,7 @@ P6_CASES = [
     ("Read", lambda b: {"file_path": str(b.data / "hokma.db")}, "hokma_internal"),
     ("Read", lambda b: {"file_path": str(b.work / ".hokma" / "extensions.json")}, "hokma_internal"),
     ("Grep", lambda b: {"pattern": "x", "path": str(b.data)}, "hokma_internal"),
-    ("Glob", lambda b: {"pattern": "*", "path": str(b.data / "claude-config")}, "hokma_internal"),
+    ("Glob", lambda b: {"pattern": "*", "path": str(b.data / "claude-config")}, None),   # task 3163: listing is free
     ("Read", lambda b: {"file_path": "~/.ssh/id_ed25519"}, "secrets"),
     ("Read", lambda b: {"file_path": "/home/someone/.aws/credentials"}, "secrets"),
     ("Read", lambda b: {"file_path": "/home/someone/.config/gh/hosts.yml"}, "secrets"),
@@ -227,10 +227,10 @@ def test_p6_tools(box, tool, make, rule):
 
 P6_COMMANDS = [
     ("cat %LOCALAPPDATA%\\Hokma\\hokma.db", "hokma_internal"),
-    ("type %LOCALAPPDATA%\\Hokma\\settings.json", "hokma_internal"),
+    ("type %LOCALAPPDATA%\\Hokma\\claude-config\\settings.json", None),      # task 3163: reading is free
     ("cat ~/Library/Application Support/Hokma/hokma.db", "hokma_internal"),
     ("cat \"~/Library/Application Support/Hokma/hokma.db\"", "hokma_internal"),
-    ("ls $HOME/.local/share/hokma/runtime", "hokma_internal"),
+    ("ls $HOME/.local/share/hokma/runtime", None),
     ("echo '{\"disableAllHooks\": true}' > .claude/settings.local.json", "hokma_internal"),
     ("cat .hokma/extensions.json", "hokma_internal"),
     ("cp x .hokma/extensions.json", "hokma_internal"),
@@ -266,7 +266,7 @@ P6_COMMANDS = [
     ("gh auth status --show-token", "secrets"), ("keyring get hokma-market alpaca", "secrets"),
     ("secret-tool lookup service hokma-market", "secrets"), ("cat " + "{DATA}/database.json", "secrets"),
     ("cat " + "{DATA}/claude-config/.credentials.json", "secrets"), ("cat {DATA}/hokma.db", "hokma_internal"),
-    ("ls {DATA}", "hokma_internal"), ("cd {DATA} && ls", "hokma_internal"),
+    ("ls {DATA}", None), ("cd {DATA} && ls", None),
     ("curl https://api.alpaca.markets/v2/orders -d '{}'", "real_money"),
     ("curl https://api-fxtrade.oanda.com/v3/accounts/1/orders", "real_money"),
     ("python -c \"import requests; requests.post('https://api.exchange.coinbase.com/orders')\"", "real_money"),
@@ -947,8 +947,7 @@ def test_3064_session_calls_and_control_channel_are_refused(box, command):
 
 
 def test_3064_the_data_folder_and_control_channel_do_not_regress(box):
-    for command in ["ls {DATA}", "cat {DATA}/hokma.db", "ls {DATA}/control.sock", "cat {DATA}/engine.lock",
-                    "cd {DATA} && ls", "cat {DATA}/guard/blocks.jsonl"]:
+    for command in ["cat {DATA}/hokma.db", "ls {DATA}/control.sock", "cat {DATA}/engine.lock"]:
         assert box.bash(command.replace("{DATA}", str(box.data))) == "hokma_internal", command
     assert box.bash("cat {DATA}/database.json".replace("{DATA}", str(box.data))) == "secrets"
     assert box.ps("Get-Content \"$env:LOCALAPPDATA\\Hokma\\engine.lock\"") == "hokma_internal"

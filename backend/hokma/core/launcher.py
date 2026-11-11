@@ -14,6 +14,9 @@ secret) and checks /health, so the secrets exist only in the supervisor's memory
 the browser's address bar. A pipe handshake would have put the secrets in one more process and needed handle
 inheritance rules that differ between Windows and POSIX.
 
+Open Hokma always in the browser is a marker file (`config.browser_pref_path`) that the desktop window and the icon read;
+`hokma start` already opens the browser, so it keeps doing it with or without the marker.
+
 Stop: one `stop` word on the control channel (`hokma.core.control`), then wait for the supervisor to end. The
 supervisor itself closes everything by force after 10 seconds, so this command waits a little longer than that.
 Restart: stop, then start; the new start makes a new session and a new one-time code.

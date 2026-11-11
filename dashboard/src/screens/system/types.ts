@@ -11,9 +11,11 @@ export interface PluginItem {
   /** What the engine really has: active, disabled, pending (on, not unpacked yet) or error (see `reason`). */
   state: PluginState;
   reason: string;
+  /** The card offers Retry: the real installation again. */
+  retry?: boolean;
 }
 
-export type PluginState = "active" | "disabled" | "pending" | "error";
+export type PluginState = "active" | "disabled" | "pending" | "installing" | "attention" | "claude_only" | "error";
 
 export interface ServerItem {
   id: string;
