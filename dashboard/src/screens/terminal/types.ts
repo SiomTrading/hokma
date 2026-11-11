@@ -3,7 +3,7 @@ export type ServerFrame =
   | { type: "ready"; pid: number; cwd: string }
   | { type: "output"; data: string }
   | { type: "exit"; code: number | null }
-  | { type: "error"; code: string }
+  | { type: "error"; code: string; detail?: string }
   | { type: "pong" };
 
 export type ClientFrame = { type: "input"; data: string } | { type: "resize"; cols: number; rows: number } | { type: "ping" };

@@ -291,7 +291,7 @@ def test_powershell_files_are_plain_ascii(path):
 
 
 def test_both_installers_call_the_shortcuts_command_and_both_uninstallers_remove_them():
-    assert "shortcuts --force" in (INSTALLER / "install.ps1").read_text(encoding="utf-8")
+    assert '@("shortcuts", "--force")' in (INSTALLER / "install.ps1").read_text(encoding="utf-8")
     assert "shortcuts --force" in (INSTALLER / "install.sh").read_text(encoding="utf-8")
     ps = (INSTALLER / "uninstall.ps1").read_text(encoding="utf-8")
     sh = (INSTALLER / "uninstall.sh").read_text(encoding="utf-8")

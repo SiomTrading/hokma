@@ -204,6 +204,7 @@ def test_the_windows_path_variable_keeps_its_letter_case(data):
 def test_the_terminal_gets_them_too(data):
     from hokma.terminal.session import build_env
 
+    (data / "bin").mkdir(parents=True)               # only folders that exist are added to the owner's shell (task 3174)
     parts = build_env()["PATH"].split(os.pathsep)
     assert str(data / "bin") in parts and parts[0] != str(data / "bin")      # appended: it never shadows the owner's commands
 

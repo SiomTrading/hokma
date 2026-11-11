@@ -82,19 +82,21 @@ def installer_dirs() -> list[Path]:
     return [Path(bun_install) / "bin" if bun_install else home / ".bun" / "bin", home / ".local" / "bin"]
 
 
-def path_with_tools(path: str | None, *, first: bool = True) -> str:
+def path_with_tools(path: str | None, *, first: bool = True, only_existing: bool = False) -> str:
     """`path` with Hokma's folders in front (or at the end with `first=False`) and the installers' folders at the end,
     each once."""
     ours, last = [str(p) for p in tool_dirs()], [str(p) for p in installer_dirs()]
+    if only_existing:                      # the owner's shell: a folder that is not there is noise (and PATH has a size limit)
+        ours, last = [p for p in ours if os.path.isdir(p)], [p for p in last if os.path.isdir(p)]
     middle = [p for p in (path or "").split(os.pathsep) if p and p not in ours]
     return os.pathsep.join([*ours, *middle, *[p for p in last if p not in middle]] if first
                            else [*middle, *ours, *[p for p in last if p not in middle and p not in ours]])
 
 
-def with_tools(env: dict[str, str], *, first: bool = True) -> dict[str, str]:
+def with_tools(env: dict[str, str], *, first: bool = True, only_existing: bool = False) -> dict[str, str]:
     """`env` with `path_with_tools` applied to its PATH variable (any letter case: `Path` on Windows)."""
     key = next((k for k in env if k.upper() == "PATH"), "PATH")
-    env[key] = path_with_tools(env.get(key), first=first)
+    env[key] = path_with_tools(env.get(key), first=first, only_existing=only_existing)
     return env
 
 

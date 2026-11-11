@@ -25,7 +25,7 @@ export default defineMessages({
     "voice.error.mic_failed": "No se pudo iniciar la grabación.",
     "voice.error.no_speech": "No se escuchó voz en la grabación. Intenta de nuevo.",
     "voice.error.generic": "No se pudo transcribir la nota de voz.",
-    "voice.error.engine_missing": "El motor de voz no está instalado en esta copia de Hokma. Actualiza Hokma e intenta de nuevo.",
+    "voice.error.engine_missing": "La voz no está disponible en este equipo.",
   },
   en: {
     "voice.start": "Record a voice note",
@@ -51,6 +51,6 @@ export default defineMessages({
     "voice.error.mic_failed": "The recording could not start.",
     "voice.error.no_speech": "No speech was heard in the recording. Try again.",
     "voice.error.generic": "The voice note could not be transcribed.",
-    "voice.error.engine_missing": "The speech engine is not installed in this copy of Hokma. Update Hokma and try again.",
+    "voice.error.engine_missing": "Voice is not available on this computer.",
   },
 });

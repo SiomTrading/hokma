@@ -347,6 +347,7 @@ export function VoiceRecorder({ onTranscribed, onError, disabled, language }: Vo
             <>
               {failed ? <Pill tone="bad">{t("voice.error.title")}</Pill> : <span className="h2">{t("voice.prompt.title")}</span>}
               <p className="p">{failed && status?.error ? status.error.message : t("voice.prompt.text", { size })}</p>
+              {failed && status?.error?.detail ? <p className="p" data-testid="voice-error-detail"><small>{status.error.detail}</small></p> : null}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <Button size="sm" variant="ghost" onClick={closePrompt}>
                   {t("voice.prompt.close")}

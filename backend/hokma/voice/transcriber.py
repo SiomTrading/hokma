@@ -37,7 +37,9 @@ class FasterWhisperTranscriber:
         self._run_lock = threading.Lock()          # one transcription at a time: CPU bound, memory heavy
 
     def available(self) -> bool:
-        return importlib.util.find_spec("faster_whisper") is not None
+        # onnxruntime is what faster-whisper runs its voice detector on; it has no build for every platform
+        # (task 3173), so both must be there. Without them Hokma starts and only the voice says it is unavailable.
+        return all(importlib.util.find_spec(m) is not None for m in ("faster_whisper", "onnxruntime"))
 
     def status(self) -> dict[str, Any]:
         out = self.manager.snapshot()

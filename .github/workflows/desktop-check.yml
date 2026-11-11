@@ -8,6 +8,8 @@ on:
     paths:
       - "desktop/**"
       - "installer/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/desktop-check.yml"
   workflow_dispatch:
 
@@ -64,3 +66,79 @@ jobs:
           & $env:ISCC /Qp "/DAppVersion=0.0.0-ci" "/DSourceZip=$fake\hokma-src.zip" "/DAppExe=$fake\Hokma.exe" `
             "/DWebView2Setup=$fake\MicrosoftEdgeWebview2Setup.exe" "/DOutputDir=$fake\out" installer\windows\hokma-setup.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+
+  # Installs Hokma for real on a macOS Intel machine with installer/install.sh in a temporary folder and runs
+  # `hokma doctor` (task 3173). 0.0.23 did not install on a Mac Intel because uv found no onnxruntime wheel for
+  # darwin x86_64; nothing in CI ran that platform, so it reached students. macos-13 no longer exists on GitHub;
+  # macos-15-intel is the Intel runner (same architecture as the student's macosx_15_0_x86_64).
+  install-macos-intel:
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'SiomTrading/hokma-dev'
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check the architecture
+        run: |
+          test "$(uname -m)" = "x86_64" || { echo "not an Intel runner: $(uname -m)"; exit 1; }
+      - name: Install Hokma with installer/install.sh
+        run: |
+          base="$RUNNER_TEMP/hokma-install"
+          mkdir -p "$base"
+          HOKMA_DIR="$base/work" HOKMA_DATA_DIR="$base/data" HOME="$base/home" \
+            bash installer/install.sh --dir "$base/work" --lang en --no-doctor
+      - name: hokma doctor
+        run: |
+          base="$RUNNER_TEMP/hokma-install"
+          HOME="$base/home" "$base/home/.local/bin/hokma" doctor
+
+  # Runs installer/install.ps1 for real on Windows Server 2022 (windows-2022 is a Server edition) with Windows PowerShell
+  # 5.1 and ErrorActionPreference=Stop (task 3172). 0.0.23 stopped on the first stderr line of uv ("Using CPython
+  # 3.12.13" -> NativeCommandError) on a Windows Server VPS. Step 1 proves the failure mode with a fake native program
+  # that writes to stderr; step 2 installs Hokma in temporary folders and runs doctor. The runner is an administrator,
+  # so HOKMA_ALLOW_ADMIN lifts the student-only refusal here.
+  install-windows-server:
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'SiomTrading/hokma-dev'
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Windows edition
+        shell: powershell
+        run: |
+          (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion") | Format-List ProductName, EditionID, InstallationType, CurrentBuildNumber
+          $PSVersionTable.PSVersion
+      - name: Invoke-Native survives stderr under ErrorActionPreference Stop
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          . installer\native.ps1
+          $fake = Join-Path $env:RUNNER_TEMP "stderr-tool.cmd"
+          Set-Content -Path $fake -Value "@echo off`r`necho Using CPython 3.12.13 1>&2`r`necho out line`r`nexit /b 0" -Encoding ASCII
+          $code = Invoke-Native $fake @()
+          if ($code -ne 0) { throw "expected exit code 0, got $code" }
+          if ($script:NativeOutput -notmatch "Using CPython") { throw "stderr line lost: $($script:NativeOutput)" }
+          Set-Content -Path $fake -Value "@echo off`r`necho bad 1>&2`r`nexit /b 3" -Encoding ASCII
+          $code = Invoke-Native $fake @()
+          if ($code -ne 3) { throw "expected exit code 3, got $code" }
+      - name: Install Hokma with installer/install.ps1
+        shell: cmd
+        env:
+          HOKMA_ALLOW_ADMIN: "1"
+        run: |
+          set "BASE=%RUNNER_TEMP%\hokma-install"
+          mkdir "%BASE%\home"
+          set "USERPROFILE=%BASE%\home"
+          set "HOKMA_DATA_DIR=%BASE%\data"
+          "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File installer\install.ps1 -Dir "%BASE%\work" -Lang en -NoDoctor
+          if errorlevel 1 exit /b 1
+      - name: hokma doctor
+        shell: cmd
+        run: |
+          set "BASE=%RUNNER_TEMP%\hokma-install"
+          set "USERPROFILE=%BASE%\home"
+          call "%USERPROFILE%\.local\bin\hokma.cmd" doctor
+          if errorlevel 1 exit /b 1

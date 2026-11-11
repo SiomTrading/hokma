@@ -6,6 +6,7 @@ under cmd.exe with `chcp 65001`, robocopy, the user PATH change and git behaviou
 """
 from pathlib import Path
 
+PS_DIR = Path(__file__).resolve().parents[2] / "installer"
 PS = (Path(__file__).resolve().parents[2] / "installer" / "install.ps1").read_text()
 UNINSTALL = (Path(__file__).resolve().parents[2] / "installer" / "uninstall.ps1").read_text()
 
@@ -22,7 +23,8 @@ def test_uninstaller_reads_launcher_as_utf8():
 
 def test_git_calls_do_not_trip_error_action_preference_stop():
     assert "function Invoke-Git" in PS
-    assert 'ErrorActionPreference = "Continue"' in PS
+    assert 'Invoke-Native "git"' in PS        # task 3172: the Continue/stderr handling lives in installer\native.ps1
+    assert 'ErrorActionPreference = "Continue"' in (PS_DIR / "native.ps1").read_text()
     assert "core.autocrlf true" in PS
     for line in PS.splitlines():
         if line.strip().startswith(("&  git", "& git")):

@@ -29,6 +29,7 @@ if ($PSVersionTable.PSEdition -ne "Core") {
 
 . (Join-Path $PSScriptRoot "messages.ps1")
 . (Join-Path $PSScriptRoot "download.ps1")
+. (Join-Path $PSScriptRoot "native.ps1")
 if ($Lang) {
     if (@("es", "en") -notcontains $Lang) { Die "inst.lang_invalid" $Lang }
     $script:LangCode = $Lang
@@ -43,24 +44,21 @@ function Get-Sha256([string]$path) {
     return (($bytes | ForEach-Object { $_.ToString("x2") }) -join "")
 }
 
-# Run git without letting its stderr (CRLF warnings, hints) trigger
-# ErrorActionPreference=Stop in Windows PowerShell 5.1. Success is judged by exit code only.
+# git through Invoke-Native (its stderr never stops the script). Success is judged by exit code only; the output
+# stays in $GitOutput.
 function Invoke-Git {
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $out = & git @args 2>&1
-        $code = $LASTEXITCODE
-    }
-    finally { $ErrorActionPreference = $prev }
-    $script:GitOutput = ($out | ForEach-Object { "$_" }) -join "`n"
+    $code = Invoke-Native "git" ([string[]]$args) -Quiet
+    $script:GitOutput = $script:NativeOutput
     return $code
 }
 
 # ---- Stage 0: preconditions -------------------------------------------------
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+$IsServer = Test-WindowsServer
+Info "inst.windows_edition" (Get-WindowsEdition)
 if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -and -not $env:HOKMA_ALLOW_ADMIN) {
-    Die "inst.no_admin"
+    # Windows Server: the usual user IS an Administrator. The install goes on (it is per user anyway); it is only logged.
+    if ($IsServer) { Warn "inst.server_admin" } else { Die "inst.no_admin" }
 }
 
 $Src = Split-Path -Parent $PSScriptRoot
@@ -152,41 +150,41 @@ $env:UV_PYTHON_PREFERENCE = "only-managed"
 $env:UV_PROJECT_ENVIRONMENT = $Venv
 
 Info "inst.install_python" $PyVersion
-& $Uv python install $PyVersion
-if ($LASTEXITCODE -ne 0) { Die "inst.python_failed" $PyVersion }
+$code = Invoke-Native $Uv @("python", "install", $PyVersion)
+if ($code -ne 0) { Die "inst.python_failed" $PyVersion }
 
 Info "inst.copy_app"
 if (Test-Path $SlotDir) { Remove-Item -Recurse -Force $SlotDir }
 New-Item -ItemType Directory -Force -Path $App | Out-Null
-& robocopy $Src $App /E /XD .git node_modules .venv __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null
-if ($LASTEXITCODE -ge 8) { Die "inst.copy_failed" $LASTEXITCODE }
+$code = Invoke-Native "robocopy" @($Src, $App, "/E", "/XD", ".git", "node_modules", ".venv", "__pycache__", "/NFL", "/NDL", "/NJH", "/NJS", "/NP") -Quiet
+if ($code -ge 8) { Die "inst.copy_failed" $code }
 if (-not (Test-Path (Join-Path $App "dashboard\dist\index.html"))) { Die "inst.no_dashboard" }
 
 Info "inst.install_deps"
-& $Uv sync --project $App --frozen --no-dev --python $PyVersion
-if ($LASTEXITCODE -ne 0) { Die "inst.deps_failed" }
+$code = Invoke-Native $Uv @("sync", "--project", $App, "--frozen", "--no-dev", "--python", $PyVersion)
+if ($code -ne 0) { Die "inst.deps_failed" }
 
 $env:HOKMA_HOME = $Dir
 $env:HOKMA_DATA_DIR = $HokmaData
 $env:CLAUDE_CONFIG_DIR = $ConfigDir
 $HokmaExe = Join-Path $Venv "Scripts\hokma.exe"
 # Integrity manifest (sha256 of app, which includes the settings template). hokma and doctor verify it.
-& $HokmaExe write-manifest
-if ($LASTEXITCODE -ne 0) { Die "inst.manifest_failed" }
-& $HokmaExe verify-install | Out-Null
-if ($LASTEXITCODE -ne 0) { Die "inst.verify_failed" }
+$code = Invoke-Native $HokmaExe @("write-manifest")
+if ($code -ne 0) { Die "inst.manifest_failed" }
+$code = Invoke-Native $HokmaExe @("verify-install") -Quiet
+if ($code -ne 0) { Die "inst.verify_failed" }
 
 # Node and Bun, portable, in <data>\tools (versions and sha256 in lock.json, checked before unpacking). Plugins and their
 # hooks need them (claude-mem starts its worker with Bun); Hokma puts them on the PATH of the engine. No network or a
 # wrong hash installs nothing: the install goes on and `hokma install-tools` repeats it.
 Info "inst.install_tools"
-& $HokmaExe install-tools
-if ($LASTEXITCODE -ne 0) { Warn "inst.tools_failed" }
+$code = Invoke-Native $HokmaExe @("install-tools")
+if ($code -ne 0) { Warn "inst.tools_failed" }
 
 # ---- Stage 5: working folder as a Git repo, kit (never overwriting the student), config
 New-Item -ItemType Directory -Force -Path $Dir, $ConfigDir | Out-Null
-& $HokmaExe kit-sync | Out-Null
-if ($LASTEXITCODE -ne 0) { Die "inst.kit_failed" }
+$code = Invoke-Native $HokmaExe @("kit-sync") -Quiet
+if ($code -ne 0) { Die "inst.kit_failed" }
 $gi = Join-Path $Dir ".gitignore"
 if (-not (Test-Path $gi)) {
     Set-Content -Path $gi -Value @("*.db", "*.sqlite", "*.sqlite-wal", "*.sqlite-shm", ".env") -Encoding ASCII
@@ -241,8 +239,8 @@ $tmpPointer = Join-Path $HokmaData "current.tmp"
 Move-Item -Force -Path $tmpPointer -Destination $pointer
 
 # Runtime and Claude config live OUTSIDE the working folder; lock them from the agent.
-& $HokmaExe init-config | Out-Null
-if ($LASTEXITCODE -ne 0) { Die "inst.config_failed" }
+$code = Invoke-Native $HokmaExe @("init-config") -Quiet
+if ($code -ne 0) { Die "inst.config_failed" }
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (-not $userPath) { $userPath = "" }
@@ -254,14 +252,14 @@ if (($userPath -split ";") -notcontains $BinDir) {
 # Shortcut: Hokma (Start menu and Desktop). Old Shut down and Restart shortcuts are removed. One implementation, shared with
 # `hokma update`: `hokma shortcuts` (hokma.core.shortcuts). They point at the stable launcher, run without a console
 # window, and there is NO start at login: Hokma starts when the owner opens the "Hokma" shortcut.
-& $HokmaExe shortcuts --force
-if ($LASTEXITCODE -eq 0) { Info "inst.shortcuts_created" } else { Warn "inst.shortcuts_failed" }
+$code = Invoke-Native $HokmaExe @("shortcuts", "--force")
+if ($code -eq 0) { Info "inst.shortcuts_created" } else { Warn "inst.shortcuts_failed" }
 
 # ---- Stage 7: doctor --------------------------------------------------------
 Info "inst.installed" $Dir
 if (-not $NoDoctor) {
     Info "inst.running_doctor"
-    & $launcherPath doctor
-    if ($LASTEXITCODE -ne 0) { Warn "inst.doctor_problems" }
+    $code = Invoke-Native $launcherPath @("doctor")
+    if ($code -ne 0) { Warn "inst.doctor_problems" }
 }
 Info "inst.done"

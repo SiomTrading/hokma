@@ -7,7 +7,7 @@ from __future__ import annotations
 import traceback
 
 
-def log(message: str, exc: BaseException | None = None) -> None:
+def log(message: str, exc: BaseException | None = None, scope: str = "chat") -> None:
     try:
         from hokma.core import config
         from hokma.core.supervisor import EngineLog
@@ -15,6 +15,6 @@ def log(message: str, exc: BaseException | None = None) -> None:
         text = message
         if exc is not None:
             text += "\n" + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-4000:]
-        EngineLog(config.engine_log_path()).write("chat: " + text)
+        EngineLog(config.engine_log_path()).write(f"{scope}: " + text)
     except Exception:          # noqa: BLE001
         pass

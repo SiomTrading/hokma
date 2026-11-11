@@ -3,7 +3,7 @@ import { api } from "@/api";
 export type VoiceLanguage = "auto" | "es_en" | "es" | "en";
 
 export interface VoiceStatus {
-  /** False when the speech engine is not installed in this copy of Hokma. */
+  /** False when the speech engine is not available on this computer. */
   available: boolean;
   model: string;
   state: "missing" | "downloading" | "ready" | "error";
@@ -14,7 +14,7 @@ export interface VoiceStatus {
   /** Approximate size of the one-time download, known before it starts. */
   download_mb?: number;
   /** Set when state is "error": a localized, user-safe message. */
-  error: { code: string; message: string } | null;
+  error: { code: string; message: string; detail?: string } | null;
 }
 
 export interface TranscribeResult {

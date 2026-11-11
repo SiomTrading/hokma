@@ -123,7 +123,8 @@ function onFrame(entry: Entry, frame: ServerFrame): void {
       entry.sawExit = true;
       const key = `term.error.${frame.code}`;
       const text = frame.code === "too_many_terminals" || frame.code === "pty_unavailable" || frame.code === "spawn_failed" ? t(key) : t("term.error.unknown");
-      entry.term.write(`\r\n\x1b[31m${text}\x1b[0m\r\n`);
+      const reason = typeof frame.detail === "string" ? frame.detail.trim().slice(0, 1500).replace(/\r?\n/g, "\r\n") : "";
+      entry.term.write(`\r\n\x1b[31m${text}\x1b[0m\r\n${reason ? `\x1b[2m${reason}\x1b[0m\r\n` : ""}`);
       setStatus(entry, "error");
       break;
     }

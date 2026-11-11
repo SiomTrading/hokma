@@ -74,19 +74,35 @@ function Fail([string]$why) {
     exit 1
 }
 
-# Run a native program hidden, forward every output line as LINE:, return its exit code. Its stderr never stops
-# this script (Windows PowerShell 5.1 turns stderr lines into errors under ErrorActionPreference=Stop).
-function Invoke-Logged([string]$file, [string[]]$arguments) {
+# Run a native program (powershell.exe, cmd.exe, winget...), forward every output line as LINE:, return its exit code,
+# decided by $LASTEXITCODE alone. Same contract as Invoke-Native in installer\native.ps1 (task 3172), repeated here
+# because this helper runs before the source package is unpacked: ErrorActionPreference goes down to Continue only
+# during the call, because Windows PowerShell 5.1 turns every stderr line of a native program into a terminating
+# NativeCommandError under Stop, even when the program succeeds. Every native call of this script goes through it.
+function Invoke-Native([string]$file, [string[]]$arguments = @()) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
+    $code = 0
     try {
+        $global:LASTEXITCODE = 0
         & $file @arguments 2>&1 | ForEach-Object { $text = "$_"; if ($text.Trim()) { Emit ("LINE:" + $text) } }
         $code = $LASTEXITCODE
     }
     catch { Emit ("LINE:" + $_.Exception.Message); $code = 1 }
     finally { $ErrorActionPreference = $prev }
     if ($null -eq $code) { $code = 0 }
-    return $code
+    return [int]$code
+}
+
+# Windows edition for the log. Windows Server is supported: nothing is blocked, the edition is only recorded.
+function Get-WindowsEdition {
+    try {
+        $k = "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+        $get = [Microsoft.Win32.Registry]
+        return ("" + $get::GetValue($k, "ProductName", "") + " (" + $get::GetValue($k, "EditionID", "") + ", " +
+                $get::GetValue($k, "InstallationType", "") + ") build " + $get::GetValue($k, "CurrentBuildNumber", ""))
+    }
+    catch { return ([Environment]::OSVersion.VersionString) }
 }
 
 function Get-Platform {
@@ -254,7 +270,7 @@ function Restore-KeptData([string]$keep) {
 function Install-Git {
     if (Test-Git) { Emit "RESULT:git=present"; return }
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        $code = Invoke-Logged "winget" @("install", "--id", "Git.Git", "-e", "--scope", "user", "--silent",
+        $code = Invoke-Native "winget" @("install", "--id", "Git.Git", "-e", "--scope", "user", "--silent",
                                          "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity")
         Write-Log ("winget exit code " + $code)
         if (Test-Git) { Emit "RESULT:git=winget"; return }
@@ -283,7 +299,7 @@ function Install-Claude {
         if (-not (Invoke-HokmaDownload "https://claude.ai/install.ps1" $script "Claude Code" { param($t) Emit ("LINE:" + $t) })) {
             throw ("download failed after 3 attempts: " + $script:DownloadError)
         }
-        $code = Invoke-Logged "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $script)
+        $code = Invoke-Native "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $script)
         Write-Log ("claude install exit code " + $code)
     }
     catch { Write-Log ("claude install: " + $_.Exception.Message) }
@@ -307,7 +323,7 @@ function Restore-WorkFolder([string]$workdir, [string]$backup) {
         return
     }
     Remove-Item -LiteralPath $fresh -Recurse -Force -ErrorAction SilentlyContinue
-    $code = Invoke-Logged "cmd.exe" @("/d", "/c", ('"' + $Launcher + '" kit-sync'))
+    $code = Invoke-Native "cmd.exe" @("/d", "/c", ('"' + $Launcher + '" kit-sync'))
     Write-Log ("kit-sync exit code " + $code)
     Emit "RESULT:restore=done"
 }
@@ -343,6 +359,7 @@ function Clear-OldSetupFiles {
 
 if ($Log) { New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Log) | Out-Null }
 Write-Log ("action " + $Action + " mode " + $Mode + " dir " + $Dir)
+Write-Log ("windows " + (Get-WindowsEdition))
 
 switch ($Action) {
     "Detect" {
@@ -374,7 +391,7 @@ switch ($Action) {
     "Finish" {
         Emit "STAGE:shortcuts"
         if (Test-Path -LiteralPath $Launcher) {
-            $code = Invoke-Logged "cmd.exe" @("/d", "/c", ('"' + $Launcher + '" shortcuts --force'))
+            $code = Invoke-Native "cmd.exe" @("/d", "/c", ('"' + $Launcher + '" shortcuts --force'))
             Write-Log ("shortcuts exit code " + $code)
         }
         if (-not $NoApp) {
@@ -397,6 +414,7 @@ $script:PendingBackup = ""
 try {
     if ($WaitFor -gt 0) { Wait-ForPid $WaitFor }
 
+    Emit ("LINE:Windows: " + (Get-WindowsEdition))
     Emit "STAGE:closing"
     Stop-Hokma
     if ($Mode -eq "update") { Remove-StaleLock }
@@ -412,7 +430,7 @@ try {
         Save-KeptData $keep
         $backup = Backup-WorkFolder $Dir
         Emit "STAGE:reset"
-        $code = Invoke-Logged "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        $code = Invoke-Native "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                                                  (Join-Path $SrcDir "installer\uninstall.ps1"), "-ResetAll", "-Dir", $Dir, "-Lang", $Lang)
         if ($code -ne 0 -or (Test-Path -LiteralPath $Data)) { Fail ("reset failed (exit code " + $code + ")") }
     }
@@ -426,7 +444,7 @@ try {
     }
 
     Emit "STAGE:install"
-    $code = Invoke-Logged "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+    $code = Invoke-Native "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                                              (Join-Path $SrcDir "installer\install.ps1"), "-Dir", $Dir, "-Lang", $Lang, "-NoDoctor")
     if ($code -ne 0 -or -not (Test-Path -LiteralPath $Launcher)) { Fail ("install.ps1 failed (exit code " + $code + ")") }
 

@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.0.24
+
+0.0.23 did not install on a Mac with an Intel processor (macOS 15, `macosx_15_0_x86_64`): `uv` found no wheel of
+onnxruntime 1.31.1 for darwin x86_64. The voice (faster-whisper) pulls onnxruntime, and from 1.24 on it is only published
+for Apple silicon, Linux and Windows.
+
+- onnxruntime is pinned to 1.23.2 (the last release with a macOS Intel wheel) on that platform only; every other platform
+  keeps 1.31.1, so the lock has two entries chosen by environment markers.
+- `[tool.uv] required-environments` lists the five real platforms (Linux x86_64 and aarch64, macOS arm64 and x86_64,
+  Windows AMD64). `uv lock` now fails if a dependency has no wheel for one of them, instead of failing on a student's machine.
+- The voice reports itself as unavailable when faster-whisper or onnxruntime is not importable, and the app says
+  "La voz no está disponible en este equipo" without affecting anything else.
+- CI: new job `install-macos-intel` in `desktop-check.yml` installs Hokma with `installer/install.sh` in a temporary folder
+  on an Intel runner (`macos-15-intel`, since `macos-13` no longer exists) and runs `hokma doctor`. It also runs when
+  `pyproject.toml` or `uv.lock` change.
+
+### Added to 0.0.24 (task 3172): the installer on Windows Server
+
+The real log of Hokma-Setup 0.0.23 on a VPS with Windows Server (user Administrator) ended with
+`uv.exe : Using CPython 3.12.13 ... NativeCommandError` and `install.ps1 failed (exit code 1)`. Cause: Windows PowerShell
+5.1 with `$ErrorActionPreference = "Stop"` turns every line a native program writes to stderr into a terminating error,
+even when the program succeeds, and uv writes its progress to stderr.
+
+- New `installer/native.ps1` with `Invoke-Native`: lowers `ErrorActionPreference` to Continue only during the call,
+  merges stderr into stdout, forwards each line to the log as plain text, keeps the output in `$script:NativeOutput` and
+  decides by the exit code alone. `install.ps1` runs every native program through it: `uv python install`, `uv sync`,
+  robocopy, `hokma write-manifest / verify-install / install-tools / kit-sync / init-config / shortcuts`, `doctor`, and
+  git (`Invoke-Git` now calls it). `setup-helper.ps1` has the same function (it runs before the package is unpacked) and
+  uses it for winget, `powershell.exe` and `cmd.exe`; `Invoke-Logged` is gone. `uninstall.ps1` and `download.ps1` make
+  no native call. The updater has no `.ps1` scripts: it runs in Python.
+- Windows Server: the install goes on. The Windows edition (product, edition, installation type, build) is written to the
+  log (`Windows edition: ...` in install.ps1 and the setup log). On a Server edition an administrator is no longer
+  refused (the usual user there is one); on Windows 10/11 the refusal stays.
+- Tests: `backend/tests/test_installer_native_3172.py` fails if any `.ps1` calls a native program with `&` or by bare name
+  outside the function, reads `$LASTEXITCODE` outside it, or if the Server handling or its messages disappear.
+- CI: new job `install-windows-server` in `desktop-check.yml` on `windows-2022` (a Server edition): proves with a fake
+  program that writes to stderr that `Invoke-Native` survives `Stop`, then runs `installer/install.ps1` for real in
+  temporary folders and `hokma doctor`.
+
+### Added to 0.0.24 (task 3174): the terminal and the voice on Windows
+
+On a real Windows 0.0.23 the Terminal panel said "No se pudo iniciar la terminal." and the voice "Falló la descarga del
+modelo de voz", both with no reason. The cause could not be reproduced without that machine, so the work covers the
+likely ones and makes the real reason visible so a repeat names itself:
+
+- Terminal: the socket caught only `OSError`, but pywinpty raises its own error types; they now reach the panel as
+  `spawn_failed` with the real text. Every attempt (shell, environment, folder, PATH length, error) goes to engine.log
+  under `terminal:` and is shown under the message.
+- Terminal: if the first shell does not start (the Store alias of `pwsh.exe` is a reparse point a pseudo-terminal cannot
+  start), the next is tried: PowerShell 7, Windows PowerShell, `%COMSPEC%`, `System32\cmd.exe`. If all fail with the full
+  environment, a plain one (the app's own plus TERM) is tried. SYSTEMROOT, WINDIR and COMSPEC are always set.
+- Terminal: since 0.0.22 the PATH of the shell got Hokma's tool folders and the installers' folders even when they did
+  not exist; only existing folders are added now.
+- Voice: the download keeps the chain of real causes ("RuntimeError <- SSLError: certificate verify failed"), shows it
+  under the message and writes it to engine.log under `voice:` with the names (never the values) of the proxy and
+  certificate variables that were set. The Hugging Face Xet transport is turned off for this single-file download.
+
 ## 0.0.23
 
 0.0.22 broke the chat on real Windows for many students: every message, even a "hola", answered "Something failed

@@ -72,7 +72,8 @@ def create_router(transcriber_getter=None, engine_getter=None) -> APIRouter:
     def status_body(t: Transcriber, lang: str) -> dict:
         data = dict(t.status())
         code = data.pop("error_code", None)
-        data["error"] = _fail(500, code, lang).detail if code else None
+        detail = data.pop("error_detail", None)
+        data["error"] = {**_fail(500, code, lang).detail, **({"detail": detail} if detail else {})} if code else None
         return data
 
     @router.get("/api/transcribe/status")

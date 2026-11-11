@@ -404,7 +404,7 @@
   "voice.error.too_large": "The audio is too large. The limit is 25 MB.",
   "voice.error.no_audio": "The request has no audio.",
   "voice.error.not_audio": "That file is not an audio format Hokma can read.",
-  "voice.error.engine_missing": "The speech engine is not installed in this copy of Hokma. Update Hokma and try again.",
+  "voice.error.engine_missing": "Voice is not available on this computer.",
   "voice.error.model_missing": "The speech model is not downloaded yet.",
   "voice.error.transcribe_failed": "The audio could not be transcribed. Try recording again.",
   "voice.error.offline": "The speech model needs to be downloaded once and there is no internet connection. Connect and try again.",

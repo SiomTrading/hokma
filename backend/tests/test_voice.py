@@ -261,3 +261,37 @@ def test_audio_kind_and_transcript_in_sqlite(data_dir):
     with db.read() as u:
         row = u.attachments.get(int(res.json()["attachment_id"]))
     assert row.kind == "audio" and row.transcript == "comprar mas" and row.mime_type == "audio/webm"
+
+
+def test_voice_is_unavailable_when_onnxruntime_is_missing(monkeypatch, tmp_path):
+    """Mac Intel has no onnxruntime build for newer versions (task 3173): the voice says it is unavailable, nothing breaks."""
+    import importlib.util
+    from hokma.voice.transcriber import FasterWhisperTranscriber
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name == "onnxruntime" else real(name, *a))
+    t = FasterWhisperTranscriber(ModelManager())
+    assert t.available() is False
+    assert t.status()["available"] is False
+
+
+def test_voice_is_unavailable_when_faster_whisper_is_missing(monkeypatch):
+    import importlib.util
+    from hokma.voice.transcriber import FasterWhisperTranscriber
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name == "faster_whisper" else real(name, *a))
+    assert FasterWhisperTranscriber(ModelManager()).available() is False
+
+
+def test_pyproject_keeps_macos_intel_installable():
+    import tomllib
+    root = Path(__file__).resolve().parents[2]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = data["project"]["dependencies"]
+    intel = [d for d in deps if d.startswith("onnxruntime") and "== 'x86_64'" in d]
+    others = [d for d in deps if d.startswith("onnxruntime") and "!= 'x86_64'" in d]
+    assert len(intel) == 1 and len(others) == 1
+    assert len(data["tool"]["uv"]["required-environments"]) == 5
+    lock = (root / "uv.lock").read_text(encoding="utf-8")
+    assert "onnxruntime-1.23.2-cp312-cp312-macosx_13_0_x86_64.whl" in lock

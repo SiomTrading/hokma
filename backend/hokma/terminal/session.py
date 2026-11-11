@@ -8,7 +8,7 @@ from pathlib import Path
 
 from hokma.core import tools
 from hokma.core.config import claude_config_dir, hokma_home, launcher_path
-from hokma.terminal.pty_backend import IS_WINDOWS, open_pty
+from hokma.terminal.pty_backend import IS_WINDOWS, PtyUnavailable, open_pty
 
 MAX_SESSIONS = 16
 MIN_COLS, MAX_COLS, MIN_ROWS, MAX_ROWS = 2, 500, 1, 200
@@ -26,13 +26,30 @@ def clamp_size(cols: object, rows: object) -> tuple[int, int]:
             max(MIN_ROWS, min(MAX_ROWS, num(rows, DEFAULT_ROWS))))
 
 
+def _windows_shells() -> list[list[str]]:
+    """PowerShell 7, Windows PowerShell and cmd, in that order, each once. `shutil.which` can return the Store's
+    `pwsh.exe` alias (a reparse point a pseudo-terminal cannot start), so the caller tries the next one when it fails."""
+    found: list[list[str]] = []
+    for name in ("pwsh.exe", "powershell.exe"):
+        path = shutil.which(name)
+        if path:
+            found.append([path, "-NoLogo"])
+    root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or r"C:\Windows"
+    for cmd in (os.environ.get("COMSPEC", ""), os.path.join(root, "System32", "cmd.exe"), "cmd.exe"):
+        if cmd and [cmd] not in found:
+            found.append([cmd])
+    return found
+
+
+def shell_candidates() -> list[list[str]]:
+    if IS_WINDOWS:
+        return _windows_shells()
+    return [resolve_shell()]
+
+
 def resolve_shell() -> list[str]:
     if IS_WINDOWS:
-        for name in ("pwsh.exe", "powershell.exe"):
-            found = shutil.which(name)
-            if found:
-                return [found, "-NoLogo"]
-        return [os.environ.get("COMSPEC", "cmd.exe")]
+        return _windows_shells()[0]
     candidate = os.environ.get("SHELL", "")
     if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
         return [candidate]
@@ -67,17 +84,39 @@ def resolve_cwd(project_id: str | None) -> str:
     return str(Path.home())
 
 
-def build_env() -> dict[str, str]:
+def build_env(plain: bool = False) -> dict[str, str]:
+    """The environment of the owner's shell. `plain=True` is the last resort when the shell would not start with the
+    full one: what the app itself runs with, plus the terminal type, nothing of Hokma's PATH additions."""
     env = dict(os.environ)
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
+    if IS_WINDOWS:                         # a shell without these starts with nothing, or not at all
+        root = env.get("SYSTEMROOT") or env.get("WINDIR") or r"C:\Windows"
+        env.setdefault("SYSTEMROOT", root)
+        env.setdefault("WINDIR", root)
+        env.setdefault("COMSPEC", os.path.join(root, "System32", "cmd.exe"))
+    if plain:
+        return env
     env["CLAUDE_CONFIG_DIR"] = str(claude_config_dir())
+    key = next((k for k in env if k.upper() == "PATH"), "PATH")
     launcher_dir = launcher_path().parent
-    parts = env["PATH"].split(os.pathsep) if env.get("PATH") else []
+    parts = env[key].split(os.pathsep) if env.get(key) else []
     if str(launcher_dir) not in parts and launcher_dir.is_dir():
         parts.append(str(launcher_dir))
-        env["PATH"] = os.pathsep.join(parts)
-    return tools.with_tools(env, first=False)       # the owner's own shell: the tools never shadow what it already finds
+        env[key] = os.pathsep.join(parts)
+    return tools.with_tools(env, first=False, only_existing=True)   # the tools never shadow what the shell already finds
+
+
+class TerminalStartError(OSError):
+    """No shell would start. `detail` carries every attempt with its real error, for the screen and engine.log."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _reason(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}".strip()[:300]
 
 
 class TerminalSession:
@@ -91,11 +130,35 @@ class TerminalSession:
 
     @classmethod
     def open(cls, loop: asyncio.AbstractEventLoop, cols: int, rows: int, project_id: str | None) -> "TerminalSession":
+        """Starts the first shell that works: each candidate with the full environment, then with the plain one. A
+        missing pywinpty stops at once (PtyUnavailable). When all fail, TerminalStartError lists every attempt."""
+        from hokma.engine import errlog
+
         cwd = resolve_cwd(project_id)
-        proc = open_pty(resolve_shell(), cwd, build_env(), cols, rows)
-        session = cls(proc, cwd)
-        proc.start_reading(loop, session.queue)
-        return session
+        attempts: list[str] = []
+        for plain in (False, True):
+            try:
+                env = build_env(plain)
+            except Exception as exc:       # noqa: BLE001
+                attempts.append(f"environment: {_reason(exc)}")
+                continue
+            for argv in shell_candidates():
+                try:
+                    proc = open_pty(argv, cwd, env, cols, rows)
+                except PtyUnavailable:
+                    raise
+                except Exception as exc:   # noqa: BLE001  (pywinpty raises its own error types, not only OSError)
+                    attempts.append(f"{argv[0]} ({'plain' if plain else 'full'} environment, folder {cwd}, "
+                                    f"PATH {len(env.get('PATH', env.get('Path', '')))} characters): {_reason(exc)}")
+                    continue
+                if attempts:
+                    errlog.log("the terminal started after failures:\n" + "\n".join(attempts), scope="terminal")
+                session = cls(proc, cwd)
+                proc.start_reading(loop, session.queue)
+                return session
+        detail = "\n".join(attempts) or "no shell found"
+        errlog.log("the terminal could not start:\n" + detail, scope="terminal")
+        raise TerminalStartError(detail)
 
     async def next_output(self) -> str | None:
         """Next decoded chunk of terminal output, or None when the shell closed its side."""

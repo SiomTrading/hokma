@@ -49,11 +49,33 @@ def classify_download_error(error: BaseException) -> str:
     return "download_failed"
 
 
+def describe_error(error: BaseException) -> str:
+    """The chain of causes as one short text ("SSLError: certificate verify failed <- ConnectError: ..."), so the
+    reason shown is the real one and not the class we put it in."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen and len(parts) < 4:
+        seen.add(id(current))
+        parts.append(f"{type(current).__name__}: {current}".strip()[:240])
+        current = current.__cause__ or current.__context__
+    return " <- ".join(parts)[:700]
+
+
+def proxy_variables() -> list[str]:
+    """Names (never values) of the network variables that change how the download connects."""
+    names = ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+             "HF_ENDPOINT", "HF_HOME", "HF_HUB_OFFLINE")
+    upper = {k.upper() for k in os.environ}
+    return [n for n in names if n in upper]
+
+
 @dataclass
 class DownloadState:
     state: str = "missing"             # missing | downloading | ready | error
     bars: dict[str, list[int]] = field(default_factory=dict)       # bar name -> [bytes done, bytes total]
     error_code: str | None = None
+    error_detail: str | None = None    # the real exception ("SSLError: ..."), for the screen and engine.log
 
     def counters(self) -> tuple[int, int]:
         """(done, total) of the biggest byte bar. The hub library draws several bars (per file, overall,
@@ -82,16 +104,16 @@ class ModelManager:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             d = DownloadState(self._download.state, {k: list(v) for k, v in self._download.bars.items()},
-                              self._download.error_code)
+                              self._download.error_code, self._download.error_detail)
         done, total = d.counters()
         if self.is_ready():
             return {"state": "ready", "bytes_done": total or done, "bytes_total": total or done, "progress": 1.0,
-                    "error_code": None}
+                    "error_code": None, "error_detail": None}
         if d.state == "ready":                      # the folder was removed after a download
             d.state = "missing"
         progress = min(1.0, done / total) if total else 0.0
         return {"state": d.state, "bytes_done": done, "bytes_total": total, "progress": progress,
-                "error_code": d.error_code}
+                "error_code": d.error_code, "error_detail": d.error_detail}
 
     def start_download(self) -> None:
         """Starts the download in the background; a no-op while one runs or when the model is already complete."""
@@ -125,12 +147,24 @@ class ModelManager:
             with self._lock:
                 self._download.state = "ready"
         except BaseException as exc:                # the thread must always end in a visible state
+            code, detail = classify_download_error(exc), describe_error(exc)
             with self._lock:
                 self._download.state = "error"
-                self._download.error_code = classify_download_error(exc)
+                self._download.error_code = code
+                self._download.error_detail = detail
+            try:
+                from hokma.engine import errlog
+                errlog.log(f"the voice model download failed ({code}), repo {repo_id(self.size)}, folder {self.path}, "
+                           f"proxy/certificate variables set: {', '.join(proxy_variables()) or 'none'}\n{detail}",
+                           exc, scope="voice")
+            except Exception:                       # noqa: BLE001  (a log problem never hides the error)
+                pass
 
     @staticmethod
     def _fetch_from_hub(repo: str, target: Path, report) -> None:
+        # One 480 MB file over plain HTTPS: the Xet transport and the symlink notice only add ways to fail on Windows.
+        os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+        os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
         from huggingface_hub import snapshot_download
         from tqdm.auto import tqdm
 

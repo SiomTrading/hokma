@@ -54,6 +54,16 @@ async def _read_input(ws: WebSocket, session: TerminalSession) -> None:
             await _send(ws, {"type": "pong"})
 
 
+def _detail(exc: BaseException) -> str:
+    return (getattr(exc, "detail", None) or f"{type(exc).__name__}: {exc}").strip()[:1500]
+
+
+def _log_failure(code: str, exc: BaseException) -> None:
+    if not hasattr(exc, "detail"):         # TerminalStartError was logged by the session with every attempt
+        from hokma.engine import errlog
+        errlog.log(f"{code}: {_detail(exc)}", exc, scope="terminal")
+
+
 @router.websocket("/ws/terminal")
 async def ws_terminal(ws: WebSocket) -> None:
     if not _token_ok(ws.query_params.get("token")):
@@ -67,12 +77,14 @@ async def ws_terminal(ws: WebSocket) -> None:
     cols, rows = clamp_size(ws.query_params.get("cols", DEFAULT_COLS), ws.query_params.get("rows", DEFAULT_ROWS))
     try:
         session = TerminalSession.open(asyncio.get_running_loop(), cols, rows, ws.query_params.get("project_id"))
-    except PtyUnavailable:
-        await _send(ws, {"type": "error", "code": "pty_unavailable"})
+    except PtyUnavailable as exc:
+        _log_failure("pty_unavailable", exc)
+        await _send(ws, {"type": "error", "code": "pty_unavailable", "detail": _detail(exc)})
         await ws.close(code=1011)
         return
-    except OSError:
-        await _send(ws, {"type": "error", "code": "spawn_failed"})
+    except Exception as exc:        # noqa: BLE001  (whatever the cause, the screen gets its text, not a silent close)
+        _log_failure("spawn_failed", exc)
+        await _send(ws, {"type": "error", "code": "spawn_failed", "detail": _detail(exc)})
         await ws.close(code=1011)
         return
     registry.add(session)

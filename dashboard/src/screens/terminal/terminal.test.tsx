@@ -172,6 +172,14 @@ describe("terminal panel", () => {
     expect(terminals[0].written.join("")).toContain("demasiadas terminales");
   });
 
+  it("shows the real reason when the shell cannot start (task 3174)", () => {
+    renderWithApp(<Harness />);
+    frame(sockets[0], { type: "error", code: "spawn_failed", detail: "pwsh.exe (full environment): WinptyError: access denied\ncmd.exe: boom" });
+    const text = terminals[0].written.join("");
+    expect(text).toContain("No se pudo iniciar la terminal.");
+    expect(text).toContain("WinptyError: access denied\r\ncmd.exe: boom");
+  });
+
   it("reports a lost connection", () => {
     renderWithApp(<Harness />);
     frame(sockets[0], { type: "ready", pid: 1, cwd: "/w" });
