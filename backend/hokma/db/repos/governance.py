@@ -102,7 +102,7 @@ class JournalRepo(Repo):
         return int(self.s.scalar(f"SELECT count(*) FROM journal_entries{where}", params))
 
 
-HARD_RULES = ("delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money")
+HARD_RULES = ("delete", "hokma_internal", "outside_workdir", "secrets", "real_money")
 
 
 class GuardEventsRepo(Repo):

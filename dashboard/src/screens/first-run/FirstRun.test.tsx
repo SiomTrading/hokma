@@ -136,7 +136,7 @@ class FakeBackend {
         return this.json(this.state);
       }
       case "GET /api/protections":
-        return this.json({ always_on: true, rules: ["delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money"].map((id) => ({ id, title: id })) });
+        return this.json({ always_on: true, rules: ["delete", "hokma_internal", "outside_workdir", "secrets", "real_money"].map((id) => ({ id, title: id })) });
       case "GET /api/profile/permission-mode":
         return this.json(this.permission);
       case "PUT /api/profile/permission-mode": {

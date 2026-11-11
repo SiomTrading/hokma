@@ -85,7 +85,7 @@ def test_the_data_folder_the_working_folder_itself_and_links_out_are_refused(own
     (owner.tmp / "secret.txt").write_text("s")
     (owner.work / "link").symlink_to(owner.tmp / "secret.txt")
     with pytest.raises(trash.TrashError):
-        trash.move([str(owner.data / "database.json")], "x", db=owner.db, roots=[str(owner.work), str(owner.data)],
+        trash.move([str(owner.data / "database.json")], "x", db=owner.db, roots=[str(owner.work)],
                    protect=protect(), cwd=str(owner.work))
     with pytest.raises(trash.TrashError):
         move(owner, [str(owner.work)])
@@ -126,16 +126,17 @@ def test_emptying_and_deleting_for_good_are_the_owners_with_a_confirmation(owner
     assert any("Deleted for good" in t for t in titles) and any("emptied" in t for t in titles) and kinds == {"human"}
 
 
-def test_the_trash_is_paths_the_hooks_protect_from_the_agent(owner):
+def test_the_trash_cannot_be_deleted_by_the_agent(owner):
     from hokma.kit import hardblock
 
     ctx = hardblock.Ctx(str(owner.data), [str(owner.work)], protect(), cwd=str(owner.work))
-    for tool, tool_input in (("Read", {"file_path": str(owner.data / "trash" / "1" / "notas.md")}),
-                             ("Write", {"file_path": str(owner.data / "trash" / "1" / "notas.md"), "content": "x"}),
-                             ("Bash", {"command": f"rm -rf {owner.data}/trash"}),
-                             ("Bash", {"command": f"ls {owner.data}/trash"})):
+
+    def rule(tool, tool_input):
         block = hardblock.evaluate({"tool_name": tool, "tool_input": tool_input, "cwd": str(owner.work)}, ctx)
-        assert block is not None and block.rule in ("hokma_internal", "delete")
+        return block.rule if block else None
+
+    assert rule("Bash", {"command": f"rm -rf {owner.data}/trash"}) == "delete"
+    assert rule("Bash", {"command": f"ls {owner.data}/trash"}) is None             # task 3169: Hokma's folders are readable
 
 
 # ------------------------------------------------------------------------------------- the MCP server

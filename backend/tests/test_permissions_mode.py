@@ -63,7 +63,7 @@ def test_migrations_0003_and_0004_keep_the_data_and_the_migrated_owner_stays_in_
 
 def test_guard_events_accept_the_new_rules_only_and_stay_append_only(owner):
     with owner.db.write() as u:
-        for rule in ("delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money"):
+        for rule in ("delete", "hokma_internal", "outside_workdir", "secrets", "real_money"):
             u.guard_events.record_block(rule, "Bash", f"target for {rule}")
         first = u.guard_events.list()[-1]
     with pytest.raises(IntegrityViolation):
@@ -162,8 +162,8 @@ def test_p2_no_agent_route_reaches_the_mode(owner):
 def test_the_protections_list_is_read_only_there_is_no_switch(owner):
     res = owner.client.get("/api/protections", headers=HEADERS).json()
     assert res["always_on"] is True
-    assert [r["id"] for r in res["rules"]] == ["delete", "truncate", "hokma_internal", "force_push", "outside_workdir",
-                                               "secrets", "real_money"]
+    assert [r["id"] for r in res["rules"]] == ["delete", "hokma_internal", "outside_workdir", "secrets",
+                                               "real_money"]
     assert all(r["title"] for r in res["rules"])
     for method in ("put", "post", "delete", "patch"):
         assert getattr(owner.client, method)("/api/protections", headers=HEADERS).status_code == 405

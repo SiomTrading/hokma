@@ -166,7 +166,7 @@ def test_p13_the_windows_readers_are_stopped_in_powershell(box, command):
 def test_p13_a_script_in_the_working_folder_that_reads_the_store_is_stopped(box):
     (box.work / "peek.py").write_text("import keyring\nprint(keyring.get_password('hokma-market', 'alpaca'))\n")
     assert box.bash("python peek.py") == "secrets"
-    assert box.hit("Read", file_path=str(box.data / "connections.json")) == "hokma_internal"
+    assert box.hit("Read", file_path=str(box.data / "connections.json")) is None   # holds no secret (task 3169)
     assert box.hit("Read", file_path="/home/u/.local/share/keyrings/login.keyring") == "secrets"
     assert box.hit("Read", file_path="/home/u/Library/Keychains/login.keychain-db") == "secrets"
 

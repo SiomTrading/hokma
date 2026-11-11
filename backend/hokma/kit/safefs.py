@@ -68,22 +68,26 @@ def _walk_posix(root: Path, parts: tuple[str, ...], create: bool) -> tuple[list[
         raise
 
 
-def _read_posix(root: Path, rel: str) -> bytes | None:
+def _read_posix(root: Path, rel: str, max_bytes: int | None = None, single_link: bool = False) -> bytes | None:
     parts = _parts(rel)
     fds, dfd = _walk_posix(root, parts, create=False)
     try:
         if dfd is None:
             return None
         try:
-            fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd)
+            fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)   # a FIFO must not hang the open
         except FileNotFoundError:
             return None
         except OSError as exc:
             raise UnsafePath(t("fs.unsafe_file_link", path=rel)) from exc
         with os.fdopen(fd, "rb") as f:
-            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            info = os.fstat(f.fileno())
+            if not stat.S_ISREG(info.st_mode) or (single_link and info.st_nlink > 1):
+                raise UnsafePath(t("fs.not_regular", path=rel))      # checked on the descriptor that is read
+            data = f.read() if max_bytes is None else f.read(max_bytes + 1)
+            if max_bytes is not None and len(data) > max_bytes:
                 raise UnsafePath(t("fs.not_regular", path=rel))
-            return f.read()
+            return data
     finally:
         for fd in fds:
             os.close(fd)
@@ -149,13 +153,20 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
-def _read_generic(root: Path, rel: str) -> bytes | None:
+def _read_generic(root: Path, rel: str, max_bytes: int | None = None, single_link: bool = False) -> bytes | None:
     state = _chain_generic(root, _parts(rel))
     if state == "missing":
         return None
     if state == "unsafe":
         raise UnsafePath(t("fs.unsafe_path", path=rel))
-    return (root / rel).read_bytes()
+    path = root / rel
+    if single_link and path.stat().st_nlink > 1:
+        raise UnsafePath(t("fs.not_regular", path=rel))
+    with open(path, "rb") as f:
+        data = f.read() if max_bytes is None else f.read(max_bytes + 1)
+    if max_bytes is not None and len(data) > max_bytes:
+        raise UnsafePath(t("fs.not_regular", path=rel))
+    return data
 
 
 # OneDrive, antivirus and the search indexer open files the instant they appear, so on Windows a write that is
@@ -213,9 +224,12 @@ def _write_generic(root: Path, rel: str, data: bytes, mode: int) -> None:
 
 # ---- public API ---------------------------------------------------------------------------
 
-def read_regular(root: Path, rel: str) -> bytes | None:
-    """Bytes of a plain file under root, None if missing; UnsafePath on symlinks or odd files."""
-    return _read_posix(root, rel) if _POSIX else _read_generic(root, rel)
+def read_regular(root: Path, rel: str, *, max_bytes: int | None = None, single_link: bool = False) -> bytes | None:
+    """Bytes of a plain file under root, None if missing; UnsafePath on symlinks or odd files, and, when asked, on a
+    file bigger than `max_bytes` (never read whole) or with more than one hard link (checked on the open descriptor)."""
+    if _POSIX:
+        return _read_posix(root, rel, max_bytes, single_link)
+    return _read_generic(root, rel, max_bytes, single_link)
 
 
 def write_atomic(root: Path, rel: str, data: bytes, mode: int = 0o644) -> None:

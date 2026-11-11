@@ -53,12 +53,11 @@ class BrokerCtx:
 def _text_rule(text: str, ctx: Ctx) -> Block | None:
     """Free text (a URL, MCP arguments): secrets stores and real-money broker hosts."""
     low = norm_text(text)
-    if hardblock.SECRET_RE.search(low):
+    if hardblock.SECRET_RE.search(low) or hardblock.data_secret_in_text(low, ctx):
         return Block("secrets", short(text))
     if (ctx.host_re and ctx.host_re.search(low)) or (ctx.url_re and ctx.url_re.search(low)):
         return Block("real_money", short(text))
-    rule = hardblock.raw_data_rule(low, ctx)
-    return Block(rule, short(text)) if rule else None
+    return None
 
 
 def _flatten(value: Any, out: list[str], depth: int = 0) -> None:

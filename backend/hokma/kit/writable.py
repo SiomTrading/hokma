@@ -1,9 +1,9 @@
-"""The ONE list of places the agent can write.
+"""The ONE list of places the agent writes as a matter of course: the working folder and the requests inbox.
 
-`sandbox_allow_write()` is what goes into the sandbox `allowWrite`; `agent_writable_roots()` adds the temp
-folders the sandbox also lets commands use, with every path resolved by realpath. The extension validators
-(marketplace sources, MCP commands) compare against `agent_writable_roots()` with `hokma.kit.guard.under_any`,
-the single path comparator of Hokma, so they can never disagree with the sandbox.
+There is no Bash sandbox any more (task 3169); the list stays because the extension validators (marketplace sources,
+MCP commands) compare against `agent_writable_roots()` with `hokma.kit.guard.under_any`, the single path comparator of
+Hokma: a plugin source or an MCP program that the agent itself can rewrite is called out. `agent_writable_roots()` adds
+the temp folders, with every path resolved by realpath.
 """
 import os
 import tempfile

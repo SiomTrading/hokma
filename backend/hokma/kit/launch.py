@@ -12,6 +12,8 @@ the file never holds a token.
 @HOKMA.md) is NOT loaded. 'project' is deliberately not added (it would load the working folder's settings, which the
 agent can edit, and those could weaken the locks). Hokma hands its instructions explicitly instead:
 engines/claude_code.py passes them with --append-system-prompt-file (kit/instructions.py builds the text).
+The same flag hides the working folder's .claude/skills and .claude/agents, so kit/mirror.py copies the student's
+active skills and agents into <config>/skills and <config>/agents (the user source) on every launch.
 """
 import json
 import sys
@@ -19,7 +21,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from hokma.core.config import claude_config_dir, hokma_data_dir, hokma_home
-from hokma.kit import extensions, integrity
+from hokma.kit import extensions, integrity, mirror
 from hokma.kit.settings import protected_paths, write_settings
 
 
@@ -85,6 +87,10 @@ def prepare_claude_launch() -> LaunchSpec:
     check_integrity()
     path = write_settings()
     mcp = write_mcp_config()
+    try:
+        mirror.sync()          # skills and agents of the working folder into the user source (see kit/mirror.py)
+    except Exception:      # noqa: BLE001
+        pass               # a broken copy must not stop the engine; the instructions still reach it
     return LaunchSpec(
         args=["--settings", str(path), "--setting-sources", "user", "--mcp-config", mcp],
         # ENABLE_CLAUDEAI_MCP_SERVERS=false: the connectors of the student's claude.ai account (mail, drive, chat) stay out

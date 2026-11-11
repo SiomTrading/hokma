@@ -19,6 +19,8 @@ from hokma.kit import owner as owner_names
 
 MAX_FILE = 20_000
 MAX_PERSONA = 10_000
+MAX_IMPORTS = 60_000          # all the `@file` imports of the student's file together
+MAX_TOTAL = 150_000           # the whole text handed to the engine
 _IMPORT = re.compile(r"^@(\S+)\s*$")
 _COMMENT = re.compile(r"<!--.*?-->\s*", re.S)
 KEEP_DAYS = 14
@@ -45,7 +47,8 @@ def _read(path: Path, base: Path, limit: int = MAX_FILE) -> str | None:
     try:
         if path.is_symlink() or base.resolve() not in path.resolve().parents:
             return None
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_BINARY", 0))     # O_NONBLOCK: a FIFO named like the file must not hang the open
         with os.fdopen(fd, "rb") as handle:
             info = os.fstat(handle.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
@@ -71,6 +74,7 @@ def _inline_imports(text: str, base: Path) -> str:
     """The student's instruction file with its `@file` lines replaced by that file (one level, a plain .md inside the folder).
     `@HOKMA.md` is dropped: it is already part of the text."""
     out: list[str] = []
+    budget = MAX_IMPORTS
     for line in text.splitlines():
         m = _IMPORT.match(line.strip())
         if not m:
@@ -81,8 +85,11 @@ def _inline_imports(text: str, base: Path) -> str:
             continue
         parts = Path(name).parts
         plain = name.lower().endswith(".md") and not any(c.startswith(".") or c == ".." for c in parts)
-        body = _read(base / name, base) if plain else None       # plain .md only, never a hidden folder or file
-        out.append(body.strip() if body is not None else line)
+        body = _read(base / name, base, min(MAX_FILE, budget)) if plain and budget > 0 else None   # plain .md only
+        if body is not None:
+            body = body.strip()
+            budget -= len(body)
+        out.append(body if body is not None else line)
     return "\n".join(out).strip()
 
 
@@ -107,20 +114,30 @@ def build(project_path: str, agent: str | None) -> str:
                 body = body.split("---", 2)[-1]
             if body.strip():
                 parts.append(body.strip()[:MAX_PERSONA])
-    return "\n\n".join(parts) + "\n"
+    return "\n\n".join(parts)[:MAX_TOTAL] + "\n"
 
 
 def write_file(text: str, folder: Path) -> str:
     """Save `text` under a name made from its content (two conversations never overwrite each other) and return the
     path. The folder is inside Hokma's protected configuration folder; files nobody used for a while are removed."""
-    folder.mkdir(parents=True, exist_ok=True)
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(folder, 0o700)                      # the text holds the student's rules: nobody else on the machine reads it
+    except OSError:
+        pass
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
     path = folder / f"instructions-{digest}.md"
     if not path.is_file():
         tmp = path.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(text, encoding="utf-8")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
         tmp.replace(path)
     else:
+        try:
+            os.chmod(path, 0o600)                    # a file left by an earlier version
+        except OSError:
+            pass
         path.touch()
     cutoff = time.time() - KEEP_DAYS * 86400
     for old in folder.glob("instructions-*.md"):

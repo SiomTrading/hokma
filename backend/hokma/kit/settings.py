@@ -1,48 +1,31 @@
 """settings.json that Hokma generates for its own CLAUDE_CONFIG_DIR.
 
-Controls, from strongest to weakest. None of the first three depends on the text of a command:
+The agent has four locks (real-money orders, secrets, deleting, writing outside the working folder; see
+`hokma/kit/hardblock.py`) and the protection that keeps them on (`hokma/kit/guard.py`). Everything else is free, so
+there is no sandbox and no `permissions.deny` list here: a sandbox would stop the installers (npm, pip, winget, brew)
+and the plugins' own first-start downloads from writing where they must.
 
-1. Sandbox (Claude Code `sandbox` settings): Bash runs sandboxed with writes allowed only in the
-   working folder; the data folder, the config, the launcher and the student's extensions file are in
-   `filesystem.denyWrite`. Not available on native Windows: `hokma doctor` warns.
-2. PreToolUse hooks, both fail CLOSED:
-   `hokma/kit/guard.py` resolves real paths for Edit, MultiEdit, Write and NotebookEdit and blocks the
-   protected paths; `hokma/kit/hardblock.py` (matcher `.*`, every tool) applies the always-on protections of
+1. PreToolUse hooks, both fail CLOSED:
+   `hokma/kit/guard.py` resolves real paths for Edit, MultiEdit, Write and NotebookEdit and blocks the files of the
+   hooks and the settings registration; `hokma/kit/hardblock.py` (matcher `.*`, every tool) applies the four locks of
    both permission modes. The template pins `"disableAllHooks": false` and Hokma launches `claude` with
    `--setting-sources user`, so a settings file in the working folder cannot switch the hooks off.
-3. Regeneration: the file is rebuilt from the package template at EVERY Claude launch and passed
-   explicitly with --settings, so an edit by the agent does not survive the next launch.
-4. `permissions.deny` for Edit/Write/Bash on those paths. The Bash substring rule is best effort
-   only (it is easy to evade with $VARS, ~, globs or relative paths); it is an extra layer.
+2. Regeneration: the file is rebuilt from the package template at EVERY Claude launch and passed
+   explicitly with --settings, so an edit by the agent does not survive the next launch (and guard.py refuses an edit
+   that would take the hooks out of it while the session is running).
 
 The student's extensions (`enabledPlugins`, `extraKnownMarketplaces`, from
 <workdir>/.hokma/extensions.json) are merged in AFTER the template and can only add those two keys:
-they never touch permissions, sandbox or hooks. Plugins installed from inside Claude Code are absorbed from the
+they never touch the hooks. Plugins installed from inside Claude Code are absorbed from the
 live settings.json before it is rebuilt (`extensions.absorb_live`), so a launch or an update keeps them.
-
-Key names (sandbox.enabled, failIfUnavailable, allowUnsandboxedCommands, filesystem.allowWrite,
-filesystem.denyWrite, filesystem.denyRead) were found in the Claude Code 2.1.317 binary [VERIFIED].
-Their exact semantics and the permission-rule path syntax follow the public docs [ASSUMED] and must
-be confirmed on real machines.
 """
 import json
 import shlex
 import sys
 from pathlib import Path
 
-from hokma.core.config import (claude_config_dir, hokma_data_dir, hokma_home,
-                               launcher_path, workdir_hokma_dir)
+from hokma.core.config import claude_config_dir, hokma_data_dir, hokma_home
 from hokma.kit import extensions
-from hokma.kit.guard import under_any
-from hokma.kit import writable
-
-
-def _abs_rule_path(p: Path) -> str:
-    """Absolute path in Claude Code rule syntax: leading '//' and forward slashes."""
-    s = str(p).replace("\\", "/")
-    if len(s) > 1 and s[1] == ":":  # C:/Users/x -> /C:/Users/x so it becomes //C:/Users/x
-        s = "/" + s
-    return "/" + s if s.startswith("/") else "//" + s
 
 
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "settings.base.json"
@@ -50,14 +33,25 @@ GUARD_FILE = Path(__file__).resolve().parent / "guard.py"
 HARDBLOCK_FILE = Path(__file__).resolve().parent / "hardblock.py"
 
 
+def settings_path() -> Path:
+    return claude_config_dir() / "settings.json"
+
+
 def protected_paths() -> list[Path]:
-    """Runtime and config roots (the data dir contains both), the PATH launcher and the student's
-    `.hokma` folder (mirror of the extensions; changed only by Hokma, never by the agent)."""
-    return [hokma_data_dir(), claude_config_dir(), launcher_path(), workdir_hokma_dir()]
+    """What keeps the locks on: the code of the hooks (the `hokma` package they run from) and the interpreter that runs
+    them (`<data>/runtime`, `<data>/python`), the folders that lead the engine's PATH (`<data>/bin`, `<data>/tools`: only
+    `hokma install-tools` writes them; a plugin installs its dependencies in its own folders, `~/.bun`, or the user's
+    npm and pip prefixes, which go at the end of the PATH), the settings files that register them (`settings.json` and the copy
+    `settings.engine.json` made for key helpers) and the folder of the block log. Nothing else is protected: Hokma's
+    data folder and its config are the agent's to change."""
+    package = Path(__file__).resolve().parent.parent
+    config, data = claude_config_dir(), hokma_data_dir()
+    return [package, data / "runtime", data / "python", data / "bin", data / "tools",
+            settings_path(), config / "settings.engine.json", data / "guard"]
 
 
 def guard_command() -> str:
-    """Hook command: `cd` into the protected data dir, then run the guard by ABSOLUTE PATH with an
+    """Hook command: `cd` into the data dir, then run the guard by ABSOLUTE PATH with an
     isolated interpreter (-I: no cwd, no script dir, no PYTHON* variables on sys.path), so nothing
     planted in the working folder can replace it. `|| exit 2` makes a failed cd, a crash or a missing
     interpreter block the tool call (any other non-zero hook exit code would not block). Hooks run
@@ -76,34 +70,8 @@ def hardblock_command() -> str:
             f"{shlex.quote(sys.executable)} -I {shlex.quote(str(HARDBLOCK_FILE))} {' '.join(args)} || exit 2")
 
 
-def sandbox_available() -> bool:
-    return sys.platform != "win32"
-
-
 def build_settings() -> dict:
     settings = json.loads(TEMPLATE.read_text(encoding="utf-8"))
-    deny = settings["permissions"]["deny"]
-    for p in protected_paths():
-        rule = _abs_rule_path(p)
-        for tool in ("Edit", "Write"):
-            deny.append(f"{tool}({rule})")
-            deny.append(f"{tool}({rule}/**)")
-        if not under_any(str(p), [str(hokma_data_dir())]):
-            deny.append(f"Bash(*{str(p)}*)")  # best effort only, see module docstring
-    # The data folder and the Claude config inside it may be read (hardblock.py judges); what is secret there keeps
-    # its own best-effort rule here, as a second line.
-    data = str(hokma_data_dir())
-    for hidden in ("extensions.json", "extension-decisions.jsonl", "codex-home", "acp-home", "identity.key", "hokma.db", "database.json", "backups", "trash",
-                   "claude-config/.credentials", "claude-config/.claude.json", "claude-config/backups"):
-        deny.append(f"Bash(*{data}/{hidden}*)")
-
-    sandbox = settings["sandbox"]
-    sandbox["filesystem"]["allowWrite"] = [str(p) for p in writable.sandbox_allow_write()]
-    sandbox["filesystem"]["denyWrite"] = [str(p) for p in protected_paths()]
-    if sandbox_available():
-        sandbox["failIfUnavailable"] = True  # never run unsandboxed silently
-    else:
-        sandbox["enabled"] = False  # native Windows has no sandbox; doctor warns
 
     commands = {"{{GUARD_COMMAND}}": guard_command(), "{{HARDBLOCK_COMMAND}}": hardblock_command()}
     for group in settings["hooks"]["PreToolUse"]:
@@ -122,10 +90,6 @@ def build_settings() -> dict:
         if value:
             settings[key] = value
     return settings
-
-
-def settings_path() -> Path:
-    return claude_config_dir() / "settings.json"
 
 
 def write_settings() -> Path:

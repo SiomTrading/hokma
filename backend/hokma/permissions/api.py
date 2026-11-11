@@ -41,10 +41,10 @@ from hokma.permissions import checkpoints, guard_log, modes, trash
 from hokma.rpc.ws import SESSION_TOKEN
 
 HUMAN = Actor.human("owner")
-RULES = ("delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money")
+RULES = ("delete", "hokma_internal", "outside_workdir", "secrets", "real_money")
 TITLES = {
-    "delete": lambda: t("protection.delete"), "truncate": lambda: t("protection.truncate"),
-    "hokma_internal": lambda: t("protection.hokma_internal"), "force_push": lambda: t("protection.force_push"),
+    "delete": lambda: t("protection.delete"),
+    "hokma_internal": lambda: t("protection.hokma_internal"),
     "outside_workdir": lambda: t("protection.outside_workdir"), "secrets": lambda: t("protection.secrets"),
     "real_money": lambda: t("protection.real_money"),
 }

@@ -69,7 +69,7 @@ def test_locks_are_never_taken_from_the_live_file(env):
     })
     settings = json.loads(write_settings().read_text())
     assert settings["permissions"] == clean["permissions"]
-    assert settings["sandbox"] == clean["sandbox"]
+    assert "sandbox" not in settings
     assert settings["disableAllHooks"] is False
     commands = [h["command"] for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
     assert guard_command() in commands and hardblock_command() in commands

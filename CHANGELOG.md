@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.0.22
+
+The agent is no longer fenced in. Cristian's decision: four locks stay, in every mode; everything else is allowed. A
+real case: claude-mem could not be installed from the chat (the guard blocked changing plugins and there was no
+Node), and on Windows it was installed but its worker never answered on port 37777 because the computer had neither
+Bun nor Node.
+
+- The four locks: (1) orders with real money to a broker, (2) reading or taking keys, tokens and credentials, by any
+  route, (3) deleting files (the trash tool is the way), (4) writing outside the working folder, with two open places:
+  Hokma's data folder with its claude-config (plugins, settings, tools) and what the software installers (npm, pip,
+  winget, brew) write on their own. Plus the minimum protection that keeps the locks on: the files of the hooks and their
+  registration in the settings. `settings.json` can still be edited while both hooks stay registered.
+- Now allowed: installing dependencies (pip, npm, uv, bun) wherever they are needed, installing and removing plugins,
+  skills and MCP servers from the chat (also with files outside the working folder), changing Hokma's base
+  configuration and the permission settings, installing software (Node, npm, npx, pip, winget, brew), and Git without
+  limits inside the working folder (force push, `reset --hard`, `clean`, `config`, `-c`, `GIT_*` variables). Emptying a
+  file, moving or linking `.git`, `.claude` and `.hokma`, the `hokma` launcher and Hokma's owner endpoints are no
+  longer special.
+- Removed: the `truncate` and `force_push` rules (the app lists five protections now), the reading ban on most of
+  Hokma's data folder (only its secrets stay hidden: database, `identity.key`, sign-ins, backups, `.claude.json`), the Bash
+  sandbox, the `permissions.deny` list, the protection of the whole data folder and of `.hokma`, the check of odd
+  characters in a path, the git argument white list, and about 600 lines of the command analyzer.
+- Software installers work: `curl url | sh`, `bash -c "$(curl url)"`, `iex (irm url)` and `irm url | iex` are no longer
+  refused as "a shell fed with built text" (the idiom Homebrew, Bun and Node managers use).
+- Node (LTS 24) and Bun (1.4) come with Hokma, portable, in `<data>/tools/node` and `<data>/tools/bun`. Versions and
+  sha256 are in `installer/lock.json`; the archive is hashed before anything is unpacked, and a wrong hash installs
+  nothing. One implementation (`hokma install-tools`) serves the Windows installer, `install.sh` and `hokma update`
+  (an update brings them to a computer that has 0.0.21). `uvx` is installed next to `uv`: claude-mem needs it for its
+  vector search, and the installers had copied only `uv`. `hokma doctor` reports what is missing.
+- The engine, scheduled runs and the terminal start with a PATH that holds Hokma's tools first (uv, Node, Bun, the Python
+  uv installed), then `~/.bun/bin` and `~/.local/bin`, so the hooks of plugins find `node`, `npm`, `npx`, `bun`, `uv` and
+  `uvx`, and what a plugin downloads on its first start is on the PATH too. The environment filter keeps `BUN_INSTALL`,
+  the npm prefix and cache, `CARGO_HOME`, `GOPATH` and similar variables.
+- Checked with the real command of Hokma (temporary data folder and config, haiku, a PATH without Node, Bun or uv): the
+  plugin is installed from the chat (`claude plugin marketplace add thedotmack/claude-mem`, `claude plugin install`)
+  through the hooks without a block, a short conversation starts the worker, and `/api/health` answers `ok` with the Bun
+  of `<data>/tools/bun` (port 37790 on the test machine, where the owner's own worker uses 37777) and no degraded
+  dependency.
+- HOKMA.md, CLAUDE.md and the learn guides: the agent helps with everything (install, configure, repair Hokma) and stops
+  only at the four locks; to delete it uses the trash.
+
 ## 0.0.21
 
 Hokma answers as Hokma. In 0.0.20 the engine answered "I am Claude, Sonnet 5.5, in Claude Code" and listed the
@@ -21,6 +62,18 @@ owner's claude.ai connectors (Gmail, Drive, Slack), as if the fund's instruction
   model it runs on, it says so (Claude, ChatGPT, Gemini) without presenting itself as Claude Code or Codex.
 - Hokma starts Claude Code with `ENABLE_CLAUDEAI_MCP_SERVERS=false`: the connectors of your claude.ai account no
   longer mix into Hokma. MCP servers you approved in Hokma or added yourself with `claude mcp add` keep working.
+- Skills and agents of the working folder work again. The same `--setting-sources user` flag hid `.claude/skills` and
+  `.claude/agents`: a skill with a SKILL.md was not seen, `--agent <name>` answered "not found" and an agent could not
+  dispatch to another one (proven with the real command: "Agent type 'helper' not found"). On every launch Hokma now
+  copies your active skills and agents into the user source inside its protected config folder (`skills/`,
+  `agents/`), and removes what you deleted or turned off. Only the safe frontmatter keys cross (name, description,
+  tools, model, color; for skills also when_to_use and the invocation switches): a file the agent wrote cannot bring
+  hooks, a permission mode or MCP servers with it. Links and hard links are never read. A skill or agent you put in
+  the user source by hand is not touched. `project` is still not in `--setting-sources`.
+- The text handed to the engine has a cap: the `@file` imports together (60,000 characters) and the whole text
+  (150,000), so a CLAUDE.md with many large imports cannot produce a multi-megabyte prompt. A named pipe called
+  CLAUDE.md or HOKMA.md no longer hangs the start (files open without blocking). The instructions file is now private
+  (0600, folder 0700).
 
 ## 0.0.20
 

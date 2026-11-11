@@ -21,21 +21,19 @@ def env(tmp_path, monkeypatch):
 
 # ---- one list of agent-writable places, one comparator ------------------------------------------
 
-def test_extension_validators_use_the_sandbox_allow_write_list(env):
-    allow = build_settings()["sandbox"]["filesystem"]["allowWrite"]
-    assert allow == [str(p) for p in writable.sandbox_allow_write()]
+def test_extension_validators_use_the_allow_write_list(env):
+    allow = [str(p) for p in writable.sandbox_allow_write()]
     roots = {str(p) for p in writable.agent_writable_roots()}
     assert set(allow) <= roots and set(map(str, writable.temp_dirs())) <= roots
-    for place in allow:                                           # everything the sandbox can write is refused
+    for place in allow:                                           # everything the agent writes as a matter of course is refused
         with pytest.raises(ValueError):
             extensions.validate_source({"source": "directory", "path": os.path.join(place, "plugins")})
 
 
-def test_extension_list_follows_the_sandbox_list_when_it_grows(env, monkeypatch):
+def test_extension_list_follows_the_allow_write_list_when_it_grows(env, monkeypatch):
     extra = env / "extra-writable"
     extra.mkdir()
     monkeypatch.setattr(writable, "sandbox_allow_write", lambda: [env / "work", extra])
-    assert str(extra) in build_settings()["sandbox"]["filesystem"]["allowWrite"]
     with pytest.raises(ValueError):
         extensions.validate_source({"source": "directory", "path": str(extra / "market")})
 

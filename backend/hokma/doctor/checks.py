@@ -1,6 +1,7 @@
 """Installation checks behind `hokma doctor`. The text it prints comes from the message catalogs."""
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,19 @@ def check_uv() -> Check:
     if path:
         return Check("uv", OK, path)
     return Check("uv", FAIL, t("doctor.uv.missing"))
+
+
+def check_tools() -> Check:
+    """Node and Bun, which plugins and their hooks need, installed by Hokma at the versions of lock.json."""
+    from hokma.core import tools
+
+    name = t("doctor.tools.name")
+    missing = [tool for tool in tools.TOOLS if tools.installed_version(tool) is None]
+    if tools.uvx_path().with_name("uv.exe" if os.name == "nt" else "uv").is_file() and not tools.uvx_path().is_file():
+        missing.append("uvx")
+    if missing:
+        return Check(name, WARN, t("doctor.tools.missing", tools=" / ".join(missing)))
+    return Check(name, OK, ", ".join(f"{tool} {tools.installed_version(tool)}" for tool in tools.TOOLS))
 
 
 def check_python() -> Check:
@@ -174,52 +188,32 @@ def check_integrity() -> Check:
     return Check(name, OK, t("doctor.integrity.ok"))
 
 
-def check_sandbox() -> Check:
-    name = t("doctor.sandbox.name")
-    if sys.platform == "win32":
-        return Check(name, WARN, t("doctor.sandbox.windows"))
-    if sys.platform.startswith("linux"):
-        missing = [tool for tool in ("bwrap", "socat") if not shutil.which(tool)]
-        if missing:
-            return Check(name, WARN, t("doctor.sandbox.missing", tools=" / ".join(missing)))
-    return Check(name, OK, t("doctor.sandbox.ok"))
-
-
 def check_settings_lock() -> Check:
-    """Every protected path must have its rules, its sandbox denyWrite and its hook argument."""
-    from hokma.kit.settings import _abs_rule_path, build_settings, protected_paths, settings_path
+    """The settings file registers both hooks, none switched off, and each hook carries every protected path."""
+    from hokma.kit.guard import registration_intact
+    from hokma.kit.settings import build_settings, protected_paths, settings_path
 
     name = t("doctor.locks.name")
     path = settings_path()
     if not path.is_file():
         return Check(name, WARN, t("doctor.locks.absent"))
     try:
-        actual = json.loads(path.read_text(encoding="utf-8"))
-        deny = actual["permissions"]["deny"]
-        deny_write = actual["sandbox"]["filesystem"]["denyWrite"]
-        hook = actual["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    except (KeyError, IndexError, ValueError, OSError):
+        text = path.read_text(encoding="utf-8")
+        actual = json.loads(text)
+        commands = [h.get("command", "") for g in actual["hooks"]["PreToolUse"] for h in g.get("hooks", [])]
+    except (KeyError, IndexError, ValueError, OSError, AttributeError):
         return Check(name, WARN, t("doctor.locks.incomplete"))
     missing = []
-    if actual.get("disableAllHooks") is not False:
-        missing.append("disableAllHooks")
-    commands = " ".join(h.get("command", "") for g in actual["hooks"]["PreToolUse"] for h in g.get("hooks", []))
-    if "hardblock.py" not in commands:
-        missing.append("hook hardblock")
+    if not registration_intact(text, [str(p) for p in protected_paths()]):
+        missing.append("hooks")
     for p in protected_paths():
-        rule = _abs_rule_path(p)
-        for needed in (f"Edit({rule})", f"Edit({rule}/**)", f"Write({rule})", f"Write({rule}/**)"):
-            if needed not in deny:
-                missing.append(needed)
-        if str(p) not in deny_write:
-            missing.append(f"sandbox.denyWrite {p}")
-        if "--protect" not in hook or str(p) not in hook:
+        if not all(f"--protect {shlex.quote(str(p))}" in c for c in commands):
             missing.append(f"hook {p}")
     if missing:
         return Check(name, WARN, t("doctor.locks.missing", rules="; ".join(missing[:4])))
     if actual != build_settings():
         return Check(name, WARN, t("doctor.locks.differs"))
-    return Check(name, OK, t("doctor.locks.ok", rules=len(deny), paths=len(protected_paths())))
+    return Check(name, OK, t("doctor.locks.ok", paths=len(protected_paths())))
 
 
 def check_extensions() -> Check:
@@ -236,7 +230,7 @@ def check_extensions() -> Check:
 
 
 def run_checks() -> list[Check]:
-    return [check_uv(), check_python(), check_git(), *check_engines(),
+    return [check_uv(), check_tools(), check_python(), check_git(), *check_engines(),
             check_workdir(), check_dashboard(), check_runtime_outside_workdir(),
-            check_config_isolation(), check_integrity(), check_sandbox(), check_settings_lock(),
+            check_config_isolation(), check_integrity(), check_settings_lock(),
             check_extensions()]

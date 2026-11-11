@@ -190,10 +190,6 @@ def test_only_the_claiming_agent_changes_a_running_task(db):
     assert not run("task_comment", {"task_id": tid, "body": "a note"}, agent="vera")[1]
 
 
-def test_the_caller_variables_cannot_be_redefined_by_a_command():
-    from hokma.kit import hardblock
-    assert hardblock.ENV_REDEFINE.search("export HOKMA_AGENT=vera")
-    assert hardblock.ENV_REDEFINE.search("$env:HOKMA_TASK_ID = 5") or hardblock.ENV_REDEFINE.search("HOKMA_TASK_ID=5")
 
 
 def test_ips_read_ignores_symlinks_and_files_that_resolve_outside(profiled):

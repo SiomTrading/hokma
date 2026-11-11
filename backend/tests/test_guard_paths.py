@@ -21,16 +21,16 @@ def decide(tool, target, protect, cwd):
 
 @pytest.mark.parametrize("target", ["$HOME/x", "${HOME}/x", "%LOCALAPPDATA%\\Hokma\\x", "~/x", "~", "a/$X/b",
                                     "notes~1.md"])
-def test_blocks_dollar_percent_tilde_even_inside_workdir(dirs, target):
+def test_dollar_percent_tilde_are_ordinary_names_inside_workdir(dirs, target):
     data, work = dirs
-    assert decide("Write", target, [data], work) == 2
-    assert decide("Edit", str(work / target), [data], work) == 2
+    assert decide("Write", target, [data], work) == 0
+    assert decide("Edit", str(work / target), [data], work) == 0
 
 
 def test_no_expansion_so_a_literal_tilde_dir_is_not_confused_with_home(dirs):
     data, work = dirs
-    # the tool does not expand `~`; the guard must not either: it blocks instead of guessing
-    assert decide("Write", "~/data/x", [data], work) == 2
+    # the tool does not expand `~`; the guard does not either: the name is a folder of the working folder
+    assert decide("Write", "~/data/x", [data], work) == 0
 
 
 def test_leftover_dotdot_after_normalising_is_blocked(dirs):

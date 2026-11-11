@@ -15,8 +15,27 @@ LINE_LIMIT = 64 * 1024 * 1024          # one stream-json line can carry a whole 
 STDERR_LINES = 40
 
 
+def _trusted_path(path: str | None) -> str:
+    """PATH without entries the agent can write: relative or empty ones (the working folder) and anything inside
+    Hokma's data folder that is not protected (`<data>/bin`, `<data>/tools`, `<data>/python` are)."""
+    from hokma.core.config import hokma_data_dir
+    from hokma.kit.guard import under_any
+    from hokma.kit.settings import protected_paths
+
+    data, protect = str(hokma_data_dir()), [str(p) for p in protected_paths()]
+    keep = []
+    for entry in (path or "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        if under_any(entry, [data]) and not under_any(entry, protect):
+            continue
+        keep.append(entry)
+    return os.pathsep.join(keep)
+
+
 def find_claude(env: dict[str, str] | None = None) -> str | None:
-    return shutil.which("claude", path=(env or os.environ).get("PATH"))
+    """`claude` from a PATH with no folder the agent can write (the protected tool folders stay)."""
+    return shutil.which("claude", path=_trusted_path((env or os.environ).get("PATH")))
 
 
 class ClaudeProcess:

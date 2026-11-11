@@ -1,12 +1,13 @@
 """Student extensions: plugins and marketplaces that Hokma merges into the Claude settings.
 
-AUTHORITATIVE copy: <data>/extensions.json, in the protected data dir (the agent cannot write there).
+AUTHORITATIVE copy: <data>/extensions.json, in the data dir.
 INFORMATIONAL mirror: <workdir>/.hokma/extensions.json, versioned in the student's Git. It is rewritten
 from the authoritative copy on every change and is never read to build settings. The whole
-<workdir>/.hokma folder is protected from the agent (guard hook and sandbox denyWrite).
+<workdir>/.hokma folder is no longer protected (task 3169): the agent may install plugins itself, and Hokma absorbs
+what it installs.
 
-Only `enabledPlugins`, `extraKnownMarketplaces` and `mcpServers` are accepted. Every other key is ignored: the security
-locks (permissions, sandbox, hooks) always win and cannot be switched off from here. Every marketplace
+Only `enabledPlugins`, `extraKnownMarketplaces` and `mcpServers` are accepted. Every other key is ignored: the hooks
+always win and cannot be switched off from here. Every marketplace
 source is rebuilt from an allow-list of fields and validated (see `validate_source`).
 """
 import json

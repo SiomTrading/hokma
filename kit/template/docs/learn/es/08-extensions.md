@@ -13,11 +13,13 @@ listan con el programa que ejecutan.
 Pulsa su interruptor. Hokma muestra qué se va a activar y sus riesgos, y te pide confirmar. Tu confirmación queda
 guardada como una aprobación y cambia tu archivo de extensiones.
 
-## Solicitudes de los agentes
+## Los agentes instalan por ti
 
-Un agente puede pedir un plugin o un servidor MCP con `hokma ext request`. La solicitud aparece arriba en la sección
-Extensiones con Aprobar y Rechazar. Nada cambia hasta que apruebes. Un servidor MCP se ejecuta fuera del aislamiento
-con tus propios permisos: lee su comando y sus argumentos antes de aprobar.
+Un agente puede instalar y quitar plugins, skills y servidores MCP desde el chat (`claude plugin install`,
+`claude mcp add`, o un archivo de skill en tu carpeta de trabajo). Hokma ya tiene Node, Bun, npm, npx y uv en el PATH
+del agente y de los hooks de los plugins, así que un plugin que necesita alguno arranca. Un servidor MCP se ejecuta
+con tus propios permisos: pregúntale al agente qué instaló. `hokma ext request` sigue existiendo: la solicitud espera
+arriba en la sección Extensiones con Aprobar y Rechazar.
 
 ## Marketplace de Anthropic
 

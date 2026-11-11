@@ -51,22 +51,22 @@ working folder, so anything inside it could be edited by the agent (its own sett
 Defense in depth:
 
 - the installer refuses a data folder inside the working folder (and the reverse);
-- Claude Code sandbox for Bash, with writes allowed only in the working folder and the data folder,
-  config and launcher in `denyWrite` (not available on native Windows: `hokma doctor` warns; use WSL2);
-- a deterministic PreToolUse hook (`hokma.kit.guard`, fails closed) that resolves real paths for
-  Edit/Write/NotebookEdit and blocks the protected paths;
+- two deterministic PreToolUse hooks that fail closed (`hokma.kit.hardblock` and `hokma.kit.guard`): four locks (real-money
+  orders, keys and credentials, deleting files, writing outside the working folder and Hokma's own folders) and the
+  protection of the hook files and their registration. Everything else is allowed: dependencies, software, plugins,
+  skills, MCP servers, Hokma's configuration, Git (see `docs/permissions.md`);
 - the Claude `settings.json` is regenerated from the package template on EVERY launch and passed with
   `--settings` and `--setting-sources user`, so an edit by the agent does not survive;
 - the installer writes a sha256 manifest of `app/`; `hokma` refuses to start and `hokma doctor` fails if
   a file differs (reinstall to fix);
-- `permissions.deny` rules for Edit/Write/Bash on those paths. The Bash substring rule is best effort only;
-- `hokma doctor` FAILS if the runtime or the config end up inside the working folder and checks that every
-  protected path has its rules, its `denyWrite` entry and its hook argument.
+- `hokma doctor` FAILS if the runtime or the config end up inside the working folder and checks that the
+  settings register both hooks.
 
 Updates and extensions: `hokma update --from MANIFEST`, `hokma ext ...`.
 
 The installer verifies the uv download against `installer/lock.json` (sha256) before running anything,
-installs the pinned Python with uv, copies the app, creates the working folder as a Git repo with the
+installs the pinned Python with uv, then Node (LTS) and Bun, portable, in `<data>/tools` (`hokma install-tools`, sha256
+checked; they are on the PATH of the agent and of the plugins' hooks), copies the app, creates the working folder as a Git repo with the
 kit, puts `hokma` in the user PATH and runs `hokma doctor`. It never touches `~/.claude`.
 `git` and the `claude` CLI are detected, never installed behind your back.
 

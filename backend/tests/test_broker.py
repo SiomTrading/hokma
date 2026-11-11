@@ -26,7 +26,7 @@ def test_powershell_delete_is_blocked_in_ps_mode(box, bctx):
 
 
 @pytest.mark.parametrize("command,rule", [
-    ("git push --force origin main", "force_push"),
+    ("rm -rf d", "delete"),
     ("cat ~/.ssh/id_rsa", "secrets"),
 ])
 def test_hard_rules_on_commands(box, bctx, command, rule):
@@ -57,7 +57,7 @@ def test_real_money_host_in_fetch_and_mcp_arguments(box, bctx):
 def test_engine_credentials_are_secrets(box, bctx):
     for text in ("cat ~/.codex/auth.json", "cat ~/.gemini/oauth_creds.json", "cat ~/.claude/.credentials.json"):
         assert check("Bash", {"command": text}, cwd=str(box.work), ctx=bctx).rule in ("secrets", "hokma_internal"), text
-    assert check("Bash", {"command": "export CODEX_HOME=/tmp/x"}, cwd=str(box.work), ctx=bctx).rule == "hokma_internal"
+    assert check("Bash", {"command": "export CODEX_HOME=/tmp/x"}, cwd=str(box.work), ctx=bctx).allowed
 
 
 def test_fails_closed_on_garbage(box, bctx):

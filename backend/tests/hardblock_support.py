@@ -13,6 +13,15 @@ from hokma.kit import hardblock
 HARDBLOCK_FILE = Path(hardblock.__file__).resolve()
 
 
+def registered(hooks: Path) -> dict:
+    """The settings the way Hokma writes them: both hooks, each `python -I <script> ... || exit 2`."""
+    return {"disableAllHooks": False, "hooks": {"PreToolUse": [
+        {"matcher": "Edit|MultiEdit|Write|NotebookEdit", "hooks": [
+            {"type": "command", "command": f"cd /d && python -I {hooks}/guard.py --protect /p || exit 2"}]},
+        {"matcher": ".*", "hooks": [
+            {"type": "command", "command": f"cd /d && python -I {hooks}/hardblock.py --data /d || exit 2"}]}]}}
+
+
 class Box:
     """A throwaway data folder and working folder with a few real files."""
 
@@ -21,6 +30,8 @@ class Box:
         self.data, self.work = tmp / "data", tmp / "work"
         (self.data / "claude-config").mkdir(parents=True)
         (self.data / "guard").mkdir()
+        (self.data / "bin").mkdir()
+        (self.data / "tools").mkdir()
         self.work.mkdir()
         (self.work / "informes").mkdir()
         (self.work / "informes" / "viejo.md").write_text("old report\n")
@@ -30,8 +41,13 @@ class Box:
         (self.work / "f").write_text("content of f\n")
         (self.data / "database.json").write_text('{"url": "postgresql://u:p@h/db"}\n')
         (self.data / "claude-config" / ".credentials.json").write_text("{}\n")
-        (self.data / "claude-config" / "settings.json").write_text("{}\n")
-        self.protect = [str(self.data), str(self.work / ".hokma"), str(tmp / "bin" / "hokma")]
+        self.hooks = tmp / "hooks"                       # the code of the hooks, as the installed package is
+        self.hooks.mkdir()
+        (self.hooks / "hardblock.py").write_text("# hook\n")
+        self.settings = self.data / "claude-config" / "settings.json"
+        self.settings.write_text(json.dumps(registered(self.hooks)))
+        self.protect = [str(self.hooks), str(self.settings), str(self.data / "claude-config" / "settings.engine.json"),
+                        str(self.data / "guard"), str(self.data / "bin"), str(self.data / "tools")]
 
     def ctx(self, cwd: Path | None = None) -> hardblock.Ctx:
         return hardblock.Ctx(str(self.data), [str(self.work)], self.protect, home=str(self.tmp / "home"),

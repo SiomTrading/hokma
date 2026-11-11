@@ -1,14 +1,19 @@
-"""PreToolUse hook: the protections that are always on, in both permission modes.
+"""PreToolUse hook: the locks that are always on, in both permission modes.
 
-Seven rules, nothing else is refused (everything not listed here is the owner's to do):
+Four locks and the protection that keeps the first two on. Everything else is the owner's to ask for and the agent's
+to do (install software and dependencies, install and remove plugins, skills and MCP servers, change Hokma's own
+configuration, Git, permission settings):
 
-    delete           deleting files or folders, including the obfuscated forms
-    truncate         emptying a file that has content
-    hokma_internal   Hokma's own runtime, configuration, trash and `.hokma/`; settings files of the working folder
-    force_push       rewriting or deleting remote Git history
-    outside_workdir  writing outside the working folder; formatting or touching disks
-    secrets          the keys stored for Connections, credentials, SSH, cloud and Git credentials
     real_money       order tools of brokers and the hosts that place real orders
+    secrets          keys, tokens and credentials: the keys stored for Connections, Hokma's database and sign-ins,
+                     SSH, cloud and Git credentials, browser profiles, the system key stores, other processes' memory
+    delete           deleting files or folders, including the obfuscated forms (the trash tool is the way)
+    outside_workdir  writing outside the working folder, formatting or touching disks. Two places are open: Hokma's
+                     data folder with its claude-config (plugins, settings, tools), and whatever a software
+                     installer writes (npm, pip, winget, brew run their own writes; this hook only sees the writes
+                     a command names)
+    hokma_internal   the files of these hooks and their registration in the settings: without them the other four
+                     could be switched off
 
 It runs for every tool (matcher `.*`) next to `guard.py`, the same way: by absolute path, with an isolated
 interpreter (`python -I /abs/hardblock.py --data D --workdir W --protect P ...`) from the data folder, and
@@ -22,23 +27,13 @@ Commands are not matched as raw text. They are read the way a shell reads them: 
 binary paths and wrappers (`sudo`, `env`, `xargs`, `find -exec`, `bash -c`, `cmd /c`, `powershell -c`, `python -c`,
 `node -e`) are resolved first; `;`, `&&`, `||`, `|`, `&` and new lines split the command; `$(...)`, backticks and
 here-documents are read as commands; a command whose NAME is built at run time (`$x f`, `$(echo rm) f`), `eval`,
-`iex`, encoded commands and a decoder piped into a shell are refused outright. A script of the working folder
-that a command runs is read and its text is checked with the same rules.
+`iex`, encoded commands and a decoder piped into a shell are refused outright, except the installer idiom that feeds
+the shell with a download (`curl url | sh`, `bash -c "$(curl url)"`, `iex (irm url)`), which software installers
+use. A script of the working folder that a command runs is read and its text is checked with the same rules.
 
-Git arguments (task 3045, closed): the global options before the subcommand are a white list (`-C <path>` only when
-the path stays inside the working folder, `--no-pager`, `--no-optional-locks`, `-c key=value` only with the safe keys,
-`--version`); any other one is refused. `--template`, `--upload-pack`, `--receive-pack`, `--exec`, every abbreviation of
-them and `clone -u` are refused in clone, init, fetch, pull, push, ls-remote and archive. A command line (or a script
-of the working folder) that sets `GIT_CONFIG*`, `GIT_DIR`, `GIT_EXEC_PATH` or `GIT_TEMPLATE_DIR` is refused; reading
-them is free.
-
-Scope of this hook: it is defense in depth, not a sandbox. In no-prompt mode the agent can run arbitrary code, so the
-integrity of the harness rests on the structural protections, not on parsing every command: (1) the restore points are
-Git refs in the project (`refs/hokma/checkpoints/*`) and only those whose commit SHA matches the one recorded in
-Hokma's own database are trusted, so a forged, moved or packed ref is ignored, and this hook refuses writes to
-`.git/refs/hokma` and `packed-refs`; (2) the owner-only endpoints need the session token plus the owner confirmation
-registered once with a one-time secret; (3) the sha256 integrity manifest of the installed app, which `hokma doctor`
-verifies. A further parser finding is classified B unless it breaks one of those three protections.
+Scope of this hook: it is defense in depth, not a sandbox. The agent can run arbitrary code, so the integrity of the
+hooks rests on the structural protections too: the sha256 integrity manifest of the installed app, which Hokma
+verifies at every launch and `hokma doctor` reports, and the settings file that is rebuilt at every launch.
 
 Standard library plus `hokma.i18n` and `hokma.kit.guard` only.
 """
@@ -48,18 +43,16 @@ import ntpath
 import os
 import re
 import sys
-import time
 from datetime import datetime, timezone
-from urllib.parse import unquote
 
 from hokma.i18n import t
+from hokma.kit import guard
 from hokma.kit.guard import _fold, under_any
 
 BLOCK = 2
-RULES = ("delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money")
+RULES = ("delete", "hokma_internal", "outside_workdir", "secrets", "real_money")
 MAX_DEPTH = 6
 MAX_SCRIPT_BYTES = 512 * 1024
-MAX_EDIT_BYTES = 8 * 1024 * 1024
 MAX_TARGET = 200
 BROKERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hardblock_brokers.json")
 
@@ -79,8 +72,10 @@ class Ctx:
                  brokers: dict | None = None, cwd: str | None = None, conversation_id: str = "",
                  task_id: str = "") -> None:
         self.data = data
-        self.roots = [r for r in roots if r]
-        self.protect = [p for p in protect if p] or [data]
+        self.roots = [r for r in roots if r]                    # the working folder: where a command may write
+        self.write_roots = self.roots + [data]                  # plus Hokma's own data folder (config, plugins, tools)
+        self.protect = [p for p in protect if p]                # the hook files and their registration
+        self._protect_text = [norm_text(p) for p in self.protect if len(p) > 3]
         self.home = home or os.path.expanduser("~")
         self.brokers = brokers if brokers is not None else load_brokers()
         self.cwd = cwd or (self.roots[0] if self.roots else os.getcwd())
@@ -130,52 +125,6 @@ DEVICES = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin", "/dev/tty", 
 
 def norm_text(s: str) -> str:
     return s.replace("\\", "/").lower()
-
-
-_SLASHES = re.compile(r"/{2,}")
-SHUTDOWN_ROUTE_RE = re.compile(r"/api/system/(?:shutdown|browser)")
-# The backstop: the three words in order, whatever sits between them (spaces, control characters, a stray segment).
-SHUTDOWN_WORDS_RE = re.compile(r"api.{0,64}?system.{0,64}?(?:shutdown|browser)", re.S)
-_WHITESPACE = re.compile(r"[\s\x00-\x1f\x7f]+")
-
-
-def _decoded(s: str) -> str:
-    """Percent-decoded until it stops changing, backslashes as slashes, lowercase."""
-    for _ in range(8):
-        decoded = unquote(s)
-        if decoded == s:
-            break
-        s = decoded
-    return s.replace("\\", "/").lower()
-
-
-def remove_dot_segments(s: str) -> str:
-    """RFC 3986 remove_dot_segments over the whole text, split on `/`: `.` is dropped and `..` drops the segment before
-    it, whatever characters that segment holds (spaces and control characters included). Empty segments are dropped."""
-    out: list[str] = []
-    for segment in s.split("/"):
-        if segment == ".":
-            continue
-        if segment == "..":
-            if out:
-                out.pop()
-            continue
-        if segment == "":
-            continue
-        out.append(segment)
-    return "/" + "/".join(out) if s.startswith("/") else "/".join(out)
-
-
-def norm_route(s: str) -> str:
-    """Text as a server would read a path in it (`/api/system/%73hutdown`, `/api/system/./shutdown`,
-    `/api//system/shutdown`, `/api/x y/../system/shutdown`)."""
-    return remove_dot_segments(_SLASHES.sub("/", _decoded(s)))
-
-
-def names_shutdown_route(text: str) -> bool:
-    if SHUTDOWN_ROUTE_RE.search(norm_route(text)):
-        return True
-    return bool(SHUTDOWN_WORDS_RE.search(_WHITESPACE.sub("", _decoded(text))))
 
 
 def expand(text: str, ctx: Ctx) -> str:
@@ -230,6 +179,9 @@ def short(s: str) -> str:
 # Markers are looked for in lower-case text with `/` as the only separator.
 _B = r"(?:^|[\s\"'=:;,()<>|&/@])"
 _E = r"(?:/|\s|$|[\"'])"
+DATA_SECRET_PLACES = (r"hokma/(?:database\.json|hokma\.db|identity\.key|codex-home|acp-home|backups)|"
+                      r"claude-config/(?:\.credentials|credentials\.json|\.claude\.json|backups)")
+RAW_DATA_SECRET_RE = re.compile(DATA_SECRET_PLACES)
 SECRET_RE = re.compile("|".join([
     _B + r"\.ssh" + _E, _B + r"\.aws" + _E, _B + r"\.config/gh" + _E, _B + r"\.git-credentials(?:$|[\s\"'])",
     _B + r"\.gnupg" + _E, _B + r"_?\.?netrc(?:$|[\s\"'])", r"github cli/hosts\.yml", r"hokma-market",
@@ -238,8 +190,12 @@ SECRET_RE = re.compile("|".join([
     # Engine credentials: the Codex and Gemini sign-ins (Hokma's copies and the student's own) and the student's own
     # Claude session file.
     r"codex-home/auth\.json", r"\.codex/auth\.json", r"\.gemini/oauth_creds\.json", r"\.claude/\.credentials\.json",
-    r"hokma/database\.json", r"hokma/claude-config/(?:\.credentials\.json|credentials\.json|\.claude\.json)",
-    r"claude-config/(?:\.credentials\.json|\.claude\.json)",
+    # What Hokma's data folder keeps secret, by its default places (the real folder is judged by identity and text).
+    DATA_SECRET_PLACES,
+    # The session token of the app, the owner confirmation and the calls that start, resume or hand over a session,
+    # and the control channel and lock of the background engine (a Unix socket, a Windows pipe and the lock file).
+    r"x-hokma-token", r"x-hokma-owner", r"/api/session/(?:owner-nonce|resume|logout|challenge|enter|handoff-code)",
+    r"control\.sock", r"hokma-control-", r"engine\.lock",
     # The system stores themselves: the Secret Service on D-Bus, the keyring and wallet files, the Keychain folder and
     # the Windows credential and vault folders. Naming any of them is a way to read the Connections keys.
     r"org[./]freedesktop[./]secrets", r"\.local/share/keyrings", r"library/keychains", r"kdewallet",
@@ -274,61 +230,44 @@ SECRET_RE = re.compile("|".join([
     # process's secrets are read): `self` is the agent's own process and stays free.
     r"/proc/(?!self/|thread-self/)[^/\s\"']+/(?:mem|environ|cmdline|maps|smaps)(?:\s|$|[\"'])",
 ]))
-INTERNAL_READ_RE = re.compile("|".join([
-    _B + r"\.hokma" + _E,
-    # Hokma's own API: the session header, the owner confirmation and the calls that change the permission mode or
-    # touch the Trash and the restore points. Those belong to the owner at the screen; an agent that names them is
-    # trying to call them.
-    r"x-hokma-token", r"x-hokma-owner", r"/api/profile/permission-mode", r"/api/session/owner-nonce",
-    r"/api/system/(?:shutdown|browser)",
-    r"/api/trash/(?:empty|\d+/(?:restore|purge))", r"/api/checkpoints/[^/\s\"']+/restore-",
-    # The remembered session belongs to the owner: sign-in resume and sign-out calls, and the control channel and
-    # lock file of the background engine (a Unix socket, a Windows pipe and the lock with pid and port).
-    r"/api/session/(?:resume|logout|challenge|enter|handoff-code)", r"control\.sock", r"hokma-control-", r"engine\.lock",
-]))
-# Everything above stays hidden when it is only read. Writing, moving or deleting also refuses the data folder itself.
-INTERNAL_RE = re.compile(INTERNAL_READ_RE.pattern + "|" + (
-    r"(?:localappdata%?|appdata/local|application support|\.local/share|xdg_data_home\}?)/hokma"
-    r"(?:/|\s|$|[\"'])"))
-# The restore point refs live in the project's Git; an agent that writes them (or packs them) could forge a point.
-# Reading is free in the data folder, but not these (named by their default places): the database and its copies and
-# the Codex sign-in. `check_read_path` judges the real data folder by identity.
-# Deny by default: inside the data folder only these first-level names may be read (everything else, such as the
-# database, `identity.key`, `codex-home`, `acp-home`, backups and the trash, and any future secret, stays hidden).
-READABLE_DATA_TOPS = ("claude-config", "logs", "runtime", "bin", "python", "cache", "models", "plugin-shims",
-                      "plugin-installs.json", "kit-report.json",
-                      "kit-baseline.json", "owner.json", "language", "agents-state.json", "workdir", "active-project",
-                      "update-status.json", "update-progress.json", "current", "update.lock", "engine", "market-cache",
-                      "attachments")
-# The same inside claude-config: the plugins, the settings and the logs, not the sign-in, the session file or its backups.
-READABLE_CONFIG_TOPS = ("plugins", "settings.json", "logs", "debug", "skills", "agents", "commands", "todos")
-_CONFIG = "|".join(re.escape(x) for x in READABLE_CONFIG_TOPS)
-_TOPS = "|".join(re.escape(x) for x in READABLE_DATA_TOPS)
-_HIDDEN_AFTER = r"/(?!(?:" + _TOPS + r")(?:/|\s|$|[\"']))[^\s\"'/*?\[]+"
-HIDDEN_DATA_RE = re.compile(r"(?:localappdata%?|appdata/local|application support|\.local/share|xdg_data_home\}?)/hokma"
-                            + _HIDDEN_AFTER
-                            + r"|claude-config/(?!(?:" + _CONFIG + r")(?:/|\s|$|[\"']))[^\s\"'/*?\[]+")
-GIT_REFS_RE = re.compile(_B + r"\.git/(?:refs/hokma|packed-refs)" + r"(?:/|\s|$|[\"'])")
-RAW_DATA_RE = re.compile(r"(?:localappdata%?|appdata/local|application support|\.local/share|xdg_data_home\}?)/hokma"
-                         r"(?:/|\s|$|[\"'])")
-SETTINGS_RE = re.compile(r"(?:^|[/\s\"'])\.claude/settings[^/\s\"']*\.json")
-ENV_REDEFINE = re.compile(
-    r"\b(?:CLAUDE_CONFIG_DIR|CODEX_HOME|HOKMA_HOME|HOKMA_DATA_DIR|HOKMA_AGENT|HOKMA_TASK_ID)\b[\"'\]\)}]*\s*(?:\+?=|,)|\b(?:setx|unset)\s+(?:CLAUDE_CONFIG_DIR|"
-    r"CODEX_HOME|HOKMA_HOME|HOKMA_DATA_DIR|HOKMA_AGENT|HOKMA_TASK_ID|HOKMA_CONVERSATION_ID)\b", re.I)
-_GIT_ENV = (r"GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\w+|GIT_CONFIG_VALUE_\w+|GIT_CONFIG_PARAMETERS|GIT_CONFIG_GLOBAL|"
-            r"GIT_CONFIG_SYSTEM|GIT_CONFIG|GIT_DIR|GIT_EXEC_PATH|GIT_TEMPLATE_DIR")
-# A command line that sets one of the variables that change what Git loads or runs: `VAR=x git ..`, `export VAR=`,
-# `env VAR=..`, `set VAR=` (cmd), `$env:VAR=` (PowerShell), `declare -x`, `setx`, `Set-Item env:`, and the quoted name
-# followed by a value (`os.environ['VAR'] = ..`, `SetEnvironmentVariable('VAR', ..)`). Reading or printing one is free.
-GIT_ENV_RE = re.compile(
-    r"(?<![\w$])(?:" + _GIT_ENV + r")\b[\"'\]\)}]*\s*\+?=|"
-    r"[\"'](?:" + _GIT_ENV + r")[\"']\s*[,:]|"
-    r"\bsetx\s+(?:/m\s+)?(?:" + _GIT_ENV + r")\b|"
-    r"\b(?:set-item|si|new-item|ni)\b[^;&|\n]*\benv:(?:" + _GIT_ENV + r")\b", re.I)
+# Inside Hokma's data folder these stay secret; the rest of it (plugins, settings, logs, tools) is readable and writable.
+DATA_SECRET_TOPS = ("database.json", "hokma.db", "identity.key", "codex-home", "acp-home", "backups")
+CONFIG_SECRET_PREFIXES = (".claude.json", ".credentials", "credentials.json", "backups")
 CRED_CODE = re.compile(r"engine_key|\bimport\s+keyring\b|\bfrom\s+keyring\b|\bkeyring\s*\.\s*(?:get|set|delete)|"
                        r"\bPasswordVault\b|\bCredRead\b|Get-StoredCredential|\bsecretstorage\b|"
                        r"(?:import_module|__import__)\s*\(\s*[\"']keyring[\"']|"          # loading it by name at run time
                        r"[\"']key[\"']\s*\+\s*[\"']ring[\"']|[\"']keyr[\"']\s*\+\s*[\"']ing[\"']", re.I)
+
+
+def data_secret_in_text(low: str, ctx: Ctx) -> bool:
+    """The text names a secret inside the data folder by its real location (a folder that is not called `hokma`)."""
+    data = norm_text(ctx.data).rstrip("/")
+    if len(data) <= 3:
+        return False
+    start = 0
+    while True:
+        k = low.find(data, start)
+        if k < 0:
+            return False
+        after = low[k + len(data):]
+        if re.match(r"/(?:" + "|".join(re.escape(x) for x in DATA_SECRET_TOPS) + r")", after) or re.match(
+                r"/claude-config/(?:" + "|".join(re.escape(x) for x in CONFIG_SECRET_PREFIXES) + r")", after):
+            return True
+        start = k + 1
+
+
+DATA_PLACE_RE = re.compile(r"(?:localappdata%?|appdata/local|application support|\.local/share|xdg_data_home\}?)/hokma"
+                           r"(?:/|\s|$|[\"'])")
+
+
+def names_data_folder(low: str, ctx: Ctx) -> bool:
+    """The text names Hokma's data folder: by its default places on each system, or by the real folder."""
+    data = norm_text(ctx.data)
+    return bool(DATA_PLACE_RE.search(low)) or (len(data) > 3 and data in low)
+
+
+def names_protected(low: str, ctx: Ctx) -> bool:
+    return any(p in low for p in ctx._protect_text)
 
 
 def scan_secret_text(text: str) -> str | None:
@@ -337,54 +276,40 @@ def scan_secret_text(text: str) -> str | None:
     return m.group(0).strip(" \"'=:;,()<>|&/@") if m else None
 
 
-def check_text_markers(text: str, ctx: Ctx, *, settings: bool = True, reading: bool = False) -> None:
-    """Secrets and Hokma-internal markers in a text that names a path (or in code). `reading`: the text belongs to a
-    command or tool that only reads, so naming Hokma's data folder is not a marker (what is inside is judged by
-    `check_read_path`)."""
-    internal = INTERNAL_READ_RE if reading else INTERNAL_RE
+def check_text_markers(text: str, ctx: Ctx, *, reading: bool = False) -> None:
+    """Secrets (and, unless the command only reads, the hook files) named in a text that names a path or in code."""
     expanded = expand(text, ctx)
     for candidate in (text, expanded):
-        hit = scan_secret_text(candidate)
-        if hit:
+        if scan_secret_text(candidate) or data_secret_in_text(norm_text(candidate), ctx):
             raise Block("secrets", short(text))
-    low = norm_text(expanded) if expanded != text else norm_text(text)
-    for candidate in (norm_text(text), low):
-        if internal.search(candidate) or GIT_REFS_RE.search(candidate) or (settings and SETTINGS_RE.search(candidate)):
-            raise Block("hokma_internal", short(text))
-        if reading and HIDDEN_DATA_RE.search(candidate):
-            raise Block("hokma_internal", short(text))
-    if names_shutdown_route(text) or names_shutdown_route(expanded):
-        raise Block("hokma_internal", short(text))
+    if not reading:
+        for candidate in (norm_text(text), norm_text(expanded)):
+            if names_protected(candidate, ctx):
+                raise Block("hokma_internal", short(text))
 
 
-def check_real_path(path: str, ctx: Ctx, *, settings: bool = True, reading: bool = False, here: str | None = None) -> None:
-    """Resolve a path (relative to the call's folder) and refuse the secret and internal places by identity.
-    `reading`: the data folder is judged by `check_read_path` instead of being refused whole."""
+def check_real_path(path: str, ctx: Ctx, *, reading: bool = False, here: str | None = None, guarded: bool = True) -> None:
+    """Resolve a path (relative to the call's folder) and refuse the secret places and, unless the command only reads,
+    the hook files by identity. `guarded=False`: the hook files are judged elsewhere (`guard.decide`)."""
     if unresolved(path) and not path.startswith("~"):
         return
-    protect = [p for p in ctx.protect if not under_any(p, [ctx.data])] if reading else ctx.protect
     full = clean_path(joined(expand(path, ctx), here or ctx.cwd))
     if is_win_abs(full) and os.name != "nt":
         return                                                  # a Windows path on another system: text markers only
     for candidate in {full, os.path.realpath(full)}:
-        low = norm_text(candidate)
-        if SECRET_RE.search(low) or re.search(r"/database\.json$", low) and under_any(candidate, [ctx.data]):
+        if SECRET_RE.search(norm_text(candidate)) or (
+                under_any(candidate, [ctx.data]) and read_hidden(candidate, ctx, content=False)):
             raise Block("secrets", short(path))
-        if under_any(candidate, protect):
-            raise Block("hokma_internal", short(path))
-        if SETTINGS_RE.search(low) and settings:
-            raise Block("hokma_internal", short(path))
-        if GIT_REFS_RE.search(low + "/"):                       # the file itself, wherever a link or `..` led to it
+        if guarded and not reading and under_any(candidate, ctx.protect):
             raise Block("hokma_internal", short(path))
 
 
-# Names that stay hidden inside the data folder even for reading: the database and its copies, the Codex sign-in.
 GLOB_CHARS = "*?["
 
 
 def read_hidden(candidate: str, ctx: Ctx, *, content: bool) -> bool:
-    """True when `candidate` (a real path under the data folder) is not for reading: the database and its copies, the
-    sign-in folders, and, when the command reads CONTENT, a folder that holds any of them (the data folder and the
+    """True when `candidate` (a real path under the data folder) is a secret: the database and its copies, the sign-in
+    folders and files, and, when the command reads CONTENT, a folder that holds any of them (the data folder and the
     claude-config folder), because a recursive search or a glob would walk into the credentials."""
     data = _fold(os.path.realpath(ctx.data))                    # case-folded where the file system ignores case
     try:
@@ -396,21 +321,18 @@ def read_hidden(candidate: str, ctx: Ctx, *, content: bool) -> bool:
     if rel.startswith(".."):
         return True                                             # judged inside the data folder but not below it: hide
     parts = rel.replace("\\", "/").lower().split("/")
-    if parts[0] not in READABLE_DATA_TOPS:
+    if parts[0] in DATA_SECRET_TOPS:
         return True
     if parts[0] == "claude-config":
         if len(parts) == 1:
             return content
-        if parts[1] not in READABLE_CONFIG_TOPS or any(
-                x.startswith((".claude.json", ".credentials", "credentials.json")) for x in parts[1:]):
-            return True                                         # the session file, its backups and the sign-in files
+        return any(x.startswith(CONFIG_SECRET_PREFIXES) for x in parts[1:2])
     return False
 
 
 def check_read_path(path: str, ctx: Ctx, here: str, *, content: bool) -> None:
     """A path that a read-only command or tool names. Under the data folder it is readable unless it is a secret
-    (SECRET_RE, already checked by the markers) or `read_hidden`. A glob is judged by the folder before its first
-    wildcard."""
+    (`read_hidden`). A glob is judged by the folder before its first wildcard."""
     text = expand(path, ctx)
     if unresolved(text) and not text.startswith("~"):
         return
@@ -422,16 +344,16 @@ def check_read_path(path: str, ctx: Ctx, here: str, *, content: bool) -> None:
         tail = full[cut:].replace("\\", "/")
         if ".." in tail.split("/") or any(part.startswith(".") for part in (full[:cut].replace("\\", "/").rsplit("/", 1)[-1] + tail).split("/")):
             if under_any(os.path.dirname(full[:cut]) or "/", [ctx.data]):
-                raise Block("hokma_internal", short(path))      # a glob that can reach dot files or climb out of its folder
+                raise Block("secrets", short(path))             # a glob that can reach dot files or climb out of its folder
         full = os.path.dirname(full[:cut]) or "/"
     for candidate in {full, os.path.realpath(full)}:
         if under_any(candidate, [ctx.data]) and read_hidden(candidate, ctx, content=content):
-            raise Block("hokma_internal", short(path))
+            raise Block("secrets", short(path))
 
 
-def check_path_arg(text: str, ctx: Ctx, *, settings: bool = True) -> None:
-    check_text_markers(text, ctx, settings=settings)
-    check_real_path(text, ctx, settings=settings)
+def check_path_arg(text: str, ctx: Ctx, *, guarded: bool = True) -> None:
+    check_text_markers(text, ctx) if guarded else check_text_markers(text, ctx, reading=True)
+    check_real_path(text, ctx, guarded=guarded)
 
 
 def is_device(p: str) -> bool:
@@ -439,22 +361,22 @@ def is_device(p: str) -> bool:
     return low in DEVICES or low.startswith(("/dev/fd/", "/proc/self/fd/"))
 
 
-def check_write_dest(text: str, ctx: Ctx, cwd: str) -> str | None:
+def check_write_dest(text: str, ctx: Ctx, cwd: str, *, guarded: bool = True) -> str | None:
     """A path a command or a tool writes to. Returns the resolved path (None when it cannot be known)."""
     if not text or text == "-":
         return None
     if is_device(text):
         return None
-    check_path_arg(text, ctx)
+    check_path_arg(text, ctx, guarded=guarded)
     if unresolved(expand(text, ctx)):
         return None                                             # built at run time: cannot be judged here
     full = clean_path(joined(expand(text, ctx), cwd))
     if is_device(full):
         return None
     if not is_win_abs(full):
-        check_real_path(full, ctx)                              # relative to a folder the command moved into with `cd`
+        check_real_path(full, ctx, guarded=guarded)             # relative to a folder the command moved into with `cd`
     real = full if is_win_abs(full) and os.name != "nt" else os.path.realpath(full)
-    if not under(real, ctx.roots):
+    if not under(real, ctx.write_roots):
         raise Block("outside_workdir", short(text))
     return full
 
@@ -896,13 +818,10 @@ WRAPPERS: dict[str, set[str]] = {
 }
 FORMAT_NAMES = {"format", "diskpart", "format-volume", "clear-disk", "initialize-disk", "bcdedit", "wipefs",
                 "mkswap", "sgdisk", "mklabel"}
-WRITE_FREE = {"mkdir", "md", "touch", "mkfifo", "tee"}
 WRITE_LAST = {"cp", "mv", "ln", "install", "rsync", "scp", "copy", "xcopy", "move", "robocopy", "copy-item", "cpi",
               "move-item", "mi", "rename-item", "rni", "ren", "rename"}
 PS_PATH_WRITERS = {"new-item", "ni", "set-content", "sc", "add-content", "ac", "out-file", "export-csv",
                    "export-clixml", "tee-object"}
-PS_VALUE_PARAMS = ("path", "literalpath", "filepath", "destination", "value", "encoding", "name", "itemtype", "filter",
-                   "include", "exclude", "stream", "width", "inputobject", "variable", "delimiter", "pv")
 CD_NAMES = {"cd", "pushd", "chdir", "set-location", "sl"}
 SCRIPT_SUFFIX = {".sh": "sh", ".bash": "sh", ".zsh": "sh", ".py": "py", ".js": "node", ".mjs": "node",
                  ".cjs": "node", ".ts": "node", ".ps1": "ps", ".bat": "cmd", ".cmd": "cmd", ".rb": "ruby",
@@ -943,6 +862,7 @@ class Run:
     def __init__(self, ctx: Ctx, cwd: str, strict: bool = True) -> None:
         self.ctx, self.cwd, self.strict = ctx, [cwd], strict
         self.reading = False                    # the whole command only reads: Hokma's data folder may be read
+        self.source = ""                        # the command line of the call, for the one idiom PowerShell splits up
 
     @property
     def here(self) -> str:
@@ -978,7 +898,6 @@ def significant(words: list[Word], mode: str) -> list[Word]:
 
 
 def analyze_cmd(cmd: Cmd, prev: Cmd | None, mode: str, run: Run, depth: int, stdin_text: str | None) -> None:
-    ctx = run.ctx
     words = significant(cmd.words, mode)
     check_redirections(cmd, words, prev, mode, run)
     if not words:
@@ -1055,113 +974,38 @@ def read_script(path: str, run: Run, limit: int = MAX_SCRIPT_BYTES) -> str | Non
 
 def check_redirections(cmd: Cmd, words: list[Word], prev: Cmd | None, mode: str, run: Run) -> None:
     ctx = run.ctx
-    producer = empty_producer(words, cmd, mode)
     for op, w in cmd.redirs:
         if op in ("<", "<<", "<<<", "<&"):
-            check_path_arg(w.text, ctx, settings=True)
+            check_path_arg(w.text, ctx, guarded=False)          # reading a file is free, what it holds is not
             continue
         if op == ">&" and (w.text.isdigit() or w.text == "-"):
             continue
-        full = check_write_dest(w.text, ctx, run.here)
-        if op in (">", ">|") and producer and full and os.path.isfile(full) and os.path.getsize(full) > 0:
-            raise Block("truncate", short(w.text))
-
-
-def empty_producer(words: list[Word], cmd: Cmd, mode: str) -> bool:
-    """True when the command writes nothing, so `> file` after it empties the file."""
-    if not words:
-        return not cmd.heredocs and not cmd.herestrs
-    name = base_name(words[0].text)
-    args = [w for w in words[1:]]
-    if name in (":", "true", "false"):
-        return True
-    if name == "cat":
-        devnull = any(w.text == "/dev/null" for w in args) or any(op == "<" and w.text == "/dev/null"
-                                                                      for op, w in cmd.redirs)
-        return devnull and all(w.text.startswith("-") or w.text == "/dev/null" for w in args)
-    if name == "echo":
-        flags = [w for w in args if re.fullmatch(r"-[neE]+", w.text)]
-        rest = [w for w in args if w not in flags]
-        return any("n" in f.text for f in flags) and all(w.text == "" for w in rest)
-    if name == "printf":
-        return bool(args) and all(w.text == "" for w in args)
-    if name in ("write-output", "write-host") and mode == "ps":
-        return all(w.text == "" for w in args)
-    return False
-
-
-LAUNCHER_VERBS = frozenset(("start", "stop", "restart", "open"))
-LAUNCHER_RUNNERS = frozenset(("uv", "uvx", "pipx", "poetry", "pipenv", "pdm", "hatch", "rye", "conda", "npx", "env",
-                              "start-process", "saps", "start", "invoke-expression", "iex", "call", "cmd", "wsl"))
-_LAUNCHER_BASES = frozenset(("hokma", "hokma-script", "hokma_cli", "hokma_cli.main"))
-_LAUNCHER_EXT = re.compile(r"\.(?:exe|cmd|bat|ps1|sh|py|pyw)$")
-LAUNCHER_CODE = re.compile(
-    r"[\"']hokma(?:\.exe)?[\"']\s*,\s*[\"'](?:start|stop|restart|open)[\"']|"
-    r"[\"'][^\"'\n]*\bhokma(?:\.exe)?\s+(?:start|stop|restart|open)\b|"
-    r"hokma_cli(?:\.main)?[\"']?\s*,\s*[\"'](?:start|stop|restart|open)[\"']", re.I)
-
-
-def launcher_token(text: str) -> bool:
-    """The token names the `hokma` launcher: a bare name, any path to it, or the module that implements it."""
-    base = re.split(r"[\\/]", text.strip("\"'` ").lower())[-1]
-    base = _LAUNCHER_EXT.sub("", base) if base != "hokma_cli.main" else base
-    if base == "main" and "hokma_cli" in text.lower():
-        return True                                             # .../hokma_cli/main.py
-    return base in _LAUNCHER_BASES
-
-
-def launcher_call(name: str, words: list[Word], cmd: Cmd) -> str | None:
-    """The command line when it runs the `hokma` launcher with start, stop, restart or open (any way of reaching it)."""
-    if name in ("echo", "printf", "write-output", "write-host", "write-error", "write-warning", "git"):
-        return None
-    texts = [w.text for w in words]
-    for i, text in enumerate(texts):
-        if not launcher_token(text):
-            continue
-        prev = texts[i - 1].lower() if i else ""
-        reached = (i == 0 or name in LAUNCHER_RUNNERS or prev == "-m" or "/" in text or "\\" in text
-                   or prev in ("run", "exec", "tool", "--"))
-        if not reached:
-            continue
-        rest = [x.strip("\"'` ").lower() for part in texts[i + 1:] for x in part.split(",")]
-        if any(x in LAUNCHER_VERBS for x in rest):
-            return short(" ".join(texts))
-        if not rest and cmd.pipe_in:
-            return short(" ".join(texts))                       # `echo stop | xargs hokma`: the verb arrives on stdin
-    for i, text in enumerate(texts):                            # `python -mhokma_cli.main stop`
-        if text.lower().startswith("-mhokma_cli") and any(x.strip("\"'` ").lower() in LAUNCHER_VERBS
-                                                         for x in texts[i + 1:]):
-            return short(" ".join(texts))
-    return None
+        check_write_dest(w.text, ctx, run.here)
 
 
 # Tools that walk a whole tree. Pointed at a folder that CONTAINS the data folder (`~`, `~/.local/share`,
 # `%LOCALAPPDATA%`, `/`) they read the database and the credentials, so that is a read of the data folder's content.
-RECURSIVE_ALWAYS = {"ugrep", "ug", "rg", "find", "tree", "fd", "ag", "ack", "rgrep", "ugrep", "ug", "dir", "findstr", "gci", "get-childitem",
-                    "select-string", "sls"}
-RECURSIVE_FLAG = {"grep": "rRd", "egrep": "rRd", "fgrep": "rRd", "ls": "R", "cp": "rRa", "scp": "r", "rsync": "ra",
+RECURSIVE_ALWAYS = {"ugrep", "ug", "rg", "ag", "ack", "rgrep", "findstr", "select-string", "sls"}
+RECURSIVE_FLAG = {"grep": "rRd", "egrep": "rRd", "fgrep": "rRd", "cp": "rRa", "scp": "r", "rsync": "ra",
                   "zip": "rR", "7z": "", "7za": "", "tar": "", "pax": "", "cpio": "", "xcopy": "", "robocopy": "",
-                  "copy-item": "", "cpi": "", "compress-archive": "", "du": "", "zipinfo": ""}
-NEEDS_OPERAND = {"cp", "scp", "rsync", "zip", "7z", "7za", "tar", "pax", "cpio", "xcopy", "robocopy", "copy-item",
-                 "cpi", "compress-archive"}
+                  "copy-item": "", "cpi": "", "compress-archive": ""}
 
 
 def _recursive_call(name: str, words: list[Word]) -> bool:
+    if name == "find":                                   # listing names reads nothing; `-exec` and `-fprint` do
+        return any(w.text.lower() in FIND_WRITERS - {"-delete"} for w in words[1:])
     if name in RECURSIVE_ALWAYS:
-        return not (name == "dir" and not any(w.text.lower() in ("/s", "-recurse") for w in words[1:])) and not (
-            name in ("gci", "get-childitem") and not any(w.text.lower().startswith(("-r", "-recurse")) for w in words[1:])
-        ) and not (name in ("select-string", "sls") and not any(
+        return not (name in ("select-string", "sls") and not any(
             w.text.lower() == "-recurse" for w in words[1:])) and not (
             name == "findstr" and not any(w.text.lower().startswith("/s") for w in words[1:]))
     if name in RECURSIVE_FLAG:
         letters = RECURSIVE_FLAG[name]
         for w in words[1:]:
-            t = w.text
-            if t in ("-recurse",) or (t.startswith("--") and (t[2:].startswith(("rec", "dereference-rec", "arch"))
-                                                                or t.startswith("--dir"))) or (
-                    letters and re.match(r"^-[A-Za-z]+$", t) and any(c in t[1:] for c in letters)) or (
-                    name == "grep" and t.startswith("--directories=recurse")) or (
-                    False):
+            tx = w.text
+            if tx in ("-recurse",) or (tx.startswith("--") and (tx[2:].startswith(("rec", "dereference-rec", "arch"))
+                                                                or tx.startswith("--dir"))) or (
+                    letters and re.match(r"^-[A-Za-z]+$", tx) and any(c in tx[1:] for c in letters)) or (
+                    name == "grep" and tx.startswith("--directories=recurse")):
                 return True
         return name in ("tar", "pax", "cpio", "7z", "7za", "xcopy", "robocopy", "copy-item", "cpi", "compress-archive")
     return False
@@ -1246,7 +1090,7 @@ def check_recursive(name: str, words: list[Word], run: Run) -> None:
     if name in ("grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls", "ag", "ack", "rgrep", "fd"):
         if len(operands) <= 1:
             operands = operands + [Word(".", False, False, False)]      # no path: it walks the folder it runs in
-    elif name in ("find", "tree", "ls", "dir", "gci", "get-childitem", "du") and not operands:
+    elif name == "find" and not operands:
         operands = [Word(".", False, False, False)]
     excluded = _excludes_data(name, words, _fold(os.path.basename(os.path.realpath(ctx.data))))
     follows = any(w.text in ("-R", "-L", "-h", "-follow", "-H", "--follow", "--dereference", "--copy-links",
@@ -1260,19 +1104,19 @@ def check_recursive(name: str, words: list[Word], run: Run) -> None:
     for w in operands:
         text = expand(w.text, ctx)
         if w.text.startswith("~") and not re.match(r"^~(?:$|[/\\])", w.text) and w not in extra:
-            raise Block("hokma_internal", short(w.text))         # `~user`, `~+`: a home the check cannot see
+            raise Block("secrets", short(w.text))         # `~user`, `~+`: a home the check cannot see
         if (unresolved(text) and not text.startswith("~")) or re.search(r"\{[^}]*(?:,|\.\.)[^}]*\}", text):
-            raise Block("hokma_internal", short(w.text))         # built at run time or by brace expansion: fail closed
+            raise Block("secrets", short(w.text))         # built at run time or by brace expansion: fail closed
         full = clean_path(joined(text, run.here))
         if is_win_abs(full) and os.name != "nt":
             continue                                             # a Windows path on another system: text markers only
         if _contains_data(full, ctx) and (
                 not excluded or _fold(os.path.realpath(full)) == _fold(os.path.realpath(ctx.data))):
-            raise Block("hokma_internal", short(w.text))
+            raise Block("secrets", short(w.text))
 
 
 def scan_words(name: str, words: list[Word], cmd: Cmd, run: Run) -> None:
-    """Markers of secrets and Hokma internals anywhere in the arguments, plus the host list of brokers."""
+    """Markers of secrets (and of the hook files) anywhere in the arguments, plus the host list of brokers."""
     ctx = run.ctx
     args = [w for w in words[1:]]
     if name in ("echo", "printf", "write-output", "write-host", "write-error", "write-warning"):
@@ -1285,15 +1129,15 @@ def scan_words(name: str, words: list[Word], cmd: Cmd, run: Run) -> None:
     if text:
         check_text_markers(text, ctx, reading=run.reading)
         content = name in CONTENT_READERS
-        for index, w in enumerate(scan):
+        for w in scan:
             if run.reading and w is not words[0]:
                 if unresolved(expand(w.text, ctx)) and not w.text.startswith("~"):
-                    raise Block("hokma_internal", short(w.text))          # built at run time: could name a secret
+                    raise Block("secrets", short(w.text))                 # built at run time: could name a secret
                 if (w.text.startswith("~") and not re.match(r"^~(?:$|[/\\])", w.text)) or (
                         "," in w.text and any(ch in w.text for ch in "/\\")):
-                    raise Block("hokma_internal", short(w.text))          # `~+`, `~user`, a PowerShell path list
+                    raise Block("secrets", short(w.text))                 # `~+`, `~user`, a PowerShell path list
                 if "{" in w.text or "}" in w.text:
-                    raise Block("hokma_internal", short(w.text))          # brace expansion builds names the check cannot see
+                    raise Block("secrets", short(w.text))                 # brace expansion builds names the check cannot see
                 if w.text.startswith("-"):
                     for value in _option_values(w.text):
                         check_read_path(value, ctx, run.here, content=content)
@@ -1311,14 +1155,38 @@ def scan_words(name: str, words: list[Word], cmd: Cmd, run: Run) -> None:
                 for value in _option_values(w.text):
                     check_real_path(value, ctx, here=run.here)
         check_recursive(name, words, run)
-        if ENV_REDEFINE.search(text) or GIT_ENV_RE.search(text):
-            raise Block("hokma_internal", short(text))
     full = " ".join(w.text for w in words)
-    shown = launcher_call(name, words, cmd)
-    if shown:
-        raise Block("hokma_internal", shown)
     if ctx.host_re and ctx.host_re.search(full) or ctx.url_re and ctx.url_re.search(full):
         raise Block("real_money", short(full))
+
+
+DOWNLOADERS = {"curl", "wget", "irm", "iwr", "invoke-restmethod", "invoke-webrequest"}
+# PowerShell reads `iex (irm url)` as `iex` followed by the group `(irm url)`: the line is judged as a whole.
+PS_IEX_DOWNLOAD_RE = re.compile(r"\b(?:iex|invoke-expression)\b\s*\(+\s*(?:irm|iwr|invoke-restmethod|invoke-webrequest|"
+                                r"\(?\s*new-object\s+net\.webclient\s*\)?\s*\.\s*downloadstring)\b", re.I)
+
+
+def is_download(text: str, mode: str) -> bool:
+    """The command text starts with a download tool (`curl -fsSL url`)."""
+    try:
+        first = significant(lex(text, mode)[0].words, mode)
+    except (IndexError, ValueError):
+        return False
+    return bool(first) and base_name(first[0].text) in DOWNLOADERS
+
+
+def installer_idiom(words: list[Word], cmd: Cmd, prev: Cmd | None, mode: str, source: str) -> bool:
+    """`irm url | iex`, `eval "$(curl url)"`, `iex (irm url)`: the interpreter is fed ONLY by a download, the way software
+    installers (Homebrew, Bun, Node managers) are run. Any literal code next to it (`eval rm f`) is not the idiom."""
+    args = words[1:]
+    if not args:
+        if prev is not None and cmd.pipe_in:
+            pw = significant(prev.words, mode)
+            if pw and base_name(pw[0].text) in DOWNLOADERS:
+                return True
+        return mode == "ps" and bool(PS_IEX_DOWNLOAD_RE.search(source))
+    return bool(cmd.subs) and all(w.text.replace("\0", "").strip() == "" for w in args) and all(
+        is_download(x, mode) for x in cmd.subs)
 
 
 def dispatch(name: str, words: list[Word], args: list[Word], cmd: Cmd, prev: Cmd | None, mode: str, run: Run,
@@ -1328,7 +1196,7 @@ def dispatch(name: str, words: list[Word], args: list[Word], cmd: Cmd, prev: Cmd
     shown = short(" ".join(w.text for w in words))
     low = [x.lower() for x in texts]
 
-    if name in DYNAMIC_EXEC:
+    if name in DYNAMIC_EXEC and not installer_idiom(words, cmd, prev, mode, run.source):
         raise Block("delete", name)
 
     if name in WRAPPERS:
@@ -1346,8 +1214,6 @@ def dispatch(name: str, words: list[Word], args: list[Word], cmd: Cmd, prev: Cmd
     if name in ("mv", "move-item", "mi", "move") and texts and is_null(texts[-1]):
         raise Block("delete", shown)
 
-    harness_rules(name, args, mode, shown)
-
     if name == "find":
         find_rules(args, mode, run, depth)
         return
@@ -1360,40 +1226,7 @@ def dispatch(name: str, words: list[Word], args: list[Word], cmd: Cmd, prev: Cmd
         change_dir(args, run)
         return
 
-    if name in ("truncate",):
-        for i, a in enumerate(low):
-            if a in ("-s", "--size") and i + 1 < len(low) and zero_size(low[i + 1]):
-                raise Block("truncate", shown)
-            if (a.startswith("--size=") and zero_size(a[7:])) or (a.startswith("-s") and len(a) > 2 and zero_size(a[2:])):
-                raise Block("truncate", shown)
-        return
-    if name in ("clear-content", "clc"):
-        raise Block("truncate", shown)
-
-    if name == "cp" and any(x == "/dev/null" for x in texts):
-        dest = [w for w in args if not w.text.startswith("-") and w.text != "/dev/null"]
-        for w in dest:
-            full = check_write_dest(w.text, ctx, run.here)
-            if full and os.path.isfile(full) and os.path.getsize(full) > 0:
-                raise Block("truncate", short(w.text))
-
-    if name == "tee" and not any(x in ("-a", "--append") for x in low):
-        empty_in = any(op == "<" and w.text == "/dev/null" for op, w in cmd.redirs) or (
-            prev is not None and empty_producer(significant(prev.words, mode), prev, mode))
-        if empty_in:
-            for w in args:
-                if not w.text.startswith("-"):
-                    full = check_write_dest(w.text, ctx, run.here)
-                    if full and os.path.isfile(full) and os.path.getsize(full) > 0:
-                        raise Block("truncate", short(w.text))
-
     if name == "dd":
-        if any(w.text.lower() == "if=/dev/null" for w in args):
-            for w in args:
-                if w.text.lower().startswith("of="):
-                    full = check_write_dest(w.text[3:], ctx, run.here)
-                    if full and os.path.isfile(full) and os.path.getsize(full) > 0:
-                        raise Block("truncate", short(w.text))
         for w in args:
             if w.text.lower().startswith("of="):
                 target = w.text[3:]
@@ -1475,8 +1308,6 @@ def is_null(text: str) -> bool:
     return text.lower() in ("/dev/null", "nul", "nul:", "$null")
 
 
-def zero_size(v: str) -> bool:
-    return bool(re.fullmatch(r"0+[kmgtb]*", v.lower()))
 
 
 def unwrap(name: str, args: list[Word], mode: str) -> list[Word]:
@@ -1537,254 +1368,39 @@ def change_dir(args: list[Word], run: Run) -> None:
         return
     run.cwd[0] = clean_path(joined(expand(target, ctx), run.here))
 
-
-# ---- the harness itself (bug 1036): `.git`, `.claude`, `.hokma` must not be renamed, moved or reached by a link ----
-
-HARNESS_NAMES = (".git", ".claude", ".hokma")
-MOVE_NAMES = {"mv", "move", "move-item", "mi", "ren", "rename", "rename-item", "rni"}
-LINK_NAMES = {"ln", "mklink", "new-item", "ni", "junction"}
-LINK_KINDS = {"symboliclink", "junction", "hardlink"}
-
-
-def _parts(text: str) -> list[str]:
-    return [x for x in text.replace("\\", "/").lower().split("/") if x not in ("", ".")]
-
-
-def harness_move_target(text: str) -> bool:
-    """The folder itself (`.git`, `.claude/`, `a/.hokma`) or anything inside `.git` and `.hokma`."""
-    parts = _parts(text)
-    if not parts:
-        return False
-    return parts[-1] in HARNESS_NAMES or any(x in (".git", ".hokma") for x in parts[:-1])
-
-
-def harness_link_target(text: str) -> bool:
-    """A link may not point at `.git` or `.hokma` (or into them) nor at `.claude` or its settings files."""
-    parts = _parts(text)
-    return any(x in (".git", ".hokma") for x in parts) or bool(parts and parts[-1] == ".claude") or bool(
-        SETTINGS_RE.search(norm_text(text)))
-
-
-def harness_rules(name: str, args: list[Word], mode: str, shown: str) -> None:
-    words = [w.text for w in args if w.text and not w.text.startswith("-")
-             and not (mode == "cmd" and w.text.startswith("/"))]
-    if name in MOVE_NAMES and any(harness_move_target(x) for x in words):
-        raise Block("hokma_internal", shown)
-    if name in LINK_NAMES:
-        kinds = {w.text.lower() for w in args}
-        if name in ("new-item", "ni") and not kinds & LINK_KINDS:
-            return
-        if any(harness_link_target(x) for x in words):
-            raise Block("hokma_internal", shown)
-
-
-SAFE_CONFIG_KEYS = {"user.name", "user.email", "core.autocrlf", "init.defaultbranch"}
-CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
-CONFIG_SHOW_FLAGS = {"--show-origin", "--show-scope"}
-CONFIG_READ_EXTRAS = {"--name-only", "--null", "-z"}
-CONFIG_SCOPES = {"--local", "--global"}
-CONFIG_SUBCOMMANDS = {"get", "list", "set", "unset"}
-CONFIG_KNOWN = CONFIG_READ_FLAGS | CONFIG_SHOW_FLAGS | CONFIG_READ_EXTRAS | CONFIG_SCOPES | {"--add", "--unset"}
-
-
-def safe_config_key(key: str) -> bool:
-    """A key a command may write: one of the short list (Git ignores the case of a key), nothing around it."""
-    return key.lower() in SAFE_CONFIG_KEYS
-
-
-def config_allowed(args: list[Word]) -> bool:
-    """`git config` (the words after `config`) by white list. True only for one of the known forms of reading, or
-    for the write or unset of a key of SAFE_CONFIG_KEYS. Everything else is refused: an option that is not
-    recognised exactly (abbreviations and short bundles included), a key outside the list, a word the shell expands."""
-    if any(w.dyn or w.glob for w in args):
-        return False
-    options: list[str] = []
-    positional: list[str] = []
-    for w in args:
-        if w.text.startswith("-") and len(w.text) > 1:
-            if w.text not in CONFIG_KNOWN:
-                return False
-            options.append(w.text)
-        else:
-            positional.append(w.text)
-    flags = set(options)
-    if len(flags) != len(options):
-        return False
-    sub = positional[0] if positional and positional[0] in CONFIG_SUBCOMMANDS else None
-    rest = positional[1:] if sub else positional
-    reads = flags & CONFIG_READ_FLAGS
-    if reads or sub in ("get", "list"):
-        if len(reads) + (1 if sub else 0) != 1 or flags & {"--add", "--unset"} or sub in ("set", "unset"):
-            return False
-        if sub == "list" or reads <= {"--list", "-l"} and reads:
-            return not rest
-        return 1 <= len(rest) <= 2
-    if flags & (CONFIG_SHOW_FLAGS | CONFIG_READ_EXTRAS):
-        return False                                   # these only go with an explicit read
-    if sub == "unset" or "--unset" in flags:
-        return not (sub and "--unset" in flags) and flags <= CONFIG_SCOPES | {"--unset"} and \
-            len(rest) == 1 and safe_config_key(rest[0])
-    if sub == "set":
-        return flags <= CONFIG_SCOPES and len(rest) == 2 and safe_config_key(rest[0])
-    if len(rest) == 2:
-        return flags <= CONFIG_SCOPES | {"--add"} and safe_config_key(rest[0])
-    if len(rest) == 1:
-        return flags <= CONFIG_SCOPES                  # a key with no value reads it
-    return not rest and not flags                      # `git config` alone only prints its usage
-
-
-def config_key_ok(text: str) -> bool:
-    """The `name=value` of `git -c` and `--config-env`: the name has to be one of the safe keys."""
-    return safe_config_key(text.split("=", 1)[0])
-
-
-def clone_config_ok(rest: list[Word]) -> bool:
-    """`git clone -c key=value` and `--config key=value` write the config of the new clone, hooks included."""
-    i = 0
-    while i < len(rest):
-        x = rest[i].text
-        if x == "--":
-            break
-        if x in ("-c", "--config"):
-            if i + 1 >= len(rest) or not config_key_ok(rest[i + 1].text):
-                return False
-            i += 2
-            continue
-        if x.startswith("--") and len(x.split("=", 1)[0]) >= 3 and "--config".startswith(x.split("=", 1)[0]):
-            if "=" not in x or not config_key_ok(x.split("=", 1)[1]):     # `--conf x`, `--config=x`
-                return False
-        elif x.startswith("-c") and len(x) > 2 and x[1] != "-":
-            if not config_key_ok(x[2:]):
-                return False
-        elif x[:1] == "-" and x[1:2] != "-" and "c" in x[1:]:
-            return False                                # a short bundle with c: its key cannot be proven
-        i += 1
-    return True
-
-GIT_GLOBAL_FREE = {"--no-pager", "--no-optional-locks"}
-PROGRAM_OPTION_SUBS = {"clone", "init", "fetch", "pull", "push", "ls-remote", "archive"}
-PROGRAM_OPTIONS = ("template", "upload-pack", "receive-pack", "exec")      # they name a program or a folder Git runs from
-
-
-def program_option(sub: str, rest: list[str]) -> bool:
-    """An option that makes Git run a program or load hooks from a folder: `--template`, `--upload-pack`,
-    `--receive-pack`, `--exec`, any abbreviation of them (Git accepts any unambiguous prefix, so every prefix is
-    refused), the `--option=value` form, and `clone -u` (and `-u<value>`, short bundles with u). `push -u` is
-    `--set-upstream` and stays free."""
-    for x in rest:
-        if x == "--":
-            return False
-        if x.startswith("--"):
-            name = x[2:].split("=", 1)[0].lower()
-            if name and any(p.startswith(name) for p in PROGRAM_OPTIONS):
-                return True
-        elif sub == "clone" and x.startswith("-") and len(x) > 1 and "u" in x[1:]:
-            return True
-    return False
-
-
 def git_rules(args: list[Word], run: Run) -> None:
+    """Git is free inside the working folder. What stays: the credential helper (a way to read stored credentials) and
+    the places Git can write to outside the folders a command may write (`-C`, the destination of `clone` and `init`,
+    the path of `worktree add`)."""
+    ctx = run.ctx
     a = [w.text for w in args]
     i = 0
     base = run.here                                  # `-C` moves the folder the rest of the line is judged from
     while i < len(a):
         x = a[i]
-        w = args[i]
-        if w.dyn or w.glob:
-            raise Block("hokma_internal", short("git " + " ".join(a)))
-        if x in GIT_GLOBAL_FREE:
-            i += 1
-        elif x == "-C":
-            if i + 1 >= len(a) or args[i + 1].dyn or args[i + 1].glob or unresolved(expand(a[i + 1], run.ctx)):
-                raise Block("hokma_internal", short("git " + " ".join(a)))
-            target = clean_path(joined(expand(a[i + 1], run.ctx), base))
-            if not under(target if is_win_abs(target) and os.name != "nt" else os.path.realpath(target), run.ctx.roots):
-                raise Block("hokma_internal", short("git " + " ".join(a)))
-            base = target
+        if x == "-C" and i + 1 < len(a):
+            target = check_write_dest(a[i + 1], ctx, base)
+            if target is not None:
+                base = target
             i += 2
-        elif x in ("-c", "--config-env"):
-            if i + 1 >= len(a) or args[i + 1].dyn or args[i + 1].glob or not config_key_ok(a[i + 1]):
-                raise Block("hokma_internal", short("git " + " ".join(a)))
+        elif x in ("-c", "--config-env", "--git-dir", "--work-tree", "--namespace", "--exec-path") and i + 1 < len(a):
             i += 2
-        elif x.startswith("--config-env=") or (x.startswith("-c") and len(x) > 2 and x[1] == "c"):
-            attached = x[len("--config-env="):] if x[1] == "-" else x[2:]          # `-ckey=value`, `--config-env=key=VAR`
-            if not config_key_ok(attached):
-                raise Block("hokma_internal", short("git " + " ".join(a)))
-            i += 1
-        elif x == "--version" and i == len(a) - 1:
-            return
         elif x.startswith("-"):
-            raise Block("hokma_internal", short("git " + " ".join(a)))     # every other global option is refused
+            i += 1
         else:
             break
     if i >= len(a):
         return
-    sub, rest = a[i].lower(), a[i + 1:]
-    rl = [x.lower() for x in rest]
-    shown = short("git " + " ".join(a))
-    if args[i].dyn or args[i].glob:
-        raise Block("hokma_internal", shown)         # the subcommand is not known: it could be `config`
-
-    def letters(prefix_ok: str) -> bool:
-        return any(len(x) > 1 and x[0] == "-" and x[1] != "-" and any(c in prefix_ok for c in x[1:]) for x in rest)
-
-    if sub in PROGRAM_OPTION_SUBS and program_option(sub, rest):
-        raise Block("hokma_internal", shown)
-    if sub == "push":
-        forced = any(x in ("--force", "--delete", "--mirror", "--prune", "--force-if-includes") or
-                     x.startswith(("--force=", "--force-with-lease")) for x in rl) or letters("fd")
-        refspec = any(len(x) > 1 and x[0] in "+:" for x in rest)
-        if forced or refspec:
-            raise Block("force_push", shown)
-    elif sub in ("filter-branch", "filter-repo"):
-        raise Block("force_push", shown)
-    elif sub == "reflog" and any(x in ("expire", "delete") for x in rl):
-        raise Block("force_push", shown)
-    elif sub == "gc" and any(x == "--prune" or (x.startswith("--prune=") and x != "--prune=never") for x in rl):
-        raise Block("force_push", shown)
-    elif sub == "prune" and any(re.fullmatch(r"(?:--expire=)?now", x) for x in rl):
-        raise Block("force_push", shown)
-    elif sub == "credential":
-        raise Block("secrets", shown)
-    elif sub == "update-ref" and any("refs/hokma" in x for x in rl):
-        raise Block("hokma_internal", shown)
-    elif sub == "update-ref" and any(x in ("-d", "--delete", "--stdin") or (x[:1] == "-" and x[1:2] != "-" and "d" in x[1:])
-                                     for x in rl):
-        raise Block("force_push", shown)             # deleting a ref (branch, tag, point) loses history
-    elif sub == "replace" and not any(x in ("-l", "--list", "--format") or x.startswith("--format=") for x in rl):
-        raise Block("force_push", shown)             # a replace ref hides real commits behind others
-    elif sub == "worktree" and rl[:1] and rl[0] in ("remove", "prune"):
-        raise Block("delete", shown)                 # remove takes a working folder off the disk
-    elif sub == "tag" and any(x in ("-d", "--delete") or (x[:1] == "-" and x[1:2] != "-" and "d" in x[1:]) for x in rest) \
-            and any("hokma" in x for x in rl):
-        raise Block("hokma_internal", shown)
-    elif sub == "mv" and any(harness_move_target(x) for x in rest if not x.startswith("-")):
-        raise Block("hokma_internal", shown)
-    elif sub == "config" and not config_allowed(args[i + 1:]):
-        raise Block("hokma_internal", shown)
-    elif sub == "clone" and not clone_config_ok(args[i + 1:]):
-        raise Block("hokma_internal", shown)
-    elif sub == "rm" and "--cached" not in rl:
-        raise Block("delete", shown)
-    elif sub == "clean" and not any(x in ("-n", "--dry-run") or (x.startswith("-") and not x.startswith("--") and "n" in x)
-                                    for x in rl):
-        raise Block("delete", shown)
-    elif sub == "reset" and "--hard" in rl:
-        raise Block("delete", shown)
-    elif sub == "checkout" and (("--" in rest and rest.index("--") < len(rest) - 1) or (rest and rest[-1] == ".")):
-        raise Block("delete", shown)
-    elif sub == "restore":
-        staged_only = ("--staged" in rl or "-S" in rest) and not ("--worktree" in rl or "-W" in rest)
-        if not staged_only:
-            raise Block("delete", shown)
-    elif sub == "stash" and rl[:1] and rl[0] in ("drop", "clear"):
-        raise Block("delete", shown)
-    elif sub == "stash" and any(x in ("--include-untracked", "--all") or (x[:1] == "-" and x[1:2] != "-"
-                                                                          and any(c in x[1:] for c in "ua"))
-                                for x in rl):
-        raise Block("delete", shown)                 # it takes the untracked files out of the working folder
-    elif sub == "branch" and any(x == "-D" or (x[:1] == "-" and x[1:2] != "-" and "D" in x[1:]) for x in rest):
-        raise Block("delete", shown)
+    sub, rest = a[i].lower(), [w for w in args[i + 1:]]
+    if sub == "credential":
+        raise Block("secrets", short("git " + " ".join(a)))
+    paths = [w.text for w in rest if not w.text.startswith("-")]
+    if sub == "clone" and len(paths) >= 2 and not re.search(r"://|^[\w.-]+@[\w.-]+:", paths[-1]):
+        check_write_dest(paths[-1], ctx, base)
+    elif sub == "init" and paths:
+        check_write_dest(paths[-1], ctx, base)
+    elif sub == "worktree" and len(paths) >= 2 and paths[0] == "add":
+        check_write_dest(paths[1], ctx, base)
 
 
 def procsub_scripts(args: list[Word], cmd: Cmd, mode: str, run: Run, depth: int) -> None:
@@ -1816,6 +1432,8 @@ def run_shell(name: str, args: list[Word], cmd: Cmd, mode: str, run: Run, depth:
             continue
         break
     if code is not None:
+        if code.replace("\0", "").strip() == "" and cmd.subs and all(is_download(x, mode) for x in cmd.subs):
+            return                                                  # `bash -c "$(curl url)"`: an installer fed by a download
         analyze_text(code, "bash", run, depth + 1)
         return
     if i < len(args) and not args[i].text.startswith("-"):
@@ -1912,12 +1530,9 @@ def scan_code(kind: str, code: str, run: Run, depth: int) -> None:
     """Check the text of a script or of `-c` code the way its language is written."""
     ctx = run.ctx
     if kind in ("sh", "ps", "cmd"):
-        if GIT_ENV_RE.search(code):                              # `VAR=x git ..` lines drop out of the word scan
-            raise Block("hokma_internal", short(GIT_ENV_RE.search(code).group(0)))
         analyze_text(code, {"sh": "bash", "ps": "ps", "cmd": "cmd"}[kind], Run(ctx, run.here, strict=False), depth)
         return
     check_code_markers(code, ctx)
-    scan_code_harness(code)
     if kind == "py":
         if PY_DELETE.search(code):
             raise Block("delete", short(PY_DELETE.search(code).group(0)))
@@ -1936,42 +1551,15 @@ def scan_code(kind: str, code: str, run: Run, depth: int) -> None:
             if parts and parts[0].lower() in SHELL_DELETE_WORD and (len(parts) > 1 or literal.strip() == parts[0]):
                 raise Block("delete", short(literal))
 
-
-CODE_MOVE = re.compile(
-    r"\bshutil\s*\.\s*move\s*\(|\bos\s*\.\s*(?:rename|renames|replace|symlink|link)\s*\(|\.\s*(?:rename|symlink_to|"
-    r"hardlink_to|link_to)\s*\(|\b(?:rename|symlink|link)(?:Sync)?\s*\(|\bfs\w*\s*\.\s*(?:promises\s*\.\s*)?"
-    r"(?:rename|symlink|link)\w*\s*\(|\bFile\s*\.\s*(?:rename|symlink|link)\b|\bFileUtils\s*\.\s*(?:mv|ln_s?)\b|"
-    r"\bfrom\s+(?:os|shutil)\s+import\b[^\n]*\b(?:rename|renames|replace|symlink|link|move)\b|"
-    r"\bMove-Item\b|\bRename-Item\b|\bSymbolicLink\b", re.I)
-
-
-def scan_code_harness(code: str) -> None:
-    """A call that renames, moves or links something, in a script that names `.git`, `.claude` or `.hokma`."""
-    if not CODE_MOVE.search(code):
-        return
-    for m in STR_LITERAL.finditer(code):
-        literal = m.group(1) if m.group(1) is not None else m.group(2)
-        if literal and harness_move_target(literal) and len(literal) < 400:
-            raise Block("hokma_internal", short(literal))
-
-
 def check_code_markers(code: str, ctx: Ctx) -> None:
     if CRED_CODE.search(code):
         raise Block("secrets", "keyring")
     low = norm_text(code)
-    if SECRET_RE.search(low):
-        raise Block("secrets", short(SECRET_RE.search(low).group(0)))
-    if INTERNAL_RE.search(low) or SETTINGS_RE.search(low) or GIT_REFS_RE.search(low):
-        raise Block("hokma_internal", short((INTERNAL_RE.search(low) or SETTINGS_RE.search(low)
-                                             or GIT_REFS_RE.search(low)).group(0)))
-    if names_shutdown_route(code):
-        raise Block("hokma_internal", "/api/system/shutdown")
-    if LAUNCHER_CODE.search(code):
-        raise Block("hokma_internal", short(LAUNCHER_CODE.search(code).group(0)))
-    if ENV_REDEFINE.search(code):
-        raise Block("hokma_internal", short(ENV_REDEFINE.search(code).group(0)))
-    if GIT_ENV_RE.search(code):
-        raise Block("hokma_internal", short(GIT_ENV_RE.search(code).group(0)))
+    m = SECRET_RE.search(low)
+    if m or data_secret_in_text(low, ctx):
+        raise Block("secrets", short(m.group(0) if m else "data folder"))
+    if names_protected(low, ctx):
+        raise Block("hokma_internal", "hook files")
     if ctx.host_re and ctx.host_re.search(code) or ctx.url_re and ctx.url_re.search(code):
         raise Block("real_money", "broker host")
 
@@ -2021,7 +1609,7 @@ def run_interpreter(kind: str, args: list[Word], cmd: Cmd, run: Run, depth: int,
 
 def write_rules(name: str, words: list[Word], args: list[Word], mode: str, run: Run, cmd: Cmd,
                 prev: Cmd | None) -> None:
-    """Destinations of the listed write commands must be inside the working folder."""
+    """Destinations of the listed write commands must be inside the working folder or Hokma's data folder."""
     ctx = run.ctx
     positional = [w for w in args if not w.text.startswith("-") and not (mode == "cmd" and w.text.startswith("/"))]
     if name == "tee":
@@ -2063,90 +1651,34 @@ def write_rules(name: str, words: list[Word], args: list[Word], mode: str, run: 
         if target is None and positional:
             target = positional[0]
         if target is not None:
-            full = check_write_dest(target.text, ctx, run.here)
-            if full and name in ("set-content", "sc", "out-file") and not any(ps_param(w.text, "append") for w in args):
-                empty = piped_empty(prev, mode) if cmd.pipe_in else ps_empty_write(args, positional, target)
-                if empty and os.path.isfile(full) and os.path.getsize(full) > 0:
-                    raise Block("truncate", short(target.text))
-
-
-def piped_empty(prev: Cmd | None, mode: str) -> bool:
-    """The command before `| Set-Content f` produces nothing: an empty string, $null or an empty echo."""
-    words = significant(prev.words, mode) if prev is not None else []
-    if len(words) == 1:
-        return words[0].text.strip() == "" or words[0].text.lower() == "$null"
-    return bool(words) and empty_producer(words, prev, mode)
-
-
-def ps_empty_write(args: list[Word], positional: list[Word], target: Word) -> bool:
-    values = []
-    for i, w in enumerate(args):
-        if ps_param(w.text, "value") and i + 1 < len(args):
-            values.append(args[i + 1].text)
-    others = [w for w in positional if w is not target]
-    values += [w.text for w in others]
-    return all(v.strip() == "" or v.lower() == "$null" for v in values)
+            check_write_dest(target.text, ctx, run.here)
 
 
 # ------------------------------------------------------------------------------------------------ the tools
 
-FILE_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit"}
+FILE_TOOLS = guard.FILE_TOOLS
 READ_TOOLS = {"Read", "Grep", "Glob"}
 SHELL_TOOLS = {"Bash": "bash", "PowerShell": "ps"}
 ORDER_TOOL = re.compile(r"(?:place|submit|send|create|modify|replace|cancel)[_-]?order(?!s?[_-]?book)|"
                         r"order[_-](?:create|send|cancel)", re.I)
 
 
-def edit_result(tool: str, tool_input: dict, current: str) -> str | None:
-    if tool == "Edit":
-        old, new = tool_input.get("old_string"), tool_input.get("new_string")
-        if not isinstance(old, str) or not isinstance(new, str) or old == "":
-            return None
-        return current.replace(old, new) if tool_input.get("replace_all") else current.replace(old, new, 1)
-    if tool == "MultiEdit":
-        text = current
-        for edit in tool_input.get("edits") or []:
-            if not isinstance(edit, dict):
-                return None
-            old, new = edit.get("old_string"), edit.get("new_string")
-            if not isinstance(old, str) or not isinstance(new, str) or old == "":
-                return None
-            text = text.replace(old, new) if edit.get("replace_all") else text.replace(old, new, 1)
-        return text
-    return None
-
-
 def check_file_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
+    """Edit, Write and NotebookEdit: the hook files are `guard`'s (the settings file may change while it keeps the
+    registration of the hooks); the rest is judged here: secrets, and writing outside the allowed folders."""
     target = tool_input.get("file_path") or tool_input.get("notebook_path")
-    if not isinstance(target, str) or not target:
-        raise Block("hokma_internal", "no path")
-    full = check_write_dest(target, ctx, cwd)
-    if full is None or tool == "NotebookEdit":
-        return
-    try:
-        size = os.path.getsize(full) if os.path.isfile(full) else 0
-    except OSError:
-        size = 0
-    if size == 0:
-        return
-    if tool == "Write":
-        content = tool_input.get("content")
-        if isinstance(content, str) and content.strip() == "":
-            raise Block("truncate", short(target))
-    elif size <= MAX_EDIT_BYTES:
-        try:
-            with open(full, "rb") as f:
-                current = f.read().decode("utf-8")
-        except (OSError, UnicodeDecodeError):
-            return
-        result = edit_result(tool, tool_input, current)
-        if result is not None and result.strip() == "" and current.strip() != "":
-            raise Block("truncate", short(target))
+    shown = short(target) if isinstance(target, str) and target else "no path"
+    if isinstance(target, str) and is_win_abs(target) and os.name != "nt":
+        if under(clean_path(joined(target, cwd)), ctx.protect):        # a Windows path judged on another system
+            raise Block("hokma_internal", shown)
+    elif guard.decide({"tool_name": tool, "tool_input": tool_input, "cwd": cwd}, ctx.protect)[0]:
+        raise Block("hokma_internal", shown)
+    check_write_dest(target, ctx, cwd, guarded=False)
 
 
 def check_read_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
-    """Read, Grep and Glob. Hokma's data folder may be read (plugins, settings, logs) except its secrets and hidden
-    names; `Glob` only lists names, so it may also list a folder that holds secrets."""
+    """Read, Grep and Glob. Hokma's data folder may be read (plugins, settings, logs) except its secrets; `Glob` only
+    lists names, so it may also list a folder that holds secrets."""
     candidates = []
     if tool == "Read":
         candidates.append((tool_input.get("file_path"), True))
@@ -2160,35 +1692,17 @@ def check_read_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
         root = expand(tool_input.get("path") or cwd, ctx)
         if isinstance(root, str) and not unresolved(root) and not (is_win_abs(root) and os.name != "nt") and _contains_data(
                 clean_path(joined(root, cwd)), ctx):
-            raise Block("hokma_internal", short(root))
+            raise Block("secrets", short(root))
     for item, content in candidates:
         if isinstance(item, str) and item:
-            check_text_markers(item, ctx, settings=False, reading=True)
-            check_real_path(item, ctx, settings=False, reading=True)
+            check_text_markers(item, ctx, reading=True)
+            check_real_path(item, ctx, reading=True)
             if tool != "Grep" or content:
                 check_read_path(item, ctx, cwd, content=content)
 
 
-SECRET_FILES = re.compile(r"database\.json|claude-config/(?:\.credentials\.json|\.claude\.json)")
-
-
-def raw_data_rule(low: str, ctx: Ctx) -> str | None:
-    """`secrets` or `hokma_internal` when the command text names Hokma's data folder (default places or the real one)."""
-    spots = []
-    m = RAW_DATA_RE.search(low)
-    if m:
-        spots.append(low[m.start():m.start() + 200])
-    data = norm_text(ctx.data)
-    if len(data) > 3 and data in low:
-        k = low.find(data)
-        spots.append(low[k:k + len(data) + 200])
-    if not spots:
-        return None
-    return "secrets" if any(SECRET_FILES.search(s) for s in spots) else "hokma_internal"
-
-
-# Commands that only read. Any of them over Hokma's data folder is allowed (`ls`, `cat`, `grep` of plugins, settings
-# and logs); a command line is read-only only when EVERY command in it is one of these.
+# Commands that only read. A command line is read-only only when EVERY command in it is one of these; such a line may
+# name the hook files (reading them is free) and is judged strictly where it touches Hokma's data folder.
 LIST_COMMANDS = {"ls", "dir", "stat", "du", "pwd", "get-childitem", "gci", "get-item", "gi", "test-path",
                  "get-location", "realpath", "readlink", "basename", "dirname", "which", "where", "find", "echo", "printf",
                  "true", "false", "write-output", "write-host"}
@@ -2252,6 +1766,25 @@ def only_reads(command: str, mode: str, depth: int = 0) -> bool:
     return True
 
 
+def lists_into_reader(command: str, mode: str) -> bool:
+    """A PowerShell pipeline where a listing (or an echo) feeds a content reader: `Get-ChildItem x | Get-Content`."""
+    if mode != "ps":
+        return False
+    try:
+        cmds = lex(command, mode)
+    except Exception:
+        return False
+    tainted = False
+    for cmd in cmds:
+        words = significant(cmd.words, mode)
+        first = base_name(words[0].text) if words else ""
+        tainted = tainted and cmd.pipe_in
+        if tainted and first in CONTENT_READERS:
+            return True
+        tainted = tainted or first in LISTERS or first in ("echo", "write-output", "write-host", "printf")
+    return False
+
+
 def _option_values(text: str) -> list[str]:
     """The paths an option word may carry: `--file=x`, PowerShell `-Path:x`, a short option glued to its value (`-fx`)."""
     found = [text.split(sep, 1)[1] for sep in ("=", ":") if sep in text]
@@ -2264,22 +1797,21 @@ def check_command(tool: str, command: object, cwd: str, ctx: Ctx) -> None:
     if not isinstance(command, str):
         raise Block("delete", "command is not text")
     run = Run(ctx, cwd)
+    run.source = command
     mode = SHELL_TOOLS[tool]
-    rule = raw_data_rule(norm_text(command), ctx)              # backslashes may be eaten by the shell reading below
-    if under_any(cwd, [ctx.data]) and not only_reads(command, mode):
-        raise Block("hokma_internal", short(command))          # the call itself runs inside the data folder
-    if (rule == "hokma_internal" or under_any(cwd, [ctx.data])) and only_reads(command, mode):
-        raw = norm_text(command)                               # the raw text too: a shell eats backslashes
-        data = norm_text(ctx.data)
-        if HIDDEN_DATA_RE.search(raw) or re.search(re.escape(data) + _HIDDEN_AFTER, raw):
-            raise Block("hokma_internal", short(command))
-        run.reading, rule = True, None                         # read-only: the data folder may be read, not its secrets
-    if rule:
-        raise Block(rule, short(command))
-    if ENV_REDEFINE.search(command) or GIT_ENV_RE.search(command):
-        stripped = re.sub(r"\b(?:echo|printf)\b[^;&|\n]*", "", command)
-        if ENV_REDEFINE.search(stripped) or GIT_ENV_RE.search(stripped):
-            raise Block("hokma_internal", short(command))
+    raw = norm_text(command)                                   # backslashes may be eaten by the shell reading below
+    for candidate in (raw, norm_text(expand(command, ctx))):   # the text as typed: a shell eats backslashes
+        if RAW_DATA_SECRET_RE.search(candidate) or data_secret_in_text(candidate, ctx):
+            raise Block("secrets", short(command))
+    in_data = under_any(cwd, [ctx.data])
+    hooks = names_protected(raw, ctx) or under_any(cwd, ctx.protect)
+    if hooks or in_data or names_data_folder(raw, ctx):
+        if lists_into_reader(command, mode):
+            raise Block("secrets", short(command))             # `Get-ChildItem <folder> | Get-Content` reads what it lists
+        if only_reads(command, mode):
+            run.reading = True                                 # read-only: Hokma's folders may be read, not their secrets
+        elif hooks:
+            raise Block("hokma_internal", short(command))      # something other than a read, on the hook files
     analyze_text(command, mode, run, 0)
 
 
@@ -2314,9 +1846,7 @@ def evaluate(payload: dict, ctx: Ctx) -> Block | None:
 
 MESSAGES = {
     "delete": lambda x: (t("hardblock.delete", target=x), t("hardblock.hint.delete")),
-    "truncate": lambda x: (t("hardblock.truncate", target=x), t("hardblock.hint.truncate")),
     "hokma_internal": lambda x: (t("hardblock.hokma_internal", target=x), t("hardblock.hint.hokma_internal")),
-    "force_push": lambda x: (t("hardblock.force_push", target=x), t("hardblock.hint.force_push")),
     "outside_workdir": lambda x: (t("hardblock.outside_workdir", target=x), t("hardblock.hint.outside_workdir")),
     "secrets": lambda x: (t("hardblock.secrets", target=x), t("hardblock.hint.secrets")),
     "real_money": lambda x: (t("hardblock.real_money", target=x), t("hardblock.hint.real_money")),
@@ -2357,7 +1887,10 @@ def build_ctx(args: list[str], env: dict | None = None) -> Ctx:
         roots.append(extra)
     if not roots:
         raise ValueError("no --workdir")
-    return Ctx(data, roots, arguments(args, "--protect") or [data], conversation_id=env.get("HOKMA_CONVERSATION_ID", ""),
+    protect = arguments(args, "--protect")
+    if not protect:
+        raise ValueError("no --protect")
+    return Ctx(data, roots, protect, conversation_id=env.get("HOKMA_CONVERSATION_ID", ""),
                task_id=env.get("HOKMA_TASK_ID", ""))
 
 
@@ -2383,3 +1916,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

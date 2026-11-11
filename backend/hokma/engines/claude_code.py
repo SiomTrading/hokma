@@ -2,7 +2,6 @@
 0.0.9, moved behind the contract without a change in behaviour. Hooks stay active (guard and hardblock)."""
 from __future__ import annotations
 
-import os
 import uuid
 from typing import Any, AsyncIterator
 
@@ -150,7 +149,7 @@ class ClaudeCodeAdapter:
         self.owner = owner
 
     def caps(self) -> EngineCaps:
-        return {"hooks": True, "os_sandbox": os.name == "posix", "native_subagents": True, "resume": True,
+        return {"hooks": True, "os_sandbox": False, "native_subagents": True, "resume": True,
                 "images": True, "mcp": True}
 
     def new_ref(self) -> str:

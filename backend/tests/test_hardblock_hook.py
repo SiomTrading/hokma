@@ -196,7 +196,7 @@ def test_p4_every_variant_of_the_plan_through_the_real_hook_process_keeps_every_
     from test_hardblock_rules import P4_DELETE
 
     spec = P4_DELETE[:P4_DELETE.index("mv f /dev/null") + 1]
-    assert len(spec) == 34
+    assert len(spec) == 29
     (box.work / "borra.py").write_text("import os\nos.unlink('f')\n")
     before = box.tree_hash()
     for command in spec:
@@ -215,7 +215,7 @@ def test_p4_every_variant_of_the_plan_through_the_real_hook_process_keeps_every_
 def test_the_project_folder_set_by_the_engine_is_a_second_working_folder(box, tmp_path):
     other = tmp_path / "other-project"
     other.mkdir()
-    args = [sys.executable, "-I", str(HARDBLOCK_FILE), "--data", str(box.data), "--workdir", str(box.work)]
+    args = [sys.executable, "-I", str(HARDBLOCK_FILE), "--data", str(box.data), "--workdir", str(box.work), "--protect", str(box.hooks)]
 
     def run(command, root):
         env = {**os.environ, "HOKMA_LANG": "en", **({"HOKMA_WORK_ROOT": str(root)} if root else {})}

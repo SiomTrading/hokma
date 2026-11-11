@@ -176,6 +176,13 @@ if ($LASTEXITCODE -ne 0) { Die "inst.manifest_failed" }
 & $HokmaExe verify-install | Out-Null
 if ($LASTEXITCODE -ne 0) { Die "inst.verify_failed" }
 
+# Node and Bun, portable, in <data>\tools (versions and sha256 in lock.json, checked before unpacking). Plugins and their
+# hooks need them (claude-mem starts its worker with Bun); Hokma puts them on the PATH of the engine. No network or a
+# wrong hash installs nothing: the install goes on and `hokma install-tools` repeats it.
+Info "inst.install_tools"
+& $HokmaExe install-tools
+if ($LASTEXITCODE -ne 0) { Warn "inst.tools_failed" }
+
 # ---- Stage 5: working folder as a Git repo, kit (never overwriting the student), config
 New-Item -ItemType Directory -Force -Path $Dir, $ConfigDir | Out-Null
 & $HokmaExe kit-sync | Out-Null

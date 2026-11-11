@@ -158,6 +158,12 @@ HOKMA_ENV=(HOKMA_HOME="$DIR" HOKMA_DATA_DIR="$HOKMA_DATA" CLAUDE_CONFIG_DIR="$CO
 env "${HOKMA_ENV[@]}" "$VENV/bin/hokma" write-manifest || die inst.manifest_failed
 env "${HOKMA_ENV[@]}" "$VENV/bin/hokma" verify-install >/dev/null || die inst.verify_failed
 
+# Node and Bun, portable, in <data>/tools (versions and sha256 in lock.json, checked before unpacking). Plugins and their
+# hooks need them (claude-mem starts its worker with Bun); Hokma puts them on the PATH of the engine. No network or a
+# wrong hash installs nothing: the install goes on and `hokma install-tools` repeats it.
+info inst.install_tools
+env "${HOKMA_ENV[@]}" "$VENV/bin/hokma" install-tools || warn inst.tools_failed
+
 # ---- Stage 5: working folder as a Git repo, kit (never overwriting the student), config
 mkdir -p "$DIR" "$CONFIG_DIR"
 env "${HOKMA_ENV[@]}" "$VENV/bin/hokma" kit-sync >/dev/null || die inst.kit_failed

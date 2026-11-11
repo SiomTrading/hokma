@@ -272,7 +272,7 @@ def test_approved_mcp_goes_through_a_launcher_with_a_safe_working_folder(env):
     # (the test folder itself lives under /tmp, so check against the sandbox allowWrite list: workdir and inbox)
     assert not under_any(cwd, [str(r) for r in sandbox_allow_write()]), "cwd must be outside agent-writable folders"
     s = build_settings()
-    assert s["permissions"]["deny"] and s["sandbox"]["enabled"] and s["hooks"]["PreToolUse"] and "mcpServers" not in s
+    assert s["hooks"]["PreToolUse"] and "mcpServers" not in s and "sandbox" not in s
 
 
 def test_remote_servers_are_passed_as_they_are(env, monkeypatch):
@@ -303,13 +303,9 @@ def test_an_approved_remote_server_that_is_a_web_page_is_not_passed(env, monkeyp
 
 # ---- the agent can only ask ---------------------------------------------------------------------------
 
-def test_inbox_is_agent_writable_and_applied_state_is_not(env):
-    from pathlib import Path
+def test_there_is_no_sandbox_to_keep_the_inbox_open(env):
     s = build_settings()
-    inbox = str(requests.requests_dir())
-    assert inbox in s["sandbox"]["filesystem"]["allowWrite"]
-    assert not any(Path(inbox).is_relative_to(d) for d in s["sandbox"]["filesystem"]["denyWrite"])
-    assert str(config.hokma_data_dir()) in s["sandbox"]["filesystem"]["denyWrite"]
+    assert "sandbox" not in s and "deny" not in s["permissions"]
 
 
 def test_the_agent_cannot_approve_its_own_request(env, monkeypatch, capsys):

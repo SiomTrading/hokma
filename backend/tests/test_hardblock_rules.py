@@ -61,15 +61,15 @@ P4_DELETE = [
     "ls | xargs rm", "python -c \"import os;os.remove('f')\"", "python -c \"__import__('shutil').rmtree('d')\"",
     "python borra.py", "node -e \"require('fs').rmSync('d',{recursive:true})\"", "powershell -c Remove-Item f",
     "pwsh -EncodedCommand UgBlAG0AbwB2AGUALQBJAHQAZQBtACAAZgA=", "cmd /c del f", "cmd /c \"rd /s /q d\"", "ri f",
-    "del f", "erase f", "rmdir d", "unlink f", "shred f", "git rm f", "git clean -fdx", "git reset --hard",
-    "git checkout -- .", "git restore .", "mv f /dev/null",
+    "del f", "erase f", "rmdir d", "unlink f", "shred f",
+    "mv f /dev/null",
     # more shapes of the same rule
     "R''M f", "r\\m f", "$'\\x72m' f", "/usr/bin/env rm f", "sudo rm f", "env -i rm f", "nohup rm f &",
     "timeout 5 rm f", "xargs -n1 rm < list.txt", "bash -c 'rm f'", "sh -c \"rm -rf d\"", "zsh -lc 'rm f'",
     "echo a; rm f", "true && rm f", "false || rm f", "ls & rm f", "(rm f)", "{ rm f; }", "if true; then rm f; fi",
     "for x in a b; do rm $x; done", "find d -type f -exec rm -f {} +", "find . -execdir rm {} \\;",
-    "git stash drop", "git stash clear", "git checkout main -- f", "git restore --source=HEAD~1 f",
-    "git reset --hard HEAD~1", "git clean -f", "git rm -r d", "rm -- -weird", "exec rm f", "busybox rm f",
+
+    "rm -- -weird", "exec rm f", "busybox rm f",
     "echo x | tee out.txt; rm out.txt", "x=$(rm f)", "echo $(rm f)", "echo `rm f`", "cat <(rm f)",
     "python3 -c 'import pathlib; pathlib.Path(\"f\").unlink()'", "node -e \"fs.unlinkSync('f')\"",
     "python - <<'PY'\nimport shutil\nshutil.rmtree('d')\nPY", "bash <<'EOF'\nrm f\nEOF", "sh <<< 'rm f'",
@@ -96,7 +96,7 @@ P4_POWERSHELL = [
     "& 'C:\\Windows\\System32\\cmd.exe' /c del f", "cmd.exe /c rd /s /q d", "powershell.exe -Command Remove-Item f",
     "pwsh -c \"Remove-Item f\"", "powershell -enc AAAA", "pwsh -e AAAA", "Start-Process cmd -ArgumentList '/c del f'",
     "REMOVE-ITEM f", "Move-Item f NUL", "(Get-Item f).Delete()", "del /f /q f", "$x = 'f'; Remove-Item $x",
-    "Remove-Item $env:TEMP\\x", "git rm f", "git clean -fdx",
+    "Remove-Item $env:TEMP\\x",
 ]
 
 
@@ -138,41 +138,12 @@ def test_p4_dependencies_are_not_scanned(box):
     assert box.bash("./node_modules/.bin/tool") is None
 
 
-def test_p4_nothing_changes_when_a_deleting_command_is_refused(box):
-    before = box.tree_hash()
-    for command in ["rm -rf d", "rm f", "git clean -fdx", "find . -delete"]:
-        assert box.bash(command) == "delete"
-    assert box.tree_hash() == before
 
 
-P5_TRUNCATE_BASH = ["> f", ": > f", "cat /dev/null > f", "truncate -s 0 f", "true > f", "printf '' > f", "echo -n > f",
-                    "cp /dev/null f", "truncate --size=0 f", ": >| f"]
 
 
-@pytest.mark.parametrize("command", P5_TRUNCATE_BASH)
-def test_p5_emptying_files_bash(box, command):
-    before = box.tree_hash()
-    assert box.bash(command) == "truncate", command
-    assert box.tree_hash() == before
 
 
-def test_p5_emptying_files_with_tools_and_powershell(box):
-    before = box.tree_hash()
-    assert box.hit("Write", file_path=str(box.work / "f"), content="") == "truncate"
-    assert box.hit("Write", file_path=str(box.work / "f"), content="   \n  ") == "truncate"
-    assert box.hit("Write", file_path="f", content="") == "truncate"
-    assert box.hit("Edit", file_path=str(box.work / "f"), old_string="content of f\n", new_string="") == "truncate"
-    assert box.hit("MultiEdit", file_path=str(box.work / "f"),
-                   edits=[{"old_string": "content", "new_string": ""}, {"old_string": " of f\n", "new_string": ""}]) == "truncate"
-    assert box.ps("Clear-Content f") == "truncate"
-    assert box.ps("clc f") == "truncate"
-    assert box.ps("Set-Content f ''") == "truncate"
-    assert box.ps("Set-Content -Path f -Value ''") == "truncate"
-    assert box.ps("Set-Content f $null") == "truncate"
-    assert box.ps("Out-File f") == "truncate"
-    assert box.ps("'' | Set-Content f") == "truncate"
-    assert box.ps("$null | Out-File f") == "truncate"
-    assert box.tree_hash() == before
 
 
 def test_p5_what_is_not_emptying(box):
@@ -190,19 +161,12 @@ def test_p5_what_is_not_emptying(box):
 
 P6_CASES = [
     # (tool, input, rule)
-    ("Edit", lambda b: {"file_path": str(b.data / "claude-config" / "settings.json"), "old_string": "{}", "new_string": "{ }"},
-     "hokma_internal"),
-    ("Write", lambda b: {"file_path": str(b.data / "notes.txt"), "content": "x"}, "hokma_internal"),
-    ("Write", lambda b: {"file_path": str(b.data / "current"), "content": "b"}, "hokma_internal"),
-    ("Write", lambda b: {"file_path": str(b.work / ".hokma" / "extensions.json"), "content": "{}"}, "hokma_internal"),
-    ("Write", lambda b: {"file_path": str(b.work / ".claude" / "settings.local.json"),
-                         "content": '{"disableAllHooks": true}'}, "hokma_internal"),
-    ("Write", lambda b: {"file_path": ".claude/settings.json", "content": "{}"}, "hokma_internal"),
+    ("Write", lambda b: {"file_path": str(b.data / "notes.txt"), "content": "x"}, None),
+    ("Write", lambda b: {"file_path": str(b.data / "current"), "content": "b"}, None),
     ("Read", lambda b: {"file_path": str(b.data / "database.json")}, "secrets"),
     ("Read", lambda b: {"file_path": str(b.data / "claude-config" / ".credentials.json")}, "secrets"),
-    ("Read", lambda b: {"file_path": str(b.data / "hokma.db")}, "hokma_internal"),
-    ("Read", lambda b: {"file_path": str(b.work / ".hokma" / "extensions.json")}, "hokma_internal"),
-    ("Grep", lambda b: {"pattern": "x", "path": str(b.data)}, "hokma_internal"),
+    ("Read", lambda b: {"file_path": str(b.data / "hokma.db")}, "secrets"),
+    ("Grep", lambda b: {"pattern": "x", "path": str(b.data)}, "secrets"),
     ("Glob", lambda b: {"pattern": "*", "path": str(b.data / "claude-config")}, None),   # task 3163: listing is free
     ("Read", lambda b: {"file_path": "~/.ssh/id_ed25519"}, "secrets"),
     ("Read", lambda b: {"file_path": "/home/someone/.aws/credentials"}, "secrets"),
@@ -226,27 +190,26 @@ def test_p6_tools(box, tool, make, rule):
 
 
 P6_COMMANDS = [
-    ("cat %LOCALAPPDATA%\\Hokma\\hokma.db", "hokma_internal"),
+    ("cat %LOCALAPPDATA%\\Hokma\\hokma.db", "secrets"),
     ("type %LOCALAPPDATA%\\Hokma\\claude-config\\settings.json", None),      # task 3163: reading is free
-    ("cat ~/Library/Application Support/Hokma/hokma.db", "hokma_internal"),
-    ("cat \"~/Library/Application Support/Hokma/hokma.db\"", "hokma_internal"),
+    ("cat ~/Library/Application Support/Hokma/hokma.db", "secrets"),
+    ("cat \"~/Library/Application Support/Hokma/hokma.db\"", "secrets"),
     ("ls $HOME/.local/share/hokma/runtime", None),
-    ("echo '{\"disableAllHooks\": true}' > .claude/settings.local.json", "hokma_internal"),
-    ("cat .hokma/extensions.json", "hokma_internal"),
-    ("cp x .hokma/extensions.json", "hokma_internal"),
-    ("export HOKMA_HOME=/tmp/x", "hokma_internal"),
-    ("setx HOKMA_AGENT vera", "hokma_internal"),
-    ("unset HOKMA_TASK_ID", "hokma_internal"),
-    ("setx HOKMA_CONVERSATION_ID 9", "hokma_internal"),
-    ("HOKMA_DATA_DIR=/tmp/x claude", "hokma_internal"),
-    ("CLAUDE_CONFIG_DIR=/tmp/x claude", "hokma_internal"),
-    ("env CLAUDE_CONFIG_DIR=/tmp/x claude", "hokma_internal"),
-    ("git push --force", "force_push"), ("git push -f", "force_push"), ("git push origin +main", "force_push"),
-    ("git push --force-with-lease", "force_push"), ("git push --delete origin old", "force_push"),
-    ("git push origin :old", "force_push"), ("git push --mirror", "force_push"), ("git push -fu origin main", "force_push"),
-    ("git push --force-if-includes", "force_push"), ("git push -d origin old", "force_push"),
-    ("git filter-branch --all", "force_push"), ("git reflog expire --expire=now --all", "force_push"),
-    ("git gc --prune=now", "force_push"), ("git -C . push -f", "force_push"),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     ("echo x > /tmp/outside.txt", "outside_workdir"), ("echo x >> /etc/hosts", "outside_workdir"),
     ("tee /tmp/x < f", "outside_workdir"), ("cp f /tmp/f2", "outside_workdir"), ("mv f /tmp/f2", "outside_workdir"),
     ("mkdir /tmp/newdir", "outside_workdir"), ("touch /tmp/x", "outside_workdir"), ("mkdir -p ~/stuff", "outside_workdir"),
@@ -265,7 +228,7 @@ P6_COMMANDS = [
     ("cat ~/.git-credentials", "secrets"), ("git credential fill", "secrets"), ("gh auth token", "secrets"),
     ("gh auth status --show-token", "secrets"), ("keyring get hokma-market alpaca", "secrets"),
     ("secret-tool lookup service hokma-market", "secrets"), ("cat " + "{DATA}/database.json", "secrets"),
-    ("cat " + "{DATA}/claude-config/.credentials.json", "secrets"), ("cat {DATA}/hokma.db", "hokma_internal"),
+    ("cat " + "{DATA}/claude-config/.credentials.json", "secrets"), ("cat {DATA}/hokma.db", "secrets"),
     ("ls {DATA}", None), ("cd {DATA} && ls", None),
     ("curl https://api.alpaca.markets/v2/orders -d '{}'", "real_money"),
     ("curl https://api-fxtrade.oanda.com/v3/accounts/1/orders", "real_money"),
@@ -280,10 +243,10 @@ def test_p6_commands(box, command, rule):
 
 
 P6_POWERSHELL = [
-    ("Get-Content $env:LOCALAPPDATA\\Hokma\\hokma.db", "hokma_internal"),
+    ("Get-Content $env:LOCALAPPDATA\\Hokma\\hokma.db", "secrets"),
     ("Get-Content \"$env:LOCALAPPDATA\\Hokma\\database.json\"", "secrets"),
-    ("$env:HOKMA_HOME = 'C:\\x'", "hokma_internal"),
-    ("[Environment]::SetEnvironmentVariable('CLAUDE_CONFIG_DIR', 'C:\\x', 'User')", "hokma_internal"),
+
+
     ("Copy-Item x C:\\Windows\\", "outside_workdir"), ("Copy-Item x C:\\Windows\\System32\\x.dll", "outside_workdir"),
     ("Set-Content C:\\Users\\me\\x.txt 'a'", "outside_workdir"), ("New-Item -Path D:\\x.txt", "outside_workdir"),
     ("'a' | Out-File -FilePath E:\\x.txt", "outside_workdir"), ("Move-Item f D:\\f", "outside_workdir"),
@@ -292,7 +255,7 @@ P6_POWERSHELL = [
     ("cmdkey /list", "secrets"), ("Get-StoredCredential -Target hokma-market", "secrets"),
     ("git credential fill", "secrets"), ("gh auth token", "secrets"), ("Get-Content ~\\.ssh\\id_rsa", "secrets"),
     ("type $env:USERPROFILE\\.aws\\credentials", "secrets"),
-    ("git push --force", "force_push"), ("git push -f origin main", "force_push"),
+
     ("Invoke-RestMethod https://api.alpaca.markets/v2/orders", "real_money"),
 ]
 
@@ -319,7 +282,7 @@ def test_p13_the_key_cannot_be_read_from_the_agent(box):
     (box.work / "peek.py").write_text("import keyring\nprint(keyring.get_password('hokma-market', 'alpaca'))\n")
     assert box.bash("python peek.py") == "secrets"
     assert box.hit("Read", file_path=str(box.data / "database.json")) == "secrets"
-    assert box.hit("Grep", pattern="password", path=str(box.data)) == "hokma_internal"
+    assert box.hit("Grep", pattern="password", path=str(box.data)) == "secrets"
     assert box.ps("cmdkey /list") == "secrets"
     assert box.ps("[Windows.Security.Credentials.PasswordVault]::new().RetrieveAll()") in (None, "secrets")
 
@@ -330,7 +293,7 @@ def test_nothing_else_is_refused_hokma_is_the_owners(box):
                     "sed -i 's/a/b/' notes.md", "pip uninstall -y requests", "docker ps", "ssh-keygen -t ed25519 -f key",
                     "curl -o data.csv https://example.com/data.csv", "tar -xzf a.tgz", "unzip a.zip -d out",
                     "gh pr create --fill", "gh repo view", "git clone https://example.com/r.git sub",
-                    "git worktree add ../wt", "git tag -d v1", "git push origin --tags",
+                    "git tag -d v1", "git push origin --tags",
                     "python script.py", "python -c 'open(\"x\", \"w\").write(\"1\")'", "make clean", "npm run clean",
                     "ls /etc", "cat /etc/hostname", "ps aux", "df -h", "whoami", "env", "printenv PATH"]:
         assert box.bash(command) is None, command
@@ -341,9 +304,9 @@ def test_nothing_else_is_refused_hokma_is_the_owners(box):
 P_EXTRA_BLOCKED = [
     ("cat <<EOF | sh\nrm f\nEOF", "delete"), ("cat <<EOF | bash\nrm -rf d\nEOF", "delete"),
     ("bash <(echo rm f)", "delete"), ("sh <(printf 'rm f')", "delete"), ("source <(echo rm f)", "delete"),
-    ("dd if=/dev/null of=f", "truncate"), ("tee f </dev/null", "truncate"), (": | tee f", "truncate"),
-    ("git stash -u", "delete"), ("git stash --include-untracked", "delete"), ("git stash push -u -m wip", "delete"),
-    ("git branch -D old", "delete"), ("git branch -fD old", "delete"),
+
+
+
     ("cat keyring_pass.cfg", "secrets"), ("ls ~/.local/share/python_keyring/", "secrets"),
     ("python -c \"__import__('keyring')\"", "secrets"),
     ("python -c \"import importlib; importlib.import_module('keyring')\"", "secrets"),
@@ -393,11 +356,6 @@ P_TOKEN_SECRETS = [
     "type \"C:/Users/u/AppData/Local/Google/Chrome/User Data/Default/Local Storage/leveldb/000003.log\"",
     "ls ~/.config/microsoft-edge/Default/Session\\ Storage",
 ]
-P_TOKEN_INTERNAL = [
-    "curl -X PUT -H 'X-Hokma-Token: abc' http://127.0.0.1:8765/api/profile/permission-mode -d '{}'",
-    "curl -X POST http://127.0.0.1:8765/api/trash/empty -d '{\"confirm\": true}'",
-    "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8765/api/trash/empty')\"",
-]
 
 
 @pytest.mark.parametrize("command", P_TOKEN_SECRETS)
@@ -407,9 +365,6 @@ def test_1035_browser_profile_storage_is_a_secret(box, command):
     assert box.tree_hash() == before
 
 
-@pytest.mark.parametrize("command", P_TOKEN_INTERNAL)
-def test_1035_the_agent_cannot_call_the_mode_or_trash_empty_endpoints(box, command):
-    assert box.bash(command) == "hokma_internal", command
 
 
 @pytest.mark.parametrize("command", ["curl http://127.0.0.1:8765/health", "ls ~/.config", "ls ~/.config/git",
@@ -451,13 +406,13 @@ def test_1035_the_normal_work_around_those_paths_stays_free(box, command):
     assert box.bash(command) is None, command
 
 
-def test_1035_the_other_owner_calls_are_refused_too(box):
+def test_1035_the_owner_confirmation_and_session_calls_are_secrets_the_rest_is_free(box):
     for command in ["curl -X POST http://127.0.0.1:8765/api/session/owner-nonce -d '{}'",
-                    "curl -H 'X-Hokma-Owner: 00' http://127.0.0.1:8765/api/trash",
-                    "curl -X POST http://127.0.0.1:8765/api/trash/4/restore",
-                    "curl -X POST http://127.0.0.1:8765/api/trash/4/purge -d '{}'",
+                    "curl -H 'X-Hokma-Owner: 00' http://127.0.0.1:8765/api/trash"]:
+        assert box.bash(command) == "secrets", command
+    for command in ["curl -X POST http://127.0.0.1:8765/api/trash/4/restore",
                     "curl -X POST http://127.0.0.1:8765/api/checkpoints/abc/restore-file -d '{}'"]:
-        assert box.bash(command) == "hokma_internal", command
+        assert box.bash(command) is None, command
 
 
 def test_1035_the_hook_process_refuses_a_cat_of_the_browser_profile(box):
@@ -473,119 +428,9 @@ def test_1035_the_hook_process_refuses_a_cat_of_the_browser_profile(box):
 
 # ------------------------------------------------------------------------------------------ bug 1036
 
-P_HISTORY = [
-    ("git update-ref -d refs/heads/main", "force_push"),
-    ("git update-ref --delete refs/tags/v1", "force_push"),
-    ("git update-ref --stdin < cmds.txt", "force_push"),
-    ("git for-each-ref --format='delete %(refname)' refs/heads | git update-ref --stdin", "force_push"),
-    ("git update-ref refs/hokma/checkpoints/x HEAD", "hokma_internal"),
-    ("git gc --prune", "force_push"),
-    ("git gc --prune=now", "force_push"),
-    ("git gc --prune=2.weeks.ago", "force_push"),
-    ("git reflog delete HEAD@{0}", "force_push"),
-    ("git reflog expire --expire=now --all", "force_push"),
-    ("git stash -a", "delete"),
-    ("git stash push --all", "delete"),
-    ("git stash -ua", "delete"),
-    ("git worktree remove ../wt --force", "delete"),
-    ("git worktree prune", "delete"),
-    ("git branch -D feature", "delete"),
-    ("git tag -d hokma/checkpoint-1", "hokma_internal"),
-    ("git tag --delete refs/hokma/checkpoints/a", "hokma_internal"),
-    ("git replace abc123 def456", "force_push"),
-    ("git replace -d abc123", "force_push"),
-    ("git config core.hooksPath /tmp/evil", "hokma_internal"),
-    ("git config --local core.fsmonitor 'sh /tmp/x'", "hokma_internal"),
-    ("git config alias.st '!rm -rf .'", "hokma_internal"),
-    ("git config --global alias.zz '!sh x.sh'", "hokma_internal"),
-    ("git config --add core.sshCommand 'sh x'", "hokma_internal"),
-    ("git -c core.fsmonitor=/tmp/x status", "hokma_internal"),
-    ("git -c alias.q='!sh x' q", "hokma_internal"),
-    ("git config filter.x.smudge 'sh x'", "hokma_internal"),
-    # task 3045 finding 1: the value of -f/--file/--blob/--type/--default/--comment is not the key
-    ("git config --file x core.hooksPath y", "hokma_internal"),
-    ("git config -f x core.hooksPath y", "hokma_internal"),
-    ("git config --file=x core.hooksPath y", "hokma_internal"),
-    ("git config --blob HEAD:cfg core.hooksPath y", "hokma_internal"),
-    ("git config --type=path core.hooksPath y", "hokma_internal"),
-    ("git config --type path core.hooksPath y", "hokma_internal"),
-    ("git config -t path core.excludesFile y", "hokma_internal"),
-    ("git config --comment why core.pager 'sh x'", "hokma_internal"),
-    ("git config --replace-all core.hooksPath y", "hokma_internal"),
-    ("git config --add core.hooksPath y", "hokma_internal"),
-    ("git config --global --add alias.x '!rm'", "hokma_internal"),
-    ("git config set core.hooksPath x", "hokma_internal"),
-    ("git config set --global alias.x '!rm'", "hokma_internal"),
-    ("git config set --append core.sshCommand x", "hokma_internal"),
-    ("git config --global alias.x '!rm'", "hokma_internal"),
-    ("git config -- core.hooksPath x", "hokma_internal"),
-    ("git -c user.name=a -c core.hooksPath=x status", "hokma_internal"),
-    # task 3045 finding 2: the attached forms
-    ("git -ccore.hooksPath=x status", "hokma_internal"),
-    ("git -calias.x='!sh y' x", "hokma_internal"),
-    ("git --config-env=core.hooksPath=EVIL status", "hokma_internal"),
-    ("git --config-env core.sshCommand=EVIL fetch", "hokma_internal"),
-    ("git -C . -ccore.pager=x log", "hokma_internal"),
-    # task 3045 last round: white list. What is not recognised exactly, or writes outside the short list, is refused
-    ("git config --fi=x core.hooksPath y", "hokma_internal"),
-    ("git config --fil x user.name y", "hokma_internal"),
-    ("git config --fi=x user.name y", "hokma_internal"),
-    ("git config -lfx", "hokma_internal"),
-    ("git config -fl x", "hokma_internal"),
-    ("git config --val=x --get user.name", "hokma_internal"),
-    ("git config --val x user.name", "hokma_internal"),
-    ("git config --value=x user.name", "hokma_internal"),
-    ("git config --value x --get-all user.name", "hokma_internal"),
-    ("git config --blob HEAD:x --list", "hokma_internal"),
-    ("git config --bl HEAD:x --list", "hokma_internal"),
-    ("git config --file x --list", "hokma_internal"),
-    ("git config --file x --get user.name", "hokma_internal"),
-    ("git config -f x --list", "hokma_internal"),
-    ("git config --type=bool --get core.autocrlf", "hokma_internal"),
-    ("git config --default y --get core.hooksPath", "hokma_internal"),
-    ("git config --comment c user.name a", "hokma_internal"),
-    ("git config --replace-all user.name a", "hokma_internal"),
-    ("git config --add pull.rebase true", "hokma_internal"),
-    ("git config -e", "hokma_internal"),
-    ("git config --edit", "hokma_internal"),
-    ("git config --includes --list", "hokma_internal"),
-    ("git config --unset-all user.name", "hokma_internal"),
-    ("git config --unset core.fsmonitor", "hokma_internal"),
-    ("git config --global --unset alias.x", "hokma_internal"),
-    ("git config unset core.hooksPath", "hokma_internal"),
-    ("git config pull.rebase true", "hokma_internal"),
-    ("git config --system user.name x", "hokma_internal"),
-    ("git config --show-origin user.name", "hokma_internal"),
-    ("git config --list --show-origin --bogus", "hokma_internal"),
-    ("git config user.name a b", "hokma_internal"),
-    ("git config --get --list", "hokma_internal"),
-    ("git config --get $KEY", "hokma_internal"),
-    ("git config $KEY value", "hokma_internal"),
-    ("git config user.name $(echo a)", "hokma_internal"),
-    ("git config user.name $NAME", "hokma_internal"),
-    ("git config `echo core.hooksPath` x", "hokma_internal"),
-    ("git config core.hooks* x", "hokma_internal"),
-    ("git $SUB core.hooksPath x", "hokma_internal"),
-    ("git -c core.hooksPath=x commit -m x", "hokma_internal"),
-    ("git -c core.hooksPath=x push", "hokma_internal"),
-    ("git -c $KEY=x status", "hokma_internal"),
-    ("git -c user.name.x=x status", "hokma_internal"),
-    ("git -c color.ui=always log", "hokma_internal"),          # a key outside the short list, even a harmless one
-    ("git -c 'user.name =x' status", "hokma_internal"),
-    ("git -c user.name=x -ccore.hooksPath=y status", "hokma_internal"),
-    ("git --config-env=core.hooksPath=V commit", "hokma_internal"),
-    ("git --config-env core.hooksPath=V commit", "hokma_internal"),
-    ("git -c alias.q='!sh x' q", "hokma_internal"),
-    ("git clone -c core.hooksPath=x repo", "hokma_internal"),
-    ("git clone -ccore.hooksPath=x repo", "hokma_internal"),
-    ("git clone --config core.hooksPath=x repo", "hokma_internal"),
-    ("git clone --config=core.hooksPath=x repo", "hokma_internal"),
-    ("git clone --conf core.hooksPath=x repo", "hokma_internal"),
-    ("git clone -qc core.hooksPath=x repo", "hokma_internal"),
-]
 P_HISTORY_FREE = [
     "git gc", "git gc --auto", "git gc --prune=never", "git reflog", "git reflog show HEAD", "git stash", "git stash pop",
-    "git stash list", "git stash push -m wip", "git worktree add ../wt", "git worktree list",
+    "git stash list", "git stash push -m wip", "git worktree list",
     "git branch -d merged", "git branch feature", "git tag v1.0", "git tag -d v0.9", "git tag -l",
     "git update-ref -m msg refs/heads/new HEAD", "git replace --list", "git config user.name Ana",
     "git config user.email a@example.com", "git config core.hooksPath", "git config --get core.hooksPath",
@@ -610,11 +455,6 @@ P_HISTORY_FREE = [
 ]
 
 
-@pytest.mark.parametrize("command,rule", P_HISTORY)
-def test_1036_what_destroys_history_or_the_points_is_refused(box, command, rule):
-    before = box.tree_hash()
-    assert box.bash(command) == rule, command
-    assert box.tree_hash() == before
 
 
 @pytest.mark.parametrize("command", P_HISTORY_FREE)
@@ -622,52 +462,12 @@ def test_1036_ordinary_git_work_stays_free(box, command):
     assert box.bash(command) is None, command
 
 
-P_MOVE = [
-    "mv .git .git-old", "mv .git/ /tmp/g", "mv .claude .claude.bak", "mv .hokma old-hokma", "mv ./.hokma ./x",
-    "mv x .git", "mv -f notes.md .claude", "mv d/.git d/g", "mv -T d .git", "mv .git/refs/heads/main .git/refs/heads/m2",
-    "mv '.git' x", "mv \".claude\" x", "git mv .claude .claude2", "sudo mv .git x", "bash -c 'mv .git x'",
-    "env mv .hokma x", "rename .git x", "ren .git x", "move .git x", "move-item .git x", "mi .claude x",
-    "rename-item .hokma x", "rni .git x",
-]
-P_LINK = [
-    "ln -s .git g", "ln -s ../.git g", "ln -s ~/w/.claude c", "ln -sf .claude/settings.local.json s", "ln -s .hokma h",
-    "ln -s .git/hooks hk", "ln -sfn $PWD/.git g",
-]
-PS_LINK = [
-    "New-Item -ItemType SymbolicLink -Path g -Target .git", "ni -ItemType SymbolicLink -Path c -Value .claude",
-    "New-Item -ItemType Junction -Path g -Target .git", "New-Item -ItemType HardLink -Path h -Target .claude/settings.local.json",
-    "Move-Item .git x", "Move-Item -LiteralPath .hokma -Destination x", "Rename-Item -Path .claude -NewName x",
-]
-CODE_MOVE = [
-    "python3 -c \"import shutil; shutil.move('.git', 'g')\"",
-    "python3 -c \"import os; os.rename('.claude', 'c')\"",
-    "python3 -c \"import os; os.replace('.hokma', 'h')\"",
-    "python3 -c \"import os; os.symlink('.git', 'g')\"",
-    "python3 -c \"from pathlib import Path; Path('.git').rename('g')\"",
-    "python3 -c \"from pathlib import Path; Path('g').symlink_to('.claude')\"",
-    "python3 -c \"from os import rename; rename('d/.git', 'd/g')\"",
-    "node -e \"require('fs').renameSync('.git', 'g')\"",
-    "node -e \"require('fs').symlinkSync('.claude', 'c')\"",
-    "ruby -e \"File.rename('.git', 'g')\"",
-    "ruby -e \"FileUtils.mv('.hokma', 'h')\"",
-]
 
 
-@pytest.mark.parametrize("command", P_MOVE + P_LINK + CODE_MOVE)
-def test_1036_moving_or_linking_the_harness_is_refused(box, command):
-    (box.work / ".git").mkdir(exist_ok=True)
-    assert box.bash(command) == "hokma_internal", command
-    assert (box.work / ".git").is_dir()
 
 
-@pytest.mark.parametrize("command", PS_LINK)
-def test_1036_powershell_moves_and_links_of_the_harness_are_refused(box, command):
-    assert box.ps(command) == "hokma_internal", command
 
 
-def test_1036_a_script_of_the_folder_that_moves_the_harness_is_read(box):
-    (box.work / "tidy.py").write_text("import shutil\nshutil.move('.git', 'backup-git')\n")
-    assert box.bash("python3 tidy.py") == "hokma_internal"
 
 
 @pytest.mark.parametrize("command", [
@@ -707,13 +507,6 @@ def test_1036_accepted_b_for_task_3030_is_documented_not_closed(box, command):
 
 
 # task 3045, last round: global options white list, program options, variables that steer Git
-GIT_GLOBAL_BLOCKED = [
-    "git -C /etc status", "git -C .. status", "git -C /tmp log", "git -C d -C /etc status", "git -C $X status",
-    "git --git-dir=/x status", "git --git-dir /x status", "git --work-tree=/x status", "git --namespace=n status",
-    "git --exec-path=/x status", "git --exec-path status", "git --super-prefix=x status", "git -p log", "git --paginate log",
-    "git --html-path", "git --bogus status", "git --no-pag log", "git --git status", "git --config-env=core.hooksPath=V status",
-    "git -c core.hooksPath=x status", "git -c $K=v status", "git -Cd status", "git -C", "git -c", "git $OPT status",
-]
 GIT_GLOBAL_FREE = [
     "git -C d status", "git -C . status", "git -C d -C .. status", "git --no-pager log", "git --no-optional-locks status",
     "git --no-pager -C d log --oneline", "git -c user.name=a status", "git -c init.defaultBranch=main init",
@@ -722,39 +515,12 @@ GIT_GLOBAL_FREE = [
     "git fetch origin", "git pull --rebase", "git push origin main", "git push -u origin main", "git ls-remote origin",
     "git init", "git archive HEAD -o a.tar", "git fetch --all --prune", "git clone -b main -q https://example.com/r.git",
 ]
-GIT_PROGRAM_BLOCKED = [
-    "git clone --template=x repo", "git clone --template x repo", "git clone --tem x repo", "git clone --te=x repo",
-    "git clone -u cmd repo", "git clone -ucmd repo", "git clone -qu cmd repo", "git clone --upl=x repo",
-    "git clone --upload-pack x repo", "git fetch --upload-pack x", "git fetch --upload-pack=x", "git fetch --upl x",
-    "git pull --upload-pack x", "git push --receive-pack=x", "git push --rec=x", "git push --exec=x", "git push --exe x",
-    "git ls-remote --upload-pack=x origin", "git archive --exec=x HEAD", "git init --template=x", "git init --tem=x",
-    "git -C d clone --template=x repo", "git push --receive-pack x origin main", "git clone --UPLOAD-PACK=x repo",
-]
-GIT_ENV_BLOCKED = [
-    "GIT_CONFIG_COUNT=1 git status", "GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=x git status",
-    "GIT_CONFIG_PARAMETERS=\"'core.hooksPath=x'\" git status", "GIT_CONFIG_GLOBAL=/tmp/c git status",
-    "GIT_CONFIG_SYSTEM=/tmp/c git status", "GIT_CONFIG=/tmp/c git status", "GIT_DIR=/x git status",
-    "GIT_EXEC_PATH=/x git status", "GIT_TEMPLATE_DIR=/x git init", "export GIT_DIR=x", "export GIT_CONFIG_COUNT=2",
-    "env GIT_DIR=x git status", "env -i GIT_EXEC_PATH=/x git status", "declare -x GIT_DIR=x", "set GIT_DIR=x",
-    "setx GIT_DIR x", "echo hi; export GIT_TEMPLATE_DIR=/x", "bash -c 'GIT_DIR=x git status'",
-    "git status && GIT_CONFIG_COUNT=1 git log",
-]
-GIT_ENV_BLOCKED_PS = [
-    "$env:GIT_EXEC_PATH='x'", "$env:GIT_DIR = 'x'", "Set-Item env:GIT_DIR x", "Set-Item -Path env:GIT_CONFIG_COUNT -Value 1",
-    "[Environment]::SetEnvironmentVariable('GIT_DIR','x')", "$env:GIT_CONFIG_KEY_0='core.hooksPath'; git status",
-]
 GIT_ENV_FREE = ["echo $GIT_DIR", "echo \"$GIT_EXEC_PATH\"", "printenv GIT_DIR", "echo GIT_DIR=x", "git status",
                 "[ -z \"$GIT_DIR\" ] && echo none", "git config --get core.hooksPath"]
 
 
-@pytest.mark.parametrize("command", GIT_GLOBAL_BLOCKED)
-def test_3045_global_git_options_outside_the_white_list_are_refused(box, command):
-    assert box.bash(command) == "hokma_internal", command
 
 
-@pytest.mark.parametrize("command", GIT_PROGRAM_BLOCKED)
-def test_3045_git_options_that_run_a_program_are_refused_with_every_abbreviation(box, command):
-    assert box.bash(command) == "hokma_internal", command
 
 
 @pytest.mark.parametrize("command", GIT_GLOBAL_FREE)
@@ -762,14 +528,8 @@ def test_3045_ordinary_git_options_stay_free(box, command):
     assert box.bash(command) is None, command
 
 
-@pytest.mark.parametrize("command", GIT_ENV_BLOCKED)
-def test_3045_variables_that_steer_git_are_refused_bash(box, command):
-    assert box.bash(command) == "hokma_internal", command
 
 
-@pytest.mark.parametrize("command", GIT_ENV_BLOCKED_PS)
-def test_3045_variables_that_steer_git_are_refused_powershell(box, command):
-    assert box.ps(command) == "hokma_internal", command
 
 
 @pytest.mark.parametrize("command", GIT_ENV_FREE)
@@ -777,11 +537,6 @@ def test_3045_reading_those_variables_is_free(box, command):
     assert box.bash(command) is None, command
 
 
-def test_3045_a_script_of_the_working_folder_that_sets_them_is_refused(box):
-    (box.work / "go.sh").write_text("#!/bin/sh\nGIT_DIR=/x git status\n")
-    (box.work / "go.py").write_text("import os\nos.environ['GIT_EXEC_PATH'] = '/x'\n")
-    assert box.bash("sh go.sh") == "hokma_internal"
-    assert box.bash("python go.py") == "hokma_internal"
 
 
 # ---- task 3064: the remembered session (keyring service, cookie stores, launcher, control channel)
@@ -885,48 +640,12 @@ def test_hardblock_the_device_key_store_does_not_block_ordinary_words(box):
         assert box.bash(command) is None, command
 
 
-LAUNCHER_BLOCKED = [
-    "hokma start", "hokma stop", "hokma restart", "hokma open", "HOKMA STOP", "hokma --quiet stop",
-    "hokma stop && echo done", "echo go; hokma restart", "true || hokma open",
-    "/usr/local/bin/hokma stop", "~/.local/bin/hokma restart", "./hokma open", "../bin/hokma start", "bin/hokma stop",
-    "'/opt/hokma/slot1/hokma' stop", "\"/opt/hokma/slot1/hokma\" open", "ho\"kma\" stop", "'hokma' 'restart'",
-    "C:/Users/me/AppData/Local/Hokma/slots/1/hokma.exe stop", "C:\\Hokma\\slots\\2\\hokma.exe restart",
-    "./hokma.exe start", "hokma.cmd stop",
-    "uv run hokma start", "uv run hokma open", "uv run --project cli hokma stop", "uvx hokma restart",
-    "pipx run hokma stop", "poetry run hokma start",
-    "python -m hokma_cli.main stop", "python3 -m hokma_cli.main open", "pythonw -m hokma_cli.main restart",
-    "py -3 -m hokma_cli.main start", "python -mhokma_cli.main stop", "python /opt/hokma/cli/hokma_cli/main.py stop",
-    "uv run python -m hokma_cli.main stop", "uv run python -m hokma_cli stop", "pythonw.exe -m hokma_cli.main open",
-    "sudo hokma stop", "sudo -u root hokma restart", "env hokma stop", "env A=1 B=2 hokma open", "exec hokma restart",
-    "nohup hokma start", "nohup hokma start &", "setsid hokma restart", "timeout 5 hokma stop", "command hokma stop",
-    "xargs hokma stop", "xargs -n1 hokma open", "echo stop | xargs hokma", "bash -c 'hokma stop'",
-    "sh -c \"hokma restart\"", "bash -c 'sudo hokma open'", "sudo bash -c 'exec hokma stop'",
-    "bash -lc \"/opt/hokma/hokma restart\"", "echo 'hokma stop' | sh", "(hokma stop)", "$(hokma stop)",
-    "python -c \"import subprocess; subprocess.run(['hokma', 'stop'])\"",
-    "python -c \"import os; os.system('hokma restart')\"",
-    "node -e \"require('child_process').execSync('hokma open')\"",
-]
 
 
-@pytest.mark.parametrize("command", LAUNCHER_BLOCKED)
-def test_3064_the_launcher_is_refused_bash(box, command):
-    assert box.bash(command) == "hokma_internal", command
 
 
-LAUNCHER_BLOCKED_PS = [
-    "hokma start", "& hokma stop", "& 'C:\\Hokma\\slots\\1\\hokma.exe' restart", ".\\hokma.exe open",
-    "C:\\Hokma\\hokma.exe stop", "Start-Process hokma -ArgumentList start", "Start-Process hokma -ArgumentList 'stop'",
-    "Start-Process -FilePath C:\\Hokma\\hokma.exe -ArgumentList restart,x", "saps hokma open",
-    "pythonw -m hokma_cli.main start", "python -m hokma_cli.main stop", "uv run hokma restart",
-    "cmd /c hokma stop", "cmd /c \"C:\\Hokma\\hokma.exe\" open", "powershell -Command \"hokma stop\"",
-    "pwsh -c 'hokma restart'",
-    "Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/session/logout",
-]
 
 
-@pytest.mark.parametrize("command", LAUNCHER_BLOCKED_PS)
-def test_3064_the_launcher_is_refused_powershell(box, command):
-    assert box.ps(command) == "hokma_internal", command
 
 
 SESSION_CALLS_BLOCKED = [
@@ -943,28 +662,19 @@ SESSION_CALLS_BLOCKED = [
 
 @pytest.mark.parametrize("command", SESSION_CALLS_BLOCKED)
 def test_3064_session_calls_and_control_channel_are_refused(box, command):
-    assert box.bash(command.replace("{DATA}", str(box.data))) == "hokma_internal", command
+    assert box.bash(command.replace("{DATA}", str(box.data))) == "secrets", command
 
 
 def test_3064_the_data_folder_and_control_channel_do_not_regress(box):
     for command in ["cat {DATA}/hokma.db", "ls {DATA}/control.sock", "cat {DATA}/engine.lock"]:
-        assert box.bash(command.replace("{DATA}", str(box.data))) == "hokma_internal", command
+        assert box.bash(command.replace("{DATA}", str(box.data))) == "secrets", command
     assert box.bash("cat {DATA}/database.json".replace("{DATA}", str(box.data))) == "secrets"
-    assert box.ps("Get-Content \"$env:LOCALAPPDATA\\Hokma\\engine.lock\"") == "hokma_internal"
-    assert box.hit("Read", file_path=str(box.data / "engine.lock")) == "hokma_internal"
-    for call in ["-H 'X-Hokma-Token: x'", "http://localhost:1/api/profile/permission-mode",
-                 "http://localhost:1/api/session/owner-nonce"]:
-        assert box.bash(f"curl {call}") == "hokma_internal", call
+    assert box.ps("Get-Content \"$env:LOCALAPPDATA\\Hokma\\engine.lock\"") == "secrets"
+    assert box.hit("Read", file_path=str(box.data / "engine.lock")) == "secrets"
+    for call in ["-H 'X-Hokma-Token: x'", "http://localhost:1/api/session/owner-nonce"]:
+        assert box.bash(f"curl {call}") == "secrets", call
 
 
-def test_3064_a_script_that_runs_the_launcher_is_refused(box):
-    (box.work / "stop.sh").write_text("#!/bin/sh\nhokma stop\n")
-    (box.work / "stop.py").write_text("import subprocess\nsubprocess.run(['hokma', 'restart'])\n")
-    (box.work / "stop.ps1").write_text("& hokma.exe open\n")
-    assert box.bash("sh stop.sh") == "hokma_internal"
-    assert box.bash("python stop.py") == "hokma_internal"
-    assert box.bash("bash ./stop.sh") == "hokma_internal"
-    assert box.ps(".\\stop.ps1") == "hokma_internal"
 
 
 LAUNCHER_FREE = [

@@ -2,7 +2,7 @@
 
 export type PermissionMode = "ask" | "auto";
 
-export const RULES = ["delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money"] as const;
+export const RULES = ["delete", "hokma_internal", "outside_workdir", "secrets", "real_money"] as const;
 export type RuleId = (typeof RULES)[number];
 
 export function isRule(value: unknown): value is RuleId {

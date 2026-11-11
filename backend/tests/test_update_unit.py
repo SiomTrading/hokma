@@ -196,8 +196,8 @@ def test_extensions_merge_and_cannot_disable_locks(env):
     s = build_settings()
     assert s["enabledPlugins"] == {"good@market": True}
     assert list(s["extraKnownMarketplaces"]) == ["market"]
-    assert s["permissions"]["deny"] and s["permissions"]["allow"] == ["mcp__hokma__trash_move"]   # not the student's
-    assert s["sandbox"]["enabled"] is True and s["hooks"]["PreToolUse"] and "env" not in s
+    assert s["permissions"] == {"allow": ["mcp__hokma__trash_move"]}   # not the student's
+    assert "sandbox" not in s and s["hooks"]["PreToolUse"] and "env" not in s
     _, problems = extensions.load()
     assert any("permissions" in p for p in problems) and any("evil" in p for p in problems)
 
@@ -207,7 +207,7 @@ def test_extensions_file_broken_is_ignored_not_fatal(env):
     ext.parent.mkdir()
     ext.write_text("{not json")
     s = build_settings()
-    assert "enabledPlugins" not in s and s["permissions"]["deny"]
+    assert "enabledPlugins" not in s and s["hooks"]["PreToolUse"]
 
 
 def test_ext_commands_validate_and_persist(env):
@@ -223,11 +223,10 @@ def test_ext_commands_validate_and_persist(env):
         extensions.add_marketplace("m", {"source": "shell"})
 
 
-def test_extensions_file_is_protected_from_the_agent(env):
+def test_extensions_file_is_not_protected_from_the_agent_any_more(env):
     from hokma.kit.settings import protected_paths
-    assert config.workdir_hokma_dir() in protected_paths()
-    s = build_settings()
-    assert str(config.workdir_hokma_dir()) in s["sandbox"]["filesystem"]["denyWrite"]
+    assert config.workdir_hokma_dir() not in protected_paths()
+    assert "sandbox" not in build_settings()
 
 
 # ---- update endpoint ----------------------------------------------------------------------

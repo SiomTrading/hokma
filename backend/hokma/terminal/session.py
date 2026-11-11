@@ -6,6 +6,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from hokma.core import tools
 from hokma.core.config import claude_config_dir, hokma_home, launcher_path
 from hokma.terminal.pty_backend import IS_WINDOWS, open_pty
 
@@ -76,7 +77,7 @@ def build_env() -> dict[str, str]:
     if str(launcher_dir) not in parts and launcher_dir.is_dir():
         parts.append(str(launcher_dir))
         env["PATH"] = os.pathsep.join(parts)
-    return env
+    return tools.with_tools(env, first=False)       # the owner's own shell: the tools never shadow what it already finds
 
 
 class TerminalSession:

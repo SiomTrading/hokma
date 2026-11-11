@@ -219,6 +219,8 @@ def test_bad_messages_do_not_close_the_socket(env):
 
 def test_missing_claude_is_reported(env, monkeypatch):
     monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.setenv("HOME", "/nonexistent")                  # Hokma adds ~/.local/bin to the PATH of the engine
+    monkeypatch.setenv("USERPROFILE", "/nonexistent")
     with make_client(env.engine()) as client, connect(client) as ws:
         assert turn(ws, "hello")[-1]["code"] == "claude_not_found"
 

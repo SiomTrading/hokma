@@ -151,8 +151,13 @@ def test_no_lock_stops_writing_agents_skills_or_instructions_windows_paths(rel):
     assert not any(ntpath.normcase(target).startswith(ntpath.normcase(p) + "\\") for p in protect)
 
 
-def test_the_settings_of_the_working_folder_and_the_data_folder_stay_locked(work):
+def test_only_the_settings_registration_stays_locked(work):
     protect = [str(p) for p in protected_paths()]
-    for target in (work.data / "claude-config" / "settings.json", work.home / ".hokma" / "x.json"):
+
+    def write(target):
         payload = {"tool_name": "Write", "cwd": str(work.home), "tool_input": {"file_path": str(target), "content": "x"}}
-        assert guard.decide(payload, protect)[0] == 2
+        return guard.decide(payload, protect)[0]
+
+    assert write(work.data / "claude-config" / "settings.json") == 2        # content without the hooks
+    assert write(work.home / ".hokma" / "x.json") == 0                       # task 3169: no longer protected
+    assert write(work.data / "claude-config" / "plugins" / "x.json") == 0

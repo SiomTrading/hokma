@@ -194,41 +194,10 @@ def test_a09c_the_shutdown_is_written_in_the_journal_as_the_owner(stops, db):
 
 
 # ---- A-10: an agent cannot name the route -------------------------------------------------------------------------
-@pytest.mark.parametrize("command", [
-    "curl -X POST http://127.0.0.1:8765/api/system/shutdown",
-    "Invoke-WebRequest -Method POST -Uri http://127.0.0.1:8765/api/system/shutdown",
-    "python3 -c \"import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8765/api/system/shutdown', method='POST'))\"",
-])
-def test_a10_hardblock_refuses_every_way_of_naming_the_route(box, command):
-    assert box.bash(command) == "hokma_internal"
-    assert box.ps(command) == "hokma_internal"
 
 
-def test_a10_the_hook_process_answers_with_the_block_line(box):
-    payload = {"tool_name": "Bash", "tool_input": {"command": "curl -X POST http://127.0.0.1:8765/api/system/shutdown"},
-               "cwd": str(box.work)}
-    done = box.run_hook(payload)
-    assert done.returncode == 2 and done.stderr.splitlines()[0] == "HOKMA_BLOCKED hokma_internal"
 
 
-@pytest.mark.parametrize("route", [
-    "http://127.0.0.1:8765/api/system/%73hutdown",
-    "http://127.0.0.1:8765/api/system/%2573hutdown",                  # encoded twice
-    "http://127.0.0.1:8765/api/system/./shutdown",
-    "http://127.0.0.1:8765/api/system/x/../shutdown",
-    "http://127.0.0.1:8765/api//system///shutdown",
-    "http://127.0.0.1:8765/API/System/SHUTDOWN",
-    "http://127.0.0.1:8765/api/%2e/system/shutdown",
-    "http://127.0.0.1:8765/api/system%2Fshutdown",
-    "http://127.0.0.1:8765/api/x\\ y/../system/shutdown",         # a segment with a space, removed by `..`
-    "http://127.0.0.1:8765/api/x%20y/../system/shutdown",
-    "http://127.0.0.1:8765/api/x%09y/../system/shutdown",         # a tab inside the segment
-    "http://127.0.0.1:8765/api/system/sh%0autdown",               # a line break inside the word
-])
-def test_a10b_hardblock_refuses_the_roundabout_forms_of_the_route(box, route):
-    assert box.bash(f"curl -X POST {route}") == "hokma_internal", route
-    assert box.ps(f"Invoke-WebRequest -Method POST -Uri {route}") == "hokma_internal", route
-    assert box.bash(f"python3 -c \"import urllib.request as u; u.urlopen('{route}', data=b'')\"") == "hokma_internal", route
 
 
 def test_a10c_a_normal_api_call_is_still_free(box):
@@ -302,16 +271,5 @@ def test_n08_nonces_are_capped_and_expired_ones_dropped(stops, monkeypatch):
     assert len(app.state.shutdown_nonces) == 1
 
 
-def test_a10d_the_dot_segments_are_removed_the_way_rfc_3986_does():
-    from hokma.kit.hardblock import norm_route, remove_dot_segments
-
-    assert remove_dot_segments("/a/b c/../d/./e") == "/a/d/e"
-    assert remove_dot_segments("/a/../../b") == "/b"
-    assert norm_route("/API//x\ty/%2e%2E/System/./SHUTDOWN") == "/api/system/shutdown"
 
 
-def test_a10e_the_words_in_order_are_the_backstop(box):
-    for command in ("curl -X POST http://127.0.0.1:8765/api/foo bar baz/qux/system/shut\tdown",
-                    "curl -X POST 'http://127.0.0.1:8765/ap i/sys tem/shu tdown'"):
-        assert box.bash(command) == "hokma_internal", command
-    assert box.bash("echo shutdown system api") is None                 # wrong order

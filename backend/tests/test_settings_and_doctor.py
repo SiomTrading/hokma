@@ -9,7 +9,7 @@ from hokma.doctor import checks
 from hokma.i18n import t
 from hokma.kit import guard, integrity
 from hokma.kit.launch import IntegrityError, check_integrity, prepare_claude_launch
-from hokma.kit.settings import _abs_rule_path, build_settings, guard_command, write_settings
+from hokma.kit.settings import build_settings, guard_command, protected_paths, write_settings
 
 
 @pytest.fixture
@@ -22,26 +22,27 @@ def env(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_abs_rule_path_posix_and_windows():
-    from pathlib import PurePosixPath, PureWindowsPath
-
-    assert _abs_rule_path(PurePosixPath("/home/x/.local/share/hokma")) == "//home/x/.local/share/hokma"
-    assert _abs_rule_path(PureWindowsPath("C:\\Users\\Jos\u00e9\\AppData\\Local\\Hokma")) == "//C:/Users/Jos\u00e9/AppData/Local/Hokma"
-
-
-def test_settings_have_sandbox_hook_and_rules(env):
+def test_settings_have_the_two_hooks_and_nothing_that_stops_installers(env):
     s = build_settings()
-    deny = s["permissions"]["deny"]
-    data_rule = str(env / "data").lstrip("/")
-    assert f"Edit(//{data_rule}/**)" in deny and f"Write(//{data_rule}/**)" in deny
-    assert any(d.startswith("Bash(*") for d in deny)
-    sb = s["sandbox"]
-    assert sb["enabled"] is True and sb["failIfUnavailable"] is True and sb["allowUnsandboxedCommands"] is False
-    assert sb["filesystem"]["allowWrite"] == [str(env / "work"), str(env / "data-requests")]
-    assert str(env / "data") in sb["filesystem"]["denyWrite"]
+    assert "sandbox" not in s and "deny" not in s["permissions"]           # task 3169: no sandbox, no deny list
+    assert guard.registration_intact(json.dumps(s), [str(p) for p in protected_paths()])
     hook = s["hooks"]["PreToolUse"][0]
     assert hook["matcher"] == "Edit|MultiEdit|Write|NotebookEdit"
     assert hook["hooks"][0]["command"] == guard_command() and guard_command().endswith("|| exit 2")
+    assert s["hooks"]["PreToolUse"][1]["matcher"] == ".*"
+    assert s["disableAllHooks"] is False
+
+
+def test_only_the_hooks_and_their_registration_are_protected(env):
+    paths = [str(p) for p in protected_paths()]
+    data = env / "data"
+    assert str(data / "claude-config" / "settings.json") in paths
+    assert str(data / "claude-config" / "settings.engine.json") in paths
+    assert str(data / "guard") in paths
+    assert not any(guard.under_any(str(data / "claude-config" / "plugins" / "x"), [p]) for p in paths)
+    assert not any(guard.under_any(str(data / "extensions.json"), [p]) for p in paths)
+    assert not any(guard.under_any(str(env / "work" / ".hokma" / "x"), [p]) for p in paths)
+    assert any(guard.under_any(str(guard.__file__), [p]) for p in paths)         # the code of the hooks
 
 
 def test_launch_regenerates_settings_every_time(env):
@@ -53,21 +54,26 @@ def test_launch_regenerates_settings_every_time(env):
                         "ENABLE_CLAUDEAI_MCP_SERVERS": "false"}     # claude.ai connectors stay out of Hokma
     assert spec.cwd == str(env / "work")
     original = path.read_text()
-    # the agent "edits" its settings: drops the hook, the sandbox and the rules
+    # the agent "edits" its settings and drops the hooks
     path.write_text(json.dumps({"permissions": {"allow": ["Bash(*)"]}}))
     prepare_claude_launch()
     assert path.read_text() == original
 
 
-def test_doctor_checks_every_protected_path(env):
+def test_doctor_checks_that_both_hooks_are_registered(env):
     write_settings()
     assert checks.check_settings_lock().status == checks.OK
     path = env / "data" / "claude-config" / "settings.json"
     s = json.loads(path.read_text())
-    s["sandbox"]["filesystem"]["denyWrite"].pop()
+    s["hooks"]["PreToolUse"].pop()
     path.write_text(json.dumps(s))
     c = checks.check_settings_lock()
-    assert c.status == checks.WARN and "denyWrite" in c.detail
+    assert c.status == checks.WARN and "hooks" in c.detail
+
+
+def test_doctor_reports_missing_tools(env):
+    c = checks.check_tools()
+    assert c.status == checks.WARN and "node" in c.detail and "bun" in c.detail
 
 
 def test_doctor_fails_when_runtime_inside_workdir(env, monkeypatch):
@@ -88,21 +94,22 @@ def _decide(tool, path, protect, cwd):
                         [str(p) for p in protect])[0]
 
 
-def test_guard_blocks_protected_even_through_tricks(tmp_path, monkeypatch):
-    data, work = tmp_path / "data", tmp_path / "work"
-    (data / "claude-config").mkdir(parents=True)
+def test_guard_blocks_the_hooks_even_through_tricks(tmp_path, monkeypatch):
+    hooks, work = tmp_path / "hooks", tmp_path / "work"
+    hooks.mkdir()
     work.mkdir()
-    (work / "link").symlink_to(data)
+    (hooks / "hardblock.py").write_text("# hook\n")
+    (work / "link").symlink_to(hooks)
     monkeypatch.setenv("HOME", str(tmp_path))
-    prot = [data]
-    assert _decide("Edit", data / "claude-config" / "settings.json", prot, work) == 2
-    assert _decide("Write", work / "link" / "claude-config" / "settings.json", prot, work) == 2   # symlink
-    assert _decide("Write", "../data/claude-config/settings.json", prot, work) == 2               # relative
-    assert _decide("Write", work / ".." / "data" / "x", prot, work) == 2                          # ..
-    assert _decide("Edit", "~/data/x", prot, work) == 2                                           # ~ (HOME=tmp)
-    assert _decide("NotebookEdit", data / "n.ipynb", prot, work) == 2
+    prot = [hooks]
+    assert _decide("Edit", hooks / "hardblock.py", prot, work) == 2
+    assert _decide("Write", work / "link" / "hardblock.py", prot, work) == 2                      # symlink
+    assert _decide("Write", "../hooks/hardblock.py", prot, work) == 2                             # relative
+    assert _decide("Write", work / ".." / "hooks" / "x", prot, work) == 2                         # ..
+    assert _decide("NotebookEdit", hooks / "n.ipynb", prot, work) == 2
     assert _decide("Edit", work / "notes.md", prot, work) == 0
-    assert _decide("Read", data / "x", prot, work) == 0                                           # not a file-editing tool
+    assert _decide("Edit", "~/hooks/x", prot, work) == 0              # the tool does not expand `~`: it is a name in `work`
+    assert _decide("Read", hooks / "x", prot, work) == 0                                           # not a file-editing tool
 
 
 def test_guard_fails_closed(tmp_path):

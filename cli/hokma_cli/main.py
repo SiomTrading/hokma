@@ -228,6 +228,30 @@ def cmd_kit_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_install_tools(_: argparse.Namespace) -> int:
+    """Node and Bun, portable, at the versions of installer/lock.json (sha256 checked before unpacking)."""
+    from hokma.core import tools
+
+    try:
+        done = tools.ensure_tools(lambda line: print(line, flush=True))
+    except tools.ToolsError as exc:
+        print(f"[error] {exc}", file=sys.stderr)
+        return 1
+    print("tools installed: " + (", ".join(done) if done else "already up to date"))
+    return 0
+
+
+def _ensure_tools_quietly() -> None:
+    """After an update: bring Node and Bun in when the install does not have them yet. A failure (no network) never
+    fails the update; `hokma doctor` reports it and `hokma install-tools` repeats it."""
+    from hokma.core import tools
+
+    try:
+        tools.ensure_tools(lambda line: print(line, file=sys.stderr, flush=True))
+    except (tools.ToolsError, OSError) as exc:
+        print(f"[warning] could not install Node and Bun: {exc}", file=sys.stderr)
+
+
 def cmd_post_update(_: argparse.Namespace) -> int:
     """Run by the NEW runtime right after the pointer flips: kit sync + settings. Prints the kit report."""
     from hokma.kit.integrity import app_root
@@ -240,6 +264,7 @@ def cmd_post_update(_: argparse.Namespace) -> int:
     if code:
         return code
     _ensure_shortcuts()
+    _ensure_tools_quietly()
     print(json.dumps(report.to_dict()))
     return 0
 
@@ -504,6 +529,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("init-config", help="Write Hokma's Claude settings").set_defaults(fn=cmd_init_config)
     sub.add_parser("prepare-claude", help="Regenerate Claude settings and print the launch spec (JSON)"
                    ).set_defaults(fn=cmd_prepare_claude)
+    sub.add_parser("install-tools", help="Install Node and Bun for plugins (portable, sha256 checked)"
+                   ).set_defaults(fn=cmd_install_tools)
     sub.add_parser("write-manifest", help="Write the sha256 integrity manifest").set_defaults(fn=cmd_write_manifest)
     sub.add_parser("verify-install", help="Exit 0 only if the install matches its manifest"
                    ).set_defaults(fn=cmd_verify_install)

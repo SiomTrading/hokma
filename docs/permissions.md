@@ -1,17 +1,21 @@
 # Permissions, always-on protections, trash and restore points
 
-Hokma has two permission modes, `ask` and `auto` ("Do everything without asking"). Seven protections apply in both,
-with no switch in the app. What is not listed below is the owner's to do.
+Hokma has two permission modes, `ask` and `auto` ("Do everything without asking"). Four locks apply in both, with no
+switch in the app, plus the protection that keeps them on (task 3169; before 0.0.22 there were seven rules). What is
+not listed below is the owner's and the agent's to do: install dependencies (pip, npm, uv, bun), software (Node, npm,
+npx, pip, winget, brew), plugins, skills and MCP servers from the chat, change Hokma's configuration and permission
+settings, Git without limits inside the working folder.
 
 | Rule | What it refuses |
 |---|---|
-| `delete` | Deleting files or folders, including quoted, encoded and wrapped forms (`eval`, `base64 -d \| sh`, `bash -c`, `python -c`, `node -e`, `-EncodedCommand`, scripts of the working folder that call delete APIs) |
-| `truncate` | Emptying a file that has content (`Write` with nothing, `: > f`, `truncate -s 0`, `Clear-Content`, `Set-Content f ''`) |
-| `hokma_internal` | Reading with commands, writing or editing Hokma's data folder, `.hokma/`, `.claude/settings*.json` of the working folder; redefining `CLAUDE_CONFIG_DIR`, `HOKMA_HOME`, `HOKMA_DATA_DIR`; renaming or moving `.git`, `.claude`, `.hokma` (or anything inside `.git` and `.hokma`) with `mv`, `ren`, `Move-Item`, `Rename-Item`, `git mv` or `shutil.move` / `os.rename` / `fs.renameSync` in a command or a script; a link (`ln`, `mklink`, `New-Item -ItemType SymbolicLink`, `os.symlink`) that points at them; `git config` / `git -c` / `git -ckey=...` / `git --config-env=key=VAR` that sets a key which runs a program, in any form (`--file`, `--add`, `--replace-all`, `git config set`; reading, listing and unsetting stay free) (`core.hooksPath`, `core.fsmonitor`, `core.sshCommand`, `alias.*`, filter and diff drivers); `git tag -d` of a Hokma tag; naming Hokma's own owner calls (`X-Hokma-Token`, `X-Hokma-Owner`, `/api/profile/permission-mode`, `/api/session/owner-nonce`, the Trash and restore point calls); running the `hokma` launcher with `start`, `stop`, `restart` or `open` (any path to it or to a slot's `hokma.exe`, also through `python -m hokma_cli.main`, `uv run hokma`, `pythonw`, `sudo`, `env`, `exec`, `xargs`, `bash -c`, PowerShell and `Start-Process`); naming `/api/session/resume` or `/api/session/logout`; naming the control channel and lock of the background engine (`control.sock`, `hokma-control-*`, `engine.lock`) |
-| `force_push` | `git push` with force, delete, mirror or a `+` / `:` refspec; `filter-branch`, `reflog expire` and `reflog delete`, `gc --prune` (any value but `never`), `update-ref -d` and `update-ref --stdin`, `git replace` (except listing) |
-| `outside_workdir` | Writing outside the working folder; formatting or touching disks |
-| `secrets` | The keys stored for Connections (service `hokma-market`) and the remembered session (service `hokma-session`, read or write), `database.json`, Claude credentials, `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.git-credentials`, `keyring`, `cmdkey /list`, `security find-*-password`, `git credential fill`, `gh auth token`; the profile folders of Chrome, Chromium, Edge, Brave, Firefox and Safari on Linux, macOS and Windows (also snap and flatpak) and their `Local Storage`, `Session Storage`, `IndexedDB`, `Local State`, and the cookie stores by name or by search (`Cookies`, `Network/Cookies`, Firefox `cookies.sqlite`, `find -name Cookies`, `-Filter Cookies`, obvious globs); `/proc/<pid>/mem`, `environ`, `cmdline` of other processes (`/proc/self` stays free) |
 | `real_money` | MCP tools named like `place_order` / `submit_order`, and hosts that place real orders (`hardblock_brokers.json`) |
+| `secrets` | The keys stored for Connections (service `hokma-market`) and the remembered session (service `hokma-session`, read or write), Hokma's database (`database.json`, `hokma.db`), `identity.key`, `codex-home`, `acp-home`, `backups` and the Claude sign-in files in `claude-config` (`.credentials*`, `.claude.json`, `backups`), `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.git-credentials`, `keyring`, `cmdkey /list`, `security find-*-password`, `git credential`, `gh auth token`; the session token header and the owner and session calls of Hokma's API (`X-Hokma-Token`, `X-Hokma-Owner`, `/api/session/owner-nonce`, `resume`, `enter`, ...) and the control channel and lock of the engine; the profile folders of Chrome, Chromium, Edge, Brave, Firefox and Safari (also snap and flatpak) and their `Local Storage`, `Session Storage`, `IndexedDB`, `Local State`, and the cookie stores by name or by search; `/proc/<pid>/mem`, `environ`, `cmdline` of other processes (`/proc/self` stays free). Also a recursive read (`grep -r`, `rg`, `tar`, `cp -r`, `zip`, `find -exec`) over a folder that contains Hokma's data folder. The rest of Hokma's data folder (plugins, settings, logs, tools) is readable |
+| `delete` | Deleting files or folders, including quoted, encoded and wrapped forms (`eval`, `base64 -d \| sh`, `bash -c`, `python -c`, `node -e`, `-EncodedCommand`, scripts of the working folder that call delete APIs). The installer idiom that feeds a shell with a download (`curl url \| sh`, `bash -c "$(curl url)"`, `iex (irm url)`) is allowed: it is how software installers run |
+| `outside_workdir` | Writing outside the working folder and Hokma's data folder (with its `claude-config`, plugins and tools); formatting or touching disks. What a software installer writes on its own (npm, pip, winget, brew) is not seen by the hook and is not refused |
+| `hokma_internal` | Changing the files of the hooks (the `hokma` package they run from, the log folder `<data>/guard`) and the settings files that register them (`settings.json`, `settings.engine.json`). `settings.json` may be edited with Edit or Write as long as the result still registers both hooks (`guard.registration_intact`) |
+
+There is no sandbox and no `permissions.deny` list: a sandbox would stop the installers and the first-start downloads of
+plugins from writing where they must.
 
 What an agent does instead of deleting: `trash_move(paths, reason)` from the `hokma` MCP server. The owner restores,
 deletes for good or empties the trash from Settings > Trash (session token plus confirmation). Before each turn in
@@ -24,6 +28,11 @@ deletes for good or empties the trash from Settings > Trash (session token plus 
   appends a line to `<data>/guard/blocks.jsonl`; the engine stores it in `guard_events` and sends `guard_block`.
 - The settings template pins `"disableAllHooks": false`; `claude` is launched with `--settings <generated file>` and
   `--setting-sources user`. The generated file is rebuilt at every launch.
+- The engine process and the terminal get a PATH that starts with Hokma's tools (`hokma.core.tools`): `<data>/bin` (uv),
+  `<data>/tools/node`, `<data>/tools/bun`, the Python uv installed, then `~/.bun/bin` and `~/.local/bin`. Node and Bun
+  come from `installer/lock.json` (sha256 checked before unpacking) through `hokma install-tools`, which the three
+  installers and `hokma update` run. The environment filter keeps the variables installers need (`BUN_INSTALL`, the npm
+  prefix and cache, `CARGO_HOME`, `GOPATH`, ...).
 - All the files are in the sha256 manifest, so changing `hardblock.py` or `hardblock_brokers.json` in an installed copy
   stops Hokma from starting.
 - The permission mode is `profile.permission_mode`; only `PUT /api/profile/permission-mode` (session token plus the
@@ -222,48 +231,32 @@ Run on Windows and macOS: `python scripts/r1_probe.py` with the same CLI version
 and requires a median of 150 ms or less. Linux, Python 3.12: median about 36 ms, maximum about 44 ms. Windows is
 pending, run by QA/owner (process start is slower there; run the same test).
 
-## Git arguments (task 3045)
+## Git
 
-- Options before the Git subcommand are a white list. Allowed: `-C <path>` when the path (resolved from the working
-  folder) is inside the working folder, `--no-pager`, `--no-optional-locks`, `--version`, and `-c key=value` /
-  `--config-env=key=VAR` with a safe key (`user.name`, `user.email`, `core.autocrlf`, `init.defaultBranch`). Everything
-  else is refused with `hokma_internal`: `--exec-path`, `--git-dir`, `--work-tree`, `--namespace`, `--super-prefix`,
-  `--paginate` / `-p`, `--html-path`, unknown or abbreviated options, `-c` with another key, and any option whose value
-  comes from a variable or an expansion.
-- In `clone`, `init`, `fetch`, `pull`, `push`, `ls-remote` and `archive`, `--template`, `--upload-pack`,
-  `--receive-pack`, `--exec`, any abbreviation of them (`--tem`, `--upl`, `--rec`, `--exe`), their `--option=value` form
-  and `clone -u` / `-u<value>` are refused. `push -u` is `--set-upstream` and stays free. Normal clone, fetch, pull and
-  push are untouched.
-- A command line, or a script of the working folder, that sets `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`,
-  `GIT_CONFIG_VALUE_*`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_DIR`,
-  `GIT_EXEC_PATH` or `GIT_TEMPLATE_DIR` is refused (`VAR=x git ...`, `export`, `env`, `set`, `$env:`, `setx`,
-  `Set-Item env:`, `declare -x`). Reading or printing them (`echo $GIT_DIR`) is free.
+Git is free inside the working folder. The hook only refuses `git credential` (a way to read stored credentials) and the
+places Git could write outside the allowed folders: `-C <path>`, the destination of `clone` and `init`, the path of
+`worktree add`.
 
 ## What the hard block is, and what it is not
 
 The hard block is defense in depth. In no-prompt mode the agent can run arbitrary code, so the integrity of the harness
 rests on the structural protections, not on parsing every command:
 
-1. **Restore points.** They are Git refs of the project (`refs/hokma/checkpoints/*`, inside the project's `.git`, so not
-   outside the working folder). They are trusted only when the commit SHA matches the one Hokma recorded in its own
-   database; a ref the agent writes, moves or packs is ignored. The hard block also refuses commands and tools that
-   write `.git/refs/hokma` or `packed-refs`, and `git update-ref` on `refs/hokma`.
+1. **The settings are rebuilt at every launch** and passed with `--settings`, so an edit of the registration does not
+   survive a restart; `guard.py` also refuses, during the session, an edit that would take the hooks out of it.
 2. **Owner-only endpoints.** The mode change, the Trash and the restore point restores need the session token and the
    owner confirmation, which one tab registers once per start with a one-time secret (above).
-3. **The integrity manifest.** The sha256 manifest of the installed app is checked by `hokma doctor`
+3. **The integrity manifest.** The sha256 manifest of the installed app is checked at every launch and by `hokma doctor`
    (`check_integrity`).
+4. **Restore points.** Git refs of the project (`refs/hokma/checkpoints/*`), trusted only when the commit SHA matches the one
+   in Hokma's own database.
 
-Further parser findings are classified B unless they break one of these three protections.
+Further parser findings are classified B unless they break one of these protections.
 
 ## Residual risk
 
-The protections read the text of a command and of the scripts in the working folder. A script that builds the name of a
-delete call at run time (for example `getattr(os, 're' + 'move')`) is not on the list. The restore point taken before
-the turn shows the file as gone and brings it back (test P10). On Windows there is no sandbox, so the restore points
-and the trash are the net.
-
-Accepted B for task 3030 (the sandbox), not closed by the text rules and pinned by `test_1036_accepted_b_for_task_3030`:
-`sed -i d f`, `awk '' > f`, `alias zz=rm`, `ln -sf /dev/null f`, `tar --remove-files`, `rsync --delete`,
-`python -c "open('f','w')"`. Each empties or removes a working-folder file; the restore point of the turn (P10) brings
-it back. Also not closed: `mv` of a folder that contains `.git`, a glob such as `mv .g* x`, `Path.replace` on `.git`,
-and a name built at run time.
+The locks read the text of a command and of the scripts in the working folder. A script that builds the name of a
+delete call at run time (for example `getattr(os, 're' + 'move')`) is not on the list, and with no sandbox a command can
+empty or remove a file in ways the text rules do not see (`sed -i d f`, `awk '' > f`, `tar --remove-files`,
+`rsync --delete`, `python -c "open('f','w')"`). The restore point taken before each turn in `auto` mode shows the file as
+gone and brings it back (test P10), and the trash is the net for what the agent moves with `trash_move`.

@@ -1,17 +1,9 @@
 {
   "disableAllHooks": false,
   "permissions": {
-    "allow": ["mcp__hokma__trash_move"],
-    "deny": []
-  },
-  "sandbox": {
-    "enabled": true,
-    "allowUnsandboxedCommands": false,
-    "filesystem": {
-      "allowWrite": [],
-      "denyWrite": [],
-      "denyRead": []
-    }
+    "allow": [
+      "mcp__hokma__trash_move"
+    ]
   },
   "hooks": {
     "PreToolUse": [

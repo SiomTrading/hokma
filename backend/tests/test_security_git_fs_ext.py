@@ -257,13 +257,12 @@ def test_workdir_copy_is_informational_only(env):
     assert extensions.mirror_differs() is True
 
 
-def test_whole_hokma_folder_is_protected_from_the_agent(env):
+def test_the_hokma_folder_of_the_working_folder_is_no_longer_protected(env):
     work = env / "work"
-    assert config.workdir_hokma_dir() in protected_paths()
+    assert config.workdir_hokma_dir() not in protected_paths()
     protect = [str(p) for p in protected_paths()]
     for rel in (".hokma/extensions.json", ".hokma/anything-new.json", ".hokma/sub/x"):
         payload = {"tool_name": "Write", "tool_input": {"file_path": str(work / rel)}, "cwd": str(work)}
-        assert guard.decide(payload, protect)[0] == 2, rel
-    assert str(work / ".hokma") in build_settings()["sandbox"]["filesystem"]["denyWrite"]
+        assert guard.decide(payload, protect)[0] == 0, rel
     assert guard.decide({"tool_name": "Write", "tool_input": {"file_path": str(work / "notes.md")},
                          "cwd": str(work)}, protect)[0] == 0

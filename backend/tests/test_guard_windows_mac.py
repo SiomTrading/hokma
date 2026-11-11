@@ -128,5 +128,6 @@ def test_hardlink_to_a_protected_file_is_blocked(dirs):
     protected = data / "claude-config" / "settings.json"
     protected.write_text("{}")
     os.link(protected, work / "innocent.json")
-    assert decide(work / "innocent.json", [data / "elsewhere"], work) == 2   # nlink > 1, even if root differs
+    assert decide(work / "innocent.json", [protected], work) == 2             # the same inode as a protected file
+    assert decide(work / "innocent.json", [data / "elsewhere"], work) == 0   # a hard link to something not protected
     assert decide(work / "plain.txt", [data], work) == 0

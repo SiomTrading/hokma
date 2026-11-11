@@ -126,3 +126,34 @@ def test_imports_are_plain_markdown_and_never_hidden(env):
     (env.home / "CLAUDE.md").write_text("@.hokma/extensions.md\n@notes.txt\n@ok.md\n")
     text = instructions.build(str(env.home), None)
     assert "PLAIN-OK" in text and "HIDDEN-ONE" not in text and "NOT-MARKDOWN" not in text
+
+
+def test_imports_have_a_total_cap_and_so_does_the_whole_text(env):
+    for i in range(30):
+        (env.home / f"big{i}.md").write_text("Q" * instructions.MAX_FILE)
+    (env.home / "CLAUDE.md").write_text("\n".join(f"@big{i}.md" for i in range(30)) + "\n")
+    text = instructions.build(str(env.home), None)
+    assert text.count("Q") <= instructions.MAX_IMPORTS
+    assert len(text) <= instructions.MAX_TOTAL + 1
+
+
+def test_a_fifo_named_like_the_file_does_not_hang(env):
+    import os, signal
+    os.mkfifo(env.home / "CLAUDE.md")
+    os.mkfifo(env.home / "HOKMA.md")
+    signal.alarm(10)                                   # a hang would end the test run here
+    try:
+        text = instructions.build(str(env.home), None)
+    finally:
+        signal.alarm(0)
+    assert text.startswith("# Identity")
+
+
+def test_the_instructions_file_and_folder_are_private(env, tmp_path):
+    import os, stat
+    folder = tmp_path / "ins"
+    path = instructions.write_file("rules\n", folder)
+    assert stat.S_IMODE(os.stat(folder).st_mode) == 0o700 and stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    os.chmod(path, 0o664)                              # left by 0.0.21 with the umask
+    instructions.write_file("rules\n", folder)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
