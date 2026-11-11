@@ -183,6 +183,15 @@ class ClaudeCodeAdapter:
                 modes.flag_for(ctx.mode), "--model", TIER_ALIAS.get(ctx.model, ctx.model)]
         if ctx.agent:
             argv += ["--agent", ctx.agent]
+        if ctx.instructions:                         # Hokma's own text; `--setting-sources user` never loads the folder's
+            from hokma.core.config import claude_config_dir
+            from hokma.kit import instructions
+
+            try:
+                argv += ["--append-system-prompt-file",
+                         instructions.write_file(ctx.instructions, claude_config_dir() / "instructions")]
+            except OSError as exc:
+                raise EngineError("instructions", f"cannot write the instructions file: {exc}") from exc
         if not ctx.extra.get("no_session_flags"):
             argv += ["--resume", ref] if ctx.resume else ["--session-id", ref]
         try:

@@ -22,6 +22,7 @@ from hokma.engines import catalog
 from hokma.engines.claude_code import ClaudeCodeAdapter
 from hokma.engines.registry import build_adapter, tier_of
 from hokma.i18n import t
+from hokma.kit import instructions
 from hokma.kit.launch import LaunchSpec, prepare_claude_launch
 from hokma.permissions import checkpoints, guard_log, modes
 from hokma.scheduler import schedule
@@ -129,6 +130,7 @@ class JobRunner:
         adapter, connection, model = self.resolve_engine(model)
         ctx = EngineContext(conversation_id="", model=model, cwd=spec.cwd, agent=job.agent_slug, mode=mode,
                             task_id=str(task_id), connection=connection,
+                            instructions=instructions.build(spec.cwd, job.agent_slug),
                             extra={"base_flags": RUN_FLAGS, "no_session_flags": True})
         try:
             eng = await adapter.open(ctx)

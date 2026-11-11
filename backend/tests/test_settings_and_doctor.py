@@ -49,7 +49,8 @@ def test_launch_regenerates_settings_every_time(env):
     path = env / "data" / "claude-config" / "settings.json"
     assert spec.args == ["--settings", str(path), "--setting-sources", "user", "--mcp-config",
                          str(env / "data" / "claude-config" / "hokma-mcp.json")]
-    assert spec.env == {"CLAUDE_CONFIG_DIR": str(env / "data" / "claude-config")}
+    assert spec.env == {"CLAUDE_CONFIG_DIR": str(env / "data" / "claude-config"),
+                        "ENABLE_CLAUDEAI_MCP_SERVERS": "false"}     # claude.ai connectors stay out of Hokma
     assert spec.cwd == str(env / "work")
     original = path.read_text()
     # the agent "edits" its settings: drops the hook, the sandbox and the rules

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.0.21
+
+Hokma answers as Hokma. In 0.0.20 the engine answered "I am Claude, Sonnet 5.5, in Claude Code" and listed the
+owner's claude.ai connectors (Gmail, Drive, Slack), as if the fund's instructions did not exist.
+
+- Cause, proven with a real run (a temporary folder whose instruction file imports another file with an invented
+  identity): Hokma starts Claude Code with `--setting-sources user`, and that flag also decides which memory files
+  Claude Code loads. With `user` the folder's instruction file never entered and the engine said it was Claude; with
+  `user,project` it took the invented identity.
+- Fix for every engine: Hokma now hands over its instructions itself instead of waiting for the engine to find a
+  file. The text is built on every turn: an identity block, HOKMA.md with the owner and fund names filled in, your own
+  instruction file (CLAUDE.md, with its `@file` lines included if the file is inside the folder) and the persona of the
+  active agent. Claude Code receives it with `--append-system-prompt-file` (a file in Hokma's protected config
+  folder, named after its content); Codex, ACP engines and API connections receive the same text through their own
+  channel (AGENTS.md, first prompt block, system prompt). Scheduled runs get it too.
+- `project` is not added to `--setting-sources`: it would load the settings of the working folder, which the agent can
+  edit, and they could weaken the locks.
+- Identity: asked who it is, the agent says it is Hokma, the agent team of the owner's fund. Asked which engine or
+  model it runs on, it says so (Claude, ChatGPT, Gemini) without presenting itself as Claude Code or Codex.
+- Hokma starts Claude Code with `ENABLE_CLAUDEAI_MCP_SERVERS=false`: the connectors of your claude.ai account no
+  longer mix into Hokma. MCP servers you approved in Hokma or added yourself with `claude mcp add` keep working.
+
 ## 0.0.20
 
 Hokma can be used in the browser as an alternative to the app.

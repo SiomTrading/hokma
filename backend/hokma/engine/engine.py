@@ -115,24 +115,11 @@ class ChatEngine:
 
     @staticmethod
     def instructions_for(project_path: str, agent: str | None) -> str:
-        """HOKMA.md and the persona of the active agent, for engines that have no `--agent`."""
-        parts: list[str] = []
-        base = Path(project_path)
-        for name in ("HOKMA.md", "CLAUDE.md"):
-            try:
-                parts.append((base / name).read_text(encoding="utf-8")[:20_000])
-                break
-            except OSError:
-                continue
-        if agent:
-            try:
-                body = (base / ".claude" / "agents" / f"{agent}.md").read_text(encoding="utf-8")
-                if body.startswith("---"):
-                    body = body.split("---", 2)[-1]
-                parts.append(body.strip()[:10_000])
-            except OSError:
-                pass
-        return "\n\n".join(parts)
+        """What every engine is told: identity, HOKMA.md with the names filled in, the student's instruction file and
+        the persona of the active agent. Built here, not discovered by the engine in the folder."""
+        from hokma.kit import instructions
+
+        return instructions.build(project_path, agent)
 
     async def take_checkpoint(self, project_path: str, conversation_id: str) -> None:
         """Restore point before a turn (auto mode). A failure never stops the turn."""

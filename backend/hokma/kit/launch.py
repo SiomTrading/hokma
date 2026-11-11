@@ -7,6 +7,11 @@ agent could edit) from loosening anything. The MCP servers the student approved 
 student added themselves with `claude mcp add` keep working: they live in <config>/.claude.json). Remote servers
 signed in from the panel get a `headersHelper` that reads their token from the credential store (engines/remote_mcp.py):
 the file never holds a token.
+
+`--setting-sources user` also decides which memory files Claude Code loads: the project's CLAUDE.md (and its
+@HOKMA.md) is NOT loaded. 'project' is deliberately not added (it would load the working folder's settings, which the
+agent can edit, and those could weaken the locks). Hokma hands its instructions explicitly instead:
+engines/claude_code.py passes them with --append-system-prompt-file (kit/instructions.py builds the text).
 """
 import json
 import sys
@@ -82,6 +87,8 @@ def prepare_claude_launch() -> LaunchSpec:
     mcp = write_mcp_config()
     return LaunchSpec(
         args=["--settings", str(path), "--setting-sources", "user", "--mcp-config", mcp],
-        env={"CLAUDE_CONFIG_DIR": str(claude_config_dir())},
+        # ENABLE_CLAUDEAI_MCP_SERVERS=false: the connectors of the student's claude.ai account (mail, drive, chat) stay out
+        # of Hokma. Servers the student added with `claude mcp add` and the approved ones are not affected.
+        env={"CLAUDE_CONFIG_DIR": str(claude_config_dir()), "ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
         cwd=str(hokma_home()),
     )
