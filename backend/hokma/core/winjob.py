@@ -88,3 +88,53 @@ class KillOnCloseJob:
         if self._handle:
             self._kernel.CloseHandle(self._handle)
             self._handle = None
+
+
+class TreeJob:
+    """One job per process tree Hokma starts for a conversation or a command (task 3175).
+
+    Every process the child starts joins the job on its own (git, uv, a shell and what that shell starts), so
+    `terminate()` ends the whole tree in one call, even the grandchildren whose parent already died, which
+    `taskkill /T` no longer finds. KILL_ON_JOB_CLOSE also ends the tree if Hokma itself goes away. Nested jobs need
+    Windows 8 or later; the engine process already runs inside the supervisor's job."""
+
+    def __init__(self) -> None:
+        if sys.platform != "win32":
+            raise OSError("job objects exist only on Windows")
+        from ctypes import wintypes
+
+        self._kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        k = self._kernel
+        k.CreateJobObjectW.restype = wintypes.HANDLE
+        k.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        k.SetInformationJobObject.restype = wintypes.BOOL
+        k.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+        k.AssignProcessToJobObject.restype = wintypes.BOOL
+        k.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        k.TerminateJobObject.restype = wintypes.BOOL
+        k.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        k.CloseHandle.argtypes = [wintypes.HANDLE]
+        self._handle = k.CreateJobObjectW(None, None)
+        if not self._handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        info = ExtendedLimitInformation()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k.SetInformationJobObject(self._handle, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                                         ctypes.byref(info), ctypes.sizeof(info)):
+            error = ctypes.get_last_error()
+            k.CloseHandle(self._handle)
+            self._handle = None
+            raise ctypes.WinError(error)
+
+    def assign(self, process_handle: int) -> None:
+        if not self._kernel.AssignProcessToJobObject(self._handle, int(process_handle)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def terminate(self, exit_code: int = 1) -> None:
+        if self._handle and not self._kernel.TerminateJobObject(self._handle, exit_code):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def close(self) -> None:
+        if self._handle:
+            self._kernel.CloseHandle(self._handle)
+            self._handle = None

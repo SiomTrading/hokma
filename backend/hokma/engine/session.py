@@ -16,8 +16,10 @@ Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
 MAX_STORED_TOOLS = 40              # tool lines kept with a saved answer
 MAX_STORED_RESULT = 600            # characters of each tool result kept with a saved answer
+MAX_LIVE_OUTPUT = 4000             # characters of a running command's live output kept for a socket that reconnects
 PERMISSION_TIMEOUT = 600.0         # seconds without an answer = deny
 STOP_GRACE = 3.0                   # seconds the CLI gets to honour an interrupt before the tree is killed
+STEP_LIMIT = 10.0                  # seconds any single step of a stop may take (interrupt, kill, wrap-up)
 
 
 class TurnError(Exception):
@@ -80,21 +82,83 @@ class ChatSession:
         self._task = asyncio.create_task(self._turn(conv, project, blocks, user_text, meta))
 
     async def stop(self) -> None:
-        """Interrupt the running turn; if the CLI does not finish within STOP_GRACE seconds, kill the tree."""
+        """Stop the running turn. Never waits forever and always frees the conversation (task 3175).
+
+        1. interrupt the engine and give it `stop_grace` seconds to end the turn by itself;
+        2. kill the engine's whole process tree (and the commands it started) and wait for the turn to end;
+        3. if the turn is still stuck (a pipe nobody closes, a call that never returns), cancel it;
+        4. whatever happened, `finally` leaves the conversation idle, without a process and with its turn closed, so
+           this chat, the other chats and deleting conversations keep working."""
         if self.state != "running":
             return
         self._stop_requested = True
-        for pending in list(self.pending.values()):
-            await self.resolve(pending.request_id, "deny", "stop")
         eng = self._eng
-        if eng is not None and eng.alive:
-            await eng.interrupt()
         try:
-            await asyncio.wait_for(self._turn_done.wait(), self.engine.stop_grace)
-        except asyncio.TimeoutError:
+            for pending in list(self.pending.values()):
+                await self.resolve(pending.request_id, "deny", "stop")
+            if eng is not None and eng.alive:
+                await self._bounded(eng.interrupt(), "interrupt")
+            if await self._turn_ended(self.engine.stop_grace):
+                return
             if eng is not None:
-                await eng.close()
-            await self._turn_done.wait()
+                await self._bounded(eng.close(), "kill")
+            if await self._turn_ended(self.step_limit):
+                return
+            task = self._task
+            if task is not None and not task.done():
+                errlog.log(f"conversation {self.conversation_id}: the turn did not end after the kill; cancelled")
+                task.cancel()
+            await self._turn_ended(self.step_limit)
+        except Exception as exc:                          # noqa: BLE001
+            errlog.log(f"conversation {self.conversation_id}: stop failed", exc)
+        finally:
+            if not self._turn_done.is_set():
+                await self._release_stuck_turn(eng)
+
+    @property
+    def step_limit(self) -> float:
+        return float(getattr(self.engine, "step_limit", STEP_LIMIT))
+
+    async def _turn_ended(self, timeout: float) -> bool:
+        try:
+            await asyncio.wait_for(asyncio.shield(self._turn_done.wait()), timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    async def _bounded(self, work: Awaitable[Any], what: str) -> None:
+        """One step of a stop, at most `step_limit` seconds; a failure is logged, never raised."""
+        try:
+            await asyncio.wait_for(work, self.step_limit)
+        except asyncio.TimeoutError:
+            errlog.log(f"conversation {self.conversation_id}: {what} took over {self.step_limit:.0f} s")
+        except Exception as exc:                          # noqa: BLE001
+            errlog.log(f"conversation {self.conversation_id}: {what} failed", exc)
+
+    async def _release_stuck_turn(self, eng: EngineSession | None) -> None:
+        """The last resort of a stop: the turn did not wrap up on its own, so the conversation is freed here. The
+        process is dropped (its kill goes on in the background) and the panel is told the turn stopped."""
+        errlog.log(f"conversation {self.conversation_id}: the turn was released by force after a stop")
+        live, self.live = self.live, None
+        for pending in list(self.pending.values()):
+            if not pending.future.done():
+                pending.future.set_result(("deny", "stop"))
+        self.pending.clear()
+        if self._eng is eng:
+            self._eng, self._eng_key = None, None
+        if eng is not None:
+            asyncio.get_running_loop().create_task(self._bounded(eng.close(), "kill"))
+        self.state = "idle"
+        self.last_used = time.monotonic()
+        self._turn_done.set()
+        try:
+            await asyncio.wait_for(self.emit({"type": "done", "turn_id": (live or {}).get("turn_id", ""),
+                                              "message_id": None, "stopped": True,
+                                              "usage": {"tokens_in": 0, "tokens_out": 0, "cache_read": 0,
+                                                        "cost_usd": 0.0},
+                                              "engine_session": None}), self.step_limit)
+        except Exception:                                 # noqa: BLE001
+            pass
 
     async def resolve(self, request_id: str, decision: str, by: str) -> bool:
         pending = self.pending.get(request_id)
@@ -106,7 +170,7 @@ class ChatSession:
     async def close(self) -> None:
         if self._task and not self._task.done():
             await self.stop()
-        await self._drop_process()
+        await self._bounded(self._drop_process(), "close")
 
     # --------------------------------------------------------------- engine
 
@@ -149,14 +213,6 @@ class ChatSession:
                     user_text: str, meta: dict[str, Any]) -> None:
         store = self.engine.store
         turn_id = uuid.uuid4().hex[:12]
-        user_msg = store.add_message(conv.id, "user", user_text, meta=meta)
-        if not store.get_conversation(conv.id).title:
-            title = self.engine.make_title(user_text)
-            store.update_conversation(conv.id, title=title)
-            # the same body as everywhere else: a general conversation says `project: null`, not the working folder
-            await self.emit({"type": "conversation", **self.engine._conv_body(conv, False), "title": title})
-        await self.emit({"type": "turn_start", "turn_id": turn_id, "message_id": user_msg.id})
-
         parts: list[str] = []
         tools: list[dict[str, Any]] = []
         usage: dict[str, Any] = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cost_usd": 0.0}
@@ -165,6 +221,13 @@ class ChatSession:
         guard_blocks: list[dict[str, Any]] = []
         self.live = {"turn_id": turn_id, "parts": parts, "tools": tools}
         try:
+            user_msg = store.add_message(conv.id, "user", user_text, meta=meta)
+            if not store.get_conversation(conv.id).title:
+                title = self.engine.make_title(user_text)
+                store.update_conversation(conv.id, title=title)
+                # the same body as everywhere else: a general conversation says `project: null`, not the working folder
+                await self.emit({"type": "conversation", **self.engine._conv_body(conv, False), "title": title})
+            await self.emit({"type": "turn_start", "turn_id": turn_id, "message_id": user_msg.id})
             mode = self.engine.permission_mode()
             if modes.snapshots_wanted(mode):
                 await self.engine.take_checkpoint(project.path, self.conversation_id)
@@ -199,6 +262,13 @@ class ChatSession:
                     await self.emit({"type": "tool_result", "turn_id": turn_id, "tool_use_id": ev.get("id", ""),
                                      "is_error": bool(ev.get("is_error")),
                                      "text": str(ev.get("text") or "")[:stream.MAX_RESULT_TEXT]})
+                elif kind == "tool_output":                    # live output of a command Hokma runs (task 3175)
+                    chunk = str(ev.get("text") or "")
+                    for line in tools:
+                        if line["id"] == ev.get("id"):
+                            line["output"] = (line.get("output", "") + chunk)[-MAX_LIVE_OUTPUT:]
+                    await self.emit({"type": "tool_output", "turn_id": turn_id, "tool_use_id": ev.get("id", ""),
+                                     "text": chunk})
                 elif kind == "permission_request":
                     if (ev.get("input") or {}).get("cancelled"):
                         await self.resolve(str(ev.get("request_id", "")), "deny", "engine")
@@ -238,7 +308,10 @@ class ChatSession:
             error = TurnError("engine_error", f"{type(exc).__name__}: {exc}".strip())
             errlog.log(f"conversation {self.conversation_id}: the turn failed", exc)
         finally:
-            await self._publish_blocks(turn_id, guard_blocks)
+            try:
+                await asyncio.wait_for(self._publish_blocks(turn_id, guard_blocks), self.step_limit)
+            except Exception as exc:                       # noqa: BLE001  never in the way of closing the turn
+                errlog.log(f"conversation {self.conversation_id}: guard blocks not published", exc)
             await self._finish_turn(conv, turn_id, parts, tools, usage, status, error, guard_blocks)
 
     async def _publish_blocks(self, turn_id: str, blocks: list[dict[str, Any]]) -> None:
@@ -258,22 +331,35 @@ class ChatSession:
     async def _finish_turn(self, conv: ConversationRecord, turn_id: str, parts: list[str], tools: list[dict],
                            usage: dict[str, Any], status: str, error: TurnError | None,
                            blocks: list[dict[str, Any]] | None = None) -> None:
-        for pending in list(self.pending.values()):
-            await self.resolve(pending.request_id, "deny", "engine")
-        await asyncio.gather(*self._waiters, return_exceptions=True)
-        text = "".join(parts)
+        stale = self.live is None or self.live.get("turn_id") != turn_id   # released by force by a stop already
         message_id = None
-        kept = tools[:MAX_STORED_TOOLS]
-        if text or status == "complete" or kept:
-            meta = {**({"tools": kept} if kept else {}), **({"blocks": blocks[:MAX_STORED_TOOLS]} if blocks else {})}
-            rec = self.engine.store.add_message(conv.id, "assistant", text, usage["tokens_in"], usage["tokens_out"],
-                                                status, meta or None)
-            message_id = rec.id
+        try:
+            for pending in list(self.pending.values()):
+                await self.resolve(pending.request_id, "deny", "engine")
+            if self._waiters:
+                waiters = list(self._waiters)
+                _done, late = await asyncio.wait(waiters, timeout=self.step_limit)
+                for waiter in late:             # an answer the engine never read must not hold the turn open
+                    waiter.cancel()
+            text = "".join(parts)
+            kept = [{k: v for k, v in t.items() if k != "output"} for t in tools[:MAX_STORED_TOOLS]]
+            if text or status == "complete" or kept:
+                meta = {**({"tools": kept} if kept else {}),
+                        **({"blocks": blocks[:MAX_STORED_TOOLS]} if blocks else {})}
+                rec = self.engine.store.add_message(conv.id, "assistant", text, usage["tokens_in"],
+                                                    usage["tokens_out"], status, meta or None)
+                message_id = rec.id
+        except Exception as exc:                # noqa: BLE001  saving must never keep the conversation busy
+            errlog.log(f"conversation {self.conversation_id}: the answer could not be saved", exc)
+        if stale:
+            return                              # the conversation was freed already and may run a new turn now
         self.live = None                        # in the same step as the save: a socket that opens now sees the message
-        if status != "complete":
-            await self._drop_process()          # a stopped or failed process is replaced and resumed on the next turn
-        self.state = "idle"
-        self.last_used = time.monotonic()
+        try:
+            if status != "complete":
+                await self._bounded(self._drop_process(), "close")   # replaced and resumed on the next turn
+        finally:
+            self.state = "idle"
+            self.last_used = time.monotonic()
         try:
             if error is not None:
                 errlog.log(f"conversation {self.conversation_id}: {error.code}: {error.message}"[:4000])

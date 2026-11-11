@@ -25,6 +25,20 @@ Extensions section with Approve and Reject.
 Press "Add by link" and write a GitHub address as `owner/repo`. The marketplace is added to your list. Its plugins
 stay off until you turn them on.
 
+## Add a skill by link
+
+Press "Add skill by link" and paste the GitHub address of the skill: the repository
+(`https://github.com/owner/repo`) or the folder of one skill inside it. Hokma downloads it, copies every skill (every
+folder with a SKILL.md) into `.claude/skills/` of your working folder and it is ready at once. If the repository is a
+plugin or a marketplace, it is added as with "Add by link". In the chat, paste the link to any agent with any engine:
+it uses the `skill_install` tool.
+
+## Commands with a time limit
+
+Every command an agent runs has a time limit (10 minutes; change it by writing the seconds in the `command-timeout`
+file of Hokma's data folder) and never waits for you to type: Git, pip and uv fail at once with their own message if
+they ask for a password. Stopping an answer ends the engine and everything it started.
+
 ## From the terminal
 
 - `hokma ext list` shows what you have.

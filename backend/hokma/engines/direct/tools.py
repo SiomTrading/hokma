@@ -9,20 +9,18 @@ import ipaddress
 import os
 import socket
 import re
-import subprocess
 import sys
+import threading
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-from hokma.core.proc import spawn_kwargs
 from hokma.engines.envfilter import filtered_env
 
 MAX_OUTPUT = 30_000
 FETCH_LIMIT = 200 * 1024
 READ_LIMIT = 200_000
-DEFAULT_TIMEOUT = 120
 READ_ONLY = {"read_file", "list_dir", "glob", "grep"}
 
 SCHEMAS: dict[str, dict[str, Any]] = {
@@ -43,7 +41,9 @@ SCHEMAS: dict[str, dict[str, Any]] = {
              "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "glob": {"type": "string"}},
              "required": ["pattern"]},
     "run_command": {"description": "Run a shell command (PowerShell on Windows, bash elsewhere) in the project "
-                                   "folder. Output is cut at 30000 characters; default timeout 120 seconds.",
+                                   "folder. Nothing can be typed into it: use non-interactive flags. Output is cut "
+                                   "at 30000 characters; it is stopped at the time limit (10 minutes unless the "
+                                   "owner changed it, or timeout_s if lower).",
                     "properties": {"command": {"type": "string"}, "timeout_s": {"type": "integer"}}, "required": ["command"]},
     "web_fetch": {"description": "GET a URL and return its text (first 200 KB).",
                   "properties": {"url": {"type": "string"}}, "required": ["url"]},
@@ -147,20 +147,29 @@ def grep(cwd: str, a: dict[str, Any]) -> str:
     return _cut("\n".join(out) or "(no matches)")
 
 
-def run_command(cwd: str, a: dict[str, Any], env: dict[str, str] | None = None) -> str:
+def run_command(cwd: str, a: dict[str, Any], env: dict[str, str] | None = None,
+                on_output: Callable[[str], None] | None = None, cancel: threading.Event | None = None) -> str:
+    """Run the command with no input, the configured time limit and live output (task 3175). At the limit, or on a
+    Stop, the command and everything it started are ended and the model is told so, with the output so far."""
+    from hokma.core import runcmd
+    from hokma.core.config import command_timeout
+
     where = cwd                                                  # always the folder the broker checked
-    timeout = min(max(int(a.get("timeout_s") or DEFAULT_TIMEOUT), 1), 600)
+    limit = command_timeout()
+    asked = a.get("timeout_s")
+    timeout = min(max(int(asked), 1), limit) if isinstance(asked, (int, float)) and asked else limit
     if sys.platform == "win32":
         argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", str(a.get("command", ""))]
     else:
         argv = ["bash", "-c", str(a.get("command", ""))]
-    try:
-        done = subprocess.run(argv, cwd=where, env=env if env is not None else filtered_env(), capture_output=True,
-                              timeout=timeout, **spawn_kwargs())
-    except subprocess.TimeoutExpired:
-        raise ValueError(f"the command did not finish in {timeout} seconds") from None
-    text = (done.stdout + done.stderr).decode("utf-8", "replace")
-    return _cut(f"{text}\n[exit code {done.returncode}]")
+    done = runcmd.run(argv, where, env if env is not None else filtered_env(), timeout, on_output, cancel)
+    if done.timed_out:
+        raise ValueError(_cut(f"{done.text}\n[stopped: the command did not finish in {timeout} seconds; it and the "
+                              "processes it started were ended. If it waited for input (a password, a yes/no), run "
+                              "it with non-interactive flags]"))
+    if done.cancelled:
+        raise ValueError(_cut(f"{done.text}\n[stopped by the owner]"))
+    return _cut(f"{done.text}\n[exit code {done.exit_code}]")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -197,14 +206,15 @@ RUNNERS: dict[str, Callable[[str, dict[str, Any]], str]] = {
     "grep": grep, "run_command": run_command, "web_fetch": web_fetch}
 
 
-def run(name: str, cwd: str, args: dict[str, Any], env: dict[str, str] | None = None) -> tuple[str, bool]:
+def run(name: str, cwd: str, args: dict[str, Any], env: dict[str, str] | None = None,
+        on_output: Callable[[str], None] | None = None, cancel: threading.Event | None = None) -> tuple[str, bool]:
     """(text, is_error). A tool failure is a result the model sees, not a crash."""
     runner = RUNNERS.get(name)
     if runner is None:
         return f"unknown tool {name}", True
     try:
         if name == "run_command":
-            return run_command(cwd, args, env), False
+            return run_command(cwd, args, env, on_output, cancel), False
         return runner(cwd, args), False
     except Exception as exc:
         return f"{type(exc).__name__}: {exc}", True

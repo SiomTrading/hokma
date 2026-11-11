@@ -84,6 +84,7 @@ class ChatEngine:
         self.permission_mode: Callable[[], str] = permission_mode or modes.current_mode
         self._checkpoint, self._blocks = checkpoint, blocks
         self.adapters: dict[str, EngineAdapter] = {}
+        self._background: set[asyncio.Task] = set()
 
     def adapter_for(self, kind: str) -> EngineAdapter:
         adapter = self.adapters.get(kind)
@@ -180,7 +181,7 @@ class ChatEngine:
         return self.sessions[conversation_id]
 
     async def shutdown(self) -> None:
-        await asyncio.gather(*(s.close() for s in self.sessions.values()), return_exceptions=True)
+        await asyncio.gather(*(s.close() for s in list(self.sessions.values())), return_exceptions=True)
 
     # ------------------------------------------------------------- dispatch
 
@@ -266,9 +267,26 @@ class ChatEngine:
         return row
 
     async def _on_stop(self, conn: Connection, msg: dict) -> None:
+        """The stop runs on its own: the panel's socket carries every chat, so it keeps reading the next message
+        (another chat, a permission answer) while this conversation's engine is being killed (task 3175)."""
         session = self.sessions.get(msg.get("conversation_id")) if isinstance(msg.get("conversation_id"), str) else None
         if session is not None:
-            await session.stop()
+            self.background(session.stop())
+
+    def background(self, work) -> asyncio.Task:
+        task = asyncio.get_running_loop().create_task(work)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        return task
+
+    async def forget(self, conversation_id: str) -> None:
+        """Stop the conversation if it runs and drop its session: what deleting a conversation needs first."""
+        session = self.sessions.get(conversation_id)
+        if session is None:
+            return
+        await session.close()
+        self.sessions.pop(conversation_id, None)
+        self.subscribers.pop(conversation_id, None)
 
     async def _on_permission(self, conn: Connection, msg: dict) -> None:
         session = self.sessions.get(msg.get("conversation_id")) if isinstance(msg.get("conversation_id"), str) else None

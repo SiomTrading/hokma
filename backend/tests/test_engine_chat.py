@@ -235,3 +235,112 @@ def test_default_launch_passes_the_isolated_config_and_hokma_settings(env):
     assert start["env"]["CLAUDE_CONFIG_DIR"] == str(env.data / "claude-config")
     assert "--settings" in start["argv"] and "--mcp-config" in start["argv"]
     assert flag_value(start["argv"], "--setting-sources") == "user"
+
+
+def _until_done_of(ws, conversation_id):
+    events = []
+    while True:
+        event = ws.receive_json()
+        events.append(event)
+        if event.get("conversation_id") == conversation_id and event["type"] in ("done", "error"):
+            return events
+
+
+def _gone(pid):
+    """True when the process ended (a zombie waiting for its parent counts as ended)."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().split(")")[-1].split()[0] == "Z"
+    except FileNotFoundError:
+        return True
+    except OSError:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+
+def _wait_gone(pid, seconds=10.0):
+    import time
+
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if _gone(pid):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_stop_with_a_hung_child_command_frees_the_conversation_and_the_other_chats(env):
+    """Task 3175, case 2: the engine runs a command that hangs (it left the process group and holds the output pipe)
+    and ignores the interrupt. Stop must kill the engine and the command, close the turn, and leave this chat, the
+    other chats and deleting conversations working."""
+    engine = env.engine(stop_grace=0.3)
+    engine.step_limit = 2.0
+    with make_client(engine) as client, connect(client) as ws:
+        ws.send_json({"type": "send", "text": "[child] git clone https://github.com/NVIDIA/SkillSpector.git"})
+        conv_id = until(ws, "delta")[0]["conversation_id"]
+        until_child = [e for e in env.entries("child")]
+        assert until_child, "the fake engine did not start its command"
+        child = until_child[0]["pid"]
+        ws.send_json({"type": "stop", "conversation_id": conv_id})
+        # the socket is not blocked by the stop: another chat is answered at once
+        ws.send_json({"type": "send", "text": "hello from another chat"})
+        events = []
+        stopped = other = None
+        while stopped is None or other is None:
+            event = ws.receive_json()
+            events.append(event)
+            if event["type"] == "done" and event.get("conversation_id") == conv_id:
+                stopped = event
+            elif event["type"] == "done":
+                other = event
+        assert stopped["stopped"] is True and other["stopped"] is False
+        assert engine.sessions[conv_id].state == "idle" and not engine.sessions[conv_id].has_process
+        assert _wait_gone(child), "the hung command survived the stop"
+        assert _wait_gone(env.entries("start")[0]["pid"]), "the engine survived the stop"
+        # the same conversation answers again
+        again = turn(ws, "after the stop", conversation_id=conv_id)
+        assert again[-1]["type"] == "done" and again[-1]["stopped"] is False
+
+
+def test_deleting_a_conversation_whose_command_hangs_stops_it_and_deletes_it(env, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from hokma.engine import api as engine_api
+    from hokma.engine.conversations_api import create_router as conversations_router
+
+    engine = env.engine(stop_grace=0.3)
+    engine.step_limit = 2.0
+    deleted = []
+
+    class Unit:
+        class conversations:
+            @staticmethod
+            def delete(cid):
+                deleted.append(cid)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Db:
+        def write(self):
+            return Unit()
+
+    app = FastAPI()
+    app.include_router(engine_api.create_router(lambda: engine))
+    app.include_router(conversations_router(db_getter=lambda: Db(), engine_getter=lambda: engine))
+    with TestClient(app) as client, connect(client) as ws:
+        ws.send_json({"type": "send", "text": "[child] uv pip install skillspector"})
+        conv_id = until(ws, "delta")[0]["conversation_id"]
+        child = env.entries("child")[0]["pid"]
+        engine.sessions["77"] = engine.sessions.pop(conv_id)     # the database ids are numbers; the memory store's are not
+        reply = client.delete("/api/conversations/77", headers={"X-Hokma-Token": SESSION_TOKEN})
+        assert reply.status_code == 204 and deleted == [77]
+        assert "77" not in engine.sessions
+        assert _wait_gone(child)

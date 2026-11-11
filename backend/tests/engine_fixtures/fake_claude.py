@@ -5,6 +5,8 @@ Behaviour is chosen by a tag in the user's text:
   [slow]    streams until interrupted    [hang]   streams and ignores the interrupt (must be killed)
   [error]   the turn ends with an error result      [crash]  the process dies without a result
   [block]   a protection hook refused a tool call: a line is appended to <data>/guard/blocks.jsonl, then a plain answer
+  [child]   starts a command that hangs (a `git clone` waiting for a password) in its own session, holding the
+            output pipes, then streams and ignores the interrupt: the case of task 3175
 Everything the process receives is appended to the file named by FAKE_CLAUDE_LOG (one JSON object per line).
 """
 import json
@@ -149,6 +151,12 @@ def main():
             return 3
         if "[perm]" in text:
             alive = turn_permission()
+        elif "[child]" in text:
+            import subprocess
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3600)"],
+                                     start_new_session=True)       # leaves the process group, keeps stdout/stderr
+            log({"event": "child", "pid": child.pid})
+            alive = turn_slow(responsive=False)
         elif "[hang]" in text:
             alive = turn_slow(responsive=False)
         elif "[slow]" in text:

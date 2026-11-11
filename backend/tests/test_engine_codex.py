@@ -80,7 +80,7 @@ def test_auto_mode_accepts_by_itself_after_the_broker_and_config_never_drops_app
     events = asyncio.run(collect(adapter, ctx_for(box, bctx, "auto")))
     assert "decision=accept" in "".join(e.get("text", "") for e in events if e["type"] == "text")
     toml = (codex_home_dir() / "config.toml").read_text()
-    assert 'approval_policy = "untrusted"' in toml and "never" not in toml and 'model_reasoning_effort = "high"' in toml
+    assert 'approval_policy = "untrusted"' in toml and 'approval_policy = "never"' not in toml and 'model_reasoning_effort = "high"' in toml
     assert (codex_home_dir() / "AGENTS.md").read_text() == "Persona text"
 
 
@@ -138,3 +138,16 @@ def test_powershell_is_unwrapped_only_in_the_exact_three_part_form():
     assert command_request(["pwsh", "-c", "ls"]) == ("PowerShell", {"command": "ls"})
     for argv in (["pwsh", "-File", "x.ps1"], ["pwsh", "-EncodedCommand", "AAA"], ["pwsh", "-NoProfile", "-Command", "ls"]):
         assert command_request(argv) == ("Bash", {"command": " ".join(argv)})
+
+
+def test_config_toml_quotes_unsafe_keys(box):
+    import tomllib
+
+    from hokma.engines.codex import write_config
+    ctx = EngineContext(conversation_id="1", model="", cwd=str(box.work))
+    env = {"ProgramFiles(x86)": "C:\\Program Files (x86)", "PATH_1": "x"}
+    home = write_config(ctx, {"ok-name": {"command": "c", "args": [], "env": env},
+                              "we ird.name": {"command": "c", "env": env}})
+    data = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+    assert data["mcp_servers"]["ok-name"]["env"] == env
+    assert data["mcp_servers"]["we ird.name"]["env"]["ProgramFiles(x86)"] == "C:\\Program Files (x86)"

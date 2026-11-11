@@ -61,6 +61,37 @@ def log(message: str) -> None:
     supervisor.EngineLog(hokma_data_dir() / "logs" / "engine.log").write("plugins: " + message)
 
 
+def _chat_installs_path() -> Path:
+    return hokma_data_dir() / "chat_plugin_installs.json"
+
+
+def record_chat_install(plugin_id: str, repo: str) -> None:
+    """Remember that a plugin came in from the chat (skill_install), so the Installed list can say so."""
+    import json
+
+    path = _chat_installs_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    data[plugin_id] = repo
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def chat_installs() -> dict[str, str]:
+    import json
+
+    try:
+        data = json.loads(_chat_installs_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def run_claude(argv: list[str], timeout: float) -> tuple[int, str]:
     """Run `claude <argv>`: no shell, no stdin, never a console window. Returns (exit code, stdout + stderr).
     `runner` points here; tests replace `runner`."""

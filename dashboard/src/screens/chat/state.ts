@@ -20,7 +20,7 @@ export interface AttachmentChip {
 export type Item =
   | { kind: "user"; key: string; messageId?: string; text: string; attachments: AttachmentChip[] }
   | { kind: "assistant"; key: string; text: string; streaming: boolean; status: "complete" | "stopped" | "error"; messageId?: string }
-  | { kind: "tool"; key: string; toolUseId: string; name: string; summary: ToolSummary; result?: { isError: boolean; text: string } }
+  | { kind: "tool"; key: string; toolUseId: string; name: string; summary: ToolSummary; result?: { isError: boolean; text: string }; output?: string }
   | { kind: "permission"; key: string; body: PermissionBody; sending?: boolean; resolution?: { decision: "allow" | "deny"; by: string } }
   | { kind: "block"; key: string; block: GuardBlock }
   | { kind: "notice"; key: string; tone: "info" | "warn" | "bad"; text: string };
@@ -112,6 +112,7 @@ function answerItems(base: string, text: string, tools: StoredTool[], status: "c
         name: tool.name,
         summary: { kind: tool.kind, target: tool.target },
         result: finished ? { isError: tool.is_error ?? status !== "complete", text: tool.result ?? "" } : undefined,
+        ...(!finished && tool.output ? { output: tool.output } : {}),
       });
     });
   pushText(text.length, true);
@@ -125,6 +126,9 @@ function blockItem(block: GuardBlock): Item {
 function permissionItem(body: PermissionBody): Item {
   return { kind: "permission", key: `perm-${body.request_id}`, body };
 }
+
+/** Characters of a running command's live output kept on its card (the server keeps the same tail). */
+const LIVE_OUTPUT_CHARS = 4000;
 
 function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: string) => string): ChatState {
   switch (event.type) {
@@ -167,6 +171,15 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
         ...state,
         items: state.items.map((item) =>
           item.kind === "tool" && item.toolUseId === event.tool_use_id ? { ...item, result: { isError: event.is_error, text: event.text } } : item,
+        ),
+      };
+    case "tool_output":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.kind === "tool" && item.toolUseId === event.tool_use_id && !item.result
+            ? { ...item, output: ((item.output ?? "") + event.text).slice(-LIVE_OUTPUT_CHARS) }
+            : item,
         ),
       };
     case "permission_request": {

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 import uuid
 from typing import Any, AsyncIterator, Callable, Iterator
 
@@ -67,6 +68,7 @@ class DirectSession:
         self.extra_tools = extra_tools
         self._answers: dict[str, asyncio.Future] = {}
         self._interrupted = False
+        self._cancels: set[threading.Event] = set()
         self._stream: Any = None
         self._closed = False
 
@@ -178,8 +180,43 @@ class DirectSession:
                 return
         if self.extra_tools is not None and self.extra_tools.owns(name):
             text, is_error = await asyncio.to_thread(self.extra_tools.run, name, args)
+        elif name == "run_command":
+            async for item in self._run_command(call, args):
+                yield item
+            return
         else:
             text, is_error = await asyncio.to_thread(tools.run, name, self.ctx.cwd, args, self._env())
+        yield {"type": "result", "text": text, "is_error": is_error}
+
+    async def _run_command(self, call: dict[str, Any], args: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        """The command runs in a thread; its output comes back as `tool_output` events while it runs, and a Stop
+        sets `cancel`, which ends the command and what it started (task 3175)."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        cancel = threading.Event()
+        if self._interrupted:
+            cancel.set()
+        self._cancels.add(cancel)
+
+        def on_output(text: str) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, text)
+
+        work = asyncio.ensure_future(asyncio.to_thread(tools.run, "run_command", self.ctx.cwd, args, self._env(),
+                                                       on_output, cancel))
+        try:
+            while not work.done():
+                getter = asyncio.ensure_future(queue.get())
+                await asyncio.wait({work, getter}, return_when=asyncio.FIRST_COMPLETED)
+                if getter.done():
+                    yield {"type": "tool_output", "id": call["id"], "text": getter.result()}
+                else:
+                    getter.cancel()
+            while not queue.empty():
+                yield {"type": "tool_output", "id": call["id"], "text": queue.get_nowait()}
+            text, is_error = work.result()
+        finally:
+            cancel.set()                    # the turn went away (closed, cancelled): the command must not outlive it
+            self._cancels.discard(cancel)
         yield {"type": "result", "text": text, "is_error": is_error}
 
     def _env(self) -> dict[str, str]:
@@ -198,6 +235,8 @@ class DirectSession:
 
     async def interrupt(self) -> None:
         self._interrupted = True
+        for cancel in list(self._cancels):          # a running command and its whole tree end now
+            cancel.set()
         if self._stream is not None:
             self._stream.close()
         for fut in list(self._answers.values()):

@@ -4,6 +4,7 @@ the slash commands complete from, and "save to the project". The live chat itsel
 Every route needs the per-boot session token (`X-Hokma-Token` or `?token=`). Errors are `{"detail": {"code", "message"}}`
 and the panel translates by `code`.
 """
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -104,15 +105,19 @@ def create_router(db_getter=get_database, engine_getter=None) -> APIRouter:
         return _summary(updated)
 
     @router.delete("/api/conversations/{conversation_id}", status_code=204)
-    def delete_conversation(conversation_id: int, x_hokma_token: str = Header(default=""),
-                            token: str = Query(default="")):
+    async def delete_conversation(conversation_id: int, x_hokma_token: str = Header(default=""),
+                                  token: str = Query(default="")):
+        """A conversation whose answer is still running is stopped first (its engine and commands killed), then
+        deleted: a turn that hung can no longer make a conversation impossible to delete (task 3175)."""
         _auth(x_hokma_token, token)
-        session = engine().sessions.get(str(conversation_id))
-        if session is not None and session.state == "running":
-            raise _fail(409, "busy", "a turn is running in this conversation")
-        try:
+        await engine().forget(str(conversation_id))
+
+        def delete() -> None:
             with db_getter().write() as u:
                 u.conversations.delete(conversation_id)
+
+        try:
+            await asyncio.to_thread(delete)
         except NotFound:
             raise _fail(404, "unknown_conversation", "no such conversation") from None
 

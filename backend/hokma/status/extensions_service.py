@@ -119,11 +119,14 @@ def listing() -> dict:
     installs = plugin_state.engine_installs()
     extra = {"failures": plugin_install.failures(), "installing": plugin_install.installing(), "engine": default_engine(),
              "companion": plugin_install.companion_problem}
+    from_chat = plugin_install.chat_installs()
     for plugin_id, enabled in sorted(data["enabledPlugins"].items()):
         name, marketplace = _split(plugin_id)
         summary = requests.Request("", "plugin", plugin_id, None, "").summary()
+        if from_chat.get(plugin_id):
+            summary = f"Instalado desde el chat ({from_chat[plugin_id]}): trae hooks/MCP. {summary}".strip()
         plugins.append({"id": plugin_id, "name": name, "marketplace": marketplace, "kind": "plugin",
-                        "enabled": enabled, "summary": summary,
+                        "enabled": enabled, "summary": summary, "from_chat": from_chat.get(plugin_id),
                         **plugin_state.state_of(plugin_id, enabled, data, installs, **extra)})
     servers = [{"id": f"mcp:{name}", "name": name, "kind": "mcp", "enabled": True, "target": _server_target(entry),
                 "remote": entry.get("type") == "http"}

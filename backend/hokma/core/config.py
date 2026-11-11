@@ -106,6 +106,32 @@ def browser_preferred() -> bool:
     return browser_pref_path().is_file()
 
 
+COMMAND_TIMEOUT_DEFAULT = 600          # seconds: 10 minutes
+COMMAND_TIMEOUT_RANGE = (30, 7200)
+
+
+def command_timeout_path() -> Path:
+    """Optional file with the time limit, in seconds, of every command Hokma runs for an engine (task 3175)."""
+    return hokma_data_dir() / "command-timeout"
+
+
+def command_timeout() -> int:
+    """The time limit of a command run for an engine: `HOKMA_COMMAND_TIMEOUT`, else the `command-timeout` file in
+    the data folder, else 10 minutes. Kept between 30 seconds and 2 hours."""
+    raw = os.environ.get("HOKMA_COMMAND_TIMEOUT", "").strip()
+    if not raw:
+        try:
+            raw = command_timeout_path().read_text(encoding="utf-8").strip()
+        except OSError:
+            raw = ""
+    try:
+        value = int(float(raw)) if raw else COMMAND_TIMEOUT_DEFAULT
+    except ValueError:
+        value = COMMAND_TIMEOUT_DEFAULT
+    low, high = COMMAND_TIMEOUT_RANGE
+    return min(max(value, low), high)
+
+
 def desktop_app_path() -> Path:
     """The desktop window, outside the data and working folders. Windows: `Hokma.exe`, installed by Hokma-Setup.exe.
     macOS: `Hokma.app`, dragged from Hokma.dmg to /Applications (or ~/Applications); the first existing one."""

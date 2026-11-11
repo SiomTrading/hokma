@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -69,6 +70,15 @@ class RpcProcess(ClaudeProcess):
         return None
 
 
+_BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def toml_key(k: str) -> str:
+    """A TOML key: bare when it is only [A-Za-z0-9_-], else a quoted string (ProgramFiles(x86) on Windows)."""
+    k = str(k)
+    return k if _BARE_KEY.fullmatch(k) else json.dumps(k)
+
+
 def write_config(ctx: EngineContext, mcp: dict[str, Any] | None = None) -> Path:
     """Rebuild config.toml and AGENTS.md from the package template. Never a no-approvals policy."""
     home = codex_home_dir()
@@ -77,7 +87,7 @@ def write_config(ctx: EngineContext, mcp: dict[str, Any] | None = None) -> Path:
              f'model_reasoning_effort = "{EFFORT.get(ctx.tier, "medium")}"', ""]
     lines += ["[shell_environment_policy]", 'exclude = ["HOKMA_MCP_TOKEN_*"]', ""]   # remote MCP tokens stay in Codex
     for name, spec in (mcp or {}).items():
-        lines.append(f"[mcp_servers.{name}]")
+        lines.append(f"[mcp_servers.{toml_key(name)}]")
         if spec.get("url"):                  # a remote server; the token is in the Codex environment, not in this file
             lines.append(f"url = {json.dumps(spec['url'])}")
             if spec.get("bearer_token_env_var"):
@@ -87,8 +97,8 @@ def write_config(ctx: EngineContext, mcp: dict[str, Any] | None = None) -> Path:
         lines.append(f"command = {json.dumps(spec['command'])}")
         lines.append("args = " + json.dumps(spec.get("args", [])))
         if spec.get("env"):
-            lines.append(f"[mcp_servers.{name}.env]")
-            lines += [f"{k} = {json.dumps(v)}" for k, v in spec["env"].items()]
+            lines.append(f"[mcp_servers.{toml_key(name)}.env]")
+            lines += [f"{toml_key(k)} = {json.dumps(v)}" for k, v in spec["env"].items()]
         lines.append("")
     (home / "config.toml").write_text("\n".join(lines), encoding="utf-8")
     (home / "AGENTS.md").write_text(ctx.instructions or "", encoding="utf-8")

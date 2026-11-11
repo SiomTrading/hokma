@@ -46,6 +46,9 @@ function ToolLine({ item }: { item: Extract<Item, { kind: "tool" }> }) {
         {item.summary.target ? <span className="mono chat-tool-target">{item.summary.target}</span> : null}
         <Pill tone={state === "done" ? "ok" : state === "failed" ? "bad" : "default"}>{t(`chat.tool.${state}`)}</Pill>
       </Chip>
+      {!item.result && item.output ? (
+        <pre className="mono chat-tool-live" aria-live="polite" aria-label={t("chat.tool.live")} data-testid="tool-live">{item.output}</pre>
+      ) : null}
       {item.result?.text ? (
         <details className="chat-tool-result">
           <summary>{t("chat.tool.result")}</summary>

@@ -4,15 +4,15 @@ import collections
 import json
 import os
 import shutil
-import signal
-import subprocess
 from typing import Any
 
 from hokma.core.proc import CREATE_NEW_PROCESS_GROUP, spawn_kwargs
+from hokma.core.proctree import ProcessTree
 from hokma.engine.stream import parse_line
 
 LINE_LIMIT = 64 * 1024 * 1024          # one stream-json line can carry a whole file or an image
 STDERR_LINES = 40
+DRAIN_WAIT = 2.0                       # seconds the stderr reader gets after the kill before it is left behind
 
 
 def _trusted_path(path: str | None) -> str:
@@ -63,6 +63,14 @@ class ClaudeProcess:
         self._proc = proc
         self._stderr: collections.deque[str] = collections.deque(maxlen=STDERR_LINES)
         self._stderr_task = asyncio.create_task(self._drain_stderr())
+        self._tree = ProcessTree.of(proc)              # Windows: its own job object; POSIX: its own group
+        self._terminated = False
+        for stream in (1, 2):                          # whoever keeps the output open is part of the tree
+            try:
+                pipe = proc._transport.get_pipe_transport(stream).get_extra_info("pipe")   # type: ignore[union-attr]
+                self._tree.watch_pipe(pipe.fileno())
+            except Exception:                          # noqa: BLE001
+                pass
 
     @classmethod
     async def spawn(cls, argv: list[str], env: dict[str, str], cwd: str) -> "ClaudeProcess":
@@ -114,34 +122,42 @@ class ClaudeProcess:
         return None
 
     async def terminate(self, grace: float = 2.0) -> None:
-        """Kill the process and its children; safe to call twice."""
+        """Kill the process and every process below it; safe to call twice, never waits forever (task 3175).
+
+        The kill itself runs in a thread (taskkill on Windows can take seconds and must not freeze the other chats).
+        After it, the pipes are closed from this side: a grandchild that escaped the kill and still holds stdout can
+        no longer keep `read()` waiting, so the turn always ends."""
+        if self._terminated:
+            return
+        self._terminated = True
         if self._proc.returncode is None:
-            self._signal(signal.SIGTERM if os.name == "posix" else None)
+            await asyncio.to_thread(self._tree.terminate)
             try:
                 await asyncio.wait_for(self._proc.wait(), grace)
             except asyncio.TimeoutError:
-                self._signal(signal.SIGKILL if os.name == "posix" else None, force=True)
+                pass
+        await asyncio.to_thread(self._tree.kill)         # also what is left of the tree after the parent ended
+        if self._proc.returncode is None:
+            try:
+                await asyncio.wait_for(self._proc.wait(), grace)
+            except asyncio.TimeoutError:
                 try:
-                    await asyncio.wait_for(self._proc.wait(), grace)
-                except asyncio.TimeoutError:
+                    self._proc.kill()
+                except ProcessLookupError:
                     pass
+        transport = getattr(self._proc, "_transport", None)
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:                            # noqa: BLE001
+                pass
         if self._proc.stdin is not None and not self._proc.stdin.is_closing():
             self._proc.stdin.close()
-        await asyncio.gather(self._stderr_task, return_exceptions=True)
-
-    def _signal(self, sig: int | None, force: bool = False) -> None:
-        pid = self._proc.pid
         try:
-            if os.name == "posix":
-                os.killpg(pid, sig)                       # type: ignore[arg-type]
-            else:
-                cmd = ["taskkill", "/T", "/PID", str(pid)] + (["/F"] if force or sig is None else [])
-                subprocess.run(cmd, capture_output=True, timeout=10, check=False, **spawn_kwargs())
-        except (ProcessLookupError, PermissionError, OSError, subprocess.SubprocessError):
-            try:
-                self._proc.kill()
-            except ProcessLookupError:
-                pass
+            await asyncio.wait_for(asyncio.gather(self._stderr_task, return_exceptions=True), DRAIN_WAIT)
+        except asyncio.TimeoutError:
+            self._stderr_task.cancel()
+        self._tree.close()
 
 
 async def claude_version(claude: str | None = None) -> str | None:

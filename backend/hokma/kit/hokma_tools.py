@@ -334,6 +334,16 @@ def skill_save(u, c: Caller, a: dict) -> str:
         raise ValueError(errors.message(exc.code, str(exc))) from exc
 
 
+def skill_install(u, c: Caller, a: dict) -> str:
+    """Install a skill from a GitHub link (task 3175): the same code as Settings > Extensions > Add skill by link."""
+    from hokma.kit import skill_install as installer
+
+    try:
+        return _dump(installer.install(a["url"], bool(a.get("replace"))))
+    except installer.SkillInstallError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def get_db():
     from hokma.db import get_database
 
@@ -368,7 +378,7 @@ def bug_list(u, c: Caller, a: dict) -> str:
 # ---------------------------------------------------------------------------- table
 
 Handler = Callable[[Any, Caller, dict], str]
-NO_UNIT = {"project_create", "agent_save", "skill_save"}          # these open their own database units
+NO_UNIT = {"project_create", "agent_save", "skill_save", "skill_install"}          # these open their own database units
 TASK_ID = {"task_id": _i("Task id.")}
 
 TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
@@ -421,7 +431,15 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
         "schedule_expr": _s(), "timezone": _s()}, ["name", "prompt", "schedule_kind", "schedule_expr"],
                         schedule_create, True),
     "schedule_list": ("List routines.", {"active": _b()}, [], schedule_list, False),
-    "extension_request": ("Ask the owner to install, enable, disable or remove a plugin, skill or MCP server.", {
+    "skill_install": ("Install a skill from a GitHub link (a repository or a folder inside it): Hokma downloads it, "
+                      "copies every SKILL.md skill into the working folder and it can be used at once. A plugin or "
+                      "marketplace repository is added to Settings > Extensions instead. Use it whenever the owner "
+                      "gives a link to a skill; it works in every engine.", {
+        "url": _s("https://github.com/owner/repo, or .../tree/<branch>/<folder> for one skill."),
+        "replace": _b("Replace a skill of the same name (the old one goes to the Hokma trash).")},
+                      ["url"], skill_install, False),
+    "extension_request": ("Ask the owner to turn on, turn off or remove a plugin or an MCP server when you cannot do "
+                          "it yourself. A skill from a link is installed with skill_install, not requested.", {
         "action": _s(enum=["install", "enable", "disable", "uninstall"]), "kind": _s(enum=["plugin", "skill", "mcp"]),
         "name": _s(), "marketplace": _s(), "reason": _s(), "version": _s(), "task_id": _i()},
                           ["action", "kind", "name", "reason"], extension_request, True),

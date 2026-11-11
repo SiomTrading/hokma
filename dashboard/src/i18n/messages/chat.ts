@@ -101,6 +101,7 @@ export default defineMessages({
     "chat.tool.done": "Listo",
     "chat.tool.failed": "Falló",
     "chat.tool.result": "Resultado",
+    "chat.tool.live": "Salida del comando en curso",
 
     "chat.perm.badge": "Pide permiso",
     "chat.perm.title.write_file": "Escribir un archivo",
@@ -297,6 +298,7 @@ export default defineMessages({
     "chat.tool.done": "Done",
     "chat.tool.failed": "Failed",
     "chat.tool.result": "Result",
+    "chat.tool.live": "Output of the running command",
 
     "chat.perm.badge": "Asks permission",
     "chat.perm.title.write_file": "Write a file",

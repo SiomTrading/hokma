@@ -27,7 +27,7 @@ _TOOLING = ("BUN_INSTALL", "BUN_INSTALL_CACHE_DIR", "NPM_CONFIG_PREFIX", "NPM_CO
             "CARGO_HOME", "RUSTUP_HOME", "GOPATH", "GOROOT", "PYTHONUSERBASE", "PNPM_HOME", "NVM_DIR", "VOLTA_HOME",
             "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR", "UV_TOOL_BIN_DIR", "ProgramW6432", "ALLUSERSPROFILE",
             "PUBLIC")
-_HOKMA = ("HOKMA_HOME", "HOKMA_DATA_DIR", "HOKMA_WORK_ROOT", "HOKMA_CONVERSATION_ID", "HOKMA_TASK_ID", "HOKMA_AGENT", "HOKMA_LANG",
+_HOKMA = ("HOKMA_COMMAND_TIMEOUT", "HOKMA_HOME", "HOKMA_DATA_DIR", "HOKMA_WORK_ROOT", "HOKMA_CONVERSATION_ID", "HOKMA_TASK_ID", "HOKMA_AGENT", "HOKMA_LANG",
           "CLAUDE_CODE_GIT_BASH_PATH")
 
 ALLOWED = _SYSTEM + _NETWORK + _TOOLING + _HOKMA
@@ -37,7 +37,25 @@ def _wanted(name: str) -> bool:
     return any(fnmatch.fnmatchcase(name.upper(), pattern) for pattern in ALLOWED)
 
 
+# Nothing an engine starts may wait for someone to type (task 3175): a `git clone` on Windows waited for Git
+# Credential Manager with no window to show, and the chat stayed "running". Git, GCM, pip and the GitHub CLI fail at
+# once instead, with their own message ("could not read Username", "authentication failed").
+NON_INTERACTIVE = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "PIP_NO_INPUT": "1",
+                   "GH_PROMPT_DISABLED": "1"}
+
+
+def command_limits() -> dict[str, str]:
+    """Claude Code's own Bash tool honours the same time limit as the commands Hokma runs itself."""
+    from hokma.core.config import command_timeout
+
+    ms = str(command_timeout() * 1000)
+    return {"BASH_DEFAULT_TIMEOUT_MS": ms, "BASH_MAX_TIMEOUT_MS": ms}
+
+
 def filtered_env(source: Mapping[str, str] | None = None) -> dict[str, str]:
-    """The allow-listed part of `source` (default: the process environment)."""
+    """The allow-listed part of `source` (default: the process environment), never interactive, with the command
+    time limit."""
     env = {k: v for k, v in (os.environ if source is None else source).items() if _wanted(k)}
+    env.update(NON_INTERACTIVE)
+    env.update(command_limits())
     return tools.with_tools(env)

@@ -31,6 +31,20 @@ enciende los plugins que quieras. Cada uno pide tu confirmación.
 Pulsa "Agregar por enlace" y escribe una dirección de GitHub como `dueño/repositorio`. El marketplace se agrega a tu
 lista. Sus plugins quedan apagados hasta que los enciendas.
 
+## Agregar una skill por enlace
+
+Pulsa "Agregar skill por enlace" y pega la dirección de GitHub de la skill: el repositorio
+(`https://github.com/dueño/repositorio`) o la carpeta de una skill dentro de él. Hokma la descarga, copia cada skill
+(cada carpeta con un SKILL.md) a `.claude/skills/` de tu carpeta de trabajo y queda disponible de inmediato. Si el
+repositorio es un plugin o un marketplace, se agrega como en "Agregar por enlace". En el chat basta con pegarle el
+enlace a cualquier agente, con cualquier motor: usa la herramienta `skill_install`.
+
+## Comandos con límite de tiempo
+
+Todo comando que corre un agente tiene un límite de tiempo (10 minutos; se cambia escribiendo los segundos en el
+archivo `command-timeout` de la carpeta de datos de Hokma) y nunca espera que escribas algo: Git, pip y uv fallan de
+inmediato con su mensaje si piden una contraseña. Detener una respuesta termina el motor y todo lo que inició.
+
 ## Desde la terminal
 
 - `hokma ext list` muestra lo que tienes.

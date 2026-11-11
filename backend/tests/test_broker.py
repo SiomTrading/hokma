@@ -75,7 +75,10 @@ def test_env_allow_list_drops_every_key_and_token():
     out = filtered_env({"PATH": "/bin", "HOME": "/h", "LC_ALL": "C", "https_proxy": "http://p", "OPENAI_API_KEY": "k",
                         "ANTHROPIC_API_KEY": "k", "HOKMA_SESSION_TOKEN": "t", "HOKMA_CONVERSATION_ID": "3",
                         "XDG_DATA_HOME": "/x", "GITHUB_TOKEN": "g"})
-    assert set(out) == {"PATH", "HOME", "LC_ALL", "https_proxy", "HOKMA_CONVERSATION_ID", "XDG_DATA_HOME"}
+    secrets = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HOKMA_SESSION_TOKEN", "GITHUB_TOKEN"}
+    assert not secrets & set(out)
+    assert {"PATH", "HOME", "LC_ALL", "https_proxy", "HOKMA_CONVERSATION_ID", "XDG_DATA_HOME"} <= set(out)
+    assert out["GIT_TERMINAL_PROMPT"] == "0" and out["GCM_INTERACTIVE"] == "never" and out["PIP_NO_INPUT"] == "1"
 
 
 def test_unknown_tools_are_denied_by_default(box, bctx):

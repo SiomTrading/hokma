@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.0.25
+
+Two real cases on Windows (task 3175): pressing Stop left Hokma hung, and a `git clone` waited for credentials nobody could type.
+
+- Stop never hangs: the engine's whole process tree and any child command are killed (job object or `taskkill /T /F` on
+  Windows, process group on POSIX), and the turn, the conversation lock and the session are released in a `finally`.
+  Other chats and deleting conversations keep working.
+- Every command Hokma launches (`run_command` of the direct engines and what Claude Code's Bash runs) has a configurable
+  time limit (default 10 minutes, `HOKMA_COMMAND_TIMEOUT`) and live output; when it expires it is cut and the chat says so.
+- Git and downloads never ask for input: `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `PIP_NO_INPUT=1`,
+  `GH_PROMPT_DISABLED=1`, stdin closed. Without credentials they fail at once with a clear message.
+- New tool `skill_install(url)` in Hokma's MCP (every engine): a GitHub repository or folder, downloaded as a zip into a
+  temporary folder, one or several `SKILL.md`, plugins and marketplaces are handed to the plugin install; the skill shows
+  up at once. Settings > Extensions has the button "Agregar skill por enlace". The kit no longer says "only request".
+
+### Added to 0.0.25 (task 3177): Codex starts on Windows
+
+- `config.toml` of Codex wrote the environment variables of the MCP servers as bare keys; Windows has variables such as
+  `ProgramFiles(x86)` and the parenthesis made the TOML invalid, so Codex did not start. Every key that is not
+  `[A-Za-z0-9_-]+` (variables and `[mcp_servers.<name>]` tables) is now written quoted. Test parses the file with `tomllib`.
+
 ## 0.0.24
 
 0.0.23 did not install on a Mac with an Intel processor (macOS 15, `macosx_15_0_x86_64`): `uv` found no wheel of

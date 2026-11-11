@@ -8,7 +8,7 @@ import { normalizeRepo, repoProblem } from "./linkFormats";
 import { readTab, storeTab } from "./extTab";
 import type { ExtTab } from "./extTab";
 import { RemoteServers } from "./RemoteServers";
-import type { AddResult, ExtensionRequest, ExtensionsData, MarketData, MarketItem, MarketplaceSource, OfferedPlugin, PluginItem, PluginState } from "./types";
+import type { AddResult, ExtensionRequest, SkillInstallResult, ExtensionsData, MarketData, MarketItem, MarketplaceSource, OfferedPlugin, PluginItem, PluginState } from "./types";
 
 type PendingAction = "toggle" | "install" | "uninstall" | "removeMarket";
 
@@ -35,6 +35,7 @@ export function ExtensionsSection() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [tab, setTab] = useState<ExtTab>(readTab);
   const [linking, setLinking] = useState(false);
+  const [skillLinking, setSkillLinking] = useState(false);
   const [openMarket, setOpenMarket] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +157,20 @@ export function ExtensionsSection() {
               <Button size="sm" variant="ghost" onClick={() => setLinking((open) => !open)} aria-pressed={linking}>
                 {t("ext.add")}
               </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSkillLinking((open) => !open)} aria-pressed={skillLinking}>
+                {t("ext.skill.add")}
+              </Button>
             </div>
+
+            {skillLinking ? (
+              <AddSkillByLink
+                onDone={() => {
+                  setSkillLinking(false);
+                  list.reload();
+                  shell.emit("extensions:changed");
+                }}
+              />
+            ) : null}
 
             {linking ? (
               <AddByLink
@@ -383,6 +397,52 @@ function AddByLink({ onDone }: { onDone: (result: AddResult) => void }) {
         <div>
           <Button type="submit" size="sm" variant="primary" disabled={!valid || busy}>{t("ext.link.submit")}</Button>
           {problem === "empty" ? <span className="hint" style={{ marginLeft: 10 }}>{t("ext.link.empty")}</span> : null}
+        </div>
+      </form>
+    </Pane>
+  );
+}
+
+/** "Add skill by link": a GitHub repository or a folder inside it; Hokma downloads it and copies every SKILL.md skill
+ * into the working folder (a plugin or marketplace repository is added to the list instead). */
+function AddSkillByLink({ onDone }: { onDone: (result: SkillInstallResult) => void }) {
+  const { t } = useI18n();
+  const shell = useShell();
+  const [url, setUrl] = useState("");
+  const [replace, setReplace] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const valid = /^(https?:\/\/)?(www\.)?github\.com\/[^\s/]+\/[^\s/]+/i.test(url.trim()) || /^[\w.-]+\/[\w.-]+$/.test(url.trim());
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const done = await api.post<SkillInstallResult>("/api/extensions/skills", { url: url.trim(), replace });
+      const names = (done.skills ?? []).map((skill) => skill.name).join(", ");
+      shell.toast({ tone: "ok", text: done.kind === "skill" ? t("ext.skill.installed", { names }) : t("ext.skill.plugin", { name: done.marketplace ?? done.repository }) });
+      onDone(done);
+    } catch (cause) {
+      setError(errorText(cause, t("api.error")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Pane style={{ padding: 14 }}>
+      <form onSubmit={(event) => void submit(event)} style={{ display: "flex", flexDirection: "column", gap: 10 }} aria-label={t("ext.skill.title")}>
+        <Field label={t("ext.skill.label")} hint={t("ext.skill.hint")} error={error ?? (url.trim() && !valid ? t("ext.skill.badFormat") : undefined)}>
+          {(control) => <Input {...control} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://github.com/owner/repo" autoComplete="off" spellCheck={false} />}
+        </Field>
+        <label className="hint" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={replace} onChange={(event) => setReplace(event.target.checked)} />
+          {t("ext.skill.replace")}
+        </label>
+        <div>
+          <Button type="submit" size="sm" variant="primary" disabled={!valid || busy}>{busy ? t("ext.skill.busy") : t("ext.skill.submit")}</Button>
         </div>
       </form>
     </Pane>

@@ -22,7 +22,7 @@ from hokma.kit.launch import TRASH_MCP
 from hokma.permissions import modes
 
 PREFIX = "mcp__hokma__"
-TIMEOUT = 60
+TIMEOUT = 180                      # a skill_install downloads a repository: give it time, but never forever
 
 
 def server_spec(ctx: EngineContext) -> dict[str, Any]:

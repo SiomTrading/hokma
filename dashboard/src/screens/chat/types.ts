@@ -47,6 +47,8 @@ export interface StoredTool {
   at: number;
   is_error: boolean | null;
   result: string | null;
+  /** Live output of a command while it runs (only in a running turn's snapshot). */
+  output?: string;
 }
 
 /** A refusal of one of the always-on protections, as the server sends it live and as it is saved with the answer. */
@@ -93,6 +95,7 @@ export type ServerEvent =
   | { type: "delta"; conversation_id: string; turn_id: string; text: string }
   | { type: "tool_use"; conversation_id: string; turn_id: string; tool_use_id: string; name: string; input: Record<string, unknown>; summary: ToolSummary }
   | { type: "tool_result"; conversation_id: string; turn_id: string; tool_use_id: string; is_error: boolean; text: string }
+  | { type: "tool_output"; conversation_id: string; turn_id: string; tool_use_id: string; text: string }
   | ({ type: "permission_request" } & PermissionBody)
   | { type: "permission_resolved"; conversation_id: string; request_id: string; decision: "allow" | "deny"; by: "human" | "timeout" | "stop" | "engine" }
   | ({ type: "guard_block"; conversation_id: string; turn_id?: string } & GuardBlock)

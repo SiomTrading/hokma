@@ -217,6 +217,27 @@ describe.each([
   });
 });
 
+describe("Add skill by link (task 3175)", () => {
+  it("installs a skill from a GitHub link and shows the reason when it fails", async () => {
+    setLocale("es");
+    const calls = mockApi({
+      "GET /api/extensions": extensionsData(),
+      "POST /api/extensions/skills": { kind: "skill", repository: "NVIDIA/SkillSpector", skills: [{ name: "skillspector", path: ".claude/skills/skillspector", files: 3, left_out: 0, replaced: false }], available_now: ["skillspector"] },
+    });
+    renderWithApp(<ExtensionsSection />);
+    await userEvent.click(await screen.findByRole("button", { name: T("ext.skill.add", "es") }));
+    const submit = screen.getByRole("button", { name: T("ext.skill.submit", "es") });
+    expect(submit).toBeDisabled();
+    await userEvent.type(screen.getByPlaceholderText("https://github.com/owner/repo"), "https://gitlab.com/a/b");
+    expect(submit).toBeDisabled();
+    expect(screen.getByText(T("ext.skill.badFormat", "es"))).toBeInTheDocument();
+    await userEvent.clear(screen.getByPlaceholderText("https://github.com/owner/repo"));
+    await userEvent.type(screen.getByPlaceholderText("https://github.com/owner/repo"), "https://github.com/NVIDIA/SkillSpector.git");
+    await userEvent.click(submit);
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/extensions/skills")?.body).toEqual({ url: "https://github.com/NVIDIA/SkillSpector.git", replace: false }));
+  });
+});
+
 describe("Extensions plugins (task 3156)", () => {
   const states = [
     { ...PLUGIN, id: "a@m", name: "alpha", marketplace: "m", enabled: true, state: "active" as const },

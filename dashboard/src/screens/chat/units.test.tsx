@@ -38,6 +38,22 @@ describe("reducer", () => {
     expect(last).toMatchObject({ text: "Done", streaming: false, messageId: "12" });
   });
 
+  it("shows a running command's output as it arrives and drops it when the result comes (task 3175)", () => {
+    const started = run(
+      initialState("7"),
+      ev({ type: "tool_use", ...base, tool_use_id: "c", name: "run_command", input: {}, summary: { kind: "run_command", target: "git clone x" } }),
+      ev({ type: "tool_output", ...base, tool_use_id: "c", text: "Cloning into 'x'...\n" }),
+      ev({ type: "tool_output", ...base, tool_use_id: "c", text: "Receiving objects: 50%\n" }),
+    );
+    expect(started.items[0]).toMatchObject({ kind: "tool", output: "Cloning into 'x'...\nReceiving objects: 50%\n" });
+    const long = run(started, ev({ type: "tool_output", ...base, tool_use_id: "c", text: "y".repeat(5000) }));
+    expect((long.items[0] as { output: string }).output.length).toBe(4000);
+    const done = run(started, ev({ type: "tool_result", ...base, tool_use_id: "c", is_error: true, text: "stopped" }),
+      ev({ type: "tool_output", ...base, tool_use_id: "c", text: "late" }));
+    expect(done.items[0]).toMatchObject({ result: { isError: true, text: "stopped" } });
+    expect((done.items[0] as { output?: string }).output).not.toContain("late");
+  });
+
   it("marks a stopped turn and keeps the partial text", () => {
     const state = run(
       initialState("7"),

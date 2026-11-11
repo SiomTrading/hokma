@@ -31,6 +31,11 @@ class MarketplaceBody(BaseModel):
     repo: str = Field(pattern=GITHUB_REPO)
 
 
+class SkillLinkBody(BaseModel):
+    url: str = Field(min_length=3, max_length=500)
+    replace: bool = False
+
+
 class McpServerBody(BaseModel):
     name: str = Field(min_length=1, max_length=32)
     url: str = Field(min_length=1, max_length=2000)
@@ -152,6 +157,17 @@ def retry_extension(body: UninstallBody) -> dict:
 @router.post("/api/extensions/marketplaces", status_code=201, summary="Add a GitHub repository (marketplace or plugin) by owner/repo; a one-plugin repo is installed")
 def add_marketplace(body: MarketplaceBody) -> dict:
     return _call(service.add_marketplace, body.repo)
+
+
+@router.post("/api/extensions/skills", status_code=201,
+             summary="Install a skill from a GitHub link (repository or folder); a plugin repository is added instead")
+def add_skill_by_link(body: SkillLinkBody) -> dict:
+    from hokma.kit import skill_install
+
+    try:
+        return skill_install.install(body.url, body.replace)
+    except skill_install.SkillInstallError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 @router.get("/api/extensions/marketplaces/{name}/plugins", summary="Plugins a registered marketplace offers")

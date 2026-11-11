@@ -71,6 +71,17 @@ export interface AddResult {
   warnings: string[];
 }
 
+/** What POST /api/extensions/skills answers: the skills copied, or the plugin route a plugin repository took. */
+export interface SkillInstallResult {
+  kind: "skill" | "plugin" | "marketplace";
+  repository: string;
+  skills?: { name: string; path: string; files: number; left_out: number; replaced: boolean }[];
+  available_now?: string[];
+  marketplace?: string;
+  installed_plugins?: string[];
+  note?: string;
+}
+
 export interface ExtensionRequest {
   id: string;
   origin: "inbox" | "db";
