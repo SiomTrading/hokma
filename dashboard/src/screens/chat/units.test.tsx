@@ -74,7 +74,11 @@ describe("reducer", () => {
     const text = (code: string) => `E:${code}`;
     const failed = run(initialState("7"), { type: "event", errorText: text, event: { type: "error", code: "engine_exited", message: "x", conversation_id: "7" } });
     expect(failed.running).toBe(false);
-    expect(failed.items[0]).toMatchObject({ kind: "notice", text: "E:engine_exited" });
+    expect(failed.items[0]).toMatchObject({ kind: "notice", text: "E:engine_exited\nx" });
+    const generic = run(initialState("7"), { type: "event", errorText: text, event: { type: "error", code: "engine_error", message: "UserPromptSubmit hook blocked", conversation_id: "7" } });
+    expect(generic.items[0]).toMatchObject({ kind: "notice", text: "E:engine_error\nUserPromptSubmit hook blocked" });
+    const plain = run(initialState("7"), { type: "event", errorText: text, event: { type: "error", code: "unknown_model", message: "secret detail", conversation_id: "7" } });
+    expect(plain.items[0]).toMatchObject({ kind: "notice", text: "E:unknown_model" });
     const busy = run({ ...initialState("7"), running: true }, { type: "event", errorText: text, event: { type: "error", code: "busy", message: "x" } });
     expect(busy.running).toBe(true);
   });

@@ -87,12 +87,18 @@ def _scan(root: Path, rel: str) -> list[os.DirEntry]:
 
 
 def _plain(entry: os.DirEntry) -> bool:
-    """A regular file with one link: not a symbolic link, not a hard link to a key stored somewhere else."""
+    """A regular file with one link: not a symbolic link, not a hard link to a key stored somewhere else.
+
+    On Windows `DirEntry.stat()` always reports `st_nlink == 0` (Python fills it only from `os.stat`), so the old
+    `st_nlink == 1` test refused every file there and no skill or agent was ever copied (task 3171): the link count
+    comes from `os.lstat` of the entry."""
     try:
         info = entry.stat(follow_symlinks=False)
+        if stat.S_ISREG(info.st_mode) and info.st_nlink == 0:
+            info = os.lstat(entry.path)
     except OSError:
         return False
-    return stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+    return stat.S_ISREG(info.st_mode) and info.st_nlink <= 1
 
 
 def _read(root: Path, rel: str, limit: int = MAX_FILE) -> bytes | None:

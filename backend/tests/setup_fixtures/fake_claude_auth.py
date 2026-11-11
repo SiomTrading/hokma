@@ -11,6 +11,21 @@ from pathlib import Path
 config = Path(os.environ["CLAUDE_CONFIG_DIR"])
 marker = config / "logged_in"
 args = sys.argv[1:]
+debug_file = None
+if args[:1] == ["--debug-file"]:
+    if os.environ.get("FAKE_NO_DEBUG_FILE"):
+        print("error: unknown option '--debug-file'")
+        sys.exit(1)
+    debug_file, args = args[1], args[2:]
+    with open(os.path.join(os.path.dirname(debug_file), "fake-env.json"), "w") as out:
+        json.dump(dict(os.environ), out)
+
+
+def debug(line):
+    if debug_file:
+        with open(debug_file, "a") as out:
+            out.write(line + "\n")
+
 
 if args[:1] == ["--version"]:
     print("9.9.9 (Claude Code)")
@@ -24,6 +39,15 @@ elif args[:2] == ["auth", "status"]:
     else:
         print(json.dumps({"loggedIn": False, "authMethod": "none"}))
         sys.exit(1)
+elif args[:2] == ["auth", "login"] and os.environ.get("FAKE_LOGIN_403"):
+    print("Opening browser to sign in...")
+    print("If the browser did not open, visit: https://claude.com/cai/oauth/authorize?code=true&state=SECRETSTATE123")
+    print("Paste code here if prompted > ", end="", flush=True)
+    sys.stdin.readline()
+    debug("2026-11-11T10:00:00.000Z [DEBUG] Remote settings: No settings found (404)")
+    debug("2026-11-11T10:00:01.000Z [ERROR] OAuth login failed: Request failed with status code 403 token=" + "Z9y8X7w6" * 5)
+    print("Login failed: Request failed with status code 403")
+    sys.exit(1)
 elif args[:2] == ["auth", "login"] and os.environ.get("FAKE_LOGIN_FAIL"):
     print("\x1b[31mError: OAuth flow failed\x1b[0m")
     print("callback https://claude.com/cai/oauth/authorize?code=true&state=SECRETSTATE123")

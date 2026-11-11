@@ -103,8 +103,12 @@ class ClaudeCodeSession:
                     if stream.is_aborted(msg) or self._interrupted:
                         yield {"type": "done", "status": "stopped"}
                     elif msg.get("is_error"):
+                        # The real text of the failure (a hook that blocked the prompt, an API error) and what the
+                        # CLI wrote on stderr: shown in the chat and kept in engine.log, never a bare "it failed".
+                        detail = str(msg.get("result") or msg.get("subtype") or "")
+                        tail = proc.stderr_tail()
                         yield {"type": "error", "code": "engine_error",
-                               "message": str(msg.get("result") or msg.get("subtype"))}
+                               "message": (detail + ("\n" + tail if tail else "")).strip()[:2000]}
                     else:
                         yield {"type": "done", "status": "complete", "usage": stream.usage_of(msg),
                                "result": "" if text_seen else str(msg.get("result") or "")}
@@ -175,7 +179,8 @@ class ClaudeCodeAdapter:
         env.update(modes.work_env(ctx.cwd, ctx.conversation_id, ctx.task_id, ctx.agent or ""))
         claude = getattr(self.owner, "claude_bin", None) or find_claude(env)
         if not claude:
-            raise EngineError("claude_not_found", "the `claude` command is not installed or not on PATH")
+            raise EngineError("claude_not_found", "the `claude` command is not installed or not on PATH "
+                              f"(PATH searched: {env.get('PATH', '')[:1500]})")
         ref = ctx.session_ref or self.new_ref()
         flags = ctx.extra.get("base_flags", BASE_FLAGS)
         argv = [claude, *spec_args, *flags, "--permission-mode",

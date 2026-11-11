@@ -70,7 +70,7 @@ def build_roots(args: list[str]) -> list[str]:
 
 
 def reply(message: dict) -> None:
-    sys.stdout.write(json.dumps(message, ensure_ascii=False) + "\n")
+    sys.stdout.write(json.dumps(message, ensure_ascii=True) + "\n")   # ASCII on the wire: no code page can break it
     sys.stdout.flush()
 
 
@@ -114,17 +114,32 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     os.environ["HOKMA_DATA_DIR"] = data
     roots, protect = build_roots(args), arguments(args, "--protect") or [data]
-    for line in sys.stdin:
-        line = line.strip()
+    # UTF-8 on both pipes whatever the Windows code page (`-I` ignores PYTHONUTF8): a Spanish or other non-cp1252
+    # character used to crash the server and Claude Code answered "the MCP failed" (task 3171).
+    source = getattr(sys.stdin, "buffer", None)
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+    for raw in (source if source is not None else sys.stdin):
+        line = (raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw).strip()
         if not line:
             continue
+        ident = None
         try:
             message = json.loads(line)
+            ident = message.get("id") if isinstance(message, dict) else None
             answer = handle(message, data, roots, protect) if isinstance(message, dict) else None
         except Exception as exc:                                  # never let one bad message end the server
-            answer = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": type(exc).__name__}}
+            print(f"hokma mcp: {type(exc).__name__}: {exc}"[:500], file=sys.stderr)
+            answer = {"jsonrpc": "2.0", "id": ident, "error": {"code": -32603,
+                                                               "message": f"{type(exc).__name__}: {exc}"[:300]}}
         if answer is not None:
-            reply(answer)
+            try:
+                reply(answer)
+            except (UnicodeError, ValueError) as exc:
+                reply({"jsonrpc": "2.0", "id": answer.get("id"), "error": {"code": -32603, "message": str(exc)[:300]}})
     return 0
 
 

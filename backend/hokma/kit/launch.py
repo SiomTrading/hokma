@@ -89,8 +89,11 @@ def prepare_claude_launch() -> LaunchSpec:
     mcp = write_mcp_config()
     try:
         mirror.sync()          # skills and agents of the working folder into the user source (see kit/mirror.py)
-    except Exception:      # noqa: BLE001
-        pass               # a broken copy must not stop the engine; the instructions still reach it
+    except Exception as exc:      # noqa: BLE001
+        # a broken copy must not stop the engine; the instructions still reach it. The reason goes to engine.log.
+        from hokma.engine import errlog
+
+        errlog.log(f"skills and agents not copied: {type(exc).__name__}: {exc}", exc)
     return LaunchSpec(
         args=["--settings", str(path), "--setting-sources", "user", "--mcp-config", mcp],
         # ENABLE_CLAUDEAI_MCP_SERVERS=false: the connectors of the student's claude.ai account (mail, drive, chat) stay out

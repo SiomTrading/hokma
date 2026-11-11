@@ -34,6 +34,25 @@ DEVICE_PREFIXES = ("\\\\?\\", "\\\\.\\", "//?/", "//./")
 CASE_INSENSITIVE = sys.platform in ("win32", "darwin")
 
 
+def utf8_stdio() -> None:
+    """Hooks and Hokma's MCP server run with `python -I`, which ignores PYTHONUTF8: on Windows their pipes were read and
+    written as cp1252, so a payload with an accented name arrived garbled (or did not decode at all) and a reply with
+    a character outside cp1252 crashed the process (task 3171). Claude Code speaks UTF-8 on every system."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+def read_stdin_text() -> str:
+    """The whole hook payload, decoded as UTF-8 whatever the console code page is."""
+    buf = getattr(sys.stdin, "buffer", None)
+    if buf is None:
+        return sys.stdin.read()
+    return buf.read().decode("utf-8-sig")
+
+
 def _fold(s: str) -> str:
     s = os.path.normcase(s)
     return s.casefold() if CASE_INSENSITIVE else s
@@ -256,12 +275,13 @@ def decide(payload: dict, protect: list[str]) -> tuple[int, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    utf8_stdio()
     try:
         args = sys.argv[1:] if argv is None else argv
         protect = [args[i + 1] for i, a in enumerate(args) if a == "--protect" and i + 1 < len(args)]
         if not protect:
             raise ValueError("no --protect paths")
-        code, message = decide(json.loads(sys.stdin.read()), protect)
+        code, message = decide(json.loads(read_stdin_text()), protect)
         if message:
             print(message, file=sys.stderr)
         return code

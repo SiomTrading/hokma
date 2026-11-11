@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Any, Awaitable, Callable
 
-from hokma.engine import stream
+from hokma.engine import errlog, stream
 from hokma.engine.protocols import ConversationRecord, ProjectRecord
 from hokma.engines.base import EngineContext, EngineError, EngineSession
 from hokma.engines.claude_code import SECRET_ENV  # noqa: F401  (kept for importers)
@@ -233,6 +233,10 @@ class ChatSession:
                 error = TurnError("engine_exited", f"{type(exc).__name__}: {exc}".strip())
             if isinstance(exc, asyncio.CancelledError):
                 raise
+        except Exception as exc:                               # a bug while starting the engine: say what it was
+            status = "error"
+            error = TurnError("engine_error", f"{type(exc).__name__}: {exc}".strip())
+            errlog.log(f"conversation {self.conversation_id}: the turn failed", exc)
         finally:
             await self._publish_blocks(turn_id, guard_blocks)
             await self._finish_turn(conv, turn_id, parts, tools, usage, status, error, guard_blocks)
@@ -272,6 +276,7 @@ class ChatSession:
         self.last_used = time.monotonic()
         try:
             if error is not None:
+                errlog.log(f"conversation {self.conversation_id}: {error.code}: {error.message}"[:4000])
                 await self.emit({"type": "error", "turn_id": turn_id, "code": error.code, "message": error.message})
             else:
                 zero = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cost_usd": 0.0}

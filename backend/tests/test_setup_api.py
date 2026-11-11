@@ -436,3 +436,84 @@ def test_settings_change_folder_and_names_after_setup(client, env):  # noqa: F81
 def test_setup_state_never_leaks_the_session_token_or_urls(client, env):  # noqa: F811
     client.post("/api/owner", headers=HEADERS, json={"owner_name": "Ana"})
     assert SESSION_TOKEN not in json.dumps(client.get("/api/setup", headers=HEADERS).json())
+
+
+# ---------------------------------------------------------------- sign-in environment and engine.log (task 3171)
+
+def _engine_log() -> str:
+    from hokma.core.config import engine_log_path
+    path = engine_log_path()
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def _wait_for(predicate, tries: int = 80):
+    for _ in range(tries):
+        if predicate():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def test_login_runs_with_the_0_0_21_environment_not_the_engine_one(client, fake_cli, monkeypatch):
+    data = hokma_data_dir()
+    tools_node = data / "tools" / "node" / "bin"
+    tools_node.mkdir(parents=True)
+    (data / "bin").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(data / "bin"), str(tools_node), os.environ["PATH"]]))
+    monkeypatch.setenv("ENABLE_CLAUDEAI_MCP_SERVERS", "false")
+    monkeypatch.setenv("HOKMA_CONVERSATION_ID", "c1")
+    monkeypatch.setenv("STUDENT_OWN_VAR", "kept")
+    assert client.post("/api/claude/login", headers=HEADERS).json()["running"] is True
+    seen = json.loads((data / "logs" / "fake-env.json").read_text())
+    parts = seen["PATH"].split(os.pathsep)
+    assert str(tools_node) not in parts and str(data / "bin") not in parts      # Claude Code's own Node, not Hokma's
+    assert str(fake_cli) in parts                                                  # the student's claude still found
+    assert "ENABLE_CLAUDEAI_MCP_SERVERS" not in seen and "HOKMA_CONVERSATION_ID" not in seen
+    assert seen["STUDENT_OWN_VAR"] == "kept"                                       # nothing else taken away
+    assert seen["CLAUDE_CONFIG_DIR"] == str(data / "claude-config")
+
+
+def test_pasted_code_goes_whole_to_the_same_child_and_is_logged_without_the_code(client, fake_cli):
+    started = client.post("/api/claude/login", headers=HEADERS).json()
+    pid = claude._login.proc.pid
+    again = client.post("/api/claude/login", headers=HEADERS).json()             # a second click: same child
+    assert started["running"] and again["running"] and claude._login.proc.pid == pid
+    assert client.post("/api/claude/login/code", headers=HEADERS, json={"code": "good-code"}).json() == {"sent": True}
+    assert _wait_for(lambda: client.get("/api/claude", headers=HEADERS).json()["state"] == "connected")
+    assert _wait_for(lambda: "ended with code 0" in _engine_log())
+    log = _engine_log()
+    assert f"pid {pid} started" in log and f"code sent to pid {pid}: 9 characters, WITHOUT the '#state' part" in log
+    assert "good-code" not in log
+    assert "--debug-file" in log and "auth login --claudeai" in log and "CLAUDE_CONFIG_DIR=" in log
+    assert "Login successful" in log
+
+
+def test_refused_login_leaves_command_environment_output_and_debug_errors_in_engine_log(client, fake_cli,
+                                                                                        monkeypatch):
+    monkeypatch.setenv("FAKE_LOGIN_403", "1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://user:pw123@proxy.local:3128")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-SHOULDNOTAPPEAR")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gw:gwpass@gateway.local/v1?key=GWQUERYKEY")
+    assert client.post("/api/claude/login", headers=HEADERS).json()["running"] is True
+    client.post("/api/claude/login/code", headers=HEADERS, json={"code": "abc123#state456"})
+    assert _wait_for(lambda: "ended with code 1" in _engine_log())
+    log = _engine_log()
+    assert "15 characters, with the '#state' part" in log
+    assert "Login failed: Request failed with status code 403" in log
+    assert "Claude Code debug errors:" in log and "[ERROR] OAuth login failed: Request failed with status code 403" in log
+    assert "[DEBUG] Remote settings" not in log                                   # only errors and warnings
+    assert "HTTPS_PROXY=http://***@proxy.local:3128" in log and "pw123" not in log
+    assert "ANTHROPIC_API_KEY" in log and "SHOULDNOTAPPEAR" not in log            # the name, never the value
+    assert "ANTHROPIC_BASE_URL=https://***@gateway.local/v1" in log
+    for secret in ("gwpass", "GWQUERYKEY", "SECRETSTATE123", "Z9y8X7w6Z9y8X7w6", "abc123", "state456"):
+        assert secret not in log
+    assert not (hokma_data_dir() / "logs" / "claude-login-debug.txt").exists()     # not kept on disk
+    info = client.get("/api/claude", headers=lang_headers("en")).json()["login"]
+    assert "403" in info["error"]
+
+
+def test_claude_without_debug_file_support_still_signs_in(client, fake_cli, monkeypatch):
+    monkeypatch.setenv("FAKE_NO_DEBUG_FILE", "1")
+    assert client.post("/api/claude/login", headers=HEADERS).json()["running"] is True
+    assert "--debug-file" not in claude._login.proc.args
+    assert "does not know --debug-file" in _engine_log()

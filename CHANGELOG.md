@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.0.23
+
+0.0.22 broke the chat on real Windows for many students: every message, even a "hola", answered "Something failed
+while answering", claude-mem did not work and calling an agent said "the MCP failed". 0.0.22 had been checked on
+Linux only. What was found by reading the code and simulating Windows in the tests:
+
+- Hooks and Hokma's MCP server run with `python -I`, which ignores `PYTHONUTF8`, so on Windows their pipes were cp1252.
+  A payload from Claude Code with an accented name in a path arrived garbled (the working folder no longer matched, writes
+  inside it looked "outside"), some accented capitals did not decode at all (the hook failed closed and refused every
+  tool), and a reply of the MCP server with a character outside cp1252 crashed it ("the MCP failed"). Now the hooks read
+  their input as UTF-8 bytes, write stderr as UTF-8, and the MCP server reads UTF-8 and answers in plain ASCII JSON;
+  a bad message gets an error answer with its reason instead of ending the server.
+- The copy of the student's skills and agents into the user source never copied anything on Windows:
+  `DirEntry.stat()` there always reports `st_nlink == 0`, and the check asked for exactly one link. The link count now
+  comes from `os.lstat`; a hard link is still refused.
+- A failure while starting the engine (a Python error in Hokma) left an empty answer and then a bare "Something
+  failed" from the socket handler. The turn now ends with `engine_error` and the real text (`ValueError: ...`), and the
+  traceback goes to `<data>/logs/engine.log`. Every failed turn writes its code and message there. An error result of
+  Claude Code (a hook that blocked the prompt, an API error) carries its text and the tail of the CLI's stderr.
+- The chat shows the engine's own words under the short text for `engine_error`, `engine_exited`, `claude_not_found`
+  and `integrity`. `claude_not_found` says which PATH was searched.
+- Finding `claude` fails open where it is not a lock: a PATH entry the path comparison cannot judge (a disconnected
+  network drive, a cloud folder) is kept and logged instead of stopping the conversation; quoted entries and entries
+  written with a variable are read like the shell reads them; a `Path` key in any letter case is read. The writable
+  part of the data folder is still left out.
+- A hook that fails closed now also prints the exception text, and printing can never turn a block into an allow.
+- "Sign in with Claude" (first run and Engines) ended on Windows with "Login failed: Request failed with status code
+  403", by the browser and by pasting the code. Reading `git diff` of 0.0.21..0.0.23: the sign-in code
+  (`backend/hokma/setup/claude.py`) did not change; the child still runs `claude auth login --claudeai` once, with
+  Hokma's process environment plus `CLAUDE_CONFIG_DIR`, without `<data>/tools` on its PATH, and the pasted text goes
+  whole (`code#state`) to that same child. Checked against the real Claude Code 2.1.322 (without finishing the OAuth):
+  the 403 is the answer of Anthropic's server after the code is exchanged, not a wrong code (a code from another
+  attempt says "That code wasn't accepted"). So the sign-in is pinned to the 0.0.21 environment on purpose (Hokma's
+  tool folders `<data>/bin`, `<data>/tools`, `<data>/python` are taken off its PATH if present, the engine-only
+  variables such as `ENABLE_CLAUDEAI_MCP_SERVERS` are dropped) and every attempt now leaves in
+  `<data>/logs/engine.log`: the command, the Claude Code version, the environment (all names; values only for PATH,
+  config, home, proxies without user and password, and similar), the pid, the length of the pasted code and whether it
+  has its `#state` part (never the code), the exit code, the full output with secrets hidden, and the `[ERROR]` and
+  `[WARN]` lines of Claude Code's own debug log (`--debug-file`, deleted afterwards; a Claude Code without the option
+  signs in without it). The next refused sign-in says which request was refused.
+- Tests: `backend/tests/test_windows_3171.py` (cp1252 pipes for hardblock, guard and the MCP server, a Windows
+  `DirEntry`, PATH entries that fail the comparison, a broken engine start and an error result reaching the chat and
+  engine.log); `backend/tests/test_setup_api.py` (the sign-in environment, one child for the code, what
+  engine.log keeps and what it hides).
+
 ## 0.0.22
 
 The agent is no longer fenced in. Cristian's decision: four locks stay, in every mode; everything else is allowed. A

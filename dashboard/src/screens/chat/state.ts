@@ -50,6 +50,9 @@ export type Action =
   | { type: "event"; event: ServerEvent; errorText?: (code: string) => string };
 
 let counter = 0;
+/** Error codes whose message from the engine is shown under the translated text. */
+const DETAILED_ERRORS = new Set(["engine_error", "engine_exited", "claude_not_found", "integrity"]);
+
 export function nextKey(prefix: string): string {
   counter += 1;
   return `${prefix}-${counter}`;
@@ -202,7 +205,10 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
       if (event.code === "unknown_conversation" && state.loading) {
         return { ...state, loading: false, loadError: errorText ? errorText(event.code) : event.code };
       }
-      const text = errorText ? errorText(event.code) : event.code;
+      const base = errorText ? errorText(event.code) : event.code;
+      // The engine's own words after the short text (task 3171): "something failed" alone told nobody what to fix.
+      const detail = DETAILED_ERRORS.has(event.code) && typeof event.message === "string" ? event.message.trim().slice(0, 600) : "";
+      const text = detail ? `${base}\n${detail}` : base;
       const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text };
       if (event.code === "busy" || event.code === "unknown_request") return { ...state, items: [...state.items, notice] };
       return { ...state, items: [...closeStreaming(state.items, "error"), notice], running: false, stopping: false };

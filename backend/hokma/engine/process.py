@@ -17,25 +17,45 @@ STDERR_LINES = 40
 
 def _trusted_path(path: str | None) -> str:
     """PATH without entries the agent can write: relative or empty ones (the working folder) and anything inside
-    Hokma's data folder that is not protected (`<data>/bin`, `<data>/tools`, `<data>/python` are)."""
+    Hokma's data folder that is not protected (`<data>/bin`, `<data>/tools`, `<data>/python` are).
+
+    Windows (task 3171): an entry written with a variable (`%USERPROFILE%\\.local\\bin`) or in quotes is read the way
+    the shell reads it, and an entry the comparison cannot judge (a disconnected network drive, a cloud folder that
+    makes realpath fail) is kept and logged instead of stopping the conversation: this filter is not one of the locks."""
     from hokma.core.config import hokma_data_dir
     from hokma.kit.guard import under_any
     from hokma.kit.settings import protected_paths
 
-    data, protect = str(hokma_data_dir()), [str(p) for p in protected_paths()]
+    try:
+        data, protect = str(hokma_data_dir()), [str(p) for p in protected_paths()]
+    except Exception as exc:                 # noqa: BLE001
+        _log(f"PATH filter skipped: {type(exc).__name__}: {exc}")
+        return path or ""
     keep = []
-    for entry in (path or "").split(os.pathsep):
+    for raw in (path or "").split(os.pathsep):
+        entry = os.path.expandvars(raw.strip().strip('"')) if raw else raw
         if not entry or not os.path.isabs(entry):
             continue
-        if under_any(entry, [data]) and not under_any(entry, protect):
-            continue
+        try:
+            if under_any(entry, [data]) and not under_any(entry, protect):
+                continue
+        except Exception as exc:             # noqa: BLE001
+            _log(f"PATH entry kept without a check ({entry!r}): {type(exc).__name__}: {exc}")
         keep.append(entry)
     return os.pathsep.join(keep)
 
 
+def _log(message: str) -> None:
+    from hokma.engine import errlog
+
+    errlog.log(message)
+
+
 def find_claude(env: dict[str, str] | None = None) -> str | None:
     """`claude` from a PATH with no folder the agent can write (the protected tool folders stay)."""
-    return shutil.which("claude", path=_trusted_path((env or os.environ).get("PATH")))
+    source = env or os.environ
+    path = next((v for k, v in source.items() if k.upper() == "PATH"), None)
+    return shutil.which("claude", path=_trusted_path(path))
 
 
 class ClaudeProcess:

@@ -1895,10 +1895,11 @@ def build_ctx(args: list[str], env: dict | None = None) -> Ctx:
 
 
 def main(argv: list[str] | None = None) -> int:
+    guard.utf8_stdio()
     try:
         args = sys.argv[1:] if argv is None else argv
         ctx = build_ctx(args)
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(guard.read_stdin_text())
         block = evaluate(payload, ctx)
         if block is None:
             return 0
@@ -1909,8 +1910,12 @@ def main(argv: list[str] | None = None) -> int:
         print(hint, file=sys.stderr)
         return BLOCK
     except BaseException as exc:  # fail closed on anything unexpected
-        print("HOKMA_BLOCKED error", file=sys.stderr)
-        print(t("hardblock.error", error=type(exc).__name__), file=sys.stderr)
+        try:
+            print("HOKMA_BLOCKED error", file=sys.stderr)
+            print(t("hardblock.error", error=type(exc).__name__), file=sys.stderr)
+            print(f"{type(exc).__name__}: {exc}"[:500], file=sys.stderr)     # the real cause, for the log and the chat
+        except BaseException:      # noqa: BLE001  printing must never turn a block into an allow
+            pass
         return BLOCK
 
 
