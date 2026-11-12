@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from hokma.db import get_database
+from hokma.engines import effective
 from hokma.engine.dbstore import DbChatStore
 from hokma.engines import catalog, diagnose, secrets
 from hokma.engines.base import EngineContext, EngineError
@@ -81,7 +82,9 @@ def add_api(provider: str, key: str | None, *, label: str | None = None, base_ur
         tiers = {t: model for t in catalog.TIERS}
     with get_database().write() as u:
         conn = u.engine_connections.add("api", label or info["label"], "local" if local else "api_key",
-                                        provider=provider, wire=info["wire"], base_url=url, tier_models=tiers or None)
+                                        provider=provider, wire=info["wire"], base_url=url, tier_models=tiers or None,
+                                        auto_default=False)
+    conn = _default_if_needed(conn.id)
     if not local:
         try:
             secrets.put(conn.id, key.strip())                  # type: ignore[union-attr]
@@ -96,7 +99,8 @@ def add_cli(engine: str, auth_kind: str, label: str, key: str | None = None) -> 
     if engine not in ("claude_code", "codex", "gemini_cli"):
         raise ServiceError(422, "engines.bad_engine")
     with get_database().write() as u:
-        conn = u.engine_connections.add(engine, label, auth_kind)
+        conn = u.engine_connections.add(engine, label, auth_kind, auto_default=False)
+    conn = _default_if_needed(conn.id)
     if key and auth_kind in ("api_key", "oauth_token"):
         try:
             secrets.put(conn.id, key.strip())
@@ -105,6 +109,98 @@ def add_cli(engine: str, auth_kind: str, label: str, key: str | None = None) -> 
                 u.engine_connections.remove(conn.id)
             raise ServiceError(503, "engines.store_unavailable") from None
     return public_view(conn)
+
+
+def _default_if_needed(connection_id: int):
+    """A new connection becomes the default only when it is Claude Code itself, or when Claude Code cannot be used
+    (bug 1095: a Gemini row added by a click, then not installed, used to take every chat from a signed-in Claude)."""
+    with get_database().write() as u:
+        new = u.engine_connections.get(connection_id)
+        if u.engine_connections.default() is None and (new.engine == "claude_code" or not effective.claude_connected()):
+            new = u.engine_connections.set_default(connection_id, chosen=False)
+        return new
+
+
+def _views() -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    store = DbChatStore()
+    with get_database().read() as u:
+        default = u.engine_connections.default()
+    return (store._conn(default) if default else None), store.connections()
+
+
+def active_engine(conversation_id: str | None = None) -> dict[str, Any]:
+    """The engine that WILL answer, by the rule the chat itself uses: the screen shows this and nothing else."""
+    store = DbChatStore()
+    default, others = _views()
+    conn = store.connection_for(conversation_id) if conversation_id else default
+    chosen = effective.resolve(conn, others)
+    stuck = effective.is_stuck(conn, others)
+    shown = chosen.conn
+    return {"id": shown.get("id") if shown else None, "engine": shown.get("engine") if shown else "claude_code",
+            "label": effective.label_of(shown), "replaced": chosen.fallback_from is not None, "available": not stuck,
+            "saved": effective.label_of(conn) if chosen.fallback_from is not None else None}
+
+
+_CLAUDE_MODELS = (("haiku", "fast", "Haiku"), ("sonnet", "balanced", "Sonnet"), ("opus", "deep", "Opus"))
+
+
+def model_menu() -> list[dict[str, Any]]:
+    """What the model button of the chat lists: one group per engine that is connected AND was proved to work, each with
+    its three models from the catalog Hokma already has per engine (no list of ours). The engine that answers is always
+    among them: when nothing is verified and a saved one is tried anyway, it is listed too (bug 1104, one rule).
+    `id` is the level the conversation stores (haiku, sonnet, opus), whatever the engine."""
+    default, conns = _views()
+    claude_ok = effective.claude_connected()
+    flags = {"is_installed": effective.installed, "claude_ok": claude_ok}
+    groups: list[dict[str, Any]] = []
+
+    def group(conn: dict[str, Any] | None) -> dict[str, Any]:
+        if conn is None or conn["engine"] == "claude_code":
+            label = "Claude" if conn is None else conn["label"]
+            models = [{"id": m, "tier": tier, "name": name} for m, tier, name in _CLAUDE_MODELS]
+        else:
+            label = conn["label"]
+            models = [{"id": m, "tier": tier, "name": catalog.tier_model(conn, tier) or name} for m, tier, name in _CLAUDE_MODELS]
+        return {"connection_id": None if conn is None else conn["id"], "engine": "claude_code" if conn is None else conn["engine"],
+                "label": label, "models": models}
+
+    has_claude_row = any(c["engine"] == "claude_code" and c.get("auth_kind") == "subscription" for c in conns)
+    if claude_ok and not has_claude_row:
+        groups.append(group(None))
+    for conn in conns:
+        if effective.verified(conn, **flags):
+            groups.append(group(conn))
+    shown = effective.resolve(default, conns).conn
+    listed = any(g["connection_id"] == (shown or {}).get("id") for g in groups) \
+        or (shown is None and any(g["engine"] == "claude_code" for g in groups))     # Claude without a row is the Claude group
+    if not listed and effective.can_run(shown, **flags):
+        groups.append(group(shown))
+    groups.sort(key=lambda g: g["engine"] != "claude_code")        # Claude first, the others as they were saved
+    return groups
+
+
+def ensure_claude_connection() -> dict[str, Any]:
+    """The connection row of Claude Code itself, made once when the student picks Claude in the model button, so that
+    every engine the button lists is a saved connection (a conversation can be attached to it)."""
+    with get_database().write() as u:
+        for c in u.engine_connections.list():
+            if c.engine == "claude_code" and c.auth_kind == "subscription":
+                return public_view(c)
+        conn = u.engine_connections.add("claude_code", "Claude", "subscription", auto_default=False)
+        u.engine_connections.set_status(conn.id, "connected", None)
+        return public_view(u.engine_connections.get(conn.id))
+
+
+def startup_check() -> None:
+    """At start: say in engine.log which engine will answer and why (never changes what the student chose)."""
+    try:
+        from hokma.engine import errlog
+
+        info = active_engine()
+        errlog.log(f"engine at start: {info['label']} ({info['engine']}), available={info['available']}"
+                   + (f", replaced the saved {info['saved']}" if info["replaced"] else ""), scope="engines")
+    except Exception:                                   # noqa: BLE001  (a log problem never stops the start)
+        pass
 
 
 def remove(connection_id: int) -> None:
@@ -185,6 +281,7 @@ async def ping(connection_id: int, owner: Any = None) -> dict[str, Any]:
         status, detail = "connected", None
     with get_database().write() as u:
         u.engine_connections.set_status(connection_id, status, detail)
+
     return {"ok": not code, "status": status, "code": detail or "", "latency_ok": bool(said or not code)}
 
 
@@ -277,7 +374,8 @@ def claude_import_apply() -> dict[str, Any]:
     payload = {"env": picked, **({"apiKeyHelper": str(helper)} if helper else {})}
     with get_database().write() as u:
         conn = u.engine_connections.add("claude_code", "Claude (imported)", kind,
-                                        base_url=picked.get("ANTHROPIC_BASE_URL"))
+                                        base_url=picked.get("ANTHROPIC_BASE_URL"), auto_default=False)
+    conn = _default_if_needed(conn.id)
     try:
         secrets.put(conn.id, json.dumps(payload))
     except StoreUnavailable:

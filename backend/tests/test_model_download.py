@@ -177,7 +177,9 @@ def test_automatic_retries_continue_while_failed(fake, tmp_path):
 
 def test_wrong_sha256_is_a_failure_and_no_final_file(fake, tmp_path):
     fake.corrupt = True
-    d = make(fake, tmp_path, waits=(0.01,))
+    # After the third failure the loop sleeps 30 s: no attempt is in flight when the files are checked. With a short wait
+    # a new attempt could be writing its .part at that moment (it failed on Windows runners, bug 1097 follow-up).
+    d = make(fake, tmp_path, waits=(0.01, 0.01, 30))
     d.start()
     wait_state(d, "failed")
     d.stop()

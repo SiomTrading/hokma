@@ -10,7 +10,7 @@ from hokma.engine.memory import FileAgents, MemoryStore, WorkdirProjects
 from hokma.engine.protocols import (DEFAULT_MODEL, GENERAL_PROJECT_ID, MODELS, AgentCatalog, ChatStore, ConversationRecord,
                                     ProjectRecord, ProjectResolver)
 from hokma.engine.session import PERMISSION_TIMEOUT, STOP_GRACE, ChatSession, TurnError
-from hokma.engines import catalog
+from hokma.engines import catalog, effective
 from hokma.engines.base import EngineAdapter
 from hokma.engines.registry import build_adapter, tier_of
 from hokma.kit.launch import LaunchSpec, prepare_claude_launch
@@ -85,6 +85,8 @@ class ChatEngine:
         self._checkpoint, self._blocks = checkpoint, blocks
         self.adapters: dict[str, EngineAdapter] = {}
         self._background: set[asyncio.Task] = set()
+        self.fallbacks: dict[str, dict[str, str]] = {}      # conversation -> {from, to} to announce before the next turn
+        self.announced: dict[str, dict[str, str]] = {}      # conversation -> the replacement already announced
 
     def adapter_for(self, kind: str) -> EngineAdapter:
         adapter = self.adapters.get(kind)
@@ -96,6 +98,22 @@ class ChatEngine:
         """The adapter, the saved connection (None = Claude Code as before 0.0.9) and the concrete model."""
         getter = getattr(self.store, "connection_for", None)
         conn = getter(conv.id) if getter else None
+        listing = getattr(self.store, "connections", None)
+        if listing is not None:
+            # The saved choice runs when it can. If its program is gone and another way in is connected, that one runs
+            # this turn and the chat says so; nothing is written (bug 1095).
+            others = listing()
+            chosen = effective.resolve(conn, others, claude_ok=True if self.claude_bin else None)
+            if self.claude_bin is None and chosen.fallback_from is None and effective.is_stuck(conn, others):
+                raise TurnError("no_engine", "no engine is installed and connected")
+            if chosen.fallback_from is not None:
+                replaced = {"from": effective.label_of(chosen.fallback_from), "to": effective.label_of(chosen.conn)}
+                if self.announced.get(conv.id) != replaced:      # said once; again only if the replacement changes
+                    self.fallbacks[conv.id] = replaced
+                    self.announced[conv.id] = replaced
+            else:
+                self.announced.pop(conv.id, None)                # the saved engine works again: a new replacement is news
+            conn = chosen.conn
         if conn is None:
             return self.adapter_for("claude_code"), None, conv.model
         if conn.get("status") == "removed":

@@ -205,6 +205,11 @@ class ChatSession:
     async def _ensure_engine(self, conv: ConversationRecord, project: ProjectRecord,
                              mode: str = modes.DEFAULT_MODE) -> EngineSession:
         adapter, connection, model = self.engine.resolve_engine(conv)
+        replaced = self.engine.fallbacks.pop(self.conversation_id, None)
+        if replaced:
+            from hokma.i18n import t
+
+            await self.emit({"type": "engine_notice", "message": t("chat.notice.engine_fallback", **{"from": replaced["from"], "to": replaced["to"]})})
         if conv.engine_session and not self._session_id:
             self._session_id, self._session_started = conv.engine_session, True
         if not self._session_id:

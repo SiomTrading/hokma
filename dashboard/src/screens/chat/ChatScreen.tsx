@@ -335,6 +335,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
         options={options}
         modelMenuRequest={modelMenuRequest}
         usagePct={usagePct}
+        conversationId={state.id}
         onModel={requestModel}
         onSend={send}
         onStop={stop}

@@ -51,11 +51,25 @@ def _log(message: str) -> None:
     errlog.log(message)
 
 
+def find_cli(binary: str, env: dict[str, str] | None = None) -> str | None:
+    """A program (`claude`, `codex`, `gemini`) from a PATH with no folder the agent can write (the protected tool folders
+    stay). The one place that looks: the checks of which engines are installed and every adapter use it, so they agree."""
+    if env is None:
+        try:
+            from hokma.engines.envfilter import filtered_env
+
+            env = filtered_env()
+        except Exception as exc:                          # noqa: BLE001  (the environment could not be built)
+            from hokma.engine import errlog
+
+            errlog.log(f"could not look for `{binary}`: the environment of the engine failed", exc, scope="engines")
+            return None                                   # that engine counts as not installed; the chat and the screen go on
+    path = next((v for k, v in env.items() if k.upper() == "PATH"), None)
+    return shutil.which(binary, path=_trusted_path(path))
+
+
 def find_claude(env: dict[str, str] | None = None) -> str | None:
-    """`claude` from a PATH with no folder the agent can write (the protected tool folders stay)."""
-    source = env or os.environ
-    path = next((v for k, v in source.items() if k.upper() == "PATH"), None)
-    return shutil.which("claude", path=_trusted_path(path))
+    return find_cli("claude", env)
 
 
 class ClaudeProcess:

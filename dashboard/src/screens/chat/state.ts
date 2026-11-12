@@ -23,7 +23,7 @@ export type Item =
   | { kind: "tool"; key: string; toolUseId: string; name: string; summary: ToolSummary; result?: { isError: boolean; text: string }; output?: string }
   | { kind: "permission"; key: string; body: PermissionBody; sending?: boolean; resolution?: { decision: "allow" | "deny"; by: string } }
   | { kind: "block"; key: string; block: GuardBlock }
-  | { kind: "notice"; key: string; tone: "info" | "warn" | "bad"; text: string };
+  | { kind: "notice"; key: string; tone: "info" | "warn" | "bad"; text: string; action?: "open_engines" };
 
 export interface ChatState {
   id: string | null;
@@ -52,7 +52,7 @@ export type Action =
 let counter = 0;
 /** Error codes whose own text says it all; any other code shows the message from the engine under the translated text (bug 1095). */
 const SELF_EXPLAINED = new Set(["bad_json", "bad_message", "unknown_conversation", "busy", "unknown_model", "unknown_agent",
-  "unknown_project", "unknown_request", "attachment_not_found", "too_many_sessions"]);
+  "unknown_project", "unknown_request", "attachment_not_found", "too_many_sessions", "no_engine"]);
 
 export function nextKey(prefix: string): string {
   counter += 1;
@@ -143,6 +143,8 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
         // null is a real answer now: a conversation without a project is General
         project: event.project ?? null,
       };
+    case "engine_notice":
+      return { ...state, items: [...state.items, { kind: "notice", key: nextKey("n"), tone: "warn", text: event.message }] };
     case "turn_start": {
       const items = [...state.items];
       for (let i = items.length - 1; i >= 0; i -= 1) {
@@ -223,7 +225,7 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
       // The engine's own words after the short text (task 3171): "something failed" alone told nobody what to fix.
       const detail = !SELF_EXPLAINED.has(event.code) && typeof event.message === "string" ? event.message.trim().slice(0, 600) : "";
       const text = detail ? `${base}\n${detail}` : base;
-      const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text };
+      const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text, ...(event.code === "no_engine" ? { action: "open_engines" as const } : {}) };
       if (event.code === "busy" || event.code === "unknown_request") return { ...state, items: [...state.items, notice] };
       return { ...state, items: [...closeStreaming(state.items, "error"), notice], running: false, stopping: false };
     }

@@ -58,7 +58,7 @@ const ERROR_CODES = new Set([
   "bad_json", "bad_message", "unknown_conversation", "busy", "unknown_model", "unknown_agent", "unknown_project",
   "unknown_request", "attachment_not_found", "too_many_sessions", "claude_not_found", "integrity", "engine_exited", "engine_error",
   "env_failed", "instructions", "auth", "region", "quota", "network", "no_connection", "no_model", "connection_removed",
-  "unsupported_engine", "codex_not_found", "gemini_not_found",
+  "unsupported_engine", "codex_not_found", "gemini_not_found", "no_engine",
 ]);
 
 /** Translated text for an engine error code. */

@@ -17,7 +17,8 @@ STATUSES = ("connected", "no_session", "no_cli", "error", "unknown", "removed")
 class EngineConnectionsRepo(Repo):
     def add(self, engine: str, label: str, auth_kind: str, *, provider: str | None = None, wire: str | None = None,
             base_url: str | None = None, tier_models: dict[str, str] | None = None,
-            settings: dict[str, Any] | None = None, make_default: bool = False) -> EngineConnection:
+            settings: dict[str, Any] | None = None, make_default: bool = False,
+            auto_default: bool = True) -> EngineConnection:
         require_in("engine", engine, ENGINES)
         require_in("auth_kind", auth_kind, AUTH_KINDS)
         label = " ".join(str(label or "").split())
@@ -31,8 +32,10 @@ class EngineConnectionsRepo(Repo):
             "base_url": base_url, "tier_models": json.dumps(tier_models) if tier_models else None,
             "settings": json.dumps(settings) if settings else None, "status": "unknown", "is_default": 0,
             "created_at": utcnow(), "updated_at": utcnow()})
-        if make_default or has_default is None:
+        if make_default:
             self.set_default(new_id)
+        elif auto_default and has_default is None:
+            self.set_default(new_id, chosen=False)
         return self.get(new_id)
 
     def get(self, id: int) -> EngineConnection:
@@ -46,11 +49,23 @@ class EngineConnectionsRepo(Repo):
         row = self.s.one("SELECT * FROM engine_connections WHERE is_default = 1 AND status <> 'removed' ORDER BY id")
         return EngineConnection.from_row(row) if row else None
 
-    def set_default(self, id: int) -> EngineConnection:
+    def set_default(self, id: int, *, chosen: bool = True) -> EngineConnection:
+        """`chosen=False` for a default Hokma picks by itself (the first connection saved): it is not a choice."""
         self.get(id)
         self.s.execute("UPDATE engine_connections SET is_default = 0 WHERE is_default = 1")
-        self.s.update("engine_connections", {"id": id}, {"is_default": 1, "updated_at": utcnow()})
+        values: dict[str, Any] = {"is_default": 1, "updated_at": utcnow()}
+        if chosen:
+            values["chosen_at"] = utcnow()
+        self.s.update("engine_connections", {"id": id}, values)
         return self.get(id)
+
+    def mark_chosen(self, id: int) -> None:
+        """The student chose this engine or one of its models. The only other writer of `chosen_at`."""
+        self.s.update("engine_connections", {"id": id}, {"chosen_at": utcnow()})
+
+    def clear_default(self) -> None:
+        """No default: new conversations then use Claude Code. The rows stay, so nothing the student connected is lost."""
+        self.s.execute("UPDATE engine_connections SET is_default = 0 WHERE is_default = 1")
 
     def set_status(self, id: int, status: str, detail: str | None = None) -> EngineConnection:
         require_in("status", status, STATUSES)

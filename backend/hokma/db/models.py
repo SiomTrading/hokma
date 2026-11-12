@@ -554,3 +554,4 @@ class EngineConnection(Record):
     checked_at: str | None
     created_at: str
     updated_at: str
+    chosen_at: str | None = None            # when the student last chose this engine or one of its models

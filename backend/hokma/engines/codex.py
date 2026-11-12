@@ -15,7 +15,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -24,6 +23,7 @@ from typing import Any, AsyncIterator
 from hokma.core.config import codex_home_dir, hokma_data_dir, hokma_home
 from hokma.engine.process import ClaudeProcess
 from hokma.engines import catalog, secrets
+from hokma.engine.process import find_cli
 from hokma.engines.base import EngineCaps, EngineContext, EngineError, EngineEvent, user_text
 from hokma.engines.envfilter import filtered_env
 from hokma.permissions import modes
@@ -340,7 +340,7 @@ class CodexAdapter:
         return None
 
     async def open(self, ctx: EngineContext) -> CodexSession:
-        binary = getattr(self.owner, "codex_bin", None) or shutil.which("codex")
+        binary = getattr(self.owner, "codex_bin", None) or find_cli("codex")
         if not binary:
             raise EngineError("codex_not_found", "the `codex` command is not installed or not on PATH")
         from hokma.engines.hokma_mcp import server_spec

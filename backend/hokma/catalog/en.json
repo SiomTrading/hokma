@@ -444,6 +444,7 @@
   "voice.error.offline": "The speech model needs to be downloaded once and there is no internet connection. Connect and try again.",
   "voice.error.disk": "The speech model could not be saved. Free some disk space and try again.",
   "voice.error.download_failed": "The speech model download failed. Try again in a moment.",
+  "chat.notice.engine_fallback": "{from} is not available on this computer. This conversation uses {to}. Your choice did not change: it goes back to {from} when you install it.",
   "skill.notice.plugin_installed": "I installed the plugin {plugin} from {repo}: it brings hooks/MCP.",
   "voice.error.tls_conflict": "The speech model could not be downloaded because of a conflict with this computer's certificates. Update Hokma and try again.",
   "chat.err.no_detail": "({code}) The engine gave no detail. Check engine.log in the logs folder of Hokma's data.",

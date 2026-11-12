@@ -93,10 +93,19 @@ async def texts(x_hokma_token: str = Header(default=""), token: str = Query(defa
 
 
 @router.get("/engines")
-async def listing(x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+async def listing(x_hokma_token: str = Header(default=""), token: str = Query(default=""),
+                  conversation_id: str | None = Query(default=None)) -> dict:
     _guard(x_hokma_token, token)
     return {"connections": await _run(service.list_connections), "detect": await _run(service.detect),
-            "store_available": secrets.available()}
+            "store_available": secrets.available(), "active": await _run(service.active_engine, conversation_id),
+            "models": await _run(service.model_menu)}
+
+
+@router.post("/engines/claude")
+async def claude_connection(x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The saved connection of Claude Code (made on first use), so the model button can pick it like any other engine."""
+    _guard(x_hokma_token, token)
+    return await _run(service.ensure_claude_connection)
 
 
 @router.post("/engines/api")

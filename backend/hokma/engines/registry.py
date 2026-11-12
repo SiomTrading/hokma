@@ -20,7 +20,11 @@ def tier_of(model: str | None) -> str:
 
 
 def installed_clis(path: str | None = None) -> dict[str, str | None]:
-    return {kind: shutil.which(binary, path=path) for kind, binary in CLIS.items()}
+    if path is not None:
+        return {kind: shutil.which(binary, path=path) for kind, binary in CLIS.items()}
+    from hokma.engine.process import find_cli
+
+    return {kind: find_cli(binary) for kind, binary in CLIS.items()}
 
 
 def build_adapter(kind: str, owner: Any) -> EngineAdapter:

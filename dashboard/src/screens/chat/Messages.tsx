@@ -1,5 +1,6 @@
 import { Bubble, Button, Chip, Icon, Pill } from "@/design";
 import { useI18n } from "@/i18n";
+import { useShell } from "@/shell/useShell";
 import { BlockCard } from "@/screens/permissions/BlockCard";
 import { Markdown } from "./markdown";
 import type { AttachmentChip, Item } from "./state";
@@ -11,6 +12,21 @@ export interface MessageActions {
   onPermission: (requestId: string, decision: "allow" | "deny") => void;
   onSaveMessage: (messageId: string) => void;
   onSaveAttachment: (attachmentId: string) => void;
+}
+
+function NoticeView({ item }: { item: Extract<Item, { kind: "notice" }> }) {
+  const { t } = useI18n();
+  const shell = useShell();
+  return (
+    <div className="chat-notice" role={item.tone === "bad" ? "alert" : "status"}>
+      <Pill tone={item.tone === "bad" ? "bad" : item.tone === "warn" ? "warn" : "acc"}>{item.text}</Pill>
+      {item.action === "open_engines" ? (
+        <Button size="sm" variant="primary" onClick={() => shell.openSettings("engines")}>
+          {t("chat.err.openEngines")}
+        </Button>
+      ) : null}
+    </div>
+  );
 }
 
 export function AttachmentView({ chip, onSave, saveLabel }: { chip: AttachmentChip; onSave?: () => void; saveLabel: string }) {
@@ -135,10 +151,6 @@ export function MessageItem({ item, actions }: { item: Item; actions: MessageAct
     case "block":
       return <BlockCard block={item.block} />;
     case "notice":
-      return (
-        <div className="chat-notice" role={item.tone === "bad" ? "alert" : "status"}>
-          <Pill tone={item.tone === "bad" ? "bad" : item.tone === "warn" ? "warn" : "acc"}>{item.text}</Pill>
-        </div>
-      );
+      return <NoticeView item={item} />;
   }
 }

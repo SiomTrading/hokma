@@ -92,6 +92,7 @@ export interface HistoryMessage {
 export type ServerEvent =
   | { type: "conversation"; conversation_id: string; title: string; model: string; agent: string | null; project: ProjectRef | null; created: boolean; project_mode?: "follow" | "fixed"; client_ref?: string }
   | { type: "turn_start"; conversation_id: string; turn_id: string; message_id: string }
+  | { type: "engine_notice"; conversation_id: string; message: string }
   | { type: "delta"; conversation_id: string; turn_id: string; text: string }
   | { type: "tool_use"; conversation_id: string; turn_id: string; tool_use_id: string; name: string; input: Record<string, unknown>; summary: ToolSummary }
   | { type: "tool_result"; conversation_id: string; turn_id: string; tool_use_id: string; is_error: boolean; text: string }

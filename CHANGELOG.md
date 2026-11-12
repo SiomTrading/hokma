@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.0.30
+
+The chat answers with the engine that is really there, and the model button lists every connected engine (bugs 1095, 1104 and 1105).
+
+- A student with Claude connected had every message sent to Gemini ("the gemini command is not installed"). A new connection
+  became the default only by being the first row saved, so a failed "Connect Gemini" click took the chat from a signed-in
+  Claude, and the model button had the word Claude and its three models written in the frontend.
+- One rule for the chat and for the screen: the saved engine answers only when it is installed and connected (proved to
+  work). If not, the connected engine the student chose last answers (Claude Code counts as one more, and goes first only
+  when the student never chose another connected engine), and an engine that was never tested is tried only when nothing
+  better exists. The last choice is saved apart (`chosen_at`, a new column), written only when the student picks an engine or
+  a model, never by a connection test. It is resolved at start and before every message. The choice is never rewritten:
+  when the saved engine works again it answers again. The chat says so once per conversation while the replacement lasts.
+- A new connection becomes the default only if it is Claude Code or Claude Code cannot be used.
+- With no engine installed and connected the chat says so in plain words and has a button that opens Settings > Engines; the
+  model button says "No engine".
+- The model button lists one group per connected engine with the models of the catalog Hokma already has, and shows
+  "Engine · Model", always the engine that answers. Picking a model picks its engine for the conversation and the next ones.
+  The list is read again every time the menu opens. The last line connects another engine.
+- The checks of which engines are installed and the adapters look for programs in the same places (one function).
+
 ## 0.0.29
 
 Three reports from students on Windows, and the tests that were red on main (bugs 1093 to 1097).

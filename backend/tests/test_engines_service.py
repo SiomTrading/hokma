@@ -10,7 +10,7 @@ from dbsupport import env  # noqa: F401  (fixture)
 from hokma.db import get_database, migrate
 from hokma.doctor import checks
 from hokma.engine.dbstore import DbChatStore
-from hokma.engines import secrets, service
+from hokma.engines import effective, secrets, service
 from hokma.engines.service import ServiceError
 from test_engine_direct import Server, oa_text  # noqa: F401
 
@@ -32,7 +32,10 @@ class MemoryKeyring(keyring.backend.KeyringBackend):
 
 
 @pytest.fixture
-def ready(env):
+def ready(env, monkeypatch):
+    # A computer without Claude Code: the first connection saved becomes the default (with Claude Code signed in it does
+    # not, bug 1095, see test_engine_choice_1095.py). Without this the result would depend on the machine running the test.
+    monkeypatch.setattr(effective, "installed", lambda kind, path=None: False)
     ring = MemoryKeyring()
     keyring.set_keyring(ring)
     migrate()

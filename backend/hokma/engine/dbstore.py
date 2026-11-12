@@ -47,7 +47,7 @@ class DbChatStore:
     def _conn(c) -> dict[str, Any]:
         return {"id": c.id, "engine": c.engine, "label": c.label, "auth_kind": c.auth_kind, "provider": c.provider,
                 "wire": c.wire, "base_url": c.base_url, "tier_models": c.tier_models or {}, "status": c.status,
-                "settings": c.settings or {}}
+                "settings": c.settings or {}, "updated_at": c.updated_at, "chosen_at": c.chosen_at}
 
     def connection_for(self, conversation_id) -> dict[str, Any] | None:
         """The connection of a conversation, else the default one, else None (Claude Code as before 0.0.9)."""
@@ -59,10 +59,16 @@ class DbChatStore:
             default = u.engine_connections.default()
             return self._conn(default) if default else None
 
+    def connections(self) -> list[dict[str, Any]]:
+        """Every saved connection that is not removed, the default first."""
+        with self.db.read() as u:
+            return [self._conn(c) for c in u.engine_connections.list()]
+
     def set_connection(self, conversation_id, connection_id) -> None:
         with self.db.write() as u:
             conn = u.engine_connections.get(int(connection_id))
             u.engine_connections.attach(int(conversation_id), conn.id)
+            u.engine_connections.mark_chosen(conn.id)                 # picking an engine for a conversation is a choice
             u.conversations.set_engine_kind(int(conversation_id), conn.engine)
             u.conversations.set_engine_session(int(conversation_id), None)
 

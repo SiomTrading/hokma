@@ -1,4 +1,5 @@
-import { useTierMode } from "../engines/useEngines";
+import { enginesApi, type ModelGroup } from "../engines/api";
+import { useEngines } from "../engines/useEngines";
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, Ref } from "react";
 import { Button, Icon, IconButton, Menu, MenuItem } from "@/design";
@@ -29,6 +30,8 @@ interface ComposerProps {
   modelMenuRequest: number;
   /** Share of the weekly cap used (0 to 100); null when there is no cap or no answer yet. */
   usagePct?: number | null;
+  /** The open conversation: the pill shows the engine that will answer it. */
+  conversationId?: string | null;
   onModel: (model: ModelId) => void;
   onSend: (text: string, attachments: AttachmentChip[]) => boolean;
   onStop: () => void;
@@ -37,15 +40,42 @@ interface ComposerProps {
 const TIER_OF: Record<ModelId, "fast" | "balanced" | "deep"> = { haiku: "fast", sonnet: "balanced", opus: "deep" };
 const MODEL_DOT: Record<ModelId, string> = { haiku: "var(--ok)", sonnet: "var(--acc)", opus: "var(--org)" };
 
-export function Composer({ ref, model, running, stopping, options, modelMenuRequest, usagePct = null, onModel, onSend, onStop }: ComposerProps) {
+export function Composer({ ref, model, running, stopping, options, modelMenuRequest, usagePct = null, conversationId = null, onModel, onSend, onStop }: ComposerProps) {
   const { t } = useI18n();
   const shell = useShell();
   const [text, setText] = useState("");
   const [chips, setChips] = useState<AttachmentChip[]>([]);
-  const tiers = useTierMode();
+  const engines = useEngines(conversationId);
+  const tiers = engines.active !== null && engines.active.engine !== "claude_code";
+  const groups: ModelGroup[] = engines.data?.models ?? [];
+  const listed = engines.data?.models !== undefined;          // an old server sends no list: the menu then keeps its three Claude models
+  const activeId = (engines.data?.active?.id ?? null) as number | null;
+  // The group of the engine that answers, or none: the button never shows another engine's name (bug 1104).
+  const activeGroup = groups.find((g) => g.connection_id === activeId) ?? null;
+  const answering = engines.data?.active ?? null;
+  const modelName = (m: ModelId) => activeGroup?.models.find((x) => x.id === m)?.name ?? (tiers ? t(`eng.tier.${TIER_OF[m]}`) : t(`chat.model.${m}`));
   const label = (m: ModelId) => (tiers ? t(`eng.tier.${TIER_OF[m]}`) : t(`chat.model.${m}`));
   const hint = (m: ModelId) => (tiers ? t(`eng.tier.${TIER_OF[m]}.hint`) : t(`chat.model.${m}.hint`));
   const [modelMenu, setModelMenu] = useState(false);
+  const reloadEngines = engines.reload;
+  useEffect(() => {
+    if (modelMenu) void reloadEngines();                      // the list follows what is connected right now, no restart
+  }, [modelMenu, reloadEngines]);
+
+  /** Picking a model picks its engine with it: the conversation (and the next ones) go to that engine. */
+  const pickModel = async (group: ModelGroup, m: ModelId) => {
+    setModelMenu(false);
+    input.current?.focus();
+    try {
+      const connectionId = group.connection_id ?? (await enginesApi.claudeConnection()).id;
+      if (connectionId !== activeId && conversationId) await enginesApi.switchEngine(conversationId, connectionId);
+      await enginesApi.makeDefault(connectionId);               // every pick is a choice: it is saved, and it is the last one
+      await reloadEngines();
+      onModel(m);
+    } catch (cause) {
+      shell.toast({ tone: "bad", text: cause instanceof Error ? cause.message : String(cause) });
+    }
+  };
   const [active, setActive] = useState(0);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -192,27 +222,70 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
         </div>
       ) : null}
       <Menu open={modelMenu} onClose={() => setModelMenu(false)} label={t("chat.model.menu")} triggerRef={pill}>
-        <div className="chat-menu-head">
-          <span className="lbl">{t("chat.model.provider")}</span>
-          <span className="pill" style={{ height: 20, fontSize: 10 }}>
-            {t("chat.model.plan")}
-          </span>
-        </div>
-        {MODELS.map((m) => (
-          <MenuItem
-            key={m}
-            selected={m === model}
-            dotColor={MODEL_DOT[m]}
-            hint={hint(m)}
-            onClick={() => {
-              onModel(m);
-              setModelMenu(false);
-              input.current?.focus();
-            }}
-          >
-            {label(m)}
-          </MenuItem>
-        ))}
+        {listed ? (
+          <>
+            {groups.map((group) => (
+              <div key={group.connection_id ?? "claude"} role="group" aria-label={group.label}>
+                <div className="chat-menu-head">
+                  <span className="lbl">{group.label}</span>
+                  {group.engine === "claude_code" ? (
+                    <span className="pill" style={{ height: 20, fontSize: 10 }}>
+                      {t("chat.model.plan")}
+                    </span>
+                  ) : null}
+                </div>
+                {group.models.map((m) => (
+                  <MenuItem
+                    key={group.label + m.id}
+                    selected={group === activeGroup && m.id === model}
+                    dotColor={MODEL_DOT[m.id]}
+                    hint={group.engine === "claude_code" ? t(`chat.model.${m.id}.hint`) : t(`eng.tier.${TIER_OF[m.id]}.hint`)}
+                    onClick={() => void pickModel(group, m.id)}
+                  >
+                    {m.name}
+                  </MenuItem>
+                ))}
+              </div>
+            ))}
+            {groups.length === 0 ? (
+              <p className="p" role="status" style={{ padding: "8px 10px" }}>
+                {t("chat.model.none")}
+              </p>
+            ) : null}
+            <MenuItem
+              onClick={() => {
+                setModelMenu(false);
+                shell.openSettings("engines");
+              }}
+            >
+              {t("chat.model.connectAnother")}
+            </MenuItem>
+          </>
+        ) : (
+          <>
+            <div className="chat-menu-head">
+              <span className="lbl">{t("chat.model.provider")}</span>
+              <span className="pill" style={{ height: 20, fontSize: 10 }}>
+                {t("chat.model.plan")}
+              </span>
+            </div>
+            {MODELS.map((m) => (
+              <MenuItem
+                key={m}
+                selected={m === model}
+                dotColor={MODEL_DOT[m]}
+                hint={hint(m)}
+                onClick={() => {
+                  onModel(m);
+                  setModelMenu(false);
+                  input.current?.focus();
+                }}
+              >
+                {label(m)}
+              </MenuItem>
+            ))}
+          </>
+        )}
       </Menu>
 
       {chips.length > 0 ? (
@@ -267,7 +340,13 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
         />
         <PermissionPill running={running} />
         <button ref={pill} type="button" className="pill acc chat-model" aria-haspopup="menu" aria-expanded={modelMenu} onClick={() => setModelMenu((v) => !v)}>
-          {tiers ? t("eng.tier.pill", { name: label(model) }) : t("chat.model.pill", { name: label(model) })}
+          {answering
+            ? answering.available
+              ? `${answering.label} · ${modelName(model)}`
+              : t("chat.model.noEngine")
+            : tiers
+              ? t("eng.tier.pill", { name: label(model) })
+              : t("chat.model.pill", { name: label(model) })}
           <Icon name="chevronUp" size={12} strokeWidth={2.4} />
         </button>
         {voice.Recorder ? (

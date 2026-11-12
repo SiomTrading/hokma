@@ -12,7 +12,6 @@ import asyncio
 import json
 import os
 import shlex
-import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -20,6 +19,7 @@ from typing import Any, AsyncIterator
 
 from hokma.core.config import hokma_data_dir, hokma_home
 from hokma.engines import secrets
+from hokma.engine.process import find_cli
 from hokma.engines.base import EngineCaps, EngineContext, EngineError, EngineEvent, user_text
 from hokma.engines.codex import RpcProcess
 from hokma.engines.envfilter import filtered_env
@@ -328,7 +328,7 @@ class AcpAdapter:
         return None
 
     async def open(self, ctx: EngineContext) -> AcpSession:
-        binary = getattr(self.owner, "gemini_bin", None) or shutil.which(self.binary_name)
+        binary = getattr(self.owner, "gemini_bin", None) or find_cli(self.binary_name)
         if not binary:
             raise EngineError("gemini_not_found", "the `gemini` command is not installed or not on PATH")
         home = acp_home_dir()

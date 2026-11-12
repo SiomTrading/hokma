@@ -62,6 +62,9 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
 
                 start_refresher()                  # remote MCP tokens, refreshed before they end
                 start_legacy_cleanup()             # Claude's own copies of remote servers from 0.0.10-0.0.12
+                from hokma.engines import service as engines_service
+
+                engines_service.startup_check()    # engine.log: which engine will answer, and whether the saved one was replaced
                 start_migration()                  # 0.0.20: plugins that were only written to the list get installed, once
                 checker = asyncio.create_task(app.state.updates.auto_check_loop(lambda: app.state.db))
                 vectors.prepare(app.state.db)      # picks and creates the vector store; a problem shows in the Library

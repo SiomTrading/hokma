@@ -32,7 +32,7 @@ def raw(path=None):
 
 def test_fresh_database_has_the_22_tables_plus_onboarding_and_is_healthy(env):
     result = migrate()
-    assert result.created and result.applied == [1, 2, 3, 4, 5, 6, 7, 8] and result.version == 8 and result.backup is None
+    assert result.created and result.applied == [1, 2, 3, 4, 5, 6, 7, 8, 9] and result.version == 9 and result.backup is None
     con = raw()
     names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
     assert names - FTS_SHADOW == TABLES and len(TABLES) == 33
@@ -63,7 +63,7 @@ def test_migrating_twice_changes_nothing(env):
     dump = list(con.iterdump())
     con.close()
     second = migrate()
-    assert second.applied == [] and not second.created and second.backup is None and second.version == 8
+    assert second.applied == [] and not second.created and second.backup is None and second.version == 9
     con = raw()
     assert list(con.iterdump()) == dump
 
@@ -71,7 +71,7 @@ def test_migrating_twice_changes_nothing(env):
 def test_current_version(env):
     assert current_version() == 0
     migrate()
-    assert current_version() == 8
+    assert current_version() == 9
 
 
 def make_dir(tmp_path, files: dict[str, str]) -> Path:
@@ -86,12 +86,12 @@ def make_dir(tmp_path, files: dict[str, str]) -> Path:
 
 def test_a_new_migration_runs_after_a_backup_of_the_existing_database(env):
     migrate()
-    directory = make_dir(env, {"0009_extra.sql": "CREATE TABLE extra ({PK_ID});".replace("{PK_ID}", "id {PK}")})
+    directory = make_dir(env, {"0010_extra.sql": "CREATE TABLE extra ({PK_ID});".replace("{PK_ID}", "id {PK}")})
     result = migrate(migrations_dir=directory)
-    assert result.applied == [9] and result.version == 9
+    assert result.applied == [10] and result.version == 10
     assert result.backup is not None and result.backup.parent == db_path().parent / "backups"
     backup = sqlite3.connect(str(result.backup))
-    assert backup.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 8
+    assert backup.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 9
     assert backup.execute("SELECT count(*) FROM sqlite_master WHERE name = 'extra'").fetchone()[0] == 0
     assert raw().execute("SELECT count(*) FROM sqlite_master WHERE name = 'extra'").fetchone()[0] == 1
 
@@ -102,15 +102,15 @@ def test_a_broken_migration_rolls_back_leaves_the_copy_and_reports(env):
     before = list(con.iterdump())
     con.close()
     bad = "CREATE TABLE half (id {PK});\nINSERT INTO half (id) VALUES (1);\nCREATE TABLE half (id {PK});"
-    directory = make_dir(env, {"0009_bad.sql": bad})
+    directory = make_dir(env, {"0010_bad.sql": bad})
     with pytest.raises(MigrationError) as info:
         migrate(migrations_dir=directory)
-    assert info.value.version == 9
-    assert str(info.value) == t("db.migrate.failed", file="0009_bad.sql", error=str(info.value.__cause__.args[0]))
+    assert info.value.version == 10
+    assert str(info.value) == t("db.migrate.failed", file="0010_bad.sql", error=str(info.value.__cause__.args[0]))
     con = raw()
     assert list(con.iterdump()) == before                           # the whole file was rolled back
-    assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 8
-    backups = list((db_path().parent / "backups").glob("hokma-v8-*.db"))
+    assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 9
+    backups = list((db_path().parent / "backups").glob("hokma-v9-*.db"))
     assert len(backups) == 1
 
 
@@ -124,11 +124,11 @@ def test_a_broken_first_migration_leaves_no_schema_version(env):
 
 
 def test_a_database_newer_than_the_code_is_refused(env):
-    directory = make_dir(env, {"0009_extra.sql": "CREATE TABLE extra (id {PK});"})
+    directory = make_dir(env, {"0010_extra.sql": "CREATE TABLE extra (id {PK});"})
     migrate(migrations_dir=directory)
     with pytest.raises(MigrationError) as info:
-        migrate()                                                   # the code only knows version 8
-    assert str(info.value) == t("db.migrate.newer", found=9, known=8)
+        migrate()                                                   # the code only knows version 9
+    assert str(info.value) == t("db.migrate.newer", found=10, known=9)
 
 
 def test_a_file_that_is_not_a_database_is_reported(env):
@@ -140,8 +140,8 @@ def test_a_file_that_is_not_a_database_is_reported(env):
 
 def test_old_backups_are_pruned(env):
     migrate()
-    for n in range(9, 23):
-        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(9, n + 1)})
+    for n in range(10, 23):
+        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(10, n + 1)})
         migrate(migrations_dir=directory)
     assert len(list((db_path().parent / "backups").glob("hokma-v*.db"))) == 10
 
@@ -179,7 +179,7 @@ def test_two_processes_migrating_at_once_apply_it_once(env):
     [th.start() for th in threads]
     [th.join() for th in threads]
     assert not errors
-    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == 8
+    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == 9
 
 
 # ------------------------------------------------------------------------------------------------ seeds
