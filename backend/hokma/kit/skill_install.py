@@ -32,6 +32,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from hokma.i18n import t
 from hokma.kit import mirror, safefs
 
 MAX_DOWNLOAD = 60 * 1024 * 1024
@@ -306,7 +307,8 @@ def _plugin_route(link: dict[str, str], kind: str) -> dict[str, Any]:
     for plugin_id in installed:
         plugin_install.log(f"installed from the chat: plugin {plugin_id} from {repo} (brings hooks/MCP)")
         plugin_install.record_chat_install(plugin_id, repo)
-    notice = "".join(f"Instalé el plugin {pid.split('@')[0]} de {repo}: trae hooks/MCP. " for pid in installed).strip()
+    notice = "".join(t("skill.notice.plugin_installed", plugin=pid.split("@")[0], repo=repo) + " "
+                     for pid in installed).strip()
     return {"kind": kind, "repository": repo, "marketplace": added.get("name"),
             "installed_plugins": installed, "notice": notice,
             "plugins": [p.get("id") or p.get("name") for p in added.get("plugins", [])],

@@ -149,11 +149,11 @@ describe.each(["es", "en"] as const)("disk folders tab (%s)", (locale) => {
 
   it("shows the backend's plain-language reason when a folder is rejected", async () => {
     backend.pick = { available: true, path: "/", cancelled: false };
-    backend.reject = { status: 400, code: "disk_root", message: "No se puede agregar un disco completo." };
+    backend.reject = { status: 400, code: "disk_root", message: "A whole disk cannot be added." };
     const user = await mountFolders();
     await screen.findByRole("list", { name: t("folders.list") });
     await user.click(screen.getByRole("button", { name: t("folders.add") }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("No se puede agregar un disco completo.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("A whole disk cannot be added.");
   });
 
   it("rescans and removes a folder of the student", async () => {
@@ -178,10 +178,10 @@ describe.each(["es", "en"] as const)("disk folders tab (%s)", (locale) => {
   });
 
   it("shows the missing status and its note", async () => {
-    backend.folders.push({ id: 3, project_id: 1, path: "/gone", own: false, label: null, status: "missing", status_detail: "La carpeta no está en el disco.", file_count: 4, last_scan_at: null });
+    backend.folders.push({ id: 3, project_id: 1, path: "/gone", own: false, label: null, status: "missing", status_detail: "The folder is not on the disk.", file_count: 4, last_scan_at: null });
     await mountFolders();
     const row = (await screen.findByText("/gone")).closest("li")!;
     expect(row).toHaveTextContent(t("folders.status.missing"));
-    expect(row).toHaveTextContent("La carpeta no está en el disco.");
+    expect(row).toHaveTextContent("The folder is not on the disk.");
   });
 });

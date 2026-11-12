@@ -1,6 +1,6 @@
 [project]
 name = "hokma"
-version = "0.0.28"
+version = "0.0.29"
 description = "Hokma: installable harness by SiomTrading"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -36,6 +36,12 @@ required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
+
+# databento asks for pip-system-certs on Windows. Its .pth patches ssl with truststore every time Python starts, and
+# httpcore2 (huggingface_hub, httpx) uses truststore by itself: the two patches stack and SSLContext.verify_mode calls
+# itself until RecursionError, so the speech model never downloads (bug 1094). Hokma does not need it: the marker
+# below never matches, so uv leaves the package out of the lock.
+override-dependencies = ["pip-system-certs; sys_platform == 'never'"]
 
 [dependency-groups]
 dev = ["pytest==8.3.4", "httpx==0.28.1"]

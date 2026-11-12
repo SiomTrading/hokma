@@ -214,7 +214,7 @@ def test_a_bug_while_starting_the_engine_reaches_the_chat_and_engine_log(env, mo
     with make_client(env.engine()) as client, connect(client) as ws:
         events = turn(ws, "hola")
     last = events[-1]
-    assert last["type"] == "error" and last["code"] == "engine_error"
+    assert last["type"] == "error" and last["code"] == "env_failed"          # bug 1095: its own code, with the cause
     assert "ValueError" in last["message"] and "Jos\u00e9" in last["message"]
     assert not any(e["type"] == "done" for e in events)          # no empty "done" before the error any more
     log = (env.data / "logs" / "engine.log").read_text(encoding="utf-8")

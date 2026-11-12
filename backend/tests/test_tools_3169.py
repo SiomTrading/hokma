@@ -220,3 +220,51 @@ def test_a_plugin_can_install_what_it_needs_in_its_own_folder(data, tmp_path):
                     "bun install", "uv tool install chroma-mcp", "pip install --target {d}/claude-config/plugins/x/py requests"):
         payload = {"tool_name": "Bash", "tool_input": {"command": command.format(d=box.data)}, "cwd": str(box.work)}
         assert hardblock.evaluate(payload, ctx) is None, command
+
+
+# WinError 448 (untrusted mount point): uv's minor version junction `cpython-3.12-...` made Hokma crash on Windows.
+
+def _fake_pythons(data):
+    root = data / "python"
+    real = root / "cpython-3.12.13-windows-x86_64-none"
+    (real / "Scripts").mkdir(parents=True)
+    (root / "cpython-3.11.9-windows-x86_64-none" / "Scripts").mkdir(parents=True)
+    return root, real
+
+
+def test_python_dirs_survives_winerror_448_and_keeps_the_other_folders(data, monkeypatch):
+    root, real = _fake_pythons(data)
+    bad = root / "cpython-3.12-windows-x86_64-none"
+    bad.mkdir()
+    monkeypatch.setattr(sys, "platform", "win32")
+    real_isdir = os.path.isdir
+
+    def isdir(p):
+        if str(p).startswith(str(bad)):
+            raise OSError(448, "The path cannot be traversed because it contains an untrusted mount point")
+        return real_isdir(p)
+
+    monkeypatch.setattr(os.path, "isdir", isdir)
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+    found = tools.python_dirs()
+    assert real / "Scripts" in found and real in found
+    assert not [p for p in found if str(p).startswith(str(bad))]
+    assert any("cpython-3.11.9" in str(p) for p in found)
+    out = tools.path_with_tools("C:\\\\Windows", first=True)
+    assert str(real / "Scripts") in out and str(bad) not in out
+
+
+def test_python_dirs_skips_the_minor_version_link(data):
+    root, real = _fake_pythons(data)
+    link = root / "cpython-3.12-windows-x86_64-none"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("no symlinks here")
+    found = tools.python_dirs()
+    assert link not in found and not [p for p in found if str(p).startswith(str(link))]
+    assert any(real.name in str(p) for p in found) or sys.platform != "win32"
+
+
+def test_python_dirs_without_the_python_folder_is_empty(data):
+    assert tools.python_dirs() == []

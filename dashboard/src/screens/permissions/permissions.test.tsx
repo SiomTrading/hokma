@@ -22,6 +22,8 @@ interface Call {
   body: unknown;
 }
 
+// The five locks left by 0.0.22, pinned by id: a rule added or removed must change this list on purpose.
+const FIVE_RULES = ["delete", "hokma_internal", "outside_workdir", "secrets", "real_money"];
 const RULE_IDS = [...RULES];
 
 /** A stand-in for the routes of this delivery. It remembers what was sent and answers like the real ones. */
@@ -289,6 +291,10 @@ describe("one-time notice for an updated installation", () => {
 });
 
 describe("Settings > General > Permissions", () => {
+  it("the panel knows exactly the five locks", () => {
+    expect([...RULES]).toEqual(FIVE_RULES);
+  });
+
   it("lists the always-on protections with no switch for any of them", async () => {
     render(
       <Harness>
@@ -296,7 +302,7 @@ describe("Settings > General > Permissions", () => {
       </Harness>,
     );
     const list = await screen.findByTestId("protections");
-    expect(within(list).getAllByRole("listitem")).toHaveLength(7);
+    expect(within(list).getAllByRole("listitem")).toHaveLength(FIVE_RULES.length);
     for (const id of RULE_IDS) expect(within(list).getByText(t(`protections.${id}`))).toBeInTheDocument();
     expect(within(list).queryByRole("switch")).not.toBeInTheDocument();
     expect(within(list).queryByRole("checkbox")).not.toBeInTheDocument();
@@ -366,7 +372,7 @@ describe("chat: pill and Blocked card", () => {
     await mount(stored);
     RULE_IDS.forEach((rule, index) => server.emit({ type: "guard_block", ...base, id: 100 + index, rule, tool: "Bash", target: `target ${rule}`, at: "2026-11-05 12:00:00" }));
     const cards = screen.getAllByTestId("block-card");
-    expect(cards).toHaveLength(7);
+    expect(cards).toHaveLength(FIVE_RULES.length);
     cards.forEach((card, index) => {
       const rule = RULE_IDS[index]!;
       expect(card).toHaveTextContent(t(`block.title.${rule}`));
@@ -539,7 +545,7 @@ describe("error codes and catalog", () => {
     expect(permissionErrorText(new ApiError(404, "unknown_project", "That project does not exist."))).toBe("That project does not exist.");
   });
 
-  it("has a title and a reason for each of the 7 rules in es and en, and no long dash", () => {
+  it("has a title and a reason for each of the 5 rules in es and en, and no long dash", () => {
     for (const locale of ["es", "en"] as const) {
       const catalog = getCatalog(locale);
       for (const rule of RULE_IDS) {

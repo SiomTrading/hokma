@@ -50,8 +50,9 @@ export type Action =
   | { type: "event"; event: ServerEvent; errorText?: (code: string) => string };
 
 let counter = 0;
-/** Error codes whose message from the engine is shown under the translated text. */
-const DETAILED_ERRORS = new Set(["engine_error", "engine_exited", "claude_not_found", "integrity"]);
+/** Error codes whose own text says it all; any other code shows the message from the engine under the translated text (bug 1095). */
+const SELF_EXPLAINED = new Set(["bad_json", "bad_message", "unknown_conversation", "busy", "unknown_model", "unknown_agent",
+  "unknown_project", "unknown_request", "attachment_not_found", "too_many_sessions"]);
 
 export function nextKey(prefix: string): string {
   counter += 1;
@@ -220,7 +221,7 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
       }
       const base = errorText ? errorText(event.code) : event.code;
       // The engine's own words after the short text (task 3171): "something failed" alone told nobody what to fix.
-      const detail = DETAILED_ERRORS.has(event.code) && typeof event.message === "string" ? event.message.trim().slice(0, 600) : "";
+      const detail = !SELF_EXPLAINED.has(event.code) && typeof event.message === "string" ? event.message.trim().slice(0, 600) : "";
       const text = detail ? `${base}\n${detail}` : base;
       const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text };
       if (event.code === "busy" || event.code === "unknown_request") return { ...state, items: [...state.items, notice] };

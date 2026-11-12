@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.0.29
+
+Three reports from students on Windows, and the tests that were red on main (bugs 1093 to 1097).
+
+- WinError 448 (bug 1093): uv makes a junction `cpython-3.12-...` to the real Python folder, and Windows Redirection Guard
+  can refuse to cross it ("untrusted mount point"). `python_dirs()` skips links and tolerates any OSError. The installer and
+  the updater build the venv from the real `cpython-3.12.x-...` folder, remove the junction (only the link, never the folder)
+  and ask uv to install Python only when no real one is there, because uv has no option to skip the link. If uv failed only
+  on the link and the real Python exists, the update goes on. A job of `desktop-check` runs the whole installer on Windows
+  Server and checks that the junction is gone and the real Python is intact.
+- Voice model download (bug 1094): databento pulled `pip-system-certs` on Windows, which stacked a second truststore patch on
+  `ssl` and looped until RecursionError. The lock leaves the package out (`override-dependencies`), the download undoes a
+  stacked patch before it connects, and a RecursionError is reported as a certificate conflict, in plain words.
+- Chat failed with "Algo fallo" while the connection said Connected (bug 1095): the chat shows the engine's message for every
+  error code, not only four, with a text for each of the codes that had none. A failure while preparing the environment has its
+  own code, an engine that does not open goes to `engine.log` with its traceback and marks the connection as an error, an
+  engine error without a message shows its code and where to look, and the connection test writes the same instructions file
+  as the chat.
+- The changelog header `unreleased` made `test_every_version_place_says_the_new_version` fail (bug 1096): the header only
+  appears with the version bump.
+- Eight tests were red on main (bug 1097). The repository rules read the real folder `.claude/skills` as a forbidden phrase;
+  a plugin notice was written in Spanish inside the backend and now comes from the catalog; two processes were launched
+  without `spawn_kwargs()`; a catalog text named `hokma start`; three tests were stale (five locks since 0.0.22, the key of
+  an AI engine is not the key of a data provider). One more test depended on the hash seed: the rule reported for a link to
+  the data folder could be `secrets` or `hokma_internal`; the order is now fixed and the secrets come first.
+
 ## 0.0.28
 
 Library fixes (SPEC-010).
@@ -49,7 +75,7 @@ Two real cases on Windows (task 3175): pressing Stop left Hokma hung, and a `git
   `GH_PROMPT_DISABLED=1`, stdin closed. Without credentials they fail at once with a clear message.
 - New tool `skill_install(url)` in Hokma's MCP (every engine): a GitHub repository or folder, downloaded as a zip into a
   temporary folder, one or several `SKILL.md`, plugins and marketplaces are handed to the plugin install; the skill shows
-  up at once. Settings > Extensions has the button "Agregar skill por enlace". The kit no longer says "only request".
+  up at once. Settings > Extensions has a button to add a skill by link. The kit no longer says "only request".
 
 ### Added to 0.0.25 (task 3177): Codex starts on Windows
 
@@ -68,7 +94,7 @@ for Apple silicon, Linux and Windows.
 - `[tool.uv] required-environments` lists the five real platforms (Linux x86_64 and aarch64, macOS arm64 and x86_64,
   Windows AMD64). `uv lock` now fails if a dependency has no wheel for one of them, instead of failing on a student's machine.
 - The voice reports itself as unavailable when faster-whisper or onnxruntime is not importable, and the app says
-  "La voz no está disponible en este equipo" without affecting anything else.
+  the voice-unavailable notice, without affecting anything else.
 - CI: new job `install-macos-intel` in `desktop-check.yml` installs Hokma with `installer/install.sh` in a temporary folder
   on an Intel runner (`macos-15-intel`, since `macos-13` no longer exists) and runs `hokma doctor`. It also runs when
   `pyproject.toml` or `uv.lock` change.
@@ -98,8 +124,8 @@ even when the program succeeds, and uv writes its progress to stderr.
 
 ### Added to 0.0.24 (task 3174): the terminal and the voice on Windows
 
-On a real Windows 0.0.23 the Terminal panel said "No se pudo iniciar la terminal." and the voice "Falló la descarga del
-modelo de voz", both with no reason. The cause could not be reproduced without that machine, so the work covers the
+On a real Windows 0.0.23 the Terminal panel said it could not start the terminal and the voice said the model download failed,
+both with no reason. The cause could not be reproduced without that machine, so the work covers the
 likely ones and makes the real reason visible so a repeat names itself:
 
 - Terminal: the socket caught only `OSError`, but pywinpty raises its own error types; they now reach the panel as

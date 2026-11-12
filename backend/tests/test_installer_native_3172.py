@@ -67,7 +67,7 @@ def test_install_runs_every_native_step_through_the_function():
     text = (INSTALLER / "install.ps1").read_text()
     assert '. (Join-Path $PSScriptRoot "native.ps1")' in text
     for needle in ('Invoke-Native $Uv @("python", "install", $PyVersion)',
-                   'Invoke-Native $Uv @("sync", "--project", $App, "--frozen", "--no-dev", "--python", $PyVersion)',
+                   'Invoke-Native $Uv @("sync", "--project", $App, "--frozen", "--no-dev", "--python", $PySpec)',
                    'Invoke-Native "robocopy"', 'Invoke-Native $HokmaExe @("write-manifest")',
                    'Invoke-Native $HokmaExe @("verify-install")', 'Invoke-Native $HokmaExe @("install-tools")',
                    'Invoke-Native $HokmaExe @("kit-sync")', 'Invoke-Native $HokmaExe @("init-config")',

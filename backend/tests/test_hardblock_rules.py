@@ -268,7 +268,8 @@ def test_p6_powershell(box, command, rule):
 def test_p6_the_rule_names_are_the_ones_the_database_accepts():
     from hokma.db.repos.governance import HARD_RULES
     from hokma.kit import hardblock
-    assert set(hardblock.RULES) == set(HARD_RULES)
+    five = {"delete", "hokma_internal", "outside_workdir", "secrets", "real_money"}      # the locks left by 0.0.22, by id
+    assert set(hardblock.RULES) == five and set(HARD_RULES) == five and len(hardblock.RULES) == 5
 
 
 def test_p13_the_key_cannot_be_read_from_the_agent(box):
@@ -288,7 +289,7 @@ def test_p13_the_key_cannot_be_read_from_the_agent(box):
 
 
 def test_nothing_else_is_refused_hokma_is_the_owners(box):
-    """Spot checks of the libertad: anything outside the seven rules goes through."""
+    """Spot checks of the libertad: anything outside the five rules goes through."""
     for command in ["rm_not_a_command_name_here_but_arg echo", "chmod +x run.sh", "chmod -R 755 .", "kill -9 12345",
                     "sed -i 's/a/b/' notes.md", "pip uninstall -y requests", "docker ps", "ssh-keygen -t ed25519 -f key",
                     "curl -o data.csv https://example.com/data.csv", "tar -xzf a.tgz", "unzip a.zip -d out",

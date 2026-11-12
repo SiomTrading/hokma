@@ -150,8 +150,19 @@ $env:UV_PYTHON_PREFERENCE = "only-managed"
 $env:UV_PROJECT_ENVIRONMENT = $Venv
 
 Info "inst.install_python" $PyVersion
-$code = Invoke-Native $Uv @("python", "install", $PyVersion)
-if ($code -ne 0) { Die "inst.python_failed" $PyVersion }
+$PyRoot = $env:UV_PYTHON_INSTALL_DIR
+# uv has no option to skip the junction, and it makes it again on every `uv python install`, even when the Python is
+# already there (it downloads nothing). So uv is asked only when no real Python of this version is installed.
+$PyExe = Get-RealPython $PyRoot $PyVersion
+$code = 0
+if (-not $PyExe) { $code = Invoke-Native $Uv @("python", "install", $PyVersion) }
+# uv also makes a junction (cpython-3.12-...) to the real folder. Windows Redirection Guard can refuse to cross it
+# (WinError 448), so the venv is built from the real folder and the junction is removed. If uv only failed on the
+# junction and the real Python is there, the install goes on.
+$PyExe = Get-RealPython $PyRoot $PyVersion
+if ($code -ne 0 -and -not $PyExe) { Die "inst.python_failed" $PyVersion }
+Remove-PythonLinks $PyRoot
+$PySpec = if ($PyExe) { $PyExe } else { $PyVersion }
 
 Info "inst.copy_app"
 if (Test-Path $SlotDir) { Remove-Item -Recurse -Force $SlotDir }
@@ -161,7 +172,7 @@ if ($code -ge 8) { Die "inst.copy_failed" $code }
 if (-not (Test-Path (Join-Path $App "dashboard\dist\index.html"))) { Die "inst.no_dashboard" }
 
 Info "inst.install_deps"
-$code = Invoke-Native $Uv @("sync", "--project", $App, "--frozen", "--no-dev", "--python", $PyVersion)
+$code = Invoke-Native $Uv @("sync", "--project", $App, "--frozen", "--no-dev", "--python", $PySpec)
 if ($code -ne 0) { Die "inst.deps_failed" }
 
 $env:HOKMA_HOME = $Dir

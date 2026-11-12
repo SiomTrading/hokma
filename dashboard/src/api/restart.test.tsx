@@ -63,7 +63,7 @@ describe("an update by the detached updater (task 3146)", () => {
   it("back on the same version: shows the engine's plain message with Retry, which starts it again", async () => {
     health(["0.0.14", null, "0.0.14"]);
     const retry = vi.fn(async () => undefined);
-    setUpdateHooks({ failure: async () => "No pude reemplazar los archivos viejos de Hokma.", retry });
+    setUpdateHooks({ failure: async () => "Could not replace the old files of Hokma.", retry });
     const reload = vi.fn();
     render(<RestartOverlay />);
     act(() => watchEngine({ mode: "update", expectedVersion: "0.0.15", reload }));
@@ -71,7 +71,7 @@ describe("an update by the detached updater (task 3146)", () => {
     await seconds(3);
     expect(reload).not.toHaveBeenCalled();
     expect(getRestartState()).toMatchObject({ phase: "failed", kind: "update" });
-    expect(screen.getByText("No pude reemplazar los archivos viejos de Hokma.")).toBeTruthy();
+    expect(screen.getByText("Could not replace the old files of Hokma.")).toBeTruthy();
     expect(document.body.textContent).not.toContain("Traceback");
     fireEvent.click(screen.getByText(t("news.retry")));
     expect(retry).toHaveBeenCalledTimes(1);

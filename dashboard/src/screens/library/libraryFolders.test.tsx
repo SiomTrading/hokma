@@ -337,11 +337,21 @@ describe("folder texts", () => {
     }
   });
 
-  it("the visible words of the folder controls are Spanish in es", () => {
+  it("the visible words of the folder controls come from the es catalog, not from the en one", () => {
+    const params = { documents: "3 documents", subfolders: "2 subfolders" };
+    for (const key of ["library.folder.new", "library.folder.rename", "library.folder.remove", "library.folder.confirm.body"]) {
+      setLocale("es");
+      const spanish = t(key, params);
+      setLocale("en");
+      const english = t(key, params);
+      expect(spanish, key).toBeTruthy();
+      expect(spanish, key).not.toBe(english);
+      expect(english, key).not.toMatch(/[\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1]/);   // en has no Spanish letters
+      expect(spanish, key).not.toMatch(/\{\w+\}/);
+    }
+    // Real Spanish texts of the catalog (this file is allowed to hold them, see scripts/check_repo_rules.py).
     setLocale("es");
     expect(t("library.folder.new")).toBe("Nueva carpeta");
-    expect(t("library.folder.rename")).toBe("Renombrar");
-    expect(t("library.folder.remove")).toBe("Quitar");
     expect(t("library.folder.confirm.body", { documents: "3 documentos", subfolders: "2 subcarpetas" })).toBe(
       "Se quitarán 3 documentos y 2 subcarpetas de la Biblioteca. No se puede deshacer.",
     );

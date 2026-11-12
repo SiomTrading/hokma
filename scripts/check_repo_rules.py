@@ -54,6 +54,9 @@ SPANISH_ALLOWED = (
     "kit/template/docs/learn/es/",
     "scripts/check_repo_rules.py",
     "backend/tests/test_repo_rules.py",
+    "dashboard/src/screens/library/libraryFolders.test.tsx",   # asserts real texts of the Spanish catalog
+    "backend/tests/test_hokma_tools.py",       # two Spanish questions against a Spanish document: the same kind of data
+    "backend/tests/test_hybrid_search.py",     # the questions a Spanish student asks: the data of a retrieval-quality test
 )
 # Not authored text: generated or third-party content.
 # The only place where names of third-party authors may appear: the license notices required by those licenses.
@@ -77,6 +80,8 @@ def normalise(text: str) -> str:
 def words_with_lines(text: str) -> list[tuple[str, int]]:
     out = []
     for number, line in enumerate(text.split("\n"), 1):
+        # `.claude/skills` and `".claude" / "skills"` are the real folder of Claude Code, not a phrase that announces an origin
+        line = re.sub(r"(?<![\w-])\.claude(?![\w-])", "dotclaude", line)
         out += [(w, number) for w in re.findall(r"[a-z0-9]+", normalise(line))]
     return out
 

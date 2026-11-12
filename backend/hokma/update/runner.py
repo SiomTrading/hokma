@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 from hokma import __version__
+from hokma.core import pyhome
 from hokma.core.proc import spawn_kwargs
 from hokma.core.config import (current_pointer, current_slot, hokma_data_dir, hokma_home, other_slot,
                                running_slot, slot_dir, slot_exe)
@@ -71,6 +72,27 @@ def _run(cmd: list[str], what: str, env: dict[str, str], timeout: int = 900) -> 
         tail = (r.stderr or r.stdout).strip().splitlines()[-3:]
         raise UpdateError(t("update.step_failed", step=what, detail=" | ".join(tail)))
     return r.stdout
+
+
+def _install_python(py_version: str, env: dict[str, str]) -> str:
+    """`uv python install`, then the interpreter the venv is built from. On Windows that is the real patch folder, never
+    uv's minor version junction (`cpython-3.12-...`), which Redirection Guard can refuse to cross (WinError 448, bug 1093):
+    the junction is removed and uv gets the path of the real `python.exe`. If uv itself failed only because it could not
+    make that junction and the real folder is there, the update goes on."""
+    root = hokma_data_dir() / "python"
+    # uv has no option to skip the minor version link and makes it again on every `uv python install`, even when the
+    # Python is already there (it downloads nothing). On Windows uv is asked only when no real Python of this version exists.
+    if sys.platform != "win32" or pyhome.real_python(root, py_version) is None:
+        try:
+            _run([str(_uv()), "python", "install", py_version], t("update.step.python"), env)
+        except UpdateError:
+            if sys.platform != "win32" or pyhome.real_python(root, py_version) is None:
+                raise
+    if sys.platform != "win32":
+        return py_version
+    pyhome.drop_links(root)
+    exe = pyhome.real_python(root, py_version)
+    return str(exe) if exe else py_version
 
 
 def _remove_slot(path: Path) -> None:
@@ -175,10 +197,10 @@ def run_update(source: UpdateSource | str, *, force: bool = False,
                        UV_CACHE_DIR=str(hokma_data_dir() / "cache"), UV_PYTHON_PREFERENCE="only-managed",
                        UV_PROJECT_ENVIRONMENT=str(target_dir / "venv"))
             step("python")
-            _run([str(_uv()), "python", "install", py_version], t("update.step.python"), env)
+            python_spec = _install_python(py_version, env)
             step("dependencies")
             _run([str(_uv()), "sync", "--project", str(target_dir / "app"), "--frozen", "--no-dev",
-                  "--python", py_version], t("update.step.dependencies"), env)
+                  "--python", python_spec], t("update.step.dependencies"), env)
 
             new = str(_exe(target))
             step("verify")

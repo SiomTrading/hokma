@@ -296,10 +296,14 @@ def check_real_path(path: str, ctx: Ctx, *, reading: bool = False, here: str | N
     full = clean_path(joined(expand(path, ctx), here or ctx.cwd))
     if is_win_abs(full) and os.name != "nt":
         return                                                  # a Windows path on another system: text markers only
-    for candidate in {full, os.path.realpath(full)}:
+    # Both spellings of the path (as written and by real path), always in this order and the secrets of BOTH before the
+    # hook files: the set this replaces made the rule that was reported depend on the hash seed of the process.
+    candidates = list(dict.fromkeys((full, os.path.realpath(full))))
+    for candidate in candidates:
         if SECRET_RE.search(norm_text(candidate)) or (
                 under_any(candidate, [ctx.data]) and read_hidden(candidate, ctx, content=False)):
             raise Block("secrets", short(path))
+    for candidate in candidates:
         if guarded and not reading and under_any(candidate, ctx.protect):
             raise Block("hokma_internal", short(path))
 

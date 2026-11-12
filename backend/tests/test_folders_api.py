@@ -114,8 +114,8 @@ def test_scan_skips_git_hidden_links_and_the_data_folder(client, db, env):
     (root / "node_modules").mkdir()
     (root / "node_modules" / "m.md").write_text("modulo", encoding="utf-8")
     outside = env / "outside.md"
-    outside.write_text("fuera de la carpeta", encoding="utf-8")
-    os.symlink(outside, root / "enlace.md")
+    outside.write_text("outside the folder", encoding="utf-8")
+    os.symlink(outside, root / "link.md")
     (root / "ok.md").write_text("contenido visible", encoding="utf-8")
     folder_scan.scan_folder(folders(client, pid)[0]["id"], db)
     assert [d.rel_path for d in project_docs(db, pid)] == ["ok.md"]
@@ -241,7 +241,7 @@ def test_rejections_of_section_4_3(client, env, monkeypatch):
     (data / "libraries").mkdir(exist_ok=True)
     cases = [(Path(Path.cwd().anchor), "disk_root"), (env / "home", "disk_home"), (data, "disk_data_dir"),
              (data / "libraries", "disk_data_dir"), (env / "no-existe", "disk_path_missing"),
-             ("relativa/carpeta", "bad_path"), system_case()]
+             ("relative/folder", "bad_path"), system_case()]
     for path, code in cases:
         r = add(client, pid, path)
         assert r.json()["detail"]["code"] == code, (path, r.json())

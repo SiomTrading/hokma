@@ -124,6 +124,9 @@ jobs:
           Set-Content -Path $fake -Value "@echo off`r`necho bad 1>&2`r`nexit /b 3" -Encoding ASCII
           $code = Invoke-Native $fake @()
           if ($code -ne 3) { throw "expected exit code 3, got $code" }
+          # The step must not end with the exit code of the last fake program (3): the checks above already passed.
+          $global:LASTEXITCODE = 0
+          exit 0
       - name: Install Hokma with installer/install.ps1
         shell: cmd
         env:
@@ -135,6 +138,42 @@ jobs:
           set "HOKMA_DATA_DIR=%BASE%\data"
           "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File installer\install.ps1 -Dir "%BASE%\work" -Lang en -NoDoctor
           if errorlevel 1 exit /b 1
+      # Bug 1093: uv makes a junction cpython-3.12-... to the real Python folder and Windows Redirection Guard can refuse
+      # to cross it (WinError 448). The installer must leave the real folder only, build the venv from it, and the helper
+      # that removes junctions must delete the link and never the folder it points to.
+      - name: The uv junction is gone, the real Python is intact and the venv does not use the link
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          . installer\native.ps1
+          $base = Join-Path $env:RUNNER_TEMP "hokma-install"
+          $py = Join-Path $base "data\python"
+          Get-ChildItem -LiteralPath $py -Directory -Force | Format-Table Name, Attributes, LinkType | Out-String | Write-Host
+          $links = @(Get-ChildItem -LiteralPath $py -Directory -Force | Where-Object { $_.Attributes -band [System.IO.FileAttributes]::ReparsePoint })
+          if ($links.Count -ne 0) { throw "a link is still under the Python folder: $($links[0].Name)" }
+          $real = @(Get-ChildItem -LiteralPath $py -Directory -Force | Where-Object { $_.Name -match '^cpython-3\.12\.\d+-' })
+          if ($real.Count -lt 1) { throw "no real cpython-3.12.x folder" }
+          $exe = Join-Path $real[0].FullName "python.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "python.exe missing in the real folder" }
+          $cfg = @(Get-ChildItem -Path (Join-Path $base "data\runtime") -Recurse -Filter pyvenv.cfg | Select-Object -First 1)
+          if ($cfg.Count -lt 1) { throw "no pyvenv.cfg" }
+          $text = Get-Content -LiteralPath $cfg[0].FullName -Raw
+          Write-Host $text
+          if ($text -match 'cpython-3\.12-windows') { throw "the venv goes through the minor version junction" }
+          # Make the junction again, as uv does on every `uv python install`, then remove it with the installer helper.
+          $link = Join-Path $py "cpython-3.12-windows-x86_64-none"
+          New-Item -ItemType Junction -Path $link -Target $real[0].FullName | Out-Null
+          if (-not ((Get-Item -LiteralPath $link -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { throw "the test junction was not made" }
+          $decoy = Join-Path $py "cpython-decoy"
+          New-Item -ItemType Directory -Path $decoy | Out-Null
+          Remove-PythonLinks $py
+          if (Test-Path -LiteralPath $link) { throw "the junction is still there" }
+          if (-not (Test-Path -LiteralPath $exe)) { throw "the real Python was damaged by removing the link" }
+          if (-not (Test-Path -LiteralPath $decoy)) { throw "a plain folder was removed" }
+          $found = Get-RealPython $py "3.12"
+          if ($found -ne $exe) { throw "Get-RealPython answered '$found', expected '$exe'" }
+          $global:LASTEXITCODE = 0
+          exit 0
       - name: hokma doctor
         shell: cmd
         run: |

@@ -28,9 +28,13 @@ function forbiddenTexts(): string[] {
 }
 
 function assertNoKeyFields(root: ParentNode, where: string) {
-  expect(root.querySelectorAll('input[type="password"]'), where + ": password input").toHaveLength(0);
+  // The key of an AI engine (task 3127, `#hk-eng-key`) is not the key of a data provider: only the latter lives in Connections.
+  expect(root.querySelectorAll('input[type="password"]:not(#hk-eng-key)'), where + ": password input").toHaveLength(0);
   expect(root.querySelectorAll("[data-field]"), where + ": key field").toHaveLength(0);
-  const text = (root as HTMLElement).textContent ?? "";
+  // The card that connects an AI engine with its own key (task 3127) is not the Connections card of a data provider.
+  const copy = (root as HTMLElement).cloneNode(true) as HTMLElement;
+  copy.querySelector("#hk-eng-key")?.closest(".pane")?.remove();
+  const text = copy.textContent ?? "";
   for (const word of forbiddenTexts()) expect(text.includes(word), `${where}: "${word}"`).toBe(false);
   // a provider selector would be a select, a combobox or a listbox with a provider among its options
   for (const select of root.querySelectorAll("select, [role=combobox], [role=listbox]")) {

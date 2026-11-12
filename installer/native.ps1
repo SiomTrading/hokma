@@ -43,6 +43,37 @@ function Invoke-Native {
     return [int]$code
 }
 
+# The interpreter of the newest REAL patch folder (cpython-3.12.13-...) under uv's Python folder, "" when there is none.
+# Never the minor version junction (cpython-3.12-...): Windows Redirection Guard can refuse to cross it (WinError 448).
+function Get-RealPython {
+    param([string]$Root, [string]$Version)
+    $minor = (($Version -split "\.")[0..1]) -join "."
+    if (-not (Test-Path -LiteralPath $Root)) { return "" }
+    $best = ""
+    $bestPatch = -1
+    foreach ($d in (Get-ChildItem -LiteralPath $Root -Directory -Force -ErrorAction SilentlyContinue)) {
+        if ($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
+        if ($d.Name -notmatch ("^cpython-" + [regex]::Escape($minor) + "\.(\d+)-")) { continue }
+        $exe = Join-Path $d.FullName "python.exe"
+        if (-not (Test-Path -LiteralPath $exe)) { continue }
+        $patch = [int]$Matches[1]
+        if ($patch -gt $bestPatch) { $best = $exe; $bestPatch = $patch }
+    }
+    return $best
+}
+
+# Removes the links (junctions) directly under uv's Python folder. Deleting a junction removes only the link, never the
+# folder it points to.
+function Remove-PythonLinks {
+    param([string]$Root)
+    if (-not (Test-Path -LiteralPath $Root)) { return }
+    foreach ($d in (Get-ChildItem -LiteralPath $Root -Directory -Force -ErrorAction SilentlyContinue)) {
+        if ($d.Name -like "cpython-*" -and ($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            try { [System.IO.Directory]::Delete($d.FullName, $false) } catch { }
+        }
+    }
+}
+
 # Windows edition, for the log. Windows Server is supported: the install goes on, the edition is only recorded.
 function Get-WindowsEdition {
     try {

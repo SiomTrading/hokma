@@ -86,7 +86,7 @@ def test_an_agent_file_written_in_the_folder_appears_without_restarting(client, 
 
 
 def test_skill_save_writes_skill_md_in_the_working_folder(work, client):
-    out, err = call("skill_save", {"name": "Cierre Mensual", "description": "Cuando cierre el mes",
+    out, err = call("skill_save", {"name": "Cierre Mensual", "description": "When the month closes",
                                    "instructions": "Pasos del cierre."})
     assert not err and out["path"] == ".claude/skills/cierre-mensual/SKILL.md" and not out["updated"]
     text = (work.home / ".claude" / "skills" / "cierre-mensual" / "SKILL.md").read_text()

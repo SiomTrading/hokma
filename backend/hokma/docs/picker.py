@@ -9,6 +9,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+from hokma.core.proc import spawn_kwargs
+
 DIALOG_SECONDS = 600
 
 _WINDOWS_SCRIPT = (
@@ -49,9 +51,8 @@ def pick_folder() -> Pick:
     command = _command()
     if command is None:
         return Pick(available=False)
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     try:
-        done = subprocess.run(command, capture_output=True, timeout=DIALOG_SECONDS, creationflags=flags)
+        done = subprocess.run(command, capture_output=True, timeout=DIALOG_SECONDS, **spawn_kwargs())
     except (OSError, subprocess.SubprocessError):
         return Pick(available=False)
     text = done.stdout.decode("utf-8", errors="replace").strip()

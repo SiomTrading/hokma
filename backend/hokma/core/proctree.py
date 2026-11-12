@@ -23,6 +23,8 @@ import subprocess
 import sys
 from typing import Any
 
+from hokma.core.proc import spawn_kwargs
+
 
 def _log(message: str) -> None:
     try:
@@ -110,7 +112,7 @@ def start_time(pid: int) -> str | None:
         return None
     try:
         out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
-                             check=False, stdin=subprocess.DEVNULL).stdout.strip()
+                             check=False, stdin=subprocess.DEVNULL, **spawn_kwargs()).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
     return out or None

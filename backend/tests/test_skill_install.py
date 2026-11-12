@@ -142,7 +142,8 @@ def test_a_plugin_or_marketplace_repository_goes_to_the_plugin_installation(box,
     out = box.install("https://github.com/acme/market")
     assert added == ["acme/market"] and out["kind"] == "marketplace" and out["installed_plugins"] == ["tool@acme"]
     assert not (box.work / ".claude" / "skills").exists()
-    assert "Instalé el plugin tool de acme/market: trae hooks/MCP" in out["notice"]
+    from hokma.i18n import t
+    assert t("skill.notice.plugin_installed", plugin="tool", repo="acme/market") in out["notice"]
     from hokma.status import plugin_install
     assert plugin_install.chat_installs().get("tool@acme") == "acme/market"
 

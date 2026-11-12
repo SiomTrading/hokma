@@ -46,6 +46,7 @@ def _texts(t) -> dict[str, str]:
         "offline": t("voice.error.offline"),
         "disk": t("voice.error.disk"),
         "download_failed": t("voice.error.download_failed"),
+        "tls_conflict": t("voice.error.tls_conflict"),
     }
 
 

@@ -19,6 +19,9 @@ required-markers = [
     "platform_machine == 'AMD64' and sys_platform == 'win32'",
 ]
 
+[manifest]
+overrides = [{ name = "pip-system-certs", marker = "sys_platform == 'never'" }]
+
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
@@ -581,7 +584,7 @@ dependencies = [
     { name = "databento-dbn" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "pip-system-certs", marker = "sys_platform == 'win32'" },
+    { name = "pip-system-certs", marker = "sys_platform == 'never'" },
     { name = "pyarrow" },
     { name = "requests" },
     { name = "zstandard", marker = "python_full_version < '3.14'" },
@@ -816,7 +819,7 @@ wheels = [
 
 [[package]]
 name = "hokma"
-version = "0.0.28"
+version = "0.0.29"
 source = { editable = "." }
 dependencies = [
     { name = "av" },
@@ -1511,7 +1514,7 @@ name = "pip-system-certs"
 version = "5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pip", marker = "sys_platform == 'win32'" },
+    { name = "pip", marker = "(platform_machine != 'x86_64' and sys_platform == 'darwin') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7d/6a/563b05a4f6c9ddc205c98bb413e74221368efb98b8fb9cca96b578b8930c/pip_system_certs-5.3.tar.gz", hash = "sha256:19c8bf9957bcce7d69c4dbc2d0b2ef13de1984d53f50a59012e6dbbad0af67c6", size = 6395, upload-time = "2025-10-16T06:14:55.217Z" }
 wheels = [

@@ -140,6 +140,7 @@ async def ping(connection_id: int, owner: Any = None) -> dict[str, Any]:
     adapter = build_adapter(c.engine, owner or _Owner())
     model = catalog.tier_model(conn, "fast") or ""
     ctx = EngineContext(conversation_id="", model=model, cwd=str(_cwd()), mode="ask", connection=conn, tier="fast",
+                        instructions=_chat_instructions(),
                         task_id="ping", extra={"base_flags": ["-p", "--output-format", "stream-json", "--input-format",
                                                               "stream-json", "--verbose", "--permission-prompt-tool",
                                                               "stdio"], "no_session_flags": True})
@@ -166,6 +167,10 @@ async def ping(connection_id: int, owner: Any = None) -> dict[str, Any]:
         code, message = exc.code, exc.message
     except asyncio.TimeoutError:
         code, message = "network", "no answer in time"
+    except Exception as exc:                         # noqa: BLE001  (any failure of the launch is a result, not a 500)
+        code, message = "engine_error", f"{type(exc).__name__}: {exc}"
+        from hokma.engine import errlog
+        errlog.log("connection test failed", exc, scope="engines")
     finally:
         if session is not None:
             await session.close()
@@ -194,6 +199,16 @@ class _Owner:
         from hokma.kit.launch import prepare_claude_launch
 
         return prepare_claude_launch()
+
+
+def _chat_instructions() -> str:
+    """The same instructions a chat hands to the engine, so the test writes the same file and fails where the chat fails."""
+    try:
+        from hokma.engine.engine import ChatEngine
+
+        return ChatEngine.instructions_for(str(_cwd()), None)
+    except Exception:                                # noqa: BLE001  (the test then reports what the launch says)
+        return ""
 
 
 def _cwd() -> Path:

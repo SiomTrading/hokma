@@ -179,6 +179,29 @@ class ChatSession:
         if eng is not None:
             await eng.close()
 
+    @staticmethod
+    def _error_text(ev: dict[str, Any]) -> str:
+        """The engine's own message; when it sent none, the code and where to look, never a bare "something failed"."""
+        from hokma.i18n import t
+
+        code = str(ev.get("code") or "engine_error")
+        return str(ev.get("message") or "").strip() or t("chat.err.no_detail", code=code)
+
+    @staticmethod
+    def _mark_connection_failed(connection: Any, code: str) -> None:
+        """A chat that cannot open its engine must not leave "Connected" on the connection (bug 1095): the saved
+        status came from an earlier test, before the reinstall or the update."""
+        cid = connection.get("id") if isinstance(connection, dict) else None
+        if cid is None:
+            return
+        try:
+            from hokma.db import get_database
+
+            with get_database().write() as u:
+                u.engine_connections.set_status(cid, "error", code)
+        except Exception:                                   # noqa: BLE001  (never in the way of the error itself)
+            pass
+
     async def _ensure_engine(self, conv: ConversationRecord, project: ProjectRecord,
                              mode: str = modes.DEFAULT_MODE) -> EngineSession:
         adapter, connection, model = self.engine.resolve_engine(conv)
@@ -202,6 +225,8 @@ class ChatSession:
         try:
             self._eng = await adapter.open(ctx)
         except EngineError as exc:
+            errlog.log(f"conversation {self.conversation_id}: the engine did not open ({exc.code}): {exc.message}", exc)
+            self._mark_connection_failed(connection, exc.code)
             raise TurnError(exc.code, exc.message) from exc
         self._session_id = self._eng.session_ref or self._session_id
         self._eng_key = key
@@ -289,7 +314,7 @@ class ChatSession:
                     if self._stop_requested:
                         status = "stopped"
                     else:
-                        status, error = "error", TurnError(ev.get("code", "engine_error"), ev.get("message", ""))
+                        status, error = "error", TurnError(ev.get("code", "engine_error"), self._error_text(ev))
                     break
             if not result_seen:                                # the engine ended without a verdict
                 status = "stopped" if self._stop_requested else "error"

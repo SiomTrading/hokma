@@ -164,7 +164,10 @@ class ClaudeCodeAdapter:
             spec = self.owner.launch()
         except Exception as exc:                         # IntegrityError and any failure while preparing settings
             raise EngineError("integrity", f"{type(exc).__name__}: {exc}") from exc
-        env = filtered_env()                         # allow list: no provider keys, no Hokma token, no market keys
+        try:
+            env = filtered_env()                     # allow list: no provider keys, no Hokma token, no market keys
+        except Exception as exc:                     # the PATH or the environment could not be built (WinError 448, bug 1095)
+            raise EngineError("env_failed", f"{type(exc).__name__}: {exc}") from exc
         env.update(spec.env)
         spec_args = list(spec.args)
         conn = ctx.connection

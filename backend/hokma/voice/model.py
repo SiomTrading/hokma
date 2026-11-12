@@ -33,7 +33,8 @@ def repo_id(size: str) -> str:
 
 
 def classify_download_error(error: BaseException) -> str:
-    """'offline' when the cause is the network, 'disk' when the disk is full or not writable, else 'download_failed'."""
+    """'offline' when the cause is the network, 'disk' when the disk is full or not writable,
+    'tls_conflict' when the certificate patches of ssl loop on themselves, else 'download_failed'."""
     seen: set[int] = set()
     current: BaseException | None = error
     while current is not None and id(current) not in seen:
@@ -43,6 +44,8 @@ def classify_download_error(error: BaseException) -> str:
             return "offline"
         if any(word in name for word in ("Connect", "Timeout", "Offline", "LocalEntryNotFound", "NameResolution")):
             return "offline"
+        if isinstance(current, RecursionError):      # two truststore patches stacked on ssl (bug 1094)
+            return "tls_conflict"
         if isinstance(current, OSError) and current.errno in (28, 13, 30):   # ENOSPC, EACCES, EROFS
             return "disk"
         current = current.__cause__ or current.__context__
@@ -165,6 +168,8 @@ class ModelManager:
         # One 480 MB file over plain HTTPS: the Xet transport and the symlink notice only add ways to fail on Windows.
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
         os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+        from hokma.core.tls import undo_stacked_truststore
+        undo_stacked_truststore()
         from huggingface_hub import snapshot_download
         from tqdm.auto import tqdm
 

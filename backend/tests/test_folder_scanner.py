@@ -200,7 +200,7 @@ def test_the_thread_reads_by_itself_and_stops(db, folder):
     worker = folder_worker.FolderWorker(get_db=lambda: db, interval=0.2)
     worker.start()
     try:
-        (root / "late.md").write_text("# L\n\nllegó tarde\n", encoding="utf-8")
+        (root / "late.md").write_text("# L\n\narrived late\n", encoding="utf-8")
         deadline = time.time() + 10
         while time.time() < deadline and not _docs_in(db, fid):
             time.sleep(0.1)

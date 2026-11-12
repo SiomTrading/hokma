@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable
 
 from hokma.core.config import hokma_data_dir
+from hokma.core.pyhome import is_link
 
 TOOLS = ("node", "bun")
 MARKER = ".hokma-version"
@@ -62,12 +63,30 @@ def tool_path(tool: str) -> Path:
     return bin_dir(tool) / _exe(tool)
 
 
+def _real_dir(path: Path) -> bool:
+    """`path` is a folder we can walk. Any OSError (WinError 448 included) means it is not usable, never a crash:
+    `Path.is_dir()` of Python 3.12 only ignores a few errors and would raise the rest."""
+    try:
+        return os.path.isdir(path)
+    except OSError:
+        return False
+
+
 def python_dirs() -> list[Path]:
-    """The folders of the Python that uv installed for Hokma (`<data>/python/cpython-*`)."""
-    found = []
-    for root in sorted((hokma_data_dir() / "python").glob("cpython-*")):
+    """The folders of the Python that uv installed for Hokma (`<data>/python/cpython-*`). The links uv makes to the
+    minor version (`cpython-3.12-...`, a junction on Windows) are skipped: the real folder `cpython-3.12.x-...` is
+    already in the list, and Windows can refuse to cross a link (WinError 448, WinError 448). A folder that cannot be
+    read is left out; the others stay."""
+    found: list[Path] = []
+    try:
+        roots = sorted((hokma_data_dir() / "python").glob("cpython-*"))
+    except OSError:
+        return []
+    for root in roots:
+        if is_link(root):
+            continue
         found += [root / "Scripts", root] if sys.platform == "win32" else [root / "bin"]
-    return [p for p in found if p.is_dir()]
+    return [p for p in found if _real_dir(p)]
 
 
 def tool_dirs() -> list[Path]:
