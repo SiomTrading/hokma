@@ -8,12 +8,15 @@ import { clearToken, getToken } from "./token";
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** Stable machine reason the backend sends next to `code` on some errors (link downloads); empty when absent. */
+  readonly reason: string;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, reason = "") {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.reason = reason;
   }
 }
 
@@ -43,6 +46,7 @@ function isBodyInit(body: unknown): body is BodyInit {
 /** Extracts a user-safe message from a backend error body. Never exposes stack traces. */
 async function readError(res: Response): Promise<ApiError> {
   let code = "http_error";
+  let reason = "";
   let message = t("api.error");
   try {
     const data: unknown = await res.json();
@@ -59,13 +63,17 @@ async function readError(res: Response): Promise<ApiError> {
         const d = detail as Record<string, unknown>;
         if (typeof d.message === "string") message = d.message;
         if (typeof d.code === "string") code = d.code;
+        else if (typeof d.reason === "string") code = d.reason;
+        if (typeof d.reason === "string") reason = d.reason;
       }
       if (typeof body.code === "string") code = body.code;
+      else if (typeof body.reason === "string") code = body.reason;
+      if (typeof body.reason === "string") reason = body.reason;
     }
   } catch {
     /* body is not JSON: keep the generic message */
   }
-  return new ApiError(res.status, code, message);
+  return new ApiError(res.status, code, message, reason);
 }
 
 export async function request(path: string, options: RequestOptions = {}): Promise<Response> {

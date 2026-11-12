@@ -21,6 +21,14 @@ class RuleViolation(IntegrityViolation):
     """A trigger refused the write: forbidden transition, unfinished parents, append-only table..."""
 
 
+class DuplicateDocument(IntegrityViolation):
+    """The library already holds a document with the same sha256. `existing_id` is that document."""
+
+    def __init__(self, existing_id: int) -> None:
+        super().__init__(f"document with the same content already in the library (id {existing_id})")
+        self.existing_id = existing_id
+
+
 class Conflict(DbError):
     """A conditional update matched no row: somebody else got there first."""
 

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { DragEvent } from "react";
-import { Button, Dot, EmptyState, ErrorState, Icon, IconButton, Loading } from "@/design";
+import { Button, Dot, EmptyState, ErrorState, Icon, IconButton, Loading, Segmented } from "@/design";
 import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
+import { DocumentsSection } from "./DocumentsSection";
 import { CreateProjectDialog, LinkDialog, RenameProjectDialog } from "./Dialogs";
 import { PreviewDialog } from "./Preview";
 import * as client from "./api";
@@ -81,6 +82,7 @@ export function ProjectsPanel() {
   const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const [dragging, setDragging] = useState(false);
   const [busyName, setBusyName] = useState<string | null>(null);
+  const [tab, setTab] = useState<"files" | "documents">("files");
   const picker = useRef<HTMLInputElement>(null);
   const announced = useRef<number | null>(null);
 
@@ -214,6 +216,22 @@ export function ProjectsPanel() {
             {!active.git.ok && active.exists ? <span className="hint" role="note">{t("projects.gitOff")}</span> : null}
           </div>
 
+          <div style={{ padding: "0 14px 8px" }}>
+            <Segmented
+              label={t("docs.tab.label")}
+              value={tab}
+              onChange={setTab}
+              options={[
+                { value: "files", label: t("docs.tab.files") },
+                { value: "documents", label: t("docs.tab.documents") },
+              ]}
+            />
+          </div>
+
+          {tab === "documents" ? <DocumentsSection key={active.id} projectId={active.id} /> : null}
+
+          {tab === "files" ? (
+          <>
           <div
             style={{ flex: 1, overflow: "auto", padding: "0 6px", outline: dragging ? "1px dashed var(--acc)" : "none", borderRadius: 10 }}
             onDragOver={onDragOver}
@@ -266,6 +284,8 @@ export function ProjectsPanel() {
               }}
             />
           </div>
+          </>
+          ) : null}
         </>
       ) : null}
 

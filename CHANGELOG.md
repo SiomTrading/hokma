@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.26
+
+Documents per project with local search (SPEC-009). A project keeps its reference files and the agent finds the
+passages by words, on any engine, without embeddings.
+
+- Add PDF, Word, Excel, PowerPoint, text, CSV, HTML and image files to a project, by dragging them or from a link.
+  Each file is split into passages with its section (page, sheet, heading) so the agent cites file and section.
+- New tools `docs_search` and `docs_list` in Hokma's MCP for every engine.
+- The search ignores accents and case, and tries all the words first, then any of them.
+- CI: the document tests (`test_docs_*`) also run on Windows and macOS, with paths that carry spaces and accents and
+  with the removal of a file that was just read.
+
 ## 0.0.25
 
 Two real cases on Windows (task 3175): pressing Stop left Hokma hung, and a `git clone` waited for credentials nobody could type.

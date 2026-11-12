@@ -45,7 +45,30 @@ def test_every_key_used_in_the_code_exists_and_every_key_is_used():
         used |= set(KEY_USE.findall(path.read_text(encoding="utf-8")))
     known = set(load("en"))
     assert used - known == set(), "keys used in the code but missing from the catalogs"
-    assert known - used == set(), "catalog keys that no code uses"
+    # `docs.detail.reason.<code>` is looked up by a computed key; the test below checks it against every code
+    assert {k for k in known - used if not k.startswith("docs.detail.reason.")} == set(), "catalog keys that no code uses"
+
+
+def test_every_unreadable_code_has_a_reason_in_both_catalogs():
+    from hokma.docs import readers
+
+    source = (ROOT / "backend" / "hokma" / "docs" / "readers.py").read_text(encoding="utf-8")
+    raised = set(re.findall(r"""UnreadableDocument\(.*\bcode="([a-z_]+)"\)""", source))
+    assert raised and raised <= set(readers.UNREADABLE_CODES), "a reader raises a code that is not declared"
+    codes = {*readers.UNREADABLE_CODES, readers.UnsupportedFormat.code}
+    reasons = {lang: {k.removeprefix("docs.detail.reason.") for k in load(lang) if k.startswith("docs.detail.reason.")}
+               for lang in ("es", "en")}
+    for lang, found in reasons.items():
+        assert found == codes, f"{lang}: reasons out of sync with the codes: {found ^ codes}"
+
+
+def test_unreadable_reason_shown_to_the_student_is_localized(monkeypatch):
+    from hokma.docs import readers
+
+    monkeypatch.delenv("HOKMA_LANG", raising=False)
+    for code in readers.UNREADABLE_CODES:
+        shown = t("docs.detail.unreadable", reason=t(f"docs.detail.reason.{code}"))
+        assert not shown.startswith("docs.") and "The " not in shown, code
 
 
 def test_installer_keys_are_used_by_the_scripts():

@@ -358,6 +358,50 @@ class TrashItem(Record):
 
 
 @dataclass(frozen=True, slots=True)
+class Library(Record):
+    id: int
+    scope: str
+    project_id: int | None
+    name: str | None
+    source: str | None
+    version: str | None
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class Document(Record):
+    id: int
+    library_id: int
+    name: str
+    stored_path: str
+    mime_type: str
+    format: str
+    size_bytes: int
+    sha256: str
+    source_url: str | None
+    description: str | None
+    status: str
+    status_detail: str | None
+    chunk_count: int
+    created_at: str
+    indexed_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DocHit(Record):
+    """One passage that matched a search."""
+    chunk_id: int
+    document_id: int
+    document: str
+    section: str
+    excerpt: str
+    path: str
+    format: str
+    source_url: str | None
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
 class Bug(Record):
     id: int
     project_id: int | None

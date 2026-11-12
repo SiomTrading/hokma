@@ -17,6 +17,25 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
       - run: uv run pytest
+  docs-tests:
+    # Project documents (SPEC-009 P9): the readers, the store and the endpoints run on the two platforms where
+    # students work. Paths with spaces and accents, and removing a file just read, only fail on Windows.
+    if: github.repository == 'SiomTrading/hokma-dev'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Document tests
+        shell: bash
+        run: uv run pytest backend/tests/test_docs_*.py
   dashboard:
     runs-on: ubuntu-latest
     steps:

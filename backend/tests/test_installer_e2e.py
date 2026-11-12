@@ -79,10 +79,11 @@ def _full_cycle(home: Path):
     assert not any(p.name in ("venv", "app", "claude-config") for p in work.rglob("*") if ".git" not in p.parts)
     assert work.resolve() not in data.resolve().parents and data.resolve() not in work.resolve().parents
 
-    # settings.json denies Edit/Write/Bash on the runtime and the config.
-    deny = json.loads((data / "claude-config" / "settings.json").read_text())["permissions"]["deny"]
-    assert any(d.startswith("Edit(//") and "hokma" in d.lower() for d in deny)
-    assert any(d.startswith("Write(//") for d in deny) and any(d.startswith("Bash(") for d in deny)
+    # settings.json registers the two fail-closed PreToolUse hooks (the guard and the four locks); no deny list or sandbox.
+    settings = json.loads((data / "claude-config" / "settings.json").read_text())
+    assert settings["disableAllHooks"] is False and "deny" not in settings.get("permissions", {})
+    commands = [h["command"] for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
+    assert any("guard.py" in c for c in commands) and any("hardblock.py" in c for c in commands)
 
     # Doctor through the launcher: nothing may FAIL (claude missing/no session is a warning).
     d = _run([str(launcher), "doctor"], env)

@@ -1,6 +1,6 @@
 [project]
 name = "hokma"
-version = "0.0.25"
+version = "0.0.26"
 description = "Hokma: installable harness by SiomTrading"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -18,6 +18,10 @@ dependencies = [
     "pywinpty==3.0.3; sys_platform == 'win32'",
     "keyring==25.7.0",
     "databento==0.90.0",
+    # Document readers for project libraries (task 3187, SPEC-009 P3). Pure Python, no native build.
+    "pypdf==7.0.1",
+    "openpyxl==3.1.5",
+    "xlrd==2.0.2",
 ]
 
 [project.scripts]

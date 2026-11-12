@@ -237,7 +237,7 @@ def test_sqlite_to_postgres_and_back_keeps_every_row(seeded, pg_url, env):
 
     target = PostgresBackend(pg_url)
     result = transfer(source, target)
-    assert result.counts == {k: v for k, v in sizes.items()} and result.schema_version == 6
+    assert result.counts == {k: v for k, v in sizes.items()} and result.schema_version == 7
     assert sample_counts(target) == sizes
     assert snapshot(target) == before                         # same values, same ids, same timestamps
     # the destination says it is Postgres; the origin was not touched
@@ -368,7 +368,7 @@ def test_endpoints_need_the_session_token(env):
 def test_status_of_the_default_database(env):
     migrate()
     body = TestClient(create_app(), headers=HEADERS).get("/api/database").json()
-    assert body["engine"] == "sqlite" and body["reachable"] and body["schema_version"] == 6
+    assert body["engine"] == "sqlite" and body["reachable"] and body["schema_version"] == 7
     assert body["location"].endswith("hokma.db") and body["saved_url"] is None
 
 
@@ -449,7 +449,7 @@ def test_full_switch_over_http_and_back(seeded, pg_password_url, env, caplog):
         assert SECRET_ENCODED in database_config_path().read_text(encoding="utf-8")      # only here
 
         status = client.get("/api/database").json()
-        assert status["engine"] == "postgres" and status["reachable"] and status["schema_version"] == 6
+        assert status["engine"] == "postgres" and status["reachable"] and status["schema_version"] == 7
         assert SECRET not in json.dumps(status) and SECRET_ENCODED not in json.dumps(status)
         assert SECRET not in json.dumps(tested) and SECRET_ENCODED not in json.dumps(tested)
 

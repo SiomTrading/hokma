@@ -33,6 +33,13 @@ _MESSAGES: dict[str, Callable[..., str]] = {
     "too_many_redirects": lambda **p: t("projects.err.too_many_redirects", **p),
     "connect_failed": lambda **p: t("projects.err.connect_failed", **p),
     "timeout": lambda **p: t("projects.err.timeout", **p),
+    "doc_duplicate": lambda **p: t("docs.err.duplicate", **p),
+    "doc_too_large": lambda **p: t("docs.err.too_large", **p),
+    "doc_unsupported": lambda **p: t("docs.err.unsupported", **p),
+    "doc_not_found": lambda **p: t("docs.err.not_found", **p),
+    "link_blocked": lambda **p: t("docs.link.blocked", **p),
+    "link_not_document": lambda **p: t("docs.link.not_document", **p),
+    "link_scheme": lambda **p: t("docs.link.scheme", **p),
 }
 
 

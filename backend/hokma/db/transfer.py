@@ -284,6 +284,9 @@ def transfer(source: Backend, target: Backend, *, replace: bool = False) -> Tran
                 _reset_identity(dst, table)
             for statement in deferred:
                 dst.execute(statement)
+            if work_target.engine == "sqlite" and dst.table_exists("doc_chunks_fts"):
+                # the rows were copied before the triggers that feed the search index existed
+                dst.execute("INSERT INTO doc_chunks_fts(doc_chunks_fts) VALUES ('rebuild')")
             if dst.table_exists("profile"):
                 dst.execute("UPDATE profile SET database_engine = :e WHERE id = 1", {"e": target.engine})
             counts = _verify(src, dst, tables)

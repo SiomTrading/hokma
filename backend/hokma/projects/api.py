@@ -19,11 +19,14 @@ from hokma.rpc.ws import SESSION_TOKEN
 MAX_UPLOAD_BODY = att.MAX_ATTACHMENT_BYTES + 64 * 1024
 
 
-def _error(status: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse({"detail": {"code": code, "message": message}}, status_code=status)
+def _error(status: int, code: str, message: str, reason: str | None = None) -> JSONResponse:
+    detail = {"code": code, "message": message}
+    if reason:
+        detail["reason"] = reason
+    return JSONResponse({"detail": detail}, status_code=status)
 
 
-class _Route(APIRoute):
+class TokenRoute(APIRoute):
     """Token check and error mapping for every route of this router."""
 
     def get_route_handler(self) -> Callable:
@@ -36,14 +39,14 @@ class _Route(APIRoute):
             try:
                 return await original(request)
             except ProjectError as exc:
-                return _error(exc.status, exc.code, str(exc))
+                return _error(exc.status, exc.code, str(exc), getattr(exc, "reason", None))
             except DbError:
                 return _error(400, "db_error", t("projects.err.db_failed"))
 
         return handler
 
 
-router = APIRouter(route_class=_Route)
+router = APIRouter(route_class=TokenRoute)
 
 
 class NewProject(BaseModel):
