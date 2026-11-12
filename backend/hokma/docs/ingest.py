@@ -230,10 +230,12 @@ def _ingest(database: Database, target, name: str, data: bytes, *, description: 
         # Anything unexpected must not leave the row stuck on "indexing": the student sees it failed and can remove it.
         _finish_failed(database, doc.id, t("docs.detail.failed"))
         raise
+    from hokma.docs import folder_scan, folder_worker          # lazy: folder_scan imports this module
+    if folder_scan.total_passages(database) + len(result.passages) > folder_scan.MAX_PASSAGES:
+        return _finish_failed(database, doc.id, t("docs.disk.passage_cap", limit=f"{folder_scan.MAX_PASSAGES:,}"))
     with database.write() as u:
         u.documents.add_chunks(doc.id, result.passages)
         saved = u.documents.set_status(doc.id, "ready", _detail(result))
-    from hokma.docs import folder_worker
     folder_worker.wake()                       # the vectors of the new passages are computed now, not at the next poll
     return _present(database, [saved])[0]
 

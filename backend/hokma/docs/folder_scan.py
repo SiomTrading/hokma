@@ -224,9 +224,9 @@ def _scan_folder(folder_id: int, database: Database) -> ScanResult:
                                   {"m": mtime_ns, "s": size, "i": doc.id})
             result.unchanged += 1
             continue
-        if passages >= MAX_PASSAGES:
-            result.passage_cap = True
-            break
+        if doc is None and passages >= MAX_PASSAGES:
+            result.passage_cap = True              # the cap only holds back new files; a changed one replaces its passages
+            continue
         if doc is not None:
             passages -= doc.chunk_count
             _forget(database, doc)

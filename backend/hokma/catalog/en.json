@@ -547,6 +547,7 @@
   "docs.disk.err.home": "Your whole personal folder cannot be added. Pick a folder inside it.",
   "docs.disk.err.data_dir": "That folder belongs to Hokma and cannot be added.",
   "docs.disk.err.system": "System folders cannot be added.",
+  "docs.disk.err.hidden": "Hidden folders (their name starts with a dot) cannot be added.",
   "docs.disk.err.duplicate": "This project already reads that folder.",
   "docs.disk.err.too_many": "A project can read up to {limit} folders. Remove one to add another.",
   "docs.disk.err.own_folder": "This is the project's own folder. It is always read.",

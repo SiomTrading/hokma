@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.28
+
+Library fixes (SPEC-010).
+
+- Uploads and links respect the 50,000 passage cap: a document that would go over it is kept as failed with the cap message.
+- At the cap, a disk file that changed is reindexed (its passages are replaced); only new files wait.
+- A hidden folder (name starting with a dot, such as `.git`) cannot be added as a read folder.
+
 ## 0.0.27
 
 The Library (SPEC-010). One place for the student's reference files, searched by meaning and by words, on any engine.

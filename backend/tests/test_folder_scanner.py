@@ -159,6 +159,21 @@ def test_the_passage_cap_stops_reading_and_says_so(db, folder, monkeypatch):
     assert detail and "1" in detail
 
 
+def test_at_the_cap_a_changed_file_is_reindexed_and_a_new_one_waits(db, folder, monkeypatch):
+    fid, root, _ = folder
+    monkeypatch.setattr(folder_scan, "MAX_PASSAGES", 1)
+    (root / "a.md").write_text("# A\n\nTexto inicial.\n", encoding="utf-8")
+    folder_scan.scan_folder(fid, db)
+    before = folder_scan.total_passages(db)
+    (root / "a.md").write_text("# A\n\nTexto cambiado del todo.\n", encoding="utf-8")
+    (root / "b.md").write_text("# B\n\nArchivo nuevo.\n", encoding="utf-8")
+    result = folder_scan.scan_folder(fid, db)
+    assert result.updated == 1 and result.added == 0 and result.passage_cap
+    assert folder_scan.total_passages(db) == before                           # replaced, not summed
+    with db.read() as u:
+        assert [d.rel_path for d in _docs(u, fid)] == ["a.md"]
+
+
 def test_a_failing_folder_does_not_stop_the_thread(db, folder, monkeypatch):
     fid, root, _ = folder
     (root / "a.md").write_text("# A\n\ncuarzo\n", encoding="utf-8")

@@ -249,6 +249,17 @@ def test_rejections_of_section_4_3(client, env, monkeypatch):
     assert len(folders(client, pid)) == 1
 
 
+def test_a_hidden_folder_is_rejected_with_a_clear_error(client, env):
+    pid = new_project(client)["id"]
+    for name in (".git", ".secretos"):
+        hidden = env / name
+        hidden.mkdir()
+        r = add(client, pid, hidden)
+        assert r.status_code == 400
+        assert r.json()["detail"]["code"] == "disk_hidden"
+        assert r.json()["detail"]["message"]
+
+
 def test_a_file_is_not_a_folder(client, env):
     pid = new_project(client)["id"]
     f = env / "a.md"

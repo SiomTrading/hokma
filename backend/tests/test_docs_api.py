@@ -276,3 +276,16 @@ def test_parse_upload_reads_file_and_description():
     parsed = docs_api.parse_upload(f"multipart/form-data; boundary={boundary}", body)
     assert parsed == ("a.txt", b"hola", "una nota")
     assert docs_api.parse_upload("application/json", b"{}") is None
+
+
+def test_an_upload_over_the_passage_cap_is_kept_as_failed(client, project, monkeypatch):
+    """Bug 1089: uploads respect the installation-wide passage cap, not only the disk folders."""
+    from hokma.docs import folder_scan
+    monkeypatch.setattr(folder_scan, "MAX_PASSAGES", 1)
+    first = upload(client, project, "uno.md", b"# Uno\n\nTexto del primero.\n")
+    assert first.status_code in (200, 201) and first.json()["status"] == "ready"
+    second = upload(client, project, "dos.md", b"# Dos\n\nTexto del segundo.\n")
+    body = second.json()
+    assert body["status"] == "failed"
+    assert body["status_detail"] == t("docs.disk.passage_cap", limit="1")
+

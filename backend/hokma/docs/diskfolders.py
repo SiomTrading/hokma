@@ -91,6 +91,8 @@ def check_folder(raw: object) -> Path:
         raise ProjectError("disk_path_missing", 404) from exc
     if not path.is_dir():
         raise ProjectError("disk_not_folder", 400)
+    if path.name.startswith("."):
+        raise ProjectError("disk_hidden", 400)
     if path == Path(path.anchor) or path.parent == path:
         raise ProjectError("disk_root", 400)
     home = Path.home().resolve()

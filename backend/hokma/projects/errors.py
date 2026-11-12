@@ -46,6 +46,7 @@ _MESSAGES: dict[str, Callable[..., str]] = {
     "owner_confirmation_required": lambda **p: t("docs.disk.err.owner_required", **p),
     "disk_path_missing": lambda **p: t("docs.disk.err.path_missing", **p),
     "disk_not_folder": lambda **p: t("docs.disk.err.not_folder", **p),
+    "disk_hidden": lambda **p: t("docs.disk.err.hidden", **p),
     "disk_root": lambda **p: t("docs.disk.err.root", **p),
     "disk_home": lambda **p: t("docs.disk.err.home", **p),
     "disk_data_dir": lambda **p: t("docs.disk.err.data_dir", **p),

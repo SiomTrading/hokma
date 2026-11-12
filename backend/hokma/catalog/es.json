@@ -547,6 +547,7 @@
   "docs.disk.err.home": "No se puede agregar toda tu carpeta personal. Elige una carpeta dentro de ella.",
   "docs.disk.err.data_dir": "Esa carpeta es de Hokma y no se puede agregar.",
   "docs.disk.err.system": "Las carpetas del sistema no se pueden agregar.",
+  "docs.disk.err.hidden": "Las carpetas ocultas (su nombre empieza con punto) no se pueden agregar.",
   "docs.disk.err.duplicate": "Este proyecto ya lee esa carpeta.",
   "docs.disk.err.too_many": "Un proyecto puede leer hasta {limit} carpetas. Quita una para agregar otra.",
   "docs.disk.err.own_folder": "Esta es la carpeta propia del proyecto. Siempre se lee.",
