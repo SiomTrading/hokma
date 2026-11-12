@@ -431,13 +431,14 @@ def check_project(project_id: int, db=None) -> None:
     ingest._require_project(ingest._db(db), project_id)
 
 
-def fetch_document(project_id: int, url: str, title: str | None = None, *, resolver: Resolver | None = None,
+def fetch_document(url: str, title: str | None = None, *, folder_id: int | None = None,
+                   origin_project_id: int | None = None, resolver: Resolver | None = None,
                    connector: Connector | None = None, db=None) -> dict:
-    """Download one link and index it as a document of the project (same path as an uploaded file)."""
-    check_project(project_id, db)
+    """Download one link and index it as a Library document (same path as an uploaded file)."""
     name, data, final_url = download(url, title, resolver=resolver, connector=connector)
     try:
-        return ingest.add_document(project_id, name, data, source_url=final_url, db=db)
+        return ingest.add_library_document(name, data, source_url=final_url, folder_id=folder_id,
+                                           origin_project_id=origin_project_id, db=db)
     except ProjectError as exc:
         reason = _ADD_REASONS.get(exc.code)
         if reason is None:

@@ -66,7 +66,7 @@ def test_a_file_just_read_can_be_removed_and_its_path_has_spaces_and_accents(cli
     assert doc["status"] == "ready", doc
     with db.read() as u:
         stored = Path(u.documents.get_document(doc["id"]).stored_path)
-        library = u.documents.find_project_library(project)
+        library = u.library.find_student_library()
         assert u.documents.search([library.id], "momentum")
     assert stored.is_file()
     assert " " in str(stored) and "\u00f1" in str(stored) and str(spaced) in str(stored)

@@ -138,8 +138,9 @@ for (const locale of locales) {
 
     // (c1) the migration ran in the update: base created at the latest schema, profile from owner.json, not completed
     const db = path.join(data, "hokma.db");
+    const latestSchema = Math.max(...fs.readdirSync(path.join(repo, "backend/hokma/db/migrations")).map((f) => parseInt(f, 10)).filter(Number.isFinite));
     assert.ok(fs.existsSync(db), "the update created hokma.db");
-    assert.equal(sqlite(db, "SELECT MAX(version) FROM schema_version")[0][0], 5, "schema 5");
+    assert.equal(sqlite(db, "SELECT MAX(version) FROM schema_version")[0][0], latestSchema, `schema ${latestSchema}`);
     const [[ownerName, fundName, completedAt]] = sqlite(db, "SELECT owner_name, fund_name, setup_completed_at FROM profile");
     assert.equal(ownerName, OWNER);
     assert.equal(fundName, FUND);

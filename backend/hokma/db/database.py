@@ -13,6 +13,7 @@ from hokma.db.repos.agents import AgentsRepo
 from hokma.db.repos.approvals import ApprovalsRepo
 from hokma.db.repos.conversations import AttachmentsRepo, ConversationsRepo, MessagesRepo
 from hokma.db.repos.documents import DocumentsRepo
+from hokma.db.repos.library import LibraryRepo
 from hokma.db.repos.engines import EngineConnectionsRepo
 from hokma.db.repos.extensions import ExtensionRequestsRepo, ExtensionsRepo, ScheduledJobsRepo
 from hokma.db.repos.governance import BugsRepo, DecisionsRepo, GuardEventsRepo, JournalRepo
@@ -53,6 +54,7 @@ class Unit:
         self.trash = TrashItemsRepo(session)
         self.engine_connections = EngineConnectionsRepo(session)
         self.documents = DocumentsRepo(session)
+        self.library = LibraryRepo(session)
 
 
 class Database:

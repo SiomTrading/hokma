@@ -1,0 +1,33 @@
+{
+  "embedding": {
+    "id": "multilingual-e5-small-int8",
+    "base_model": "intfloat/multilingual-e5-small",
+    "source_repo": "Xenova/multilingual-e5-small",
+    "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+    "license": "MIT",
+    "license_source": "https://huggingface.co/intfloat/multilingual-e5-small (base model card, license: mit). The ONNX repo declares no license of its own and states it is the base model with ONNX weights.",
+    "dimensions": 384,
+    "max_tokens": 512,
+    "verified": "2026-11-12",
+    "files": [
+      {
+        "name": "model_quantized.onnx",
+        "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx/model_quantized.onnx",
+        "size": 118308185,
+        "sha256": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193"
+      },
+      {
+        "name": "tokenizer.json",
+        "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json",
+        "size": 17082730,
+        "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
+      }
+    ]
+  },
+  "tokenizers_package": {
+    "name": "tokenizers",
+    "version": "0.23.3",
+    "license": "Apache-2.0",
+    "note": "Already in uv.lock (pulled by faster-whisper); wheels exist for the five target platforms."
+  }
+}

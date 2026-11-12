@@ -142,7 +142,7 @@ export async function startServer({ script, root, dist, signedIn = false }) {
     : "";
   fs.writeFileSync(
     path.join(bin, "claude"),
-    `#!/usr/bin/env python3\nimport json, runpy, sys\n${auth}runpy.run_path(${JSON.stringify(fake)}, run_name="__main__")\n`,
+    `#!/usr/bin/env python3\nimport json, os, runpy, sys\nos.environ.setdefault("FAKE_CLAUDE_LOG", ${JSON.stringify(fakeLog)})  # the engine's environment allow list drops it\n${auth}runpy.run_path(${JSON.stringify(fake)}, run_name="__main__")\n`,
   );
   fs.chmodSync(path.join(bin, "claude"), 0o755);
   const port = await free();

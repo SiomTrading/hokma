@@ -1,5 +1,5 @@
 /**
- * Documents E2E: paste a link, find the documents, mark two, watch each row go from waiting to added, then a row the
+ * Documents E2E (Library): paste a link, find the documents, mark two, watch each row go from waiting to added, then a row the
  * site refuses that offers "open in the browser". Real backend and real browser; the "site" is a local server that
  * documents-serve.py wires in, so nothing leaves the machine.
  *
@@ -9,15 +9,15 @@ import assert from "node:assert/strict";
 import { runSuite } from "./lib.mjs";
 
 await runSuite("documents", { script: "documents-serve.py" }, async ({ page, server, msg }) => {
-  const panel = page.getByRole("complementary", { name: msg("rightPanel.title") });
   await page.goto(server.base);
-  await panel.getByRole("button", { name: msg("docs.tab.documents"), exact: true }).click();
+  const menu = page.getByRole("complementary", { name: msg("nav.menu") });
+  await menu.getByRole("button", { name: msg("nav.library"), exact: true }).click();
+  await page.getByTestId("library-screen").waitFor();
 
   const links = page.getByTestId("documents-links");
   const url = (name) => "http://" + server.info.host + "/" + name;
   const rowOf = (title) => links.getByRole("list", { name: msg("docs.link.list") }).getByRole("listitem").filter({ hasText: title });
-  const projectId = async () => (await server.api("/api/projects")).projects[0].id;
-  const documents = async () => (await server.api("/api/projects/" + (await projectId()) + "/documents")).documents;
+  const documents = async () => (await server.api("/api/library/documents")).documents;
 
   // 1. paste the link of a page and find its documents
   await links.getByLabel(msg("docs.link.title")).fill(url("papers"));
@@ -33,7 +33,7 @@ await runSuite("documents", { script: "documents-serve.py" }, async ({ page, ser
   await rowOf("Paper Alpha").getByText(msg("docs.link.state.done"), { exact: true }).waitFor();
   await rowOf("Paper Beta").getByText(msg("docs.link.state.done"), { exact: true }).waitFor();
 
-  // 3. both are in the project's document list, indexed
+  // 3. both are in the Library document list, indexed
   const added = page.getByRole("list", { name: msg("docs.list") });
   await added.getByText(/alpha/i).first().waitFor();
   await added.getByText(/beta/i).first().waitFor();

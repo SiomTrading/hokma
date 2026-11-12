@@ -7,13 +7,14 @@ export const BUILTIN_SCREENS: Record<string, ScreenMeta & { navKey: string; menu
   chat: { titleKey: "screen.chat", navKey: "nav.chat", menuKey: "nav.newChat", icon: "chat", dot: "acc", addMenu: true },
   panel: { titleKey: "screen.panel", navKey: "nav.panel", menuKey: "nav.panel", icon: "panel", dot: "muted", addMenu: true },
   chart: { titleKey: "screen.chart", navKey: "nav.chart", icon: "chart", dot: "org" },
+  library: { titleKey: "screen.library", navKey: "nav.library", icon: "library", dot: "muted" },
   connections: { titleKey: "screen.connections", navKey: "nav.connections", icon: "connections", dot: "muted" },
   tasks: { titleKey: "screen.tasks", navKey: "nav.tasks", menuKey: "nav.tasks", icon: "tasks", dot: "muted", addMenu: true },
   learn: { titleKey: "screen.learn", navKey: "nav.learn", menuKey: "nav.learn", icon: "learn", dot: "muted", addMenu: true },
 };
 
 /** Order of the main sidebar entries, as in the design. */
-export const SIDEBAR_SCREENS = ["chat", "panel", "chart", "connections", "tasks"] as const;
+export const SIDEBAR_SCREENS = ["chat", "panel", "chart", "library", "connections", "tasks"] as const;
 /** Order of the "Modules" list in the "+" menu, as in the design. */
 export const ADD_MENU_SCREENS = ["chat", "panel", "tasks", "learn"] as const;
 

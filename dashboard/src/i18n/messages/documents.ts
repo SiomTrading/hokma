@@ -3,7 +3,6 @@ import { defineMessages } from "../registry";
 export default defineMessages({
   es: {
     "docs.tab.files": "Archivos",
-    "docs.tab.documents": "Documentos",
     "docs.tab.label": "Vista del proyecto",
     "docs.title": "Documentos del proyecto",
     "docs.help": "Agrega aquí los documentos de este proyecto. Tu agente los consulta cuando le preguntas y te dice de qué archivo y sección sacó la respuesta. Todo se guarda en tu computador.",
@@ -70,7 +69,6 @@ export default defineMessages({
   },
   en: {
     "docs.tab.files": "Files",
-    "docs.tab.documents": "Documents",
     "docs.tab.label": "Project view",
     "docs.title": "Project documents",
     "docs.help": "Add the documents of this project here. Your agent looks them up when you ask and tells you which file and section the answer came from. Everything is stored on your computer.",

@@ -1,6 +1,9 @@
 export type DocumentStatus = "indexing" | "ready" | "failed";
 
-/** One document of the project library, as returned by `/api/projects/{id}/documents`. */
+/** Where documents live: one project (0.0.26 routes, kept as aliases) or the student Library. */
+export type DocsScope = number | "library";
+
+/** One document, as returned by `/api/library/documents` and `/api/projects/{id}/documents`. */
 export interface DocumentInfo {
   id: number;
   name: string;
@@ -12,6 +15,10 @@ export interface DocumentInfo {
   /** Set when the document came from a link; null for an uploaded file. */
   source_url: string | null;
   description: string | null;
+  /** Library only: the project the file was uploaded from; null or absent when it has none (anymore). */
+  origin_project_id?: number | null;
+  /** Library only: folder path of the document, empty at the root. */
+  library_path?: string;
 }
 
 export const IMAGE_FORMATS: ReadonlySet<string> = new Set(["png", "jpg", "jpeg", "gif", "webp"]);

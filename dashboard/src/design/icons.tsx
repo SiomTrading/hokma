@@ -13,6 +13,7 @@ export const ICONS = {
   chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   panel: "M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z",
   chart: "M3 3v18h18M8 17V9M12 17V5M16 17v-6M20 17v-3",
+  library: "M4 4h3v16H4zM9 4h3v16H9zM14.5 5.5l2.9-.8 3.6 14.3-2.9.8z",
   tasks: "M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z",
   learn: "M2 4h7a4 4 0 0 1 3 1.5A4 4 0 0 1 15 4h7v15h-7a3 3 0 0 0-3 2 3 3 0 0 0-3-2H2z",
   settings:

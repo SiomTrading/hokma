@@ -36,6 +36,37 @@ jobs:
       - name: Document tests
         shell: bash
         run: uv run pytest backend/tests/test_docs_*.py
+  library-tests:
+    # The Library (SPEC-010 P14): the folders, the model download, the embedder, the vector store and the search run on
+    # every platform where students work. Paths with spaces and accents, and removing a file just read, only fail on
+    # Windows; sqlite-vec ships a different binary per platform. The `slow` cases need the real model and stay out.
+    if: github.repository == 'SiomTrading/hokma-dev'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, macos-15-intel, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      # The Python the installer gives the student: a uv-managed CPython, never the runner's own.
+      UV_PYTHON_PREFERENCE: only-managed
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync --python 3.12
+      - name: vec-load-smoke
+        shell: bash
+        run: uv run python scripts/vec_load_smoke.py
+      - name: Library tests
+        shell: bash
+        run: >-
+          uv run pytest -m "not slow"
+          backend/tests/test_library_*.py backend/tests/test_folder_*.py backend/tests/test_folders_api.py
+          backend/tests/test_model_download.py backend/tests/test_embedder.py backend/tests/test_vector_store.py
+          backend/tests/test_hybrid_search.py
   dashboard:
     runs-on: ubuntu-latest
     steps:

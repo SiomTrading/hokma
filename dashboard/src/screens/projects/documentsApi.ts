@@ -1,28 +1,34 @@
 import { api, ApiError } from "@/api";
 import { FETCH_REASONS } from "./documentsTypes";
-import type { DiscoveredItem, DiscoverResult, DocumentInfo, FetchReason } from "./documentsTypes";
+import type { DiscoveredItem, DiscoverResult, DocsScope, DocumentInfo, FetchReason } from "./documentsTypes";
 
-const base = (id: number) => `/api/projects/${id}/documents`;
+const base = (scope: DocsScope) => (scope === "library" ? "/api/library/documents" : `/api/projects/${scope}/documents`);
 
 /** The list may come as a bare array or wrapped in `{ documents }`; both are accepted. */
-export async function listDocuments(projectId: number): Promise<DocumentInfo[]> {
-  const data = await api.get<DocumentInfo[] | { documents: DocumentInfo[] }>(base(projectId));
+export async function listDocuments(projectId: DocsScope, folderId?: number | null): Promise<DocumentInfo[]> {
+  const query = projectId === "library" && folderId != null ? `?folder_id=${folderId}` : "";
+  const data = await api.get<DocumentInfo[] | { documents: DocumentInfo[] }>(`${base(projectId)}${query}`);
   return Array.isArray(data) ? data : (data?.documents ?? []);
 }
 
 /** Uploads one file. The backend indexes it inside the same request. */
-export function uploadDocument(projectId: number, file: File, description?: string): Promise<DocumentInfo> {
+export function uploadDocument(projectId: DocsScope, file: File, description?: string, folderId?: number | null): Promise<DocumentInfo> {
   const form = new FormData();
   form.append("file", file, file.name || "file");
   if (description && description.trim()) form.append("description", description.trim());
-  return api.post<DocumentInfo>(base(projectId), form, { timeoutMs: 240_000 });
+  const query = projectId === "library" && folderId != null ? `?folder_id=${folderId}` : "";
+  return api.post<DocumentInfo>(`${base(projectId)}${query}`, form, { timeoutMs: 240_000 });
 }
 
-export const deleteDocument = (projectId: number, documentId: number): Promise<void> =>
+export const deleteDocument = (projectId: DocsScope, documentId: number): Promise<void> =>
   api.delete<void>(`${base(projectId)}/${documentId}`);
 
+/** Moves a Library document into a folder, or to the root with null. */
+export const moveDocument = (documentId: number, folderId: number | null): Promise<DocumentInfo> =>
+  api.patch<DocumentInfo>(`/api/library/documents/${documentId}`, { library_folder_id: folderId });
+
 /** Lists the documents found at an address. */
-export async function discoverDocuments(projectId: number, url: string): Promise<DiscoverResult> {
+export async function discoverDocuments(projectId: DocsScope, url: string): Promise<DiscoverResult> {
   const data = await api.post<Partial<DiscoverResult>>(`${base(projectId)}/discover`, { url }, { timeoutMs: 60_000 });
   return { items: data?.items ?? [], page_is_document: Boolean(data?.page_is_document) };
 }
@@ -54,12 +60,12 @@ function reasonOfError(cause: unknown): FetchReason | null {
 }
 
 /** Downloads one candidate and indexes it. Throws {@link FetchFailure}. */
-export async function fetchDocument(projectId: number, item: Pick<DiscoveredItem, "url" | "title">): Promise<DocumentInfo> {
+export async function fetchDocument(projectId: DocsScope, item: Pick<DiscoveredItem, "url" | "title">, folderId?: number | null): Promise<DocumentInfo> {
   let data: (DocumentInfo & { reason?: string }) | undefined;
   try {
     data = await api.post<DocumentInfo & { reason?: string }>(
       `${base(projectId)}/fetch`,
-      { url: item.url, title: item.title || undefined },
+      { url: item.url, title: item.title || undefined, ...(projectId === "library" && folderId != null ? { folder_id: folderId } : {}) },
       { timeoutMs: 240_000 },
     );
   } catch (cause) {

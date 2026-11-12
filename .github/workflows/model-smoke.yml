@@ -1,0 +1,34 @@
+name: model-smoke
+# Downloads the real embedding model and runs it on each platform, and prints how long it took (SPEC-010 P14).
+# Manual only: it moves about 120 MB per platform and must not run on every change.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  model:
+    if: github.repository == 'SiomTrading/hokma-dev'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+      - run: uv sync --python 3.12
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+      - name: Download and run the model
+        shell: bash
+        run: uv run python scripts/model_smoke.py
+        env:
+          UV_PYTHON_PREFERENCE: only-managed

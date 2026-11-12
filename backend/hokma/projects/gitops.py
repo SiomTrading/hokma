@@ -9,6 +9,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,6 +81,48 @@ def repo_state(project: Path) -> GitResult:
     except OSError:
         return GitResult(False, "unsafe")
     return GitResult(True) if _config_is_plain(config) else GitResult(False, "unsafe")
+
+
+_AUTO_LOCK = threading.Lock()
+_AUTO_TRIED: set[str] = set()        # projects whose history was already attempted in this run: once each, never again
+AUTO_INIT_WAIT = 1.5                 # seconds a listing waits for the first history of a project, at most
+
+
+def git_installed() -> bool:
+    return find_executable("git") is not None
+
+
+def _auto_init(project: Path, message: str) -> None:
+    # `.git` is looked at again right before: an existing one, safe or not, is never touched.
+    if os.path.lexists(project / ".git"):
+        return
+    init_repo(project, message)
+
+
+def ensure_repo(project: Path, message: str, wait: float | None = None) -> GitResult:
+    """The project's state, creating its history by itself when it has none: git installed, a real folder and no
+    `.git` of any kind. It is attempted once per project and runs in a thread, so the caller waits `wait` seconds
+    at most (the first answer can still say `no_repo` on a very slow disk; the next one reads the finished history).
+    Git missing is reported as `missing` and nothing is attempted. An existing `.git` is never changed."""
+    state = repo_state(project)
+    if state.reason != "no_repo":
+        return state
+    if not git_installed():
+        return GitResult(False, "missing")
+    try:
+        if project.is_symlink() or not project.is_dir():
+            return state
+        key = str(project.resolve())
+    except OSError:
+        return state
+    with _AUTO_LOCK:
+        first = key not in _AUTO_TRIED
+        _AUTO_TRIED.add(key)
+    if first:
+        worker = threading.Thread(target=_auto_init, args=(project, message), name="hokma-git-init", daemon=True)
+        worker.start()
+        worker.join(AUTO_INIT_WAIT if wait is None else wait)
+    return repo_state(project)
 
 
 def _git(project: Path, *args: str, timeout: int = 60):

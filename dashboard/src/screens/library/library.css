@@ -1,0 +1,23 @@
+/* Library screen. Glass tokens only. */
+.lib-page { display: flex; flex-direction: column; gap: 14px; padding: 22px 24px 32px; max-width: 820px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+
+.lib-band { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--glass-subtle); color: var(--t2); font: 500 12px/1.4 Montserrat, sans-serif; }
+.lib-band.bad { border-color: var(--bad); color: var(--t1); }
+.lib-band-text { flex: 1; min-width: 0; }
+.lib-band-bar { flex: 0 0 140px; }
+
+.lib-folders { display: flex; flex-direction: column; gap: 8px; }
+.lib-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font: 500 12px/1.4 Montserrat, sans-serif; }
+.lib-crumb-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.lib-crumb-sep { color: var(--t3); padding: 0 2px; }
+.lib-crumb { background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 3px 8px; color: var(--t2); cursor: pointer; font: inherit; }
+.lib-crumb:hover { background: var(--glass-subtle); color: var(--t1); }
+.lib-crumb.current { color: var(--t1); cursor: default; }
+.lib-crumb.over, .lib-folder.over { border-color: var(--acc); background: var(--glass-subtle); }
+
+.lib-folder-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lib-folder { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.lib-folder-name { flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; color: var(--t1); font: 500 13px/1.4 Montserrat, sans-serif; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-menu-anchor { position: relative; }
+.lib-menu-anchor .menu { top: 100%; bottom: auto; left: auto; right: 0; width: 180px; }
+.lib-name-form { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; }

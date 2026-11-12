@@ -5,7 +5,7 @@ import { setToken } from "@/api";
 import { setLocale, t } from "@/i18n";
 import { useShell } from "@/shell/useShell";
 import { renderWithApp } from "@/test/utils";
-import { ProjectsPanel } from "./ProjectsPanel";
+import { DocumentsSection } from "./DocumentsSection";
 import { resetProjectsStore } from "./store";
 import type { DocumentInfo } from "./documentsTypes";
 
@@ -80,13 +80,11 @@ async function mountDocuments() {
   setToken("test-session-token-0123456789");
   renderWithApp(
     <aside aria-label="panel">
-      <ProjectsPanel />
+      <DocumentsSection projectId={1} />
       <ToastProbe />
     </aside>,
   );
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: t("docs.tab.documents") }));
-  return user;
+  return userEvent.setup();
 }
 
 const pdf = (name = "paper.pdf") => new File(["%PDF-1.4"], name, { type: "application/pdf" });
@@ -111,15 +109,6 @@ describe.each(["es", "en"] as const)("documents tab (%s)", (locale) => {
     expect(screen.getByText(t("docs.formats"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: t("docs.add") })).toBeInTheDocument();
     expect(await screen.findByText(t("docs.empty.title"))).toBeInTheDocument();
-  });
-
-  it("switches between files and documents", async () => {
-    const user = await mountDocuments();
-    expect(screen.getByTestId("documents-section")).toBeInTheDocument();
-    expect(screen.queryByTestId("project-tree")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: t("docs.tab.files") }));
-    expect(await screen.findByTestId("project-tree")).toBeInTheDocument();
-    expect(screen.queryByTestId("documents-section")).not.toBeInTheDocument();
   });
 
   it("uploads a picked file and lists it with status, passages and origin", async () => {

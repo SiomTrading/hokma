@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hokma.db.backend import Backend, SqliteBackend
+from hokma.db.datasteps import STEPS, remove_stored_files
 from hokma.db.errors import DbError, MigrationError
 from hokma.db.paths import backups_dir, db_path
 from hokma.db.timeutil import utcnow
@@ -163,6 +164,7 @@ def _backup(backend: Backend, path: Path, version: int) -> Path:
 
 def _apply(session, backend: Backend, version: int, name: str, file: Path, result: MigrationResult) -> None:
     script = render(file.read_text(encoding="utf-8"), backend)
+    leftovers: list[Path] = []
     session.begin(write=True)
     try:
         if _version_of(session) >= version:                       # another process applied it while we waited
@@ -170,6 +172,8 @@ def _apply(session, backend: Backend, version: int, name: str, file: Path, resul
             return
         for statement in backend.split_statements(script):
             session.execute(statement)
+        step = STEPS.get(version)
+        leftovers = step(session) if step else []                 # data step: same transaction as the SQL
         session.execute("INSERT INTO schema_version (version) VALUES (:v)", {"v": version})
         session.commit()
     except Exception as exc:
@@ -177,3 +181,5 @@ def _apply(session, backend: Backend, version: int, name: str, file: Path, resul
         detail = exc.args[0] if isinstance(exc, DbError) and exc.args else exc
         raise MigrationError(t("db.migrate.failed", file=file.name, error=detail), version) from exc
     result.applied.append(version)
+    if leftovers:
+        remove_stored_files(leftovers)                            # only after the commit: a rollback loses no file

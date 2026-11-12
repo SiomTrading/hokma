@@ -106,9 +106,13 @@ class DocumentsRepo(Repo):
     def add_document(self, library_id: int, *, name: str, stored_path: str, mime_type: str, format: str,
                      size_bytes: int, sha256: str, chunks: Sequence[tuple[str, str]] = (),
                      source_url: str | None = None, description: str | None = None, status: str = "ready",
-                     status_detail: str | None = None) -> Document:
+                     status_detail: str | None = None, origin_project_id: int | None = None,
+                     folder_id: int | None = None, rel_path: str | None = None, mtime_ns: int | None = None,
+                     library_folder_id: int | None = None) -> Document:
         """Insert a document and its passages (`chunks` is a list of `(section, text)`). Raises DuplicateDocument when
-        the library already has that sha256."""
+        the library already has that sha256. `origin_project_id` is the project a Library document came from,
+        `folder_id`/`rel_path`/`mtime_ns` describe a document read from a project's disk folder and
+        `library_folder_id` the Library folder that holds it (None = top level)."""
         if not (name or "").strip() or not (stored_path or "").strip():
             raise ValidationError("name and stored_path are required")
         if not (1 <= size_bytes <= MAX_SIZE_BYTES):
@@ -126,6 +130,8 @@ class DocumentsRepo(Repo):
                 "library_id": library_id, "name": name, "stored_path": stored_path, "mime_type": mime_type,
                 "format": format, "size_bytes": size_bytes, "sha256": sha256, "source_url": source_url,
                 "description": description, "status": status, "status_detail": status_detail, "chunk_count": 0,
+                "origin_project_id": origin_project_id, "folder_id": folder_id, "rel_path": rel_path,
+                "mtime_ns": mtime_ns, "library_folder_id": library_folder_id,
                 "created_at": utcnow(), "indexed_at": utcnow() if status == "ready" else None})
         except IntegrityViolation as exc:
             if "stored_path" in str(exc):
@@ -207,6 +213,32 @@ class DocumentsRepo(Repo):
                                format=r["format"], source_url=r["source_url"], score=float(r["score"]))
                         for r in rows]
         return []
+
+    def keyword_candidates(self, query: str, where: str, limit: int) -> tuple[list[int], bool]:
+        """Passage ids that carry the words of `query`, best first, limited to the passages `where` allows (a fragment
+        over `d` = documents, from `vectors.eligible_where`). Returns `(ids, exact)`: `exact` is True when every word
+        of the query is in each passage (AND); when nothing has them all, any of the words (OR) and `exact` is False."""
+        terms = query_terms(query)
+        if not terms:
+            return [], False
+        limit = max(1, int(limit))
+        for joiner in ("AND", "OR") if len(terms) > 1 else ("AND",):
+            marks = {"n": limit}
+            if self.s.engine == "sqlite":
+                marks["q"] = f" {joiner} ".join(f'"{t}"' for t in terms)      # terms hold only letters and digits
+                sql = ("SELECT c.id AS chunk_id FROM doc_chunks_fts JOIN doc_chunks c ON c.id = doc_chunks_fts.rowid "
+                       f"JOIN documents d ON d.id = c.document_id WHERE doc_chunks_fts MATCH :q AND {where} "
+                       "ORDER BY bm25(doc_chunks_fts), c.id LIMIT :n")
+            else:
+                marks["q"] = (" & " if joiner == "AND" else " | ").join(f"'{t}'" for t in terms)
+                sql = ("SELECT c.id AS chunk_id FROM doc_chunks c JOIN documents d ON d.id = c.document_id "
+                       "WHERE to_tsvector('simple', c.search_text) @@ to_tsquery('simple', :q) "
+                       f"AND {where} ORDER BY ts_rank(to_tsvector('simple', c.search_text), to_tsquery('simple', :q)) "
+                       "DESC, c.id LIMIT :n")
+            rows = self.s.query(sql, marks)
+            if rows:
+                return [int(r["chunk_id"]) for r in rows], joiner == "AND"
+        return [], False
 
     def _match(self, ids: list[int], terms: list[str], joiner: str, limit: int) -> list[dict]:
         marks = ", ".join(f":l{i}" for i in range(len(ids)))

@@ -19,8 +19,11 @@ from hokma.rpc.ws import SESSION_TOKEN
 MAX_UPLOAD_BODY = att.MAX_ATTACHMENT_BYTES + 64 * 1024
 
 
-def _error(status: int, code: str, message: str, reason: str | None = None) -> JSONResponse:
+def _error(status: int, code: str, message: str, reason: str | None = None,
+           extra: dict | None = None) -> JSONResponse:
     detail = {"code": code, "message": message}
+    if extra:
+        detail.update(extra)
     if reason:
         detail["reason"] = reason
     return JSONResponse({"detail": detail}, status_code=status)
@@ -39,7 +42,7 @@ class TokenRoute(APIRoute):
             try:
                 return await original(request)
             except ProjectError as exc:
-                return _error(exc.status, exc.code, str(exc), getattr(exc, "reason", None))
+                return _error(exc.status, exc.code, str(exc), getattr(exc, "reason", None), getattr(exc, "extra", None))
             except DbError:
                 return _error(400, "db_error", t("projects.err.db_failed"))
 

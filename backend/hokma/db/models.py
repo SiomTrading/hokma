@@ -385,6 +385,35 @@ class Document(Record):
     chunk_count: int
     created_at: str
     indexed_at: str | None = None
+    origin_project_id: int | None = None
+    folder_id: int | None = None
+    rel_path: str | None = None
+    mtime_ns: int | None = None
+    library_folder_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectFolder(Record):
+    """A disk folder a project reads from."""
+    id: int
+    project_id: int
+    path: str
+    label: str | None
+    status: str
+    status_detail: str | None
+    file_count: int
+    last_scan_at: str | None
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class LibraryFolder(Record):
+    """A folder inside the student's Library; `parent_id` None means top level."""
+    id: int
+    library_id: int
+    parent_id: int | None
+    name: str
+    created_at: str
 
 
 @dataclass(frozen=True, slots=True)

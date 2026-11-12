@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DragEvent } from "react";
+import type { DragEvent, ReactNode } from "react";
 import { ApiError } from "@/api";
 import { Button, EmptyState, ErrorState, Icon, Input, Loading, Pill } from "@/design";
 import { useI18n } from "@/i18n";
@@ -7,7 +7,11 @@ import { useShell } from "@/shell/useShell";
 import { DocumentLinks } from "./DocumentLinks";
 import * as client from "./documentsApi";
 import { isImageName, MAX_DOCUMENT_BYTES } from "./documentsTypes";
-import type { DocumentInfo, DocumentStatus } from "./documentsTypes";
+import type { DocsScope, DocumentInfo, DocumentStatus } from "./documentsTypes";
+import { listProjects } from "./api";
+
+/** Drag payload of a Library document row (a folder or a path segment takes it). */
+const DOCUMENT_DRAG_TYPE = "application/x-hokma-document";
 
 interface Job {
   key: number;
@@ -26,9 +30,30 @@ const STATUS_TONE: Record<DocumentStatus, "ok" | "acc" | "bad"> = { ready: "ok",
 
 let nextKey = 1;
 
-/** Documents of one project: help, add and drag, list with status, remove, image descriptions. */
-export function DocumentsSection({ projectId }: { projectId: number }) {
+/** How often a Library list with documents still being indexed is read again. */
+const SETTLE_POLL_MS = 3000;
+
+/**
+ * Documents of one project or of the student Library: help, add and drag, list with status, remove, image
+ * descriptions. In the Library each document also says which project it was uploaded from.
+ */
+export function DocumentsSection({
+  projectId,
+  folderId = null,
+  reloadKey = 0,
+  actions,
+}: {
+  projectId: DocsScope;
+  /** Library only: the folder in view; null is the root. Uploads and downloads land there. */
+  folderId?: number | null;
+  /** Library only: changes when documents were moved elsewhere, so the list is read again. */
+  reloadKey?: number;
+  /** Extra controls placed next to "Add files". */
+  actions?: ReactNode;
+}) {
   const { t } = useI18n();
+  const inLibrary = projectId === "library";
+  const [projectNames, setProjectNames] = useState<Map<number, string>>(new Map());
   const shell = useShell();
   const [docs, setDocs] = useState<DocumentInfo[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -45,16 +70,28 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!inLibrary) return;
+    listProjects().then(
+      (list) => {
+        if (alive.current) setProjectNames(new Map(list.projects.map((p) => [p.id, p.name])));
+      },
+      () => undefined,
+    );
+  }, [inLibrary]);
+
   const load = useCallback(async () => {
     try {
-      const list = await client.listDocuments(projectId);
+      const all = await client.listDocuments(projectId, folderId);
       if (!alive.current) return;
+      // The root lists only what sits at the root; a folder lists its own level.
+      const list = inLibrary && folderId == null ? all.filter((doc) => !doc.library_path) : all;
       setDocs(list);
       setLoadError(false);
     } catch {
       if (alive.current) setLoadError(true);
     }
-  }, [projectId]);
+  }, [projectId, folderId, inLibrary]);
 
   useEffect(() => {
     setDocs(null);
@@ -62,18 +99,26 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
     setJobs([]);
     setImages([]);
     void load();
-  }, [load]);
+  }, [load, reloadKey]);
+
+  // Library documents stay "Indexing" until their passages are searchable: follow them until they settle.
+  const settling = inLibrary && (docs?.some((doc) => doc.status === "indexing") ?? false);
+  useEffect(() => {
+    if (!settling) return;
+    const timer = setTimeout(() => void load(), SETTLE_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [settling, docs, load]);
 
   const reasonOf = useCallback(
     (cause: unknown): string => {
       if (cause instanceof ApiError) {
-        if (cause.status === 409) return t("docs.error.duplicate");
+        if (cause.status === 409) return t(inLibrary ? "library.error.duplicate" : "docs.error.duplicate");
         if (cause.status === 413) return t("docs.error.tooBig");
         if (cause.status === 415) return t("docs.error.unsupported");
       }
       return t("docs.error.generic");
     },
-    [t],
+    [t, inLibrary],
   );
 
   /** One file at a time, as the backend indexes inside the request. */
@@ -87,7 +132,7 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
         }
         setJobs((prev) => [...prev, { key, name: file.name }]);
         try {
-          await client.uploadDocument(projectId, file, description);
+          await client.uploadDocument(projectId, file, description, folderId);
           if (!alive.current) return;
           setJobs((prev) => prev.filter((j) => j.key !== key));
           shell.toast({ tone: "ok", text: t("docs.toast.added", { name: file.name }) });
@@ -98,7 +143,7 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
         }
       }
     },
-    [projectId, shell, t, load, reasonOf],
+    [projectId, folderId, shell, t, load, reasonOf],
   );
 
   const receive = useCallback(
@@ -143,7 +188,7 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
 
   return (
     <div data-testid="documents-section" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "auto" }}>
-      <p className="p" style={{ padding: "0 14px 8px", fontSize: 12 }}>{t("docs.help")}</p>
+      <p className="p" style={{ padding: "0 14px 8px", fontSize: 12 }}>{t(inLibrary ? "library.help" : "docs.help")}</p>
 
       <div
         role="group"
@@ -158,10 +203,11 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
       >
         <span className="p" style={{ fontSize: 12 }}>{dragging ? t("docs.drop.active") : t("docs.drop.title")}</span>
         <span className="p" style={{ fontSize: 11 }}>{t("docs.formats")}</span>
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 6 }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 6 }}>
           <Button size="sm" variant="primary" onClick={() => picker.current?.click()}>
             {t("docs.add")}
           </Button>
+          {actions}
         </div>
         <input
           ref={picker}
@@ -176,7 +222,7 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
         />
       </div>
 
-      <DocumentLinks projectId={projectId} onAdded={load} />
+      <DocumentLinks projectId={projectId} folderId={folderId} onAdded={load} />
 
       {images.length > 0 ? (
         <section aria-label={t("docs.image.title")} style={{ margin: "0 10px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -229,12 +275,24 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
       {docs === null && !loadError ? <Loading inline /> : null}
       {loadError && docs === null ? <ErrorState message={t("docs.error.load")} onRetry={() => void load()} /> : null}
       {docs && docs.length === 0 && !running ? (
-        <EmptyState icon="file" title={t("docs.empty.title")} description={t("docs.empty.body")} />
+        <EmptyState icon="file" title={t(inLibrary ? "library.empty.title" : "docs.empty.title")} description={t(inLibrary ? "library.empty.body" : "docs.empty.body")} />
       ) : null}
       {docs && docs.length > 0 ? (
         <ul aria-label={t("docs.list")} style={{ listStyle: "none", margin: 0, padding: "0 10px", display: "flex", flexDirection: "column", gap: 6 }}>
           {docs.map((doc) => (
-            <li key={doc.id} style={{ display: "flex", flexDirection: "column", gap: 4, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 10 }}>
+            <li
+              key={doc.id}
+              draggable={inLibrary}
+              onDragStart={
+                inLibrary
+                  ? (event) => {
+                      event.dataTransfer.setData(DOCUMENT_DRAG_TYPE, String(doc.id));
+                      event.dataTransfer.effectAllowed = "move";
+                    }
+                  : undefined
+              }
+              style={{ display: "flex", flexDirection: "column", gap: 4, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 10 }}
+            >
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Icon name="file" size={14} />
                 <span title={doc.name} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, fontSize: 13 }}>{doc.name}</span>
@@ -247,6 +305,9 @@ export function DocumentsSection({ projectId }: { projectId: number }) {
                 <span>{doc.format.toUpperCase()}</span>
                 <span>{doc.chunk_count === 1 ? t("docs.passage") : t("docs.passages", { n: doc.chunk_count })}</span>
                 <span>{doc.source_url ? t("docs.origin.link") : t("docs.origin.file")}</span>
+                {inLibrary && doc.origin_project_id != null && projectNames.has(doc.origin_project_id) ? (
+                  <span data-testid="document-origin">{t("library.origin.from", { project: projectNames.get(doc.origin_project_id)! })}</span>
+                ) : null}
               </div>
               {doc.description ? <span className="hint">{doc.description}</span> : null}
               {doc.status_detail ? <span className="hint" role="note">{doc.status_detail}</span> : null}

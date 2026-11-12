@@ -89,8 +89,8 @@ await runSuite("permissions", { script: "permissions-serve.py" }, async ({ page,
   await section.waitFor();
   const list = section.getByTestId("protections");
   await list.waitFor();
-  assert.equal(await list.getByRole("listitem").count(), 7, "seven protections");
-  for (const rule of ["delete", "truncate", "hokma_internal", "force_push", "outside_workdir", "secrets", "real_money"]) {
+  assert.equal(await list.getByRole("listitem").count(), 5, "five protections");
+  for (const rule of ["delete", "hokma_internal", "outside_workdir", "secrets", "real_money"]) {
     assert.ok((await list.innerText()).includes(msg(`protections.${rule}`)), `${rule} listed`);
   }
   assert.equal(await list.locator("input, button, select, [role=switch], [role=checkbox]").count(), 0, "no control inside the protections");

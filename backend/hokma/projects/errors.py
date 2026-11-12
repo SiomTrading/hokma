@@ -37,15 +37,35 @@ _MESSAGES: dict[str, Callable[..., str]] = {
     "doc_too_large": lambda **p: t("docs.err.too_large", **p),
     "doc_unsupported": lambda **p: t("docs.err.unsupported", **p),
     "doc_not_found": lambda **p: t("docs.err.not_found", **p),
+    "doc_name_taken": lambda **p: t("docs.err.name_taken", **p),
+    "lib_folder_not_found": lambda **p: t("docs.err.folder_not_found", **p),
+    "duplicate_name": lambda **p: t("docs.err.folder_taken", **p),
+    "folder_not_empty": lambda **p: t("docs.err.folder_not_empty", **p),
+    "folder_bad_name": lambda **p: t("docs.err.folder_bad_name", **p),
+    "folder_too_deep": lambda **p: t("docs.err.folder_too_deep", **p),
+    "owner_confirmation_required": lambda **p: t("docs.disk.err.owner_required", **p),
+    "disk_path_missing": lambda **p: t("docs.disk.err.path_missing", **p),
+    "disk_not_folder": lambda **p: t("docs.disk.err.not_folder", **p),
+    "disk_root": lambda **p: t("docs.disk.err.root", **p),
+    "disk_home": lambda **p: t("docs.disk.err.home", **p),
+    "disk_data_dir": lambda **p: t("docs.disk.err.data_dir", **p),
+    "disk_system": lambda **p: t("docs.disk.err.system", **p),
+    "disk_duplicate": lambda **p: t("docs.disk.err.duplicate", **p),
+    "disk_too_many": lambda **p: t("docs.disk.err.too_many", **p),
+    "disk_own_folder": lambda **p: t("docs.disk.err.own_folder", **p),
+    "disk_folder_not_found": lambda **p: t("docs.disk.err.not_found", **p),
     "link_blocked": lambda **p: t("docs.link.blocked", **p),
     "link_not_document": lambda **p: t("docs.link.not_document", **p),
     "link_scheme": lambda **p: t("docs.link.scheme", **p),
+    "model_not_failed": lambda **p: t("library.err.model_not_failed", **p),
 }
 
 
 class ProjectError(Exception):
-    def __init__(self, code: str, status: int = 400, **params: object) -> None:
+    def __init__(self, code: str, status: int = 400, *, extra: dict[str, object] | None = None,
+                 **params: object) -> None:
         self.code = code
         self.status = status
         self.params = params
+        self.extra = extra                      # machine-readable fields added next to code and message
         super().__init__(_MESSAGES[code](**params))

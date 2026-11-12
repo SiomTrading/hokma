@@ -29,6 +29,10 @@ class DuplicateDocument(IntegrityViolation):
         self.existing_id = existing_id
 
 
+class DuplicateName(IntegrityViolation):
+    """A sibling folder already has that name, or the project already reads from that disk folder."""
+
+
 class Conflict(DbError):
     """A conditional update matched no row: somebody else got there first."""
 

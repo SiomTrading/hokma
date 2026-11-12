@@ -10,6 +10,7 @@ from typing import Any
 from hokma.core.config import hokma_data_dir, hokma_home
 from hokma.db import Database, DbError, IntegrityViolation, NotFound, get_database
 from hokma.db.repos.projects import KINDS, slugify
+from hokma.docs import diskfolders
 from hokma.engine import attachments as att
 from hokma.i18n import t
 from hokma.kit import safefs
@@ -118,7 +119,7 @@ def activate(project_id: int, db: Database | None = None) -> int:
 # ---- create, list, rename -------------------------------------------------------------------
 
 def _git_state(path: Path) -> dict[str, Any]:
-    state = gitops.repo_state(path)
+    state = gitops.ensure_repo(path, t("projects.git.created"))
     return {"ok": state.ok, "reason": state.reason}
 
 
@@ -195,6 +196,7 @@ def create_project(name: str, kind: str = "other", *, slug: str | None = None, d
                     u.onboarding.mark("first_project")
         except DbError as exc:
             raise ProjectError("db_failed", 500) from exc
+        diskfolders.ensure_own_folder(row.id, database)
         with database.read() as u:
             chose_general = u.profile.get_or_default().no_active_project
         if (active_id(database) is None and not chose_general) or _count_projects(database) == 1:
@@ -229,6 +231,7 @@ def ensure_default(db: Database | None = None) -> None:
 def list_projects(db: Database | None = None) -> dict[str, Any]:
     database = _db(db)
     ensure_default(database)
+    diskfolders.ensure_all_own_folders(database)
     with database.read() as u:
         rows = u.projects.list()
     active = active_id(database)

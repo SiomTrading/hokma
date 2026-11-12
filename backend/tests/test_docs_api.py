@@ -1,4 +1,5 @@
-"""Project document endpoints (SPEC-009 P4): upload, list and remove, with the statuses 400, 401, 404, 409, 413 and 415."""
+"""The 0.0.26 per-project document routes, now aliases of the Library (SPEC-010 P3): upload, list and remove, with the
+statuses 400, 401, 404, 409, 413 and 415. The Library routes themselves are in test_library_api.py."""
 import os
 from pathlib import Path
 
@@ -68,7 +69,7 @@ def test_upload_stores_the_original_in_the_library_path_and_indexes_it(client, p
 
     with db.read() as u:
         row = u.documents.get_document(doc["id"])
-        library = u.documents.find_project_library(project)
+        library = u.library.find_student_library()
     stored = Path(row.stored_path)
     assert stored.read_bytes() == data
     assert stored.parent == env / "data" / "libraries" / str(library.id)
@@ -81,7 +82,7 @@ def test_uploaded_text_can_be_found_by_the_search(client, project, db):
     res = upload(client, project, "notas.txt", "El filtro de volatilidad descarta las sesiones planas.".encode())
     assert res.status_code == 201
     with db.read() as u:
-        library = u.documents.find_project_library(project)
+        library = u.library.find_student_library()
         hits = u.documents.search([library.id], "VOLATILIDAD sesiones")
     assert [h.document for h in hits] == ["notas.txt"]
 
@@ -103,10 +104,10 @@ def test_the_same_content_is_a_409_even_with_another_name(client, project, db):
     assert len(client.get(url(project), headers=H).json()["documents"]) == 1
 
 
-def test_the_same_content_in_two_projects_is_allowed(client, project):
+def test_the_same_content_from_two_projects_is_one_document_in_the_library(client, project):
     other = client.post("/api/projects", headers=H, json={"name": "Beta", "kind": "other"}).json()["id"]
     assert upload(client, project, "a.txt", b"shared").status_code == 201
-    assert upload(client, other, "a.txt", b"shared").status_code == 201
+    assert upload(client, other, "a.txt", b"shared").status_code == 409
 
 
 def test_unsupported_format_is_a_415_and_nothing_is_stored(client, project, env):
@@ -153,7 +154,7 @@ def test_image_description_is_saved_and_searchable(client, project, db):
     doc = res.json()
     assert doc["format"] == "image" and doc["description"] == "weekly chart of the NQ"
     with db.read() as u:
-        library = u.documents.find_project_library(project)
+        library = u.library.find_student_library()
         hits = u.documents.search([library.id], "weekly")
     assert [h.document for h in hits] == ["chart.png"]
 
@@ -165,7 +166,7 @@ def test_office_and_pdf_formats_are_indexed_with_their_sections(client, project,
     for name, data in (("plan.docx", docx), ("datos.xlsx", xlsx), ("paper.pdf", pdf)):
         assert upload(client, project, name, data).status_code == 201, name
     with db.read() as u:
-        library = u.documents.find_project_library(project)
+        library = u.library.find_student_library()
         assert [h.section for h in u.documents.search([library.id], "stop")] == ["Riesgo"]
         assert u.documents.search([library.id], "enero")[0].section.startswith('sheet "Resultados"')
         assert u.documents.search([library.id], "buscable")[0].section == "page 1"
@@ -211,7 +212,7 @@ def test_remove_deletes_rows_passages_and_the_stored_file(client, project, db):
     assert client.get(url(project), headers=H).json() == {"documents": []}
     assert chunk_count(db, doc["id"]) == 0
     with db.read() as u:
-        library = u.documents.find_project_library(project)
+        library = u.library.find_student_library()
         assert u.documents.search([library.id], "referencia") == []
     assert client.delete(url(project, doc["id"]), headers=H).status_code == 404
 
@@ -222,13 +223,13 @@ def test_removed_content_can_be_uploaded_again(client, project):
     assert upload(client, project, "a.txt", b"again").status_code == 201
 
 
-def test_a_project_cannot_remove_the_document_of_another(client, project, db):
+def test_every_project_sees_and_removes_the_same_library(client, project, db):
     other = client.post("/api/projects", headers=H, json={"name": "Beta", "kind": "other"}).json()["id"]
-    doc = upload(client, project, "a.txt", b"private to alpha").json()
-    assert client.delete(url(other, doc["id"]), headers=H).status_code == 404
-    assert len(client.get(url(project), headers=H).json()["documents"]) == 1
-    with db.read() as u:
-        assert Path(u.documents.get_document(doc["id"]).stored_path).is_file()
+    doc = upload(client, project, "a.txt", b"shared by all").json()
+    assert [d["id"] for d in client.get(url(other), headers=H).json()["documents"]] == [doc["id"]]
+    assert doc["origin_project_id"] == project and doc["origin_project"] == "Alpha"
+    assert client.delete(url(other, doc["id"]), headers=H).status_code == 200
+    assert client.get(url(project), headers=H).json() == {"documents": []}
 
 
 def test_remove_never_deletes_outside_the_libraries_folder(client, project, db, env):
@@ -258,13 +259,13 @@ def test_names_with_paths_and_odd_characters_stay_inside_the_library(client, pro
     assert stored.parent.parent == env / "data" / "libraries" and stored.is_file()
 
 
-def test_deleting_a_project_removes_its_documents_rows(client, project, db):
-    doc = upload(client, project, "a.txt", b"will be cascaded").json()
+def test_deleting_a_project_keeps_its_documents_and_clears_their_origin(client, project, db):
+    doc = upload(client, project, "a.txt", b"stays in the library").json()
     with db.write() as u:
         u.session.execute("DELETE FROM projects WHERE id = :p", {"p": project})
-    assert chunk_count(db, doc["id"]) == 0
+    assert chunk_count(db, doc["id"]) > 0
     with db.read() as u:
-        assert u.session.scalar("SELECT count(*) FROM documents WHERE id = :d", {"d": doc["id"]}) == 0
+        assert u.documents.get_document(doc["id"]).origin_project_id is None
 
 
 def test_parse_upload_reads_file_and_description():

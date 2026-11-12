@@ -88,7 +88,7 @@ async function startServer(root, dist) {
   const claude = path.join(bin, "claude");
   fs.writeFileSync(
     claude,
-    `#!/usr/bin/env python3\nimport runpy\nrunpy.run_path(${JSON.stringify(path.join(repo, "backend/tests/engine_fixtures/fake_claude.py"))}, run_name="__main__")\n`,
+    `#!/usr/bin/env python3\nimport os, runpy\nos.environ.setdefault("FAKE_CLAUDE_LOG", ${JSON.stringify(fakeLog)})\nrunpy.run_path(${JSON.stringify(path.join(repo, "backend/tests/engine_fixtures/fake_claude.py"))}, run_name="__main__")\n`,
   );
   fs.chmodSync(claude, 0o755);
   const port = await free();

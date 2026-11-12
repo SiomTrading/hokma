@@ -4,7 +4,7 @@ import { Button, Icon, Input, Pill } from "@/design";
 import { useI18n } from "@/i18n";
 import * as client from "./documentsApi";
 import { MAX_LISTED_LINKS, MAX_MARKED_LINKS } from "./documentsTypes";
-import type { DiscoveredItem, FetchReason } from "./documentsTypes";
+import type { DiscoveredItem, DocsScope, FetchReason } from "./documentsTypes";
 
 type RowState =
   | { phase: "idle" }
@@ -22,7 +22,7 @@ interface Row {
 const isWebAddress = (value: string): boolean => /^https?:\/\/\S+$/i.test(value);
 
 /** Paste a link, find the documents it offers, mark the ones wanted and download them one by one. */
-export function DocumentLinks({ projectId, onAdded }: { projectId: number; onAdded: () => void | Promise<void> }) {
+export function DocumentLinks({ projectId, folderId = null, onAdded }: { projectId: DocsScope; folderId?: number | null; onAdded: () => void | Promise<void> }) {
   const { t } = useI18n();
   const [address, setAddress] = useState("");
   const [searching, setSearching] = useState(false);
@@ -109,7 +109,7 @@ export function DocumentLinks({ projectId, onAdded }: { projectId: number; onAdd
       if (!alive.current) return;
       setState(index, { phase: "running" });
       try {
-        await client.fetchDocument(projectId, row.item);
+        await client.fetchDocument(projectId, row.item, folderId);
         if (!alive.current) return;
         setRows((prev) => (prev ? prev.map((r, i) => (i === index ? { ...r, marked: false, state: { phase: "done" } } : r)) : prev));
         await onAdded();
@@ -121,7 +121,8 @@ export function DocumentLinks({ projectId, onAdded }: { projectId: number; onAdd
     if (alive.current) setDownloading(false);
   };
 
-  const reasonText = (reason: FetchReason | null): string => t(`docs.link.reason.${reason ?? "generic"}`);
+  const reasonText = (reason: FetchReason | null): string =>
+    reason === "duplicate" && projectId === "library" ? t("library.error.duplicate") : t(`docs.link.reason.${reason ?? "generic"}`);
 
   return (
     <section aria-label={t("docs.link.title")} data-testid="documents-links" style={{ margin: "0 10px 10px", display: "flex", flexDirection: "column", gap: 6 }}>

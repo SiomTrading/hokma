@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.27
+
+The Library (SPEC-010). One place for the student's reference files, searched by meaning and by words, on any engine.
+
+- A Library screen with folders: create, rename, remove and drag files between them. Files are no longer tied to one
+  project; a project can also index folders of the student's disk, which are scanned in the background.
+- The agent tools `docs_search` and `docs_list` search the Library by meaning (a question in one language finds the
+  passage in another) and by exact words, and say "nothing found" instead of returning weak matches.
+- A small multilingual embedding model is downloaded once in the background and runs on the student's computer.
+  Vectors live in `sqlite-vec` (SQLite) or `pgvector` (Postgres), with a plain fallback on Postgres.
+- Hokma 0.0.26 that is still open while the update runs keeps working: its per-project document routes answer as
+  aliases of the Library.
+- CI: a `library-tests` job runs the Library tests on Windows, macOS (arm64 and x64) and Linux, with paths that carry
+  spaces and accents, and a `vec-load-smoke` step that loads `sqlite-vec` with the Python Hokma installs. A manual
+  `model-smoke` workflow downloads the real model on three platforms and measures the time.
+
 ## 0.0.26
 
 Documents per project with local search (SPEC-009). A project keeps its reference files and the agent finds the

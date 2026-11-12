@@ -336,6 +336,20 @@ describe.each(["es", "en"] as const)("projects panel (%s)", (locale) => {
     expect(await within(panel()).findByText(t("projects.gitOff"))).toBeInTheDocument();
     expect(within(panel()).getAllByRole("listitem")[1]).toHaveTextContent(t("projects.filesNoGit", { n: 0 }));
   });
+
+  it("says Git needs to be installed when it is missing", async () => {
+    backend.projects[0]!.git = { ok: false, reason: "missing" };
+    mount();
+    expect(await within(panel()).findByText(t("projects.gitMissing"))).toBeInTheDocument();
+  });
+
+  it("shows no Git warning for a project that is only waiting for its history", async () => {
+    backend.projects[0]!.git = { ok: false, reason: "no_repo" };
+    mount();
+    await within(panel()).findAllByRole("listitem");
+    expect(within(panel()).queryByText(t("projects.gitOff"))).toBeNull();
+    expect(within(panel()).queryByText(t("projects.gitMissing"))).toBeNull();
+  });
 });
 
 describe("General and more than one project (3083)", () => {

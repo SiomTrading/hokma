@@ -14,6 +14,8 @@ from hokma.core.dashboard_static import DashboardFiles
 from hokma.core.lifecycle import Lifecycle, WebSocketTracker
 from hokma.core.shutdown_api import router as shutdown_router, turns_running
 from hokma.core.origin import TEST_HOSTS, LocalOnlyMiddleware, hosts_for_port
+from hokma.db import vectors
+from hokma.docs import folder_worker
 from hokma.db.api import database_lifespan, router as database_router
 from hokma.engines.api import router as engines_router
 from hokma.engine.api import router as engine_router
@@ -23,6 +25,8 @@ from hokma.permissions.api import router as permissions_router
 from hokma.market.api import router as market_router
 from hokma.market.ws import router as market_ws_router
 from hokma.docs.api import router as docs_router
+from hokma.library import model_download as library_model
+from hokma.library.api import router as library_router
 from hokma.projects.api import router as projects_router
 from hokma.rpc.ws import router as rpc_router
 from hokma.setup import router as setup_router
@@ -60,11 +64,16 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
                 start_legacy_cleanup()             # Claude's own copies of remote servers from 0.0.10-0.0.12
                 start_migration()                  # 0.0.20: plugins that were only written to the list get installed, once
                 checker = asyncio.create_task(app.state.updates.auto_check_loop(lambda: app.state.db))
+                vectors.prepare(app.state.db)      # picks and creates the vector store; a problem shows in the Library
+                folder_worker.start_worker(get_db=lambda: app.state.db)   # the Library's single reading thread
+                library_model.downloader().start()  # search model: background, resumable, nothing for the student to do
             try:
                 yield
             finally:
                 if checker is not None:
                     checker.cancel()
+                    folder_worker.stop_worker()
+                    library_model.downloader().stop()
                 await connections_shutdown()
 
     app = FastAPI(title="Hokma", version=__version__, lifespan=lifespan)  # opens app.state.db
@@ -96,6 +105,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     app.include_router(engine_router)
     app.include_router(engines_router)
     app.include_router(projects_router)
+    app.include_router(library_router)
     app.include_router(docs_router)
     app.include_router(setup_router)
     app.include_router(terminal_router)

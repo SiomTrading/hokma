@@ -49,7 +49,7 @@ def test_b01_sqlite_existing_conversations_keep_their_project_and_follow(tmp_pat
     con.close()
 
     result = migrate(path, seed=False)
-    assert result.applied == [5, 6, 7] and result.backup is not None
+    assert result.applied == [5, 6, 7, 8] and result.backup is not None
 
     con = sqlite3.connect(str(path))
     after = con.execute("SELECT id, project_id, title, pinned, archived FROM conversations ORDER BY id").fetchall()
@@ -80,7 +80,7 @@ def test_b01_postgres_same_result(pg_url, tmp_path):
         session.close()
 
     result = migrate(backend=backend, seed=False)
-    assert result.applied == [5, 6, 7]
+    assert result.applied == [5, 6, 7, 8]
 
     session = backend.connect()
     try:

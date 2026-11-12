@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from hokma.db.errors import DbError, IntegrityViolation, RuleViolation
+from hokma.db.vecext import load_into as load_vec_extension
 
 Params = Mapping[str, Any] | None
 
@@ -142,6 +143,7 @@ class SqliteSession(Session):
         self._conn.execute("PRAGMA busy_timeout = 5000")
         self._enable_wal()
         self._conn.execute("PRAGMA synchronous = NORMAL")
+        self.vec_loaded = load_vec_extension(self._conn)      # sqlite-vec for the Library's vectors; False when absent
 
     def _enable_wal(self) -> None:
         """Switching a new file to WAL needs a lock that `busy_timeout` does not wait for: several processes opening a

@@ -3,7 +3,7 @@ import type { DragEvent } from "react";
 import { Button, Dot, EmptyState, ErrorState, Icon, IconButton, Loading, Segmented } from "@/design";
 import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
-import { DocumentsSection } from "./DocumentsSection";
+import { FoldersSection } from "./FoldersSection";
 import { CreateProjectDialog, LinkDialog, RenameProjectDialog } from "./Dialogs";
 import { PreviewDialog } from "./Preview";
 import * as client from "./api";
@@ -23,6 +23,16 @@ export function middleEllipsis(path: string, max = 34): string {
 export function CreateProjectButton() {
   const { t } = useI18n();
   return <IconButton icon="plus" size={15} label={t("projects.create")} onClick={() => openDialog("create")} />;
+}
+
+type Translate = (k: string, p?: Record<string, string | number>) => string;
+
+/** The only two reasons that deserve a warning: Git is not installed, or the project's Git config is not the plain one.
+ *  A project without history gets it created by Hokma, so "no_repo" shows nothing. */
+function gitWarning(t: Translate, reason: string): { note: string; toast: string } | null {
+  if (reason === "missing") return { note: t("projects.gitMissing"), toast: t("projects.gitMissingToast") };
+  if (reason === "unsafe") return { note: t("projects.gitOff"), toast: t("projects.gitOffToast") };
+  return null;
 }
 
 function metaText(t: (k: string, p?: Record<string, string | number>) => string, p: ProjectInfo): string {
@@ -82,7 +92,7 @@ export function ProjectsPanel() {
   const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const [dragging, setDragging] = useState(false);
   const [busyName, setBusyName] = useState<string | null>(null);
-  const [tab, setTab] = useState<"files" | "documents">("files");
+  const [tab, setTab] = useState<"files" | "folders">("files");
   const picker = useRef<HTMLInputElement>(null);
   const announced = useRef<number | null>(null);
 
@@ -139,8 +149,8 @@ export function ProjectsPanel() {
         try {
           const done = await client.uploadProjectFile(active.id, file);
           shell.toast({
-            tone: done.git.ok ? "ok" : "warn",
-            text: done.git.ok ? t(done.created ? "projects.toast.uploaded" : "projects.toast.exists", { path: done.path }) : t("projects.gitOffToast"),
+            tone: gitWarning(t, done.git.reason) === null ? "ok" : "warn",
+            text: gitWarning(t, done.git.reason)?.toast ?? t(done.created ? "projects.toast.uploaded" : "projects.toast.exists", { path: done.path }),
           });
         } catch (cause) {
           shell.toast({ tone: "bad", text: messageOf(cause) });
@@ -213,7 +223,7 @@ export function ProjectsPanel() {
               </Button>
             </div>
             <span className="mono" title={active.path} style={{ fontSize: 10, color: "var(--t3)", whiteSpace: "nowrap" }}>{middleEllipsis(active.path)}</span>
-            {!active.git.ok && active.exists ? <span className="hint" role="note">{t("projects.gitOff")}</span> : null}
+            {active.exists && gitWarning(t, active.git.reason) ? <span className="hint" role="note">{gitWarning(t, active.git.reason)?.note}</span> : null}
           </div>
 
           <div style={{ padding: "0 14px 8px" }}>
@@ -223,12 +233,12 @@ export function ProjectsPanel() {
               onChange={setTab}
               options={[
                 { value: "files", label: t("docs.tab.files") },
-                { value: "documents", label: t("docs.tab.documents") },
+                { value: "folders", label: t("folders.tab") },
               ]}
             />
           </div>
 
-          {tab === "documents" ? <DocumentsSection key={active.id} projectId={active.id} /> : null}
+          {tab === "folders" ? <FoldersSection key={active.id} projectId={active.id} /> : null}
 
           {tab === "files" ? (
           <>

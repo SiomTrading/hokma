@@ -10,9 +10,12 @@ export class ApiError extends Error {
   readonly code: string;
   /** Stable machine reason the backend sends next to `code` on some errors (link downloads); empty when absent. */
   readonly reason: string;
+  /** Extra fields the backend sent with the error (for example the counts of a folder that is not empty). */
+  readonly data: Record<string, unknown>;
 
-  constructor(status: number, code: string, message: string, reason = "") {
+  constructor(status: number, code: string, message: string, reason = "", data: Record<string, unknown> = {}) {
     super(message);
+    this.data = data;
     this.name = "ApiError";
     this.status = status;
     this.code = code;
@@ -47,12 +50,14 @@ function isBodyInit(body: unknown): body is BodyInit {
 async function readError(res: Response): Promise<ApiError> {
   let code = "http_error";
   let reason = "";
+  let extra: Record<string, unknown> = {};
   let message = t("api.error");
   try {
     const data: unknown = await res.json();
     if (data && typeof data === "object") {
       const body = data as Record<string, unknown>;
       const detail = body.detail ?? body;
+      extra = detail && typeof detail === "object" && !Array.isArray(detail) ? (detail as Record<string, unknown>) : body;
       if (typeof detail === "string") {
         message = detail;
       } else if (Array.isArray(detail) && detail.length > 0) {
@@ -73,7 +78,7 @@ async function readError(res: Response): Promise<ApiError> {
   } catch {
     /* body is not JSON: keep the generic message */
   }
-  return new ApiError(res.status, code, message, reason);
+  return new ApiError(res.status, code, message, reason, extra);
 }
 
 export async function request(path: string, options: RequestOptions = {}): Promise<Response> {

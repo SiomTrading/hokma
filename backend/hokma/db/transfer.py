@@ -189,8 +189,14 @@ def _referenced_first(rows: list[dict[str, Any]], columns: list[str]) -> list[di
     return ordered
 
 
+# Tables whose source may hold columns the schema files do not declare (the vector columns a Postgres server adds
+# to the control table); only the declared columns travel. The vectors are derived data and are rebuilt on arrival.
+COPY_COLUMNS = {"doc_chunk_vectors": ("chunk_id", "model_id", "dim")}
+
+
 def _copy_table(source: Session, target: Session, table: TableInfo) -> int:
-    rows = source.query(f"SELECT * FROM {table.name} ORDER BY 1")
+    columns_sql = ", ".join(COPY_COLUMNS[table.name]) if table.name in COPY_COLUMNS else "*"
+    rows = source.query(f"SELECT {columns_sql} FROM {table.name} ORDER BY 1")
     if not rows:
         return 0
     columns = list(rows[0])
