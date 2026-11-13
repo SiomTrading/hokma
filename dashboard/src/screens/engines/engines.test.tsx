@@ -97,6 +97,20 @@ describe("engines screens", () => {
     expect(other).toHaveBeenCalledOnce();
   });
 
+  it("Settings > Engines shows the Claude sign-in when the CLI has no session (bug 1112)", async () => {
+    const base = fetch as unknown as (i: RequestInfo | URL, n?: RequestInit) => Promise<Response>;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/claude")) return reply({ state: "no_session", plan: null, login: { url: null, error: null } });
+      if (url.endsWith("/api/engines") && (init?.method ?? "GET") === "GET") {
+        return reply({ ...LISTING, connections: [{ id: 1, engine: "claude_code", label: "Claude Code", status: "connected", status_detail: null, is_default: true }] });
+      }
+      return base(input, init);
+    }));
+    renderWithApp(<EnginesSettings />);
+    expect(await screen.findByRole("button", { name: t("firstrun.claude.login") })).toBeInTheDocument();
+  });
+
   it("Settings > Engines with no connection shows the banner and a way to connect", async () => {
     renderWithApp(<EnginesSettings />);
     await waitFor(() => expect(screen.getByText(t("eng.none_banner"))).toBeInTheDocument());

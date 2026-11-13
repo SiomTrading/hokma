@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import ssl
 from datetime import datetime
 from typing import Any, Callable
 
@@ -14,7 +15,6 @@ from hokma.db import Database
 from hokma.engine.protocols import DEFAULT_MODEL
 from hokma.i18n import t
 from hokma.telegram.core import TelegramLink
-from hokma.telegram.core.link import build_application
 from hokma.telegram.core.session_policy import SessionResetPolicy, should_reset
 
 log = logging.getLogger("hokma.telegram")
@@ -24,6 +24,37 @@ TELEGRAM_LIMIT = 4000                  # characters of one message (Telegram all
 RETRY_SECONDS = 60
 POLICY = SessionResetPolicy(mode="both", idle_minutes=120, at_hour=4)     # local time
 PROMPT_LIMIT = 3800                    # characters the approval message can show (core truncates beyond)
+
+
+def tls12_context() -> ssl.SSLContext:
+    # Bug 1114: some networks cut the OpenSSL TLS 1.3 ClientHello towards Telegram; Telegram serves TLS 1.2.
+    ctx = ssl.create_default_context()
+    ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
+async def build_application(token: str):
+    """core's Application with every Telegram request (calls and long-poll) on a TLS 1.2 context."""
+    from telegram.ext import Application
+    from telegram.request import HTTPXRequest
+    from hokma.telegram.core.link import discover_fallback_ips, SEED_FALLBACK_IPS, TelegramFallbackTransport, tcp_keepalive_socket_options
+    import httpx
+
+    kw = {"connection_pool_size": 512, "pool_timeout": 8.0, "connect_timeout": 10.0,
+          "read_timeout": 20.0, "write_timeout": 20.0, "media_write_timeout": 60.0}
+    try:
+        ips = await asyncio.wait_for(discover_fallback_ips(), timeout=5.0)
+    except Exception:
+        ips = list(SEED_FALLBACK_IPS)
+
+    def request(keepalive: int) -> HTTPXRequest:
+        limits = httpx.Limits(max_connections=512, max_keepalive_connections=keepalive, keepalive_expiry=5.0)
+        transport = TelegramFallbackTransport(
+            ips, socket_options=tcp_keepalive_socket_options(), limits=limits, verify=tls12_context())
+        return HTTPXRequest(**kw, httpx_kwargs={"transport": transport})
+
+    # A long-poll is continuously active: never hand getUpdates a pooled socket from a previous poll.
+    return Application.builder().token(token).request(request(20)).get_updates_request(request(0)).build()
 
 
 class LinkStore:

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.34
+
+- Fix: the chat no longer stops when an antivirus blocks an installer file; the runtime no longer carries `Instalar-Hokma.cmd`, which no longer uses `Invoke-Expression` or a hidden window (bug 1113).
+- Fix: a signed-out Claude shows the sign-in text and button in the chat, and Settings > Engines shows the Claude sign-in step and refreshes the session on Test (bug 1112).
+- Fix: Telegram connect logs the real error, tells a rejected token apart from a blocked network and says so in Settings (bug 1114).
+- Fix: Telegram requests use TLS 1.2, because some networks cut the TLS 1.3 handshake towards Telegram (bug 1114).
+
 ## 0.0.33
 
 - Fix: the detached updater no longer imports keyring, so updating from 0.0.31 and later works (bug 1111).

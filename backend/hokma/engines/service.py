@@ -270,6 +270,15 @@ async def ping(connection_id: int, owner: Any = None) -> dict[str, Any]:
     finally:
         if session is not None:
             await session.close()
+    if c.engine == "claude_code" and not code:
+        # Refresh the saved sign-in state (`claude auth status`): a signed-out Claude must not stay "connected" (bug 1112)
+        from hokma.setup import claude as claude_setup
+
+        state = await asyncio.to_thread(claude_setup.detect)
+        with get_database().write() as u:
+            if u.profile.get() is not None:
+                u.profile.set_claude_status(state.state, state.plan)
+        code = "auth" if state.state == "no_session" else code
     if code in ("claude_not_found", "codex_not_found", "gemini_not_found"):
         status, detail = "no_cli", code
     elif code == "auth":

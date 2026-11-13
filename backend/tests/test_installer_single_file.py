@@ -15,10 +15,14 @@ def test_file_is_utf8_without_bom_with_crlf():
     assert b"\r\n" in RAW and b"\n" not in RAW.replace(b"\r\n", b"")
 
 
-def test_batch_header_ends_before_the_powershell_part_and_opens_no_console():
-    assert BATCH.count("exit /b") == 1
-    assert "-WindowStyle Hidden" in BATCH and "start \"\" /min" in BATCH
+def test_batch_header_ends_before_the_powershell_part_and_runs_it_as_a_file():
+    """Bug 1113: Defender flagged the hidden window + Invoke-Expression of itself. A plain -File run of a temp .ps1."""
+    assert BATCH.count("exit /b 0") == 1
+    assert "start \"\" /min" in BATCH and "-File \"%HOKMA_PS%\"" in BATCH and "%TEMP%" in BATCH
     assert "%~f0" in BATCH
+    for word in ("Invoke-Expression", "iex", "-WindowStyle", "Hidden"):
+        assert word not in BATCH, word
+    assert "Invoke-Expression" not in POWERSHELL
     # the marker is only ever built from two pieces in the header, so IndexOf finds the real marker line
     assert TEXT.count("#PSBEGIN") == 1
 

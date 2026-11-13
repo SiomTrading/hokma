@@ -86,11 +86,11 @@ def turn_block():
     turn_text()
 
 
-def turn_error():
+def turn_error(text="simulated failure"):
     for m in load("text_turn")["lines"][:-1]:
         emit(m)
     result = dict(load("text_turn")["lines"][-1])
-    result.update({"subtype": "error_during_execution", "is_error": True, "result": "simulated failure"})
+    result.update({"subtype": "error_during_execution", "is_error": True, "result": text})
     emit(result)
 
 
@@ -163,6 +163,9 @@ def main():
             alive = turn_slow()
         elif "[error]" in text:
             turn_error()
+            alive = True
+        elif "[notlogged]" in text:
+            turn_error("Not logged in \u00b7 Please run /login")
             alive = True
         elif "[block]" in text:
             turn_block()

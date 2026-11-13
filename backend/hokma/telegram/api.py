@@ -20,6 +20,7 @@ from hokma.core.origin import token_matches
 from hokma.i18n import t
 from hokma.rpc.ws import SESSION_TOKEN
 from hokma.telegram.core import AlreadyLinked, InvalidBotToken, NotLinked
+from hokma.telegram.core.approvals_ui import _redact_telegram_error_text
 from hokma.telegram.glue import TOKEN_ENTRY, TelegramGlue
 
 
@@ -33,6 +34,24 @@ class CodeBody(BaseModel):
 
 def _fail(status: int, code: str, message: str) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+def _is_rejected_token(exc: BaseException) -> bool:
+    from telegram.error import InvalidToken
+    return isinstance(exc, (InvalidBotToken, InvalidToken))
+
+
+def _is_network(exc: BaseException) -> bool:
+    import httpx
+    from telegram.error import NetworkError, TimedOut
+    return isinstance(exc, (NetworkError, TimedOut, httpx.ConnectError))
+
+
+def _log_connect_error(exc: BaseException) -> None:
+    """Leave the real reason in engine.log (the token never goes there)."""
+    from hokma.engine import errlog
+    errlog.log("telegram connect failed: " + _redact_telegram_error_text(f"{type(exc).__name__}: {exc}"),
+               scope="telegram")
 
 
 def create_router() -> APIRouter:
@@ -71,11 +90,14 @@ def create_router() -> APIRouter:
             raise _fail(503, "no_key_store", t("telegram.err.no_key_store")) from None
         try:
             await g.start()
-        except InvalidBotToken:
-            g.keys.delete(TOKEN_ENTRY)
-            raise _fail(400, "invalid_token", t("telegram.err.invalid_token")) from None
-        except Exception:
+        except Exception as exc:                       # noqa: BLE001  (every failure becomes a code the screen can show)
+            if _is_rejected_token(exc):
+                g.keys.delete(TOKEN_ENTRY)
+                raise _fail(400, "invalid_token", t("telegram.err.invalid_token")) from None
+            _log_connect_error(exc)
             await g.disconnect()
+            if _is_network(exc):
+                raise _fail(502, "network", t("telegram.err.network")) from None
             raise _fail(502, "cannot_connect", t("telegram.err.cannot_connect")) from None
         return {"connected": g.link.connected}
 

@@ -6,7 +6,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import os
 import socket
+import urllib.request
 from typing import Iterable, Optional
 
 import httpx
@@ -48,6 +50,20 @@ _DOH_PROVIDERS: list[dict] = [
 # first-try connect targets so a blackholed IPv6 AAAA for the hostname can't pin initialize().
 SEED_FALLBACK_IPS: list[str] = ["149.154.166.110", "149.154.167.220"]
 _UNSET = object()
+
+
+def _resolve_proxy_url(target_hosts=None) -> str | None:
+    """Proxy URL from TELEGRAM_PROXY, then the standard proxy variables; None when NO_PROXY matches a target."""
+    value = (os.environ.get("TELEGRAM_PROXY") or "").strip()
+    if not value:
+        keys = ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy")
+        value = next((v for k in keys if (v := (os.environ.get(k) or "").strip())), "")
+    if not value:
+        return None
+    hosts = [target_hosts] if isinstance(target_hosts, str) else list(target_hosts or [])
+    if hosts and all(urllib.request.proxy_bypass_environment(h) for h in hosts):
+        return None
+    return value
 
 
 class TelegramFallbackTransport(httpx.AsyncBaseTransport):

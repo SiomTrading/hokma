@@ -167,7 +167,7 @@ $PySpec = if ($PyExe) { $PyExe } else { $PyVersion }
 Info "inst.copy_app"
 if (Test-Path $SlotDir) { Remove-Item -Recurse -Force $SlotDir }
 New-Item -ItemType Directory -Force -Path $App | Out-Null
-$code = Invoke-Native "robocopy" @($Src, $App, "/E", "/XD", ".git", "node_modules", ".venv", "__pycache__", "/NFL", "/NDL", "/NJH", "/NJS", "/NP") -Quiet
+$code = Invoke-Native "robocopy" @($Src, $App, "/E", "/XD", ".git", "node_modules", ".venv", "__pycache__", "/XF", "Instalar-Hokma.cmd", "/NFL", "/NDL", "/NJH", "/NJS", "/NP") -Quiet
 if ($code -ge 8) { Die "inst.copy_failed" $code }
 if (-not (Test-Path (Join-Path $App "dashboard\dist\index.html"))) { Die "inst.no_dashboard" }
 

@@ -24,3 +24,10 @@ def test_launchers_read_the_active_slot_and_validate_it():
 def test_installers_use_kit_sync_not_a_blind_copy():
     assert "kit-sync" in SH and "kit-sync" in PS
     assert "copy_no_overwrite" not in SH and "Copy-Item $_.FullName $dest" not in PS
+
+
+def test_the_installed_app_does_not_carry_the_double_click_installer():
+    """Bug 1113: Defender quarantines Instalar-Hokma.cmd; the runtime copy (installer and updater) leaves it out."""
+    root = Path(__file__).resolve().parents[2]
+    assert '"/XF", "Instalar-Hokma.cmd"' in (root / "installer" / "install.ps1").read_text(encoding="utf-8")
+    assert 'ignore_patterns("Instalar-Hokma.cmd")' in (root / "backend" / "hokma" / "update" / "runner.py").read_text(encoding="utf-8")

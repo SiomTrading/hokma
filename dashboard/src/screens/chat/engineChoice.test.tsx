@@ -73,6 +73,17 @@ describe("the chat tells what happened", () => {
   });
 });
 
+describe("a signed-out Claude and a blocked file in the chat", () => {
+  it("auth leads to Engines; integrity_check has its own text, not the save-failed one (bugs 1112, 1113)", () => {
+    const auth = reducer(initialState("7"), ev({ type: "error", code: "auth", message: "Not logged in", conversation_id: "7" }));
+    expect(auth.items[0]).toMatchObject({ kind: "notice", action: "open_engines" });
+    const blocked = reducer(initialState("7"), ev({ type: "error", code: "integrity_check", message: "IntegrityError: x", conversation_id: "7" }));
+    const text = (blocked.items[0] as { text: string }).text;
+    expect(text).toContain(t("chat.err.integrity_check"));
+    expect(text).not.toContain(t("chat.err.integrity"));
+  });
+});
+
 describe("the no engine message leads to Settings > Engines", () => {
   it("the reducer marks it with an action and the message shows a button that opens the engines section", async () => {
     const state = reducer(initialState("7"), ev({ type: "error", code: "no_engine", message: "x", conversation_id: "7" }));

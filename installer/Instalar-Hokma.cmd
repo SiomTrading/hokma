@@ -3,8 +3,12 @@ rem Hokma one-file installer for Windows. Double click it: no commands to type.
 rem It closes a running Hokma, downloads the main branch of SiomTrading/hokma to a temporary folder, runs
 rem installer\install.ps1, creates the shortcuts (install.ps1 does it) and opens Hokma at the end.
 rem The first lines are batch and end at the exit line; everything after the marker is PowerShell, read as UTF-8.
+rem The PowerShell part is copied to a .ps1 in %TEMP% and run with -File, so nothing is evaluated from text.
 set "HOKMA_SELF=%~f0"
-start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$t=[IO.File]::ReadAllText($env:HOKMA_SELF,[Text.Encoding]::UTF8); Invoke-Expression $t.Substring($t.IndexOf('#'+'PSBEGIN'))"
+set "HOKMA_PS=%TEMP%\hokma-installer-%RANDOM%.ps1"
+powershell.exe -NoProfile -Command "$t=[IO.File]::ReadAllText($env:HOKMA_SELF,[Text.Encoding]::UTF8); [IO.File]::WriteAllText($env:HOKMA_PS,$t.Substring($t.IndexOf('#'+'PSBEGIN')),(New-Object Text.UTF8Encoding $true))"
+if not exist "%HOKMA_PS%" exit /b 1
+start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%HOKMA_PS%"
 exit /b 0
 
 #PSBEGIN
@@ -56,7 +60,8 @@ function Show-Box([string]$text, [string]$icon) {
     $Form.TopMost = $false
     [void][System.Windows.Forms.MessageBox]::Show($text, $T.title, "OK", $icon)
 }
-function Fail([string]$text) { Show-Box $text "Error"; $Form.Close(); exit 1 }
+function Remove-Self { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue }
+function Fail([string]$text) { Show-Box $text "Error"; $Form.Close(); Remove-Self; exit 1 }
 
 # Run a program with no window, output to a log file, keeping the progress window alive. Returns the exit code.
 function Invoke-Hidden([string]$file, [string]$argLine, [string]$log, [scriptblock]$onTick) {
@@ -159,5 +164,6 @@ if (-not (Test-Path -LiteralPath $launcher)) { Fail $T.not_found }
 Start-Process -FilePath "cmd.exe" -ArgumentList ('/d /c ""' + $launcher + '" start"') -WindowStyle Hidden
 Start-Sleep -Seconds 2
 $Form.Close()
+Remove-Self
 if ($claudeMissing) { Show-Box $T.no_claude "Information" }
 exit 0

@@ -39,9 +39,11 @@ class LaunchSpec:
 def check_integrity() -> None:
     if not integrity.is_installed_app():
         return  # dev checkout: no manifest
-    problems = integrity.verify()
-    if problems:
-        raise IntegrityError("; ".join(problems[:5]))
+    found = integrity.find_problems()
+    # Only code that Claude runs (backend/, kit/) blocks the chat; a blocked or changed dashboard or installer file
+    # (an antivirus false positive, bug 1113) does not. `hokma doctor` still reports every problem.
+    if any(not f or f.startswith(("backend/", "kit/")) for _, f in found):
+        raise IntegrityError("; ".join(text for text, _ in found[:5]))
 
 
 MCP_RUN = Path(__file__).resolve().parent / "mcp_run.py"

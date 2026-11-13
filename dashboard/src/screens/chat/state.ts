@@ -225,7 +225,7 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
       // The engine's own words after the short text (task 3171): "something failed" alone told nobody what to fix.
       const detail = !SELF_EXPLAINED.has(event.code) && typeof event.message === "string" ? event.message.trim().slice(0, 600) : "";
       const text = detail ? `${base}\n${detail}` : base;
-      const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text, ...(event.code === "no_engine" ? { action: "open_engines" as const } : {}) };
+      const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text, ...(event.code === "no_engine" || event.code === "auth" ? { action: "open_engines" as const } : {}) };
       if (event.code === "busy" || event.code === "unknown_request") return { ...state, items: [...state.items, notice] };
       return { ...state, items: [...closeStreaming(state.items, "error"), notice], running: false, stopping: false };
     }

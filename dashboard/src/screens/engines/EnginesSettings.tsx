@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError } from "@/api";
 import { Button, Dot, Loading, Pill } from "@/design";
 import { useI18n } from "@/i18n";
+import { ClaudeStep } from "../first-run/ClaudeStep";
+import { setupApi } from "../first-run/api";
 import { enginesApi, errorKey, type Connection } from "./api";
 import { ConnectCards } from "./ConnectCards";
 import { RegionCard } from "./RegionCard";
@@ -17,6 +19,12 @@ export function EnginesSettings() {
   const { data, failed, reload } = useEngines();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [claudeSignedOut, setClaudeSignedOut] = useState(false);
+
+  // The saved connection can say "connected" while the Claude session expired (bug 1112): ask the CLI itself.
+  useEffect(() => {
+    void setupApi.claude().then((c) => setClaudeSignedOut(c.state === "no_session"), () => undefined);
+  }, [data]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -49,7 +57,7 @@ export function EnginesSettings() {
             <strong>{c.label}</strong>
             <Pill tone={tone(c)}>
               <Dot />
-              {c.status}
+              {c.engine === "claude_code" && claudeSignedOut ? "no_session" : c.status}
             </Pill>
             {c.is_default ? <Pill tone="ok">{t("eng.active")}</Pill> : null}
           </div>
@@ -60,6 +68,7 @@ export function EnginesSettings() {
               {t(errorKey(c.status_detail), { provider: c.label, cli: c.label })}
             </p>
           ) : null}
+          {c.engine === "claude_code" && claudeSignedOut ? <ClaudeStep /> : null}
           <div style={{ display: "flex", gap: 8 }}>
             {!c.is_default ? (
               <Button size="sm" onClick={() => void act(() => enginesApi.makeDefault(c.id))}>

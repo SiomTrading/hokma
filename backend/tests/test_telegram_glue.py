@@ -287,6 +287,37 @@ def test_api_connects_links_and_unlinks_without_a_console(env):
         assert TOKEN_ENTRY not in env.glue.keys.items
 
 
+def _connect_failing_with(env, exc):
+    async def boom():
+        raise exc
+    env.glue.start = boom
+    app = FastAPI()
+    app.state.telegram = env.glue
+    app.include_router(create_router())
+    with TestClient(app) as client:
+        return client.put("/api/telegram/token", json={"token": TOKEN}, headers=HEADERS)
+
+
+def test_connect_telling_rejected_token_blocked_network_and_other_failures_apart(env):
+    from telegram.error import InvalidToken, NetworkError
+    import httpx
+    r = _connect_failing_with(env, InvalidToken("Unauthorized"))
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "invalid_token"
+    for exc in (NetworkError("[WinError 10054]"), httpx.ConnectError("reset")):
+        r = _connect_failing_with(env, exc)
+        assert r.status_code == 502 and r.json()["detail"]["code"] == "network"
+        assert "another network" in r.json()["detail"]["message"]
+    r = _connect_failing_with(env, RuntimeError("boom"))
+    assert r.status_code == 502 and r.json()["detail"]["code"] == "cannot_connect"
+
+
+def test_connect_failure_is_logged_without_the_token(env, monkeypatch):
+    seen = []
+    monkeypatch.setattr("hokma.engine.errlog.log", lambda message, exc=None, scope="chat": seen.append((scope, message)))
+    _connect_failing_with(env, RuntimeError("bad " + TOKEN))
+    assert seen and seen[0][0] == "telegram" and "RuntimeError" in seen[0][1] and TOKEN not in seen[0][1]
+
+
 def test_core_copy_matches_its_manifest():
     """`core/` is a verbatim copy of the shared module: a local edit that skipped the sync fails here."""
     import hashlib
@@ -299,3 +330,14 @@ def test_core_copy_matches_its_manifest():
         listed[name] = digest
     actual = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in core.glob("*.py")}
     assert actual == listed
+
+
+def test_application_requests_use_tls12_context():
+    import ssl
+    from hokma.telegram.glue import build_application
+
+    app = asyncio.run(build_application("123456:" + "a" * 35))
+    for req in app.bot._request:
+        transport = req._client._transport
+        ctx = transport._primary._pool._ssl_context
+        assert ctx.maximum_version == ssl.TLSVersion.TLSv1_2

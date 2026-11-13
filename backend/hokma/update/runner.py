@@ -191,7 +191,8 @@ def run_update(source: UpdateSource | str, *, force: bool = False,
             if target_dir.exists():
                 _remove_slot(target_dir)           # leftovers from an earlier failed or interrupted update
             (target_dir).mkdir(parents=True)
-            shutil.copytree(release, target_dir / "app", symlinks=False)
+            shutil.copytree(release, target_dir / "app", symlinks=False,
+                            ignore=shutil.ignore_patterns("Instalar-Hokma.cmd"))   # antivirus false positive (bug 1113)
             env = _env()
             env.update(UV_NO_CONFIG="1", UV_PYTHON_INSTALL_DIR=str(hokma_data_dir() / "python"),
                        UV_CACHE_DIR=str(hokma_data_dir() / "cache"), UV_PYTHON_PREFERENCE="only-managed",

@@ -32,29 +32,42 @@ def compute(root: Path) -> dict[str, str]:
     for p in sorted(root.rglob("*")):
         if not p.is_file() or p.suffix == ".pyc" or SKIP_DIRS & set(p.relative_to(root).parts):
             continue
-        files[p.relative_to(root).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
+        try:
+            files[p.relative_to(root).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
+        except OSError:
+            files[p.relative_to(root).as_posix()] = ""      # antivirus or system blocked it (bug 1113): verify() names it
     return files
 
 
 def write_manifest() -> Path:
     path = manifest_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"version": 1, "files": compute(app_root())}, indent=1, sort_keys=True) + "\n",
+    files = compute(app_root())
+    blocked = [f for f, digest in files.items() if not digest]
+    if blocked:
+        raise OSError(t("integrity.unreadable", file=", ".join(blocked)))
+    path.write_text(json.dumps({"version": 1, "files": files}, indent=1, sort_keys=True) + "\n",
                     encoding="utf-8")
     return path
 
 
-def verify() -> list[str]:
-    """Return a list of problems; empty means the installed app matches its manifest."""
+def find_problems() -> list[tuple[str, str]]:
+    """(text, file) of every difference with the manifest; the file is "" for the manifest problems."""
     path = manifest_path()
     if not path.is_file():
-        return [t("integrity.missing_manifest")]
+        return [(t("integrity.missing_manifest"), "")]
     try:
         expected = json.loads(path.read_text(encoding="utf-8"))["files"]
     except (ValueError, KeyError, OSError):
-        return [t("integrity.bad_manifest")]
+        return [(t("integrity.bad_manifest"), "")]
     actual = compute(app_root())
-    problems = [t("integrity.modified", file=f) for f in expected if f in actual and actual[f] != expected[f]]
-    problems += [t("integrity.absent", file=f) for f in expected if f not in actual]
-    problems += [t("integrity.new", file=f) for f in actual if f not in expected]
+    problems = [(t("integrity.unreadable", file=f), f) for f, digest in actual.items() if not digest]
+    problems += [(t("integrity.modified", file=f), f) for f in expected if actual.get(f) and actual[f] != expected[f]]
+    problems += [(t("integrity.absent", file=f), f) for f in expected if f not in actual]
+    problems += [(t("integrity.new", file=f), f) for f in actual if actual[f] and f not in expected]
     return problems
+
+
+def verify() -> list[str]:
+    """Return a list of problems; empty means the installed app matches its manifest."""
+    return [text for text, _ in find_problems()]

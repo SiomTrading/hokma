@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator
 
 from hokma.engine import stream
 from hokma.engine.process import ClaudeProcess, find_claude
+from hokma.engines import diagnose
 from hokma.engines.envfilter import filtered_env
 from hokma.engines.base import EngineCaps, EngineContext, EngineError, EngineEvent
 from hokma.permissions import modes
@@ -107,8 +108,8 @@ class ClaudeCodeSession:
                         # CLI wrote on stderr: shown in the chat and kept in engine.log, never a bare "it failed".
                         detail = str(msg.get("result") or msg.get("subtype") or "")
                         tail = proc.stderr_tail()
-                        yield {"type": "error", "code": "engine_error",
-                               "message": (detail + ("\n" + tail if tail else "")).strip()[:2000]}
+                        text = (detail + ("\n" + tail if tail else "")).strip()[:2000]
+                        yield {"type": "error", "code": diagnose.classify_text(None, text), "message": text}
                     else:
                         yield {"type": "done", "status": "complete", "usage": stream.usage_of(msg),
                                "result": "" if text_seen else str(msg.get("result") or "")}
@@ -163,7 +164,10 @@ class ClaudeCodeAdapter:
         try:
             spec = self.owner.launch()
         except Exception as exc:                         # IntegrityError and any failure while preparing settings
-            raise EngineError("integrity", f"{type(exc).__name__}: {exc}") from exc
+            from hokma.kit.launch import IntegrityError
+
+            code = "integrity_check" if isinstance(exc, IntegrityError) else "integrity"
+            raise EngineError(code, f"{type(exc).__name__}: {exc}") from exc
         try:
             env = filtered_env()                     # allow list: no provider keys, no Hokma token, no market keys
         except Exception as exc:                     # the PATH or the environment could not be built (WinError 448, bug 1095)

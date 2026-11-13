@@ -205,6 +205,14 @@ def test_crash_and_engine_error_report_and_recover(env):
         assert turn(ws, "fine", conversation_id=conv_id)[-1]["type"] == "done"
 
 
+def test_a_signed_out_claude_is_an_auth_error_not_a_generic_one(env):
+    """Bug 1112: `Not logged in · Please run /login` must reach the chat as `auth` (reconnect text and button)."""
+    with make_client(env.engine()) as client, connect(client) as ws:
+        failed = turn(ws, "[notlogged] hi")
+        assert failed[-1]["type"] == "error" and failed[-1]["code"] == "auth"
+        assert "Not logged in" in failed[-1]["message"]
+
+
 def test_bad_messages_do_not_close_the_socket(env):
     with make_client(env.engine()) as client, connect(client) as ws:
         ws.send_text("not json")

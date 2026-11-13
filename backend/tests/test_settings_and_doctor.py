@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -145,3 +146,32 @@ def test_manifest_detects_tampering(tmp_path, monkeypatch):
     with pytest.raises(IntegrityError):
         check_integrity()
     assert checks.check_integrity().status == checks.FAIL
+
+
+def test_a_file_the_system_will_not_let_us_read_is_a_named_problem(tmp_path, monkeypatch):
+    """Bug 1113: an antivirus blocks a file; compute/verify name it instead of raising OSError. Only code blocks the chat."""
+    app = tmp_path / "data" / "runtime" / "a" / "app"
+    (app / "backend").mkdir(parents=True)
+    (app / "installer").mkdir()
+    (app / "backend" / "a.py").write_text("print(1)")
+    (app / "installer" / "x.cmd").write_text("rem")
+    monkeypatch.setenv("HOKMA_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(integrity, "app_root", lambda: app)
+    integrity.write_manifest()
+    real = Path.read_bytes
+
+    def blocked(self):
+        if self.name in blocked.names:
+            raise OSError(22, "Invalid argument")
+        return real(self)
+
+    blocked.names = {"x.cmd"}
+    monkeypatch.setattr(Path, "read_bytes", blocked)
+    assert integrity.verify() == [t("integrity.unreadable", file="installer/x.cmd")]
+    check_integrity()                                    # not code Claude runs: the chat still starts
+    blocked.names = {"a.py"}
+    assert integrity.verify() == [t("integrity.unreadable", file="backend/a.py")]
+    with pytest.raises(IntegrityError):
+        check_integrity()
+    with pytest.raises(OSError):                         # a manifest is never written over a blocked file
+        integrity.write_manifest()
