@@ -70,7 +70,7 @@ def test_without_duplicates_nothing_is_lost(old_database):
     ids, (one, two, three) = seed_three_projects(old_database, with_duplicates=False)
     with old_database.read() as u:
         before = counts(u)
-    assert migrate().version == 13
+    assert migrate().version == 14
     with old_database.read() as u:
         assert counts(u) == before == (4, 8)
         library = u.library.find_student_library()
@@ -156,7 +156,7 @@ def test_a_forced_failure_leaves_nothing_half_done(old_database, monkeypatch):
     assert before == after
     assert all(path.exists() for _, path in ids.values())           # no file was deleted
     monkeypatch.setitem(datasteps.STEPS, 8, real_step)
-    assert migrate().version == 13                                   # and the next start migrates normally
+    assert migrate().version == 14                                   # and the next start migrates normally
     with old_database.read() as u:
         assert counts(u) == (4, 8)
 

@@ -77,7 +77,7 @@ def test_0007_applies_on_top_of_a_0006_database_without_touching_data(env):
     with database.write() as u:
         u.projects.create("Old project", "/p/old")
     result = migrate()
-    assert result.applied == [7, 8, 9, 10, 11, 12, 13] and result.version == 13
+    assert result.applied == [7, 8, 9, 10, 11, 12, 13, 14] and result.version == 14
     with database.read() as u:
         assert [p.name for p in u.projects.list()] == ["Old project"]
         assert u.documents.find_project_library(u.projects.list()[0].id) is None

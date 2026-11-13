@@ -7,6 +7,8 @@ export interface TelegramState {
   linked: boolean;
   connected: boolean;
   user_name: string;
+  group_linked?: boolean;
+  avisos?: "ok" | "no_permission" | null;
 }
 
 export function telegramStatus(state: TelegramState): "linked" | "waiting" | "off" {
@@ -22,6 +24,7 @@ export function TelegramSection() {
   const [saved, setSaved] = useState<TelegramState | null>(null);
   const [token, setToken] = useState("");
   const [code, setCode] = useState("");
+  const [groupCode, setGroupCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -57,7 +60,18 @@ export function TelegramSection() {
   const unlink = () =>
     run(async () => {
       await api.delete("/api/telegram");
-      return { linked: false, connected: false, user_name: "" };
+      return { linked: false, connected: false, user_name: "", group_linked: false, avisos: null };
+    });
+  const approveGroup = () =>
+    run(async () => {
+      const res = await api.post<{ avisos?: "ok" | "no_permission" | null }>("/api/telegram/group/approve", { code: groupCode.trim() });
+      setGroupCode("");
+      return { ...state, group_linked: true, avisos: res.avisos ?? null };
+    });
+  const unlinkGroup = () =>
+    run(async () => {
+      await api.delete("/api/telegram/group");
+      return { ...state, group_linked: false, avisos: null };
     });
 
   return (
@@ -85,6 +99,28 @@ export function TelegramSection() {
           </>
         ) : null}
         {current !== "off" ? <div><Button disabled={busy} onClick={() => void unlink()}>{t("telegram.unlink")}</Button></div> : null}
+      </Pane>
+      <Pane style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <strong className="p">{t("telegram.group.title")}</strong>
+          {state.group_linked ? <Pill tone="ok" data-testid="telegram-group-status">{t("telegram.group.linked")}</Pill> : null}
+          {state.group_linked && state.avisos ? (
+            <Pill tone={state.avisos === "ok" ? "ok" : "warn"} data-testid="telegram-group-avisos">{t(`telegram.group.avisos.${state.avisos}`)}</Pill>
+          ) : null}
+        </span>
+        {!state.linked ? <p className="p">{t("telegram.group.needsLink")}</p> : null}
+        {state.linked && !state.group_linked ? (
+          <>
+            <ol className="p" style={{ margin: 0, paddingLeft: 20 }}>
+              {[1, 2, 3, 4].map((n) => <li key={n}>{t(`telegram.group.step${n}`)}</li>)}
+            </ol>
+            <Field label={t("telegram.group.code")}>
+              {(control) => <Input {...control} autoComplete="off" value={groupCode} maxLength={16} onChange={(e) => setGroupCode(e.target.value)} />}
+            </Field>
+            <div><Button variant="primary" disabled={busy || groupCode.trim() === ""} onClick={() => void approveGroup()}>{t("telegram.group.approve")}</Button></div>
+          </>
+        ) : null}
+        {state.group_linked ? <div><Button disabled={busy} onClick={() => void unlinkGroup()}>{t("telegram.group.unlink")}</Button></div> : null}
       </Pane>
       {error !== null ? <p className="p" role="alert" style={{ color: "var(--bad)" }}>{error}</p> : null}
     </div>

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.32
+
+- Telegram group with topics, one session per topic, auto close.
+
 ## 0.0.31
 
 Hokma keeps the computer awake while it works, talks to the student through Telegram, and backs up everything to the

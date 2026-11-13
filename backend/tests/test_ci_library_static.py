@@ -1,4 +1,4 @@
-"""The Library CI job, the smoke scripts and the 0.0.31 version (SPEC-010 P14). The jobs themselves only run on GitHub;
+"""The Library CI job, the smoke scripts and the 0.0.32 version (SPEC-010 P14). The jobs themselves only run on GitHub;
 these checks keep their shape from drifting and run the load smoke here for real."""
 import json
 import re
@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 CI = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 SMOKE = (ROOT / ".github" / "workflows" / "model-smoke.yml").read_text(encoding="utf-8")
-VERSION = "0.0.31"
+VERSION = "0.0.32"
 
 
 def job(name: str) -> str:

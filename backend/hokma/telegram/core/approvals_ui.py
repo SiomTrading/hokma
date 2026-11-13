@@ -53,7 +53,8 @@ class ApprovalsUI:
 
     Ports: ``is_authorized(chat_id) -> bool``; ``on_decision(request_id, choice)`` returning how
     many pending requests it resolved (0 when none was waiting); ``t(key, **kw) -> str``;
-    optional ``on_rejected(chat_id)`` called when a tap comes from an unauthorized chat.
+    optional ``on_rejected(chat_id)`` called when a tap comes from an unauthorized chat; optional
+    ``is_sender_ok(chat_id, user_id) -> bool`` decides who may tap (default: the linked private chat itself).
     """
 
     _EA_CMD_BUDGET = 3800
@@ -61,12 +62,14 @@ class ApprovalsUI:
     def __init__(
         self, bot: Any, *, is_authorized: Callable[[str], bool],
         on_decision: Callable[[str, str], "int | Awaitable[int]"],
-        t: Callable[..., str], on_rejected: Optional[Callable[[str], None]] = None) -> None:
+        t: Callable[..., str], on_rejected: Optional[Callable[[str], None]] = None,
+        is_sender_ok: Optional[Callable[[str, str], bool]] = None) -> None:
         self._bot = bot
         self._is_authorized = is_authorized
         self._on_decision = on_decision
         self._t = t
         self._on_rejected = on_rejected
+        self._is_sender_ok = is_sender_ok or (lambda chat_id, user_id: user_id == chat_id and bool(is_authorized(chat_id)))
         self._approval_state: Dict[str, str] = {}  # approval_id → request_id
         self._EA_HEADER = f"⚠️ <b>{t('approval_header')}</b>\n\n"
         self._EA_CODE_OPEN = "<pre>"
@@ -98,7 +101,7 @@ class ApprovalsUI:
                 f"{self._EA_CODE_OPEN}{self._ea_escape(cmd_preview)}{self._EA_CODE_CLOSE}"
                 f"{self._EA_REASON_LABEL}{self._ea_escape(description)}")
 
-    async def _send_prompt(self, what: str, chat_id: str, build, *, parse_mode: Any = None) -> SendResult:
+    async def _send_prompt(self, what: str, chat_id: str, build, *, parse_mode: Any = None, thread_id: Optional[int] = None) -> SendResult:
         """Shared control-prompt shell: not-connected guard, ``build()`` → ``(text, keyboard, on_sent)`` (or a
         SendResult to return as-is), send, state hook, redacted failure log."""
         if not self._bot:
@@ -113,6 +116,8 @@ class ApprovalsUI:
                 "parse_mode": parse_mode if parse_mode is not None else ParseMode.MARKDOWN_V2}
             if keyboard is not None:
                 kwargs["reply_markup"] = keyboard
+            if thread_id is not None:
+                kwargs["message_thread_id"] = thread_id
             msg = await self._bot.send_message(**kwargs)
             if on_sent is not None:
                 on_sent(msg)
@@ -122,7 +127,8 @@ class ApprovalsUI:
             return SendResult(success=False, error=_redact_telegram_error_text(e))
 
     async def send_exec_approval(
-        self, chat_id: str, command: str, request_id: str, description: str = "dangerous command") -> SendResult:
+        self, chat_id: str, command: str, request_id: str, description: str = "dangerous command",
+        thread_id: Optional[int] = None) -> SendResult:
         """Send an inline-keyboard approval prompt (allow once, deny); buttons call ``on_decision``."""
         def build():
             text = self._format_exec_approval(command, description)
@@ -133,7 +139,7 @@ class ApprovalsUI:
                        InlineKeyboardButton(f"❌ {self._t('btn_deny')}", callback_data=f"ea:deny:{approval_id}")]
             return text, InlineKeyboardMarkup(
                 [buttons]), lambda msg: self._approval_state.__setitem__(approval_id, request_id)
-        return await self._send_prompt("send_exec_approval", chat_id, build, parse_mode=ParseMode.HTML)
+        return await self._send_prompt("send_exec_approval", chat_id, build, parse_mode=ParseMode.HTML, thread_id=thread_id)
 
     async def _edit_md_quiet(self, query, text_md: str) -> None:
         """MarkdownV2 edit with the keyboard removed; failures ignored (non-fatal)."""
@@ -152,12 +158,10 @@ class ApprovalsUI:
             "thread_id": getattr(query_message, "message_thread_id", None), "user_name": getattr(query.from_user, "first_name", None)}
 
     def _is_callback_user_authorized(self, user_id: str, *, chat_id: Optional[str] = None) -> bool:
-        """Return whether a Telegram inline-button caller may perform gated actions: only the linked chat."""
+        """Return whether a Telegram inline-button caller may perform gated actions: only the linked user."""
         if not str(user_id or "").strip() or chat_id is None:
             return False
-        if str(user_id) != str(chat_id):  # only a private chat: in a group the chat id is not the sender
-            return False
-        return bool(self._is_authorized(str(chat_id)))
+        return bool(self._is_sender_ok(str(chat_id), str(user_id)))
 
     async def _callback_authorized(self, query, cb: Dict[str, Any], denial_text: str) -> bool:
         """Gate a button tap on the callback allowlist; answers ``denial_text`` when refused."""

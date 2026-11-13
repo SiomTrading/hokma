@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 from typing import Any, Callable
 
 from hokma.connections.store import KeyStore
@@ -14,17 +15,19 @@ from hokma.engine.protocols import DEFAULT_MODEL
 from hokma.i18n import t
 from hokma.telegram.core import TelegramLink
 from hokma.telegram.core.link import build_application
+from hokma.telegram.core.session_policy import SessionResetPolicy, should_reset
 
 log = logging.getLogger("hokma.telegram")
 TOKEN_ENTRY = "telegram_bot"            # entry of the bot token in the system credential store
 CONVERSATION_TITLE = "Telegram"
 TELEGRAM_LIMIT = 4000                  # characters of one message (Telegram allows 4096)
 RETRY_SECONDS = 60
+POLICY = SessionResetPolicy(mode="both", idle_minutes=120, at_hour=4)     # local time
 PROMPT_LIMIT = 3800                    # characters the approval message can show (core truncates beyond)
 
 
 class LinkStore:
-    """The single link record (`telegram_link`), in the port shape `core/` expects."""
+    """The single link record (`telegram_link`: private chat, group, Avisos topic), in the port shape `core/` expects."""
 
     def __init__(self, get_db: Callable[[], Database]) -> None:
         self._db = get_db
@@ -34,16 +37,20 @@ class LinkStore:
             return u.session.one("SELECT * FROM telegram_link WHERE id = 1")
 
     def save(self, record: dict) -> None:
+        chat = str(record["chat_id"])
         with self._db().write() as u:
+            old = u.session.one("SELECT chat_id, group_id FROM telegram_link WHERE id = 1")
             u.session.execute("DELETE FROM telegram_link WHERE id = 1")
-            u.session.execute("DELETE FROM telegram_outbox WHERE sent_at IS NULL")   # meant for the previous chat
+            if old is not None and old["chat_id"] != chat:       # the queue was meant for the previous chat
+                u.session.execute("DELETE FROM telegram_outbox WHERE sent_at IS NULL")
+            elif old is not None and old["group_id"] != record.get("group_id"):    # topic ids belong to one group
+                u.session.execute("DELETE FROM telegram_outbox WHERE sent_at IS NULL AND thread_id > 0")
+                u.session.execute("DELETE FROM telegram_session WHERE thread_id > 0")
             u.session.execute(
-                "INSERT INTO telegram_link (id, chat_id, user_name) VALUES (1, :c, :n)",
-                {"c": str(record["chat_id"]), "n": record.get("user_name") or ""})
-
-    def set_conversation(self, conversation_id: str) -> None:
-        with self._db().write() as u:
-            u.session.execute("UPDATE telegram_link SET conversation_id = :c WHERE id = 1", {"c": conversation_id})
+                "INSERT INTO telegram_link (id, chat_id, user_name, group_id, avisos_thread_id, avisos_group_id, avisos) "
+                "VALUES (1, :c, :n, :g, :t, :ag, :a)",
+                {"c": chat, "n": record.get("user_name") or "", "g": record.get("group_id"),
+                 "t": record.get("avisos_thread_id"), "ag": record.get("avisos_group_id"), "a": record.get("avisos")})
 
     def clear(self) -> None:
         with self._db().write() as u:
@@ -60,23 +67,25 @@ def fit(text: str) -> str:
     return text[:TELEGRAM_LIMIT - len(tail)].rstrip() + tail
 
 
-def enqueue(unit, text: str) -> int:
-    """Put a message for the owner in the outbox (inside an open write unit). The sender delivers it."""
-    return unit.session.insert("telegram_outbox", {"text": fit(text)})
+def enqueue(unit, text: str, thread_id: int | None = None) -> int:
+    """Put a message for the owner in the outbox (inside an open write unit). The sender delivers it.
+    `thread_id`: a topic of the group, 0 for the private chat, None for Avisos."""
+    return unit.session.insert("telegram_outbox", {"text": fit(text), "thread_id": thread_id})
 
 
 class TelegramGlue:
     def __init__(self, get_db: Callable[[], Database], get_engine: Callable[[], Any], *,
-                 keys: KeyStore | None = None, application_factory=build_application, data_dir=None) -> None:
+                 keys: KeyStore | None = None, application_factory=build_application, data_dir=None, now=datetime.now) -> None:
         from hokma.engine.engine import Connection
 
         self._db, self._engine = get_db, get_engine
         self.keys = keys or KeyStore()
         self.store = LinkStore(get_db)
         self.link = TelegramLink(data_dir or hokma_data_dir() / "telegram", self.store, t=t,
-                                 on_owner_text=self.on_owner_text, on_decision=self.on_decision,
+                                 on_owner_text=self.on_owner_text, on_decision=self.on_decision, on_reset=self.on_reset,
                                  application_factory=application_factory)
-        self._conn = Connection(self._on_event)
+        self._connection, self._conns = Connection, {}          # one per conversation, so its answers know their topic
+        self._now = now
         self._turn_text: dict[str, str] = {}
         self._tasks: set[asyncio.Task] = set()
         self._flushing = asyncio.Lock()
@@ -102,47 +111,92 @@ class TelegramGlue:
 
     # ----- the owner writes -----
 
-    def _conversation(self) -> str:
-        engine, record = self._engine(), self.store.load() or {}
-        cid = record.get("conversation_id")
-        if not cid or engine.store.get_conversation(cid) is None:
-            cid = engine.store.create_conversation(CONVERSATION_TITLE, DEFAULT_MODEL, None, None).id
-            self.store.set_conversation(cid)
-        engine.subscribe(self._conn, cid)
-        return cid
+    def _busy(self, cid: str) -> bool:
+        """A turn is running or a permission waits (read only): such a session is never closed."""
+        session = self._engine().sessions.get(cid)
+        task = getattr(session, "_task", None)
+        return session is not None and (bool(getattr(session, "pending", None)) or (task is not None and not task.done()))
 
-    async def on_owner_text(self, text: str) -> None:
-        """Only called for the linked chat (core checks). The answer comes back through `_on_event`."""
-        cid = self._conversation()
-        await self._engine().handle(self._conn, json.dumps({"type": "send", "conversation_id": cid, "text": text}))
+    def _touch(self, cid: str) -> None:
+        with self._db().write() as u:
+            u.session.execute("UPDATE telegram_session SET updated_at = :n WHERE conversation_id = :c",
+                              {"n": int(self._now().timestamp()), "c": cid})
 
-    async def _on_event(self, raw: str) -> None:
+    def _conversation(self, thread_id: int, topic_name: str | None) -> tuple[str, str | None]:
+        """The conversation of (linked chat, topic): created on first use, replaced when the reset policy says so.
+        Returns it with the reset reason (`idle`, `daily`) when this call replaced an overdue one."""
+        engine, chat = self._engine(), str(self.link.linked_chat_id())
+        key = {"c": chat, "t": thread_id}
+        with self._db().read() as u:
+            row = u.session.one("SELECT conversation_id, topic_name, updated_at FROM telegram_session "
+                                "WHERE chat_id = :c AND thread_id = :t", key)
+        reason = None
+        if row is not None and engine.store.get_conversation(row["conversation_id"]) is not None:
+            reason = should_reset(POLICY, datetime.fromtimestamp(row["updated_at"]), self._now(),
+                                  self._busy(row["conversation_id"]))
+            if reason is None:
+                cid = row["conversation_id"]
+                if topic_name and topic_name != row["topic_name"]:
+                    with self._db().write() as u:
+                        u.session.execute("UPDATE telegram_session SET topic_name = :n WHERE chat_id = :c AND thread_id = :t",
+                                          {**key, "n": topic_name})
+        if row is None or reason is not None or engine.store.get_conversation(row["conversation_id"]) is None:
+            name = topic_name or (row or {}).get("topic_name") or CONVERSATION_TITLE
+            cid = engine.store.create_conversation(f"{name} {self._now():%Y-%m-%d}", DEFAULT_MODEL, None, None).id
+            with self._db().write() as u:
+                u.session.execute("DELETE FROM telegram_session WHERE chat_id = :c AND thread_id = :t", key)
+                u.session.insert_row("telegram_session", {"chat_id": chat, "thread_id": thread_id, "conversation_id": cid,
+                                                          "topic_name": name, "updated_at": int(self._now().timestamp())})
+        if cid not in self._conns:
+            self._conns[cid] = self._connection(lambda raw, th=thread_id: self._on_event(raw, th))
+        engine.subscribe(self._conns[cid], cid)
+        return cid, reason
+
+    async def on_owner_text(self, text: str, thread_id: int | None = None, topic_name: str | None = None) -> None:
+        """Only called for the linked chat (core checks); `thread_id` is None for the private chat. The answer comes
+        back through `_on_event`, to the same topic."""
+        thread = thread_id or 0
+        cid, reason = self._conversation(thread, topic_name)
+        if reason:
+            await self.deliver(t(f"telegram.reset_{reason}"), thread)
+        self._touch(cid)
+        await self._engine().handle(self._conns[cid], json.dumps({"type": "send", "conversation_id": cid, "text": text}))
+
+    def on_reset(self, thread_id: int) -> None:
+        """`/new` in a topic: forget its session; the next message opens another and the old conversation stays."""
+        with self._db().write() as u:
+            u.session.execute("DELETE FROM telegram_session WHERE chat_id = :c AND thread_id = :t",
+                              {"c": str(self.link.linked_chat_id()), "t": thread_id})
+
+    async def _on_event(self, raw: str, thread_id: int = 0) -> None:
         event = json.loads(raw)
         kind, turn = event.get("type"), event.get("turn_id", "")
         if kind == "delta":
             self._turn_text[turn] = self._turn_text.get(turn, "") + event.get("text", "")
         elif kind == "done":
+            if event.get("conversation_id") in self._conns:
+                self._touch(event["conversation_id"])           # a long turn counts as activity
             text = self._turn_text.pop(turn, "").strip()
             if text and not event.get("stopped"):
-                await self.deliver(text)
+                await self.deliver(text, thread_id)
         elif kind == "error":
             self._turn_text.pop(turn, None)
-            await self.deliver(event.get("message", ""))
+            await self.deliver(event.get("message", ""), thread_id)
         elif kind == "permission_request":
             full = json.dumps(event.get("input") or {}, ensure_ascii=False)     # everything the tool will receive
             if len(full) > PROMPT_LIMIT:         # what is approved must be what is shown: too long, so it is denied
                 session = self._engine().sessions.get(event.get("conversation_id"))
                 if session is not None:
                     await session.resolve(event["request_id"], "deny", "system")
-                await self.deliver(t("telegram.prompt_too_long"))
+                await self.deliver(t("telegram.prompt_too_long"))      # permissions and notices go to Avisos
                 return
             await self.link.send_exec_approval(full, event["request_id"], event.get("tool", ""))
 
     # ----- the outbox: nothing is lost if Telegram or Hokma is down -----
 
-    async def deliver(self, text: str) -> None:
+    async def deliver(self, text: str, thread_id: int | None = None) -> None:
         """Store the message and try to send it now; whatever fails is retried by `retry_loop`."""
-        if self._store_text(text):
+        if self._store_text(text, thread_id):
             await self.flush()
 
     def enqueue(self, text: str) -> None:
@@ -150,11 +204,11 @@ class TelegramGlue:
         if self._store_text(text):
             self._spawn(self.flush())
 
-    def _store_text(self, text: str) -> bool:
+    def _store_text(self, text: str, thread_id: int | None = None) -> bool:
         if not text.strip():
             return False
         with self._db().write() as u:
-            enqueue(u, text)
+            enqueue(u, text, thread_id)
         return True
 
     async def flush(self) -> int:
@@ -165,9 +219,9 @@ class TelegramGlue:
             if not self.link.connected or self.link.linked_chat_id() is None:
                 return 0
             with self._db().read() as u:
-                rows = u.session.query("SELECT id, text FROM telegram_outbox WHERE sent_at IS NULL ORDER BY id")
+                rows = u.session.query("SELECT id, text, thread_id FROM telegram_outbox WHERE sent_at IS NULL ORDER BY id")
             for row in rows:
-                result = await self.link.send_text(row["text"])
+                result = await self.link.send_text(row["text"], row["thread_id"])
                 with self._db().write() as u:
                     if result.success:
                         u.session.execute("UPDATE telegram_outbox SET sent_at = CURRENT_TIMESTAMP, attempts = attempts + 1, "
@@ -195,9 +249,13 @@ class TelegramGlue:
 
     async def on_decision(self, request_id: str, choice: str) -> int:
         """1 when a permission was waiting (and is now answered and recorded), 0 when it already ended."""
-        engine, cid = self._engine(), (self.store.load() or {}).get("conversation_id")
-        session = engine.sessions.get(cid) if cid else None
-        pending = session.pending.get(request_id) if session else None
+        engine = self._engine()
+        with self._db().read() as u:
+            cids = [r["conversation_id"] for r in u.session.query("SELECT conversation_id FROM telegram_session")]
+        cids += [c for c in self._conns if c not in cids]       # a conversation left by /new may still wait
+        cid, session, pending = next(((c, s, s.pending[request_id]) for c in cids
+                                      if (s := engine.sessions.get(c)) is not None and request_id in s.pending),
+                                     (None, None, None))
         if pending is None:
             return 0
         allow = choice != "deny"

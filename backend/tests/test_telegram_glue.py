@@ -190,8 +190,8 @@ async def test_owner_text_reaches_the_engine_and_the_answer_returns(env):
     send = env.engine.handled[0]
     assert send["type"] == "send" and send["text"] == "dame el resumen"
     assert env.app.bot.sent[-1]["text"] == "Hola Ana"
-    with env.db.read() as u:                        # a fixed conversation, saved in the link row
-        assert u.session.one("SELECT conversation_id FROM telegram_link")["conversation_id"] == send["conversation_id"]
+    with env.db.read() as u:                        # a fixed conversation per chat, saved as the private session
+        assert u.session.one("SELECT conversation_id FROM telegram_session WHERE thread_id = 0")["conversation_id"] == send["conversation_id"]
     await env.glue.link._handle_text_message(text_update(111, "otra"))
     assert env.engine.handled[1]["conversation_id"] == send["conversation_id"]
 
@@ -223,7 +223,7 @@ async def test_permission_arrives_with_buttons_and_a_tap_leaves_the_telegram_cha
 @aio
 async def test_a_command_too_long_to_show_is_denied_not_offered(env):
     await linked(env)
-    cid = env.glue._conversation()
+    cid = env.glue._conversation(0, None)[0]
     session = env.engine.sessions[cid] = FakeSession("Bash", "echo", "r9")
     env.engine.script = [{"type": "permission_request", "conversation_id": cid, "turn_id": "t1", "request_id": "r9",
                           "tool": "Bash", "input": {"command": "echo " + "x" * 5000}, "summary": {"target": "echo"}}]
@@ -236,7 +236,7 @@ async def test_a_command_too_long_to_show_is_denied_not_offered(env):
 async def test_deny_is_recorded_and_a_late_tap_says_expired(env):
     await linked(env)
     await env.glue.link.send_exec_approval("rm x", "r2", "Bash")
-    cid = env.glue.store.load().get("conversation_id") or env.glue._conversation()
+    cid = env.glue._conversation(0, None)[0]
     session = env.engine.sessions[cid] = FakeSession("Bash", "rm x", "r2")
     update, _ = tap(button(env.app.bot, 1), 111)
     await env.glue.link._ui.handle_callback_query(update)
@@ -269,8 +269,8 @@ def test_api_connects_links_and_unlinks_without_a_console(env):
         assert client.get("/api/telegram").status_code == 401
         assert client.put("/api/telegram/token", json={"token": TOKEN},
                           headers={"X-Hokma-Token": HEADERS["X-Hokma-Token"]}).status_code == 403   # no owner tab
-        assert client.get("/api/telegram", headers=HEADERS).json() == {"linked": False, "connected": False,
-                                                                       "user_name": ""}
+        assert client.get("/api/telegram", headers=HEADERS).json() == {
+            "linked": False, "connected": False, "user_name": "", "group_linked": False, "avisos": None}
         bad = client.put("/api/telegram/token", json={"token": "nope"}, headers=HEADERS)
         assert bad.status_code == 400 and bad.json()["detail"]["code"] == "invalid_token"
         assert TOKEN_ENTRY not in env.glue.keys.items

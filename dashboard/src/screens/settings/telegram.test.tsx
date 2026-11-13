@@ -67,4 +67,40 @@ describe.each(["es", "en"] as const)("TelegramSection (%s)", (locale) => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Bad token");
     expect(screen.getByTestId("telegram-status")).toHaveTextContent(T("telegram.status.off"));
   });
+
+  it("group: disabled without private link, steps and code when linked, status, unlink", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/telegram": off });
+    const first = renderWithApp(<TelegramSection />);
+    expect(await screen.findByText(T("telegram.group.needsLink"))).toBeInTheDocument();
+    expect(screen.queryByLabelText(T("telegram.group.code"))).not.toBeInTheDocument();
+    first.unmount();
+
+    const calls = mockApi({
+      "GET /api/telegram": { linked: true, connected: true, user_name: "Ana", group_linked: false, avisos: null },
+      "POST /api/telegram/group/approve": { avisos: "no_permission" },
+      "DELETE /api/telegram/group": { group_linked: false },
+    });
+    renderWithApp(<TelegramSection />);
+    for (const n of [1, 2, 3, 4]) expect(await screen.findByText(T(`telegram.group.step${n}`))).toBeInTheDocument();
+    const approve = screen.getAllByRole("button", { name: T("telegram.group.approve") })[0];
+    expect(approve).toBeDisabled();
+    await userEvent.type(screen.getByLabelText(T("telegram.group.code")), " GRP123 ");
+    await userEvent.click(approve);
+    expect(await screen.findByTestId("telegram-group-status")).toHaveTextContent(T("telegram.group.linked"));
+    expect(screen.getByTestId("telegram-group-avisos")).toHaveTextContent(T("telegram.group.avisos.no_permission"));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ code: "GRP123" });
+
+    await userEvent.click(screen.getByRole("button", { name: T("telegram.group.unlink") }));
+    await waitFor(() => expect(screen.queryByTestId("telegram-group-status")).not.toBeInTheDocument());
+    expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+    expect(screen.getByTestId("telegram-status")).toHaveTextContent(T("telegram.status.linked"));
+  });
+
+  it("group: shows Avisos ok when the topic works", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/telegram": { linked: true, connected: true, user_name: "Ana", group_linked: true, avisos: "ok" } });
+    renderWithApp(<TelegramSection />);
+    expect(await screen.findByTestId("telegram-group-avisos")).toHaveTextContent(T("telegram.group.avisos.ok"));
+  });
 });
