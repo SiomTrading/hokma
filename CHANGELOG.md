@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.33
+
+- Fix: the detached updater no longer imports keyring, so updating from 0.0.31 and later works (bug 1111).
+
 ## 0.0.32
 
 - Telegram group with topics, one session per topic, auto close.

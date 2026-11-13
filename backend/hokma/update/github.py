@@ -20,7 +20,6 @@ import re
 import urllib.error
 import urllib.request
 
-from hokma.connections.store import KeyStore
 from hokma.i18n import t
 from hokma.update.safe_exec import run_isolated
 from hokma.update.source import SHA_RE, UpdateError, VersionManifest, parse_version
@@ -71,8 +70,17 @@ def _token_from_gh() -> str | None:
 
 
 def github_token() -> str | None:
-    """The token Hokma saved on connecting GitHub (credential store), else the one from git or gh, else None."""
-    return KeyStore().get("github") or _token_from_git() or _token_from_gh()
+    """The token Hokma saved on connecting GitHub (credential store), else the one from git or gh, else None.
+
+    The detached updater runs on the bare base Python, where `keyring` is not installed: the store is imported here,
+    not at module level, and its absence only means there is no saved token (bug 1111)."""
+    try:
+        from hokma.connections.store import KeyStore
+
+        saved = KeyStore().get("github")
+    except ImportError:
+        saved = None
+    return saved or _token_from_git() or _token_from_gh()
 
 
 def _get(url: str, token: str | None, accept: str, limit: int) -> bytes:
