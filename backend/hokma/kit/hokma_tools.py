@@ -427,6 +427,19 @@ def docs_search(u, c: Caller, a: dict) -> str:
     return _dump({"found": True, "results": [h.public() for h in hits]})
 
 
+def notify_owner(u, c: Caller, a: dict) -> str:
+    from hokma.i18n import t
+    from hokma.telegram.glue import enqueue
+
+    if u.session.one("SELECT 1 AS x FROM telegram_link WHERE id = 1") is None:
+        return _dump({"sent": False, "message": t("telegram.notify_off")})
+    text = (a["text"] or "").strip()
+    if not text:
+        raise ValueError("text is empty")
+    enqueue(u, text)
+    return _dump({"sent": True, "message": "queued for the owner's linked Telegram chat"})
+
+
 def docs_list(u, c: Caller, a: dict) -> str:
     project_id = _doc_project(u, c, a)
     library = u.library.find_student_library()
@@ -571,6 +584,10 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
                   "of the project with their state and counts. project_id defaults to the project of this "
                   "conversation or task; without a project only the Library is listed.", {
         "project_id": _i("Project; default: the current one.")}, [], docs_list, False),
+    "notify_owner": ("Send a short message to the owner's phone through the Telegram chat linked to Hokma. Use it to "
+                     "tell the owner something that needs attention or a result they asked to hear about. It only "
+                     "reaches that chat; if Telegram is not connected it says so and nothing is sent.", {
+        "text": _s("The message, plain text.")}, ["text"], notify_owner, True),
     "bug_report": ("Report a bug.", {"title": _s(), "severity": _s(enum=["low", "medium", "high", "critical"]),
                                      "description": _s(), "project_id": _i()}, ["title"], bug_report, True),
     "bug_update": ("Update a bug or move its status.", {

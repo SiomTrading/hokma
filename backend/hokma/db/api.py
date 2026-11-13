@@ -176,6 +176,8 @@ def open_for_app() -> tuple[Database, str | None]:
 async def database_lifespan(app):
     """FastAPI lifespan: open the database at start; endpoints read it from `request.app.state.db`
     (or call `hokma.db.get_database()`, which returns the same object)."""
+    from hokma.backup.restore import apply_pending            # a restore prepared before the restart goes in first
+    apply_pending()
     app.state.db, app.state.db_error = open_for_app()
     yield
 

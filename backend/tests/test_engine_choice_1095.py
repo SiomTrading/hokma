@@ -442,14 +442,14 @@ def test_the_migration_keeps_the_saved_default_as_the_last_choice_and_is_applied
         u.session.execute("INSERT INTO engine_connections (engine, label, auth_kind, status, is_default) "
                           "VALUES ('codex', 'ChatGPT', 'subscription', 'connected', 0)")
     result = migrate()
-    assert result.applied == [9] and result.version == 9
+    assert result.applied == [9, 10, 11, 12, 13] and result.version == 13
     with get_database().read() as u:
         rows = {c.label: c for c in u.engine_connections.list()}
         assert rows["Gemini"].chosen_at == rows["Gemini"].updated_at   # nothing lost: the default is their last choice
         assert rows["ChatGPT"].chosen_at is None
         assert rows["Gemini"].is_default is True and rows["ChatGPT"].status == "connected"
     again = migrate()
-    assert again.applied == [] and again.version == 9                  # a second start changes nothing
+    assert again.applied == [] and again.version == 13                  # a second start changes nothing
 
 
 def test_a_failing_environment_makes_an_engine_count_as_not_installed_and_never_breaks_the_screen(ready, monkeypatch, env):

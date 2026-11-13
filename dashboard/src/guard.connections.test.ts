@@ -22,8 +22,8 @@ describe("keys and providers live in one place", () => {
 
   it("only the Connections card draws a password field or names a key field", () => {
     // The key of a data provider lives in the Connections card. The key of an AI engine (task 3127) is another feature,
-    // in Settings > Engines and in the engines step of the first run, so its card is the only other password field.
-    expect(filesWith('type="password"')).toEqual(["./screens/connections/ProviderCard.tsx", "./screens/engines/ConnectCards.tsx"]);
+    // in Settings > Engines and in the engines step of the first run, so its card is another password field. The Telegram bot token (Settings > Telegram) is the third.
+    expect(filesWith('type="password"')).toEqual(["./screens/connections/ProviderCard.tsx", "./screens/engines/ConnectCards.tsx", "./screens/settings/BackupSection.tsx", "./screens/settings/TelegramSection.tsx"]);
     for (const file of filesWith(/\bkey_id\b|\bsecret\b/)) {
       expect(file.startsWith("./screens/connections/") || file === "./i18n/messages/connections.ts", file).toBe(true);
     }

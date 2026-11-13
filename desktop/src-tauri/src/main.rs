@@ -1,8 +1,9 @@
 //! Hokma desktop window (Tauri 2). SPEC-001 addendum 0.0.13, section 11, task 3138.
 //!
 //! One window, one engine: opening the window starts the engine hidden and shows the start screen until /health
-//! answers; closing the window stops the engine (asking first when an agent is working). A second launch only
-//! brings the open window to the front. The panel itself is served by the engine (http://127.0.0.1:<port>), so
+//! answers. Closing the window only hides it (the engine keeps running, so routines fire at their hour); the tray
+//! icon reopens it, and "Quit" stops the engine and exits (asking first when an agent is working). A second launch
+//! only brings the open window to the front. The panel itself is served by the engine (http://127.0.0.1:<port>), so
 //! every engine version brings its own panel; the window only adds the start screen, the Update menu and the
 //! link rules (external links open in the system browser).
 
@@ -22,6 +23,7 @@ use i18n::{t, texts};
 use serde::Serialize;
 use std::thread;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
@@ -138,7 +140,51 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     Menu::with_items(app, &[&hokma])
 }
 
-/// Close the window: ask when an agent is working, then stop the engine and quit.
+/// What closing the window does: hide it and leave the engine running. Only a real quit (already `exiting`) lets
+/// the window close.
+fn close_hides_window(exiting: bool) -> bool {
+    !exiting
+}
+
+/// Quitting asks first only when an agent is working.
+fn quit_needs_confirmation(busy: bool) -> bool {
+    busy
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "tray_open", t("tray_open", &[]), true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "tray_quit", t("menu_quit", &[]), true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let mut builder = TrayIconBuilder::with_id("main")
+        .tooltip("Hokma")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "tray_open" => show_main(app),
+            "tray_quit" => begin_close(app.clone()),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Quit: ask when an agent is working, then stop the engine and exit.
 fn begin_close(app: AppHandle) {
     {
         let mut inner = shared(&app).0.lock().unwrap();
@@ -150,7 +196,7 @@ fn begin_close(app: AppHandle) {
     thread::spawn(move || {
         let port = shared(&app).0.lock().unwrap().port;
         let busy = port.and_then(http::health).map(|h| h.busy).unwrap_or(false);
-        if busy {
+        if quit_needs_confirmation(busy) {
             let close = app
                 .dialog()
                 .message(t("busy_question", &[]))
@@ -175,11 +221,7 @@ fn main() {
     let app = tauri::Builder::default()
         // First: a second launch hands over to this one and only brings the window to the front.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_main(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -233,6 +275,7 @@ fn main() {
             if let Ok(url) = window.url() {
                 shared(&handle).0.lock().unwrap().splash = Some(url);
             }
+            build_tray(&handle)?;
             engine::start(handle.clone());
             engine::monitor(handle);
             Ok(())
@@ -240,9 +283,10 @@ fn main() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle().clone();
-                if !shared(&app).0.lock().unwrap().exiting {
+                let exiting = shared(&app).0.lock().unwrap().exiting;
+                if close_hides_window(exiting) {
                     api.prevent_close();
-                    begin_close(app);
+                    let _ = window.hide();
                 }
             }
         })
@@ -263,6 +307,18 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closing_the_window_hides_it_until_a_real_quit() {
+        assert!(close_hides_window(false));
+        assert!(!close_hides_window(true));
+    }
+
+    #[test]
+    fn quit_asks_only_when_an_agent_is_working() {
+        assert!(quit_needs_confirmation(true));
+        assert!(!quit_needs_confirmation(false));
+    }
 
     #[test]
     fn the_panel_and_the_start_screen_stay_in_the_window() {

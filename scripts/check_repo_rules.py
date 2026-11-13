@@ -60,7 +60,7 @@ SPANISH_ALLOWED = (
 )
 # Not authored text: generated or third-party content.
 # The only place where names of third-party authors may appear: the license notices required by those licenses.
-ORIGIN_EXEMPT = ("legal/",)
+ORIGIN_EXEMPT = ("legal/", ".notices/THIRD_PARTY.txt")
 SKIPPED = ("dashboard/dist/", "uv.lock", "dashboard/package-lock.json")
 BINARY_SUFFIXES = {".svg", ".png", ".jpg", ".ico", ".woff", ".woff2", ".zip", ".gz"}
 

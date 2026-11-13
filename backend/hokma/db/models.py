@@ -70,7 +70,7 @@ class Record:
 
 @dataclass(frozen=True, slots=True)
 class Profile(Record):
-    BOOLS = ("telemetry_enabled", "exists", "permission_mode_intro_seen", "no_active_project")
+    BOOLS = ("telemetry_enabled", "exists", "permission_mode_intro_seen", "no_active_project", "keep_awake", "wake_enabled")
     exists: bool = False
     owner_name: str = ""
     fund_name: str | None = None
@@ -91,6 +91,8 @@ class Profile(Record):
     permission_mode: str = "ask"
     permission_mode_intro_seen: bool = False
     update_checked_at: str | None = None
+    keep_awake: bool = False
+    wake_enabled: bool = False
     setup_completed_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None

@@ -20,6 +20,7 @@ import re
 import urllib.error
 import urllib.request
 
+from hokma.connections.store import KeyStore
 from hokma.i18n import t
 from hokma.update.safe_exec import run_isolated
 from hokma.update.source import SHA_RE, UpdateError, VersionManifest, parse_version
@@ -70,8 +71,8 @@ def _token_from_gh() -> str | None:
 
 
 def github_token() -> str | None:
-    """The student's GitHub token, or None when neither git nor gh has one."""
-    return _token_from_git() or _token_from_gh()
+    """The token Hokma saved on connecting GitHub (credential store), else the one from git or gh, else None."""
+    return KeyStore().get("github") or _token_from_git() or _token_from_gh()
 
 
 def _get(url: str, token: str | None, accept: str, limit: int) -> bytes:

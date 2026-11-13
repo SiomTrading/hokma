@@ -17,6 +17,7 @@ from hokma.core.origin import TEST_HOSTS, LocalOnlyMiddleware, hosts_for_port
 from hokma.db import vectors
 from hokma.docs import folder_worker
 from hokma.db.api import database_lifespan, router as database_router
+from hokma import features_0031
 from hokma.engines.api import router as engines_router
 from hokma.engine.api import router as engine_router
 from hokma.engine.conversations_api import router as conversations_router
@@ -121,6 +122,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     app.include_router(connections_router)
     app.include_router(agents_router)
     app.include_router(permissions_router)
+    features_0031.attach(app, agent_working)
 
     dist = dashboard_dist()
     if dist.is_dir():

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.0.31
+
+Hokma keeps the computer awake while it works, talks to the student through Telegram, and backs up everything to the
+student's own GitHub (SPEC-011).
+
+- Awake while there is work: the computer is not suspended while a turn or a routine runs; no wake-up is scheduled on macOS.
+  After a sleep, the routines that were missed run once.
+- Telegram: pair a bot from Settings, approve or reject permissions with buttons, get notices there, with an email as the
+  fallback when Telegram fails. Oversized permission prompts are denied with an explanation.
+- GitHub without git or gh: "Connect GitHub" uses the device flow (a code on screen, approved in the browser). Each project
+  gets its own private repository and stays connected by itself.
+- Cloud backup of everything: projects, Library originals, folders added to a project, the database and the memory. The
+  encrypted `.hkb` goes to a private release of the student's repository, only when something changed; the 7 most recent are
+  kept. The recovery key is shown once, can be generated again until it is confirmed, and is final after that.
+- Restore on another computer from Settings: pick the backup, type the key. The engine restarts by itself and the screen lists
+  what has to be reconnected. The previous database is kept in `backups/before-restore-*`.
+- System tray icon on the desktop app.
+- A third-party notice travels inside the app, in `.notices/THIRD_PARTY.txt`.
+
 ## 0.0.30
 
 The chat answers with the engine that is really there, and the model button lists every connected engine (bugs 1095, 1104 and 1105).

@@ -28,6 +28,7 @@
   "menu_update_to": "Update to version {version}",
   "menu_reload": "Reload",
   "menu_quit": "Quit Hokma",
+  "tray_open": "Open Hokma",
   "menu_edit": "Edit",
   "update_available": "A new version is available ({version}). Update now? Hokma closes and opens again by itself in a few minutes.",
   "update_now": "Update",

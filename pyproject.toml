@@ -1,6 +1,6 @@
 [project]
 name = "hokma"
-version = "0.0.30"
+version = "0.0.31"
 description = "Hokma: installable harness by SiomTrading"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,6 +23,11 @@ dependencies = [
     "openpyxl==3.1.5",
     "xlrd==2.0.2",
     "sqlite-vec==0.1.9",
+    # Telegram link (task 3215, SPEC-011 P7): the standard client; the pairing and buttons are in hokma/telegram/core.
+    "python-telegram-bot==22.8",
+    # AES-256-GCM for the encrypted cloud backup (task 3215, SPEC-011 P10). Binary wheels for the five platforms.
+    # Pinned below 49: macOS Intel wheels end at 48.x.
+    "cryptography>=48.0.1,<49",
 ]
 
 [project.scripts]

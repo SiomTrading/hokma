@@ -1,0 +1,36 @@
+import { defineMessages } from "@/i18n";
+
+export default defineMessages({
+  es: {
+    "settings.persistent": "Mantener trabajando",
+    "persist.keepAwake": "Mantener Hokma trabajando",
+    "persist.keepAwake.hint": "Mientras Hokma trabaja o una rutina corre, el equipo no se suspende.",
+    "persist.unsupported": "Este equipo no permite evitar la suspensión desde Hokma.",
+    "persist.wake": "Despertar para la próxima rutina",
+    "persist.wake.off": "Apagado",
+    "persist.wake.off.message": "El equipo no se despertará solo.",
+    "persist.wake.ok": "Listo",
+    "persist.wake.ok.message": "Hokma despierta el equipo poco antes de la próxima rutina.",
+    "persist.wake.needs_permission": "Falta un permiso",
+    "persist.wake.needs_permission.message": "El sistema no deja programar el despertar. Hokma solo evita la suspensión mientras trabaja.",
+    "persist.wake.unsupported": "No disponible",
+    "persist.wake.unsupported.message": "Este equipo no puede despertarse por programa. Hokma solo evita la suspensión mientras trabaja.",
+    "persist.powerOff": "Con el PC apagado no corre nada. Para rutinas 24/7, mira las rutinas en otra máquina.",
+  },
+  en: {
+    "settings.persistent": "Keep working",
+    "persist.keepAwake": "Keep Hokma working",
+    "persist.keepAwake.hint": "While Hokma works or a routine runs, the computer does not go to sleep.",
+    "persist.unsupported": "This computer does not let Hokma prevent sleep.",
+    "persist.wake": "Wake up for the next routine",
+    "persist.wake.off": "Off",
+    "persist.wake.off.message": "The computer will not wake up by itself.",
+    "persist.wake.ok": "Ready",
+    "persist.wake.ok.message": "Hokma wakes the computer shortly before the next routine.",
+    "persist.wake.needs_permission": "Permission needed",
+    "persist.wake.needs_permission.message": "The system does not allow scheduling a wake-up. Hokma only prevents sleep while it works.",
+    "persist.wake.unsupported": "Not available",
+    "persist.wake.unsupported.message": "This computer cannot be woken on a schedule. Hokma only prevents sleep while it works.",
+    "persist.powerOff": "Nothing runs while the PC is off. For 24/7 routines, see routines on another machine.",
+  },
+});

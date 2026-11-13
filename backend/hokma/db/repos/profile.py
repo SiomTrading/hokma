@@ -20,7 +20,7 @@ _ENUMS = {
 _FIELDS = ("owner_name", "fund_name", "timezone", "language", "engine", "telemetry_enabled",
            "max_parallel_agents", "workdir", "database_engine", "claude_status", "claude_plan",
            "weekly_token_cap", "theme", "active_project_id", "no_active_project", "permission_mode",
-           "permission_mode_intro_seen", "update_checked_at")
+           "permission_mode_intro_seen", "update_checked_at", "keep_awake", "wake_enabled")
 
 
 def _clean_name(value: Any, *, required: bool, field: str) -> str | None:
@@ -52,14 +52,14 @@ class ProfileRepo(Repo):
              claude_status: Any = UNSET, claude_plan: Any = UNSET, weekly_token_cap: Any = UNSET,
              theme: Any = UNSET, active_project_id: Any = UNSET, permission_mode: Any = UNSET,
              permission_mode_intro_seen: Any = UNSET, update_checked_at: Any = UNSET,
-             no_active_project: Any = UNSET) -> Profile:
+             no_active_project: Any = UNSET, keep_awake: Any = UNSET, wake_enabled: Any = UNSET) -> Profile:
         values = given(owner_name=owner_name, fund_name=fund_name, timezone=timezone, language=language,
                        engine=engine, telemetry_enabled=telemetry_enabled, max_parallel_agents=max_parallel_agents,
                        workdir=workdir, database_engine=database_engine, claude_status=claude_status,
                        claude_plan=claude_plan, weekly_token_cap=weekly_token_cap, theme=theme,
                        active_project_id=active_project_id, permission_mode=permission_mode,
                        permission_mode_intro_seen=permission_mode_intro_seen, update_checked_at=update_checked_at,
-                       no_active_project=no_active_project)
+                       no_active_project=no_active_project, keep_awake=keep_awake, wake_enabled=wake_enabled)
         for name, allowed in _ENUMS.items():
             if name in values:
                 require_in(name, values[name], allowed)
@@ -73,6 +73,9 @@ class ProfileRepo(Repo):
             values["fund_name"] = _clean_name(values["fund_name"], required=False, field="fund_name")
         if "telemetry_enabled" in values:
             values["telemetry_enabled"] = flag(values["telemetry_enabled"])
+        for name in ("keep_awake", "wake_enabled"):
+            if name in values:
+                values[name] = flag(values[name])
         if "no_active_project" in values:
             values["no_active_project"] = flag(values["no_active_project"])
         if "permission_mode_intro_seen" in values:

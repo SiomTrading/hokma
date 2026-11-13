@@ -141,7 +141,7 @@ def test_runs_in_working_folder_and_has_isolated_claude_config(client, home, tmp
 def test_token_is_not_in_the_shell_environment(client, home):
     with client.websocket_connect(URL) as ws:
         json.loads(ws.receive_text())
-        type_line(ws, f"env | grep -c {SESSION_TOKEN}; echo done-$((1+1))")
+        type_line(ws, f"env | grep -c -- {SESSION_TOKEN}; echo done-$((1+1))")
         out = read_until(ws, "done-2")
     assert re.search(r"^0\s*$", out, re.M)
 
