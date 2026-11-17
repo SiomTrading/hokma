@@ -76,6 +76,16 @@ describe.each(["es", "en"] as const)("Novedades (%s)", (locale) => {
     expect(screen.getByRole("button", { name: T("news.check") })).toBeEnabled();
   });
 
+  it("says the history is in English when the panel is in Spanish, and nothing in English (1167)", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/news": news(), "GET /api/update/state": state() });
+    renderWithApp(<NewsSection />);
+    await screen.findByText(T("news.history"));
+    if (locale === "es") expect(screen.getByText(T("news.historyEnglish"))).toBeInTheDocument();
+    else expect(screen.queryByText(T("news.historyEnglish"))).not.toBeInTheDocument();
+    expect(screen.getByText("Chat with photos")).toBeInTheDocument();
+  });
+
   it("shows the new version with Update Hokma as the main action and Check for updates next to it", async () => {
     setLocale(locale);
     mockApi({ "GET /api/news": NEWER, "GET /api/update/state": state({ newer: true, latest_version: "0.0.7" }) });

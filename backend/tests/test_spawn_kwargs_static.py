@@ -3,6 +3,11 @@ import ast
 import pathlib
 
 PKG = pathlib.Path(__file__).resolve().parents[1] / "hokma"
+CLI = pathlib.Path(__file__).resolve().parents[2] / "cli"
+# A launcher can reach a function as a parameter (`popen=subprocess.Popen`, `run=subprocess.run`) and be called by that
+# name: those calls open a console on Windows just the same (bug 1107 sweep, 0.0.36).
+INJECTED_NAMES = {"popen", "_popen"}
+INJECTED_RUN_NAMES = {"_run"}          # only in a module that imports subprocess (wake_windows: `run=subprocess.run`)
 SUBPROCESS_CALLS = {"Popen", "run", "check_output", "check_call", "call", "getoutput", "getstatusoutput"}
 ASYNCIO_CALLS = {"create_subprocess_exec", "create_subprocess_shell"}
 # Files allowed to launch without spawn_kwargs, each with its reason. Keep this list minimal.
@@ -60,11 +65,22 @@ def _uses_spawn_kwargs(call: ast.Call) -> bool:
     return False
 
 
+def _is_injected_launch(call: ast.Call, uses_subprocess: bool = False) -> bool:
+    """A call to a launcher received as a parameter. A bare pass-through (`popen(args, **kwargs)`) is a wrapper."""
+    f = call.func
+    name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+    if name not in INJECTED_NAMES and not (uses_subprocess and isinstance(f, ast.Attribute) and name in INJECTED_RUN_NAMES):
+        return False
+    only_passthrough = not call.keywords or all(k.arg is None and ast.unparse(k.value) == "kwargs" for k in call.keywords)
+    return not (only_passthrough and len(call.args) == 1 and ast.unparse(call.args[0]) == "args")
+
+
 def find_violations(source: str, filename: str = "<src>") -> list[str]:
     tree = ast.parse(source, filename)
     sub_mods, aio_mods, funcs = _aliases(tree)
     return [f"{filename}:{n.lineno}" for n in ast.walk(tree)
-            if isinstance(n, ast.Call) and _is_launch(n, sub_mods, aio_mods, funcs) and not _uses_spawn_kwargs(n)]
+            if isinstance(n, ast.Call) and (_is_launch(n, sub_mods, aio_mods, funcs) or _is_injected_launch(n, bool(sub_mods)))
+            and not _uses_spawn_kwargs(n)]
 
 
 def test_every_launch_uses_spawn_kwargs():
@@ -74,7 +90,14 @@ def test_every_launch_uses_spawn_kwargs():
         if rel in EXEMPT or rel == "core/proc.py":
             continue
         bad += find_violations(path.read_text(encoding="utf-8"), rel)
+    for path in sorted(CLI.rglob("*.py")):
+        bad += find_violations(path.read_text(encoding="utf-8"), "cli/" + path.relative_to(CLI).as_posix())
     assert not bad, "process launches without spawn_kwargs(): " + ", ".join(bad)
+
+
+def test_the_scan_sees_the_packages_it_must_protect():
+    """A scan over an empty folder passes by itself: the folders have to exist and hold code."""
+    assert len(list(PKG.rglob("*.py"))) > 100 and list(CLI.rglob("*.py"))
 
 
 def test_detector_catches_aliases_and_direct_imports():
@@ -86,3 +109,12 @@ def test_detector_catches_aliases_and_direct_imports():
     assert find_violations(ok) == []
     assert find_violations("import subprocess\nsubprocess.run(['x'], **{'a': 1})") == ["<src>:2"]
     assert find_violations("import subprocess\nsubprocess.PIPE\nx = subprocess.CalledProcessError") == []
+
+
+def test_detector_catches_injected_launchers():
+    assert find_violations("def f(popen):\n    popen(['x'])") == ["<src>:2"]
+    src = "import subprocess\nclass A:\n    def g(self):\n        self._run(['x'], capture_output=True)"
+    assert find_violations(src) == ["<src>:4"]
+    assert find_violations("class A:\n    def g(self):\n        self._run(['x'])") == []      # no subprocess in the module
+    assert find_violations("def f(popen):\n    popen(['x'], **spawn_kwargs())") == []
+    assert find_violations("def f(popen):\n    def w(args, **kwargs):\n        return popen(args, **kwargs)") == []

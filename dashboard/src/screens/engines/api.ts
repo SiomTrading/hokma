@@ -28,6 +28,8 @@ export interface EnginesListing {
   models?: ModelGroup[];
   /** The engine that will answer, by the rule the chat uses (bug 1095). */
   active?: ActiveEngine;
+  /** The student pressed Disconnect on the Claude card; kept by the server (a removed Claude row), so it survives leaving Settings and restarts. */
+  claude_disabled_by_user?: boolean;
 }
 
 export interface ModelGroup {
@@ -77,5 +79,7 @@ export const enginesApi = {
 
 /** The failure codes of the ping, mapped to a text key. Unknown codes fall back to the generic engine error. */
 export function errorKey(code: string): string {
+  // Adapter codes carry the CLI name (claude_not_found, gemini_not_found): all of them read "I cannot find it" (1158).
+  if (code.endsWith("_not_found")) return "eng.err.not_found";
   return ["region", "auth", "quota", "network", "not_found"].includes(code) ? `eng.err.${code}` : "eng.err.engine_error";
 }

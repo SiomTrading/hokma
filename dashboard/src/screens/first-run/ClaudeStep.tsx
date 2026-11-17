@@ -50,6 +50,11 @@ export function ClaudeStep({
       setClaude(next);
       setError(null);
       if (next.state === "connected") setWaiting(false);
+      // A refreshed page with the login still running keeps waiting; a login that ended with an error stops waiting.
+      else if (next.login.error && !next.login.running) {
+        setWaiting(false);
+        setCodeSent(false);
+      } else if (next.login.running) setWaiting(true);
       if (next.state !== reported.current) {
         reported.current = next.state;
         onState?.(next.state);
@@ -165,9 +170,11 @@ export function ClaudeStep({
 
       {claude !== null && claude.state !== "connected" ? (
         <>
-          <p className="p" style={{ fontSize: 12 }}>
-            {t("firstrun.claude.skipWarn")}
-          </p>
+          {compact ? null : (
+            <p className="p" style={{ fontSize: 12 }}>
+              {t("firstrun.claude.skipWarn")}
+            </p>
+          )}
           <Button size="sm" style={{ alignSelf: "flex-start" }} onClick={() => void check()}>
             {t("firstrun.claude.recheck")}
           </Button>

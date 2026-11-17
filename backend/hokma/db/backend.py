@@ -121,6 +121,7 @@ class Backend(ABC):
 # --------------------------------------------------------------------------------------------- SQLite
 
 WAL_RETRY_SECONDS = 5.0
+BUSY_TIMEOUT_MS = 10000          # a writer queues behind another writer (library ingest, migration) this long
 
 
 def map_sqlite_error(exc: sqlite3.Error) -> DbError | sqlite3.Error:
@@ -137,10 +138,10 @@ class SqliteSession(Session):
     engine = "sqlite"
 
     def __init__(self, path: Path) -> None:
-        self._conn = sqlite3.connect(str(path), isolation_level=None, timeout=5.0)
+        self._conn = sqlite3.connect(str(path), isolation_level=None, timeout=BUSY_TIMEOUT_MS / 1000)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
-        self._conn.execute("PRAGMA busy_timeout = 5000")
+        self._conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
         self._enable_wal()
         self._conn.execute("PRAGMA synchronous = NORMAL")
         self.vec_loaded = load_vec_extension(self._conn)      # sqlite-vec for the Library's vectors; False when absent

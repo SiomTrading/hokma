@@ -62,6 +62,7 @@ export function RestorePoints() {
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [points, setPoints] = useState<RestorePoint[] | null>(null);
+  const [issue, setIssue] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ code: string | null; text: string } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [changes, setChanges] = useState<PointChanges | null>(null);
@@ -89,7 +90,9 @@ export function RestorePoints() {
     setChanges(null);
     setPoints(null);
     try {
-      setPoints((await permissionsApi.points(projectId)).points);
+      const list = await permissionsApi.points(projectId);
+      setIssue(list.issue ?? null);
+      setPoints(list.points);
     } catch (cause) {
       setProblem({ code: errorCode(cause), text: permissionErrorText(cause) });
     }
@@ -138,14 +141,18 @@ export function RestorePoints() {
 
   const restoreFile = (id: string, path: string) =>
     restore(id, async () => {
-      await permissionsApi.restoreFile(id, path, projectId);
-      return t("points.fileRestored", { path });
+      const done = await permissionsApi.restoreFile(id, path, projectId);
+      const where = done.restored?.[0] ?? path;
+      if (done.unchanged) return t("points.fileUnchanged", { path });
+      return done.renamed ? t("points.fileRestoredAs", { path: where }) : t("points.fileRestored", { path: where });
     });
 
   const restoreAll = (id: string) =>
     restore(id, async () => {
       const done = await permissionsApi.restoreDeleted(id, projectId);
-      return t("points.allRestored", { count: done.count ?? done.restored.length });
+      const text = t("points.allRestored", { count: done.count ?? done.restored.length });
+      const skipped = done.skipped ?? [];
+      return skipped.length > 0 ? `${text}. ${t("points.skipped", { count: skipped.length, paths: skipped.join(", ") })}` : text;
     });
 
   let body;
@@ -158,10 +165,26 @@ export function RestorePoints() {
       <ErrorState message={problem.text} onRetry={() => void load()} />
     );
   } else if (points === null) body = <Loading />;
-  else if (points.length === 0) body = <p className="p">{t("points.none")}</p>;
+  else if (points.length === 0) {
+    body = (
+      <>
+        <p className="p">{t("points.none")}</p>
+        {issue ? (
+          <p className="p" role="status" data-testid="points-issue">
+            {t(`points.issue.${issue}`) === `points.issue.${issue}` ? t("points.issue.failed") : t(`points.issue.${issue}`)}
+          </p>
+        ) : null}
+      </>
+    );
+  }
   else {
     body = (
       <ul className="perm-list" aria-label={t("points.list")}>
+        {issue ? (
+          <li className="p" role="status" data-testid="points-issue">
+            {t(`points.issue.${issue}`) === `points.issue.${issue}` ? t("points.issue.failed") : t(`points.issue.${issue}`)}
+          </li>
+        ) : null}
         {points.map((point) => (
           <li key={point.id}>
             <Pane className="perm-row" data-testid="restore-point">

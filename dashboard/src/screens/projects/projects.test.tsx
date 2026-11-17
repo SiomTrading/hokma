@@ -182,6 +182,19 @@ describe.each(["es", "en"] as const)("projects panel (%s)", (locale) => {
     expect(within(panel()).getByText(t("projects.drop.sub"))).toBeInTheDocument();
   });
 
+  it("reads the list again when the wizard changes the working folder", async () => {
+    function Emitter() {
+      const shell = useShell();
+      return <button onClick={() => shell.emit("setup:changed")}>emit</button>;
+    }
+    setToken("test-session-token-0123456789");
+    renderWithApp(<><ProjectsPanel /><Emitter /></>);
+    await screen.findByText("/work");
+    backend.list = () => ({ workdir: "/nuevo", root: "/nuevo/projects", active_id: null, kinds: [], projects: [] });
+    await userEvent.setup().click(screen.getByRole("button", { name: "emit" }));
+    expect(await screen.findByText("/nuevo")).toBeInTheDocument();
+  });
+
   it("changes the active project, reloads its tree and announces it", async () => {
     const other = backend.add("Robot NQ", "robot");
     other.entries.push({ path: "codigo/bot.py", name: "bot.py", type: "file", depth: 1, size: 900 });

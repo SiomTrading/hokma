@@ -34,6 +34,7 @@ class Pending:
         self.request_id, self.tool_use_id, self.tool = request_id, tool_use_id, tool
         self.input, self.summary, self.expires_at = tool_input, summary, expires_at
         self.future: asyncio.Future[tuple[str, str]] = asyncio.get_running_loop().create_future()
+        self.channel = "dashboard"          # where the owner answered from (set by `resolve`)
 
     def event(self) -> dict[str, Any]:
         return {"type": "permission_request", "request_id": self.request_id, "tool_use_id": self.tool_use_id,
@@ -160,10 +161,11 @@ class ChatSession:
         except Exception:                                 # noqa: BLE001
             pass
 
-    async def resolve(self, request_id: str, decision: str, by: str) -> bool:
+    async def resolve(self, request_id: str, decision: str, by: str, channel: str = "dashboard") -> bool:
         pending = self.pending.get(request_id)
         if pending is None or pending.future.done():
             return False
+        pending.channel = channel
         pending.future.set_result((decision, by))
         return True
 
@@ -435,7 +437,7 @@ class ChatSession:
         self.engine.store.record_permission(
             self.conversation_id, pending.tool, pending.summary,
             ("allowed_by_human" if allow else "denied_by_human") if human else f"denied_by_{by}",
-            "human" if human else "system", "dashboard")
+            "human" if human else "system", pending.channel)
         await self.emit({"type": "permission_resolved", "request_id": pending.request_id, "decision": decision,
                          "by": by})
 

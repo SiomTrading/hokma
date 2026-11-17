@@ -188,7 +188,7 @@ def test_a_checkpoint_restore_opens_the_resolved_path_with_no_follow(owner, monk
     checkpoints.restore_file(work, point, "a.txt", protect())
     path, flags = seen[-1]
     assert path == os.path.join(os.path.realpath(work), "a.txt")
-    assert flags & os.O_NOFOLLOW and flags & os.O_EXCL
+    assert flags & getattr(os, "O_NOFOLLOW", 0) and flags & os.O_EXCL
     assert (work / "a.txt").read_text() == "one\n"
 
 

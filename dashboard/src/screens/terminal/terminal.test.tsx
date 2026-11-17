@@ -3,8 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithApp } from "@/test/utils";
 import { useShell } from "@/shell/useShell";
+import { TerminalBridge } from "./TerminalBridge";
 import { TerminalPanel } from "./TerminalPanel";
-import { handleKey, resetTerminals, setTerminalDrivers } from "./store";
+import { handleKey, launchTerminal, resetTerminals, setTerminalDrivers } from "./store";
 
 interface FakeSocket {
   path: string;
@@ -77,6 +78,8 @@ function Harness() {
     <>
       <button onClick={() => shell.emit("terminal:new")}>plus</button>
       <button onClick={() => shell.emit("project:active", { id: 7 })}>project</button>
+      <button onClick={() => shell.emit("setup:changed")}>setup</button>
+      <TerminalBridge />
       <TerminalPanel />
     </>
   );
@@ -113,6 +116,45 @@ describe("terminal panel", () => {
     terminals[0].cols = 120;
     terminals[0].resizeCb?.();
     expect(sockets[0].sent).toContainEqual({ type: "resize", cols: 120, rows: 8 });
+  });
+
+  it("replaces the terminal the dock opened by itself when the wizard changes the folder (1165)", async () => {
+    renderWithApp(<Harness />);
+    expect(sockets).toHaveLength(1);
+    await userEvent.click(screen.getByText("setup"));
+    expect(sockets).toHaveLength(2);
+    expect(sockets[0].closed).toBe(true);
+    expect(terminals[0].disposed).toBe(true);
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+  });
+
+  it("keeps a terminal the student typed into when the wizard changes the folder", async () => {
+    renderWithApp(<Harness />);
+    terminals[0].dataCb?.("ls\r");
+    await userEvent.click(screen.getByText("setup"));
+    expect(sockets).toHaveLength(1);
+    expect(terminals[0].disposed).toBe(false);
+  });
+
+  it("moves the automatic terminal when the wizard changes the folder with the panel unmounted (1165)", async () => {
+    function BridgeOnly() {
+      const shell = useShell();
+      return (
+        <>
+          <button onClick={() => shell.emit("setup:changed")}>setup</button>
+          <TerminalBridge />
+        </>
+      );
+    }
+    act(() => {
+      launchTerminal({ auto: true });
+    });
+    expect(sockets).toHaveLength(1);
+    renderWithApp(<BridgeOnly />);
+    await userEvent.click(screen.getByText("setup"));
+    expect(sockets).toHaveLength(2);
+    expect(sockets[0].closed).toBe(true);
+    expect(sockets[1].closed).toBe(false);
   });
 
   it("attaches the xterm element to the panel", () => {

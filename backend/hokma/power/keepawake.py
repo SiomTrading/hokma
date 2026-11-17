@@ -13,6 +13,8 @@ import sys
 import threading
 from typing import Any, Protocol
 
+from hokma.core.proc import spawn_kwargs
+
 log = logging.getLogger("hokma.power")
 
 ES_CONTINUOUS = 0x80000000
@@ -85,7 +87,8 @@ class MacBlocker:
             return True
         try:
             self._proc = self._popen(["caffeinate", "-i", "-w", str(os.getpid())],
-                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     **spawn_kwargs())
         except OSError:
             log.warning("caffeinate could not be started")
             self._proc = None

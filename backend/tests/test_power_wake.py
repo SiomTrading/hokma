@@ -162,3 +162,25 @@ def test_api_exposes_wake_state(env, monkeypatch):
         body = client.put("/api/power", json={"wake_enabled": True}, headers=HEADERS).json()
         assert body["wake"]["status"] == "unsupported" and body["wake"]["message"]
         assert fake.log == []
+
+
+def test_a_failed_registration_is_retried_not_remembered():
+    """Bug 1141 (A): schedule() failed once; the same key must be tried again (after the wait), not stay stuck."""
+    class Flaky(Fake):
+        def __init__(self):
+            super().__init__()
+            self.results = [False, True]
+
+        def schedule(self, at):
+            self.log.append(("schedule", at))
+            return self.results.pop(0)
+
+    now = [1000.0]
+    fake = Flaky()
+    w = wake.Waker(fake, clock=lambda: now[0])
+    assert w.sync(True, AT) == "needs_permission"
+    assert w.sync(True, AT) == "needs_permission" and len(fake.log) == 1      # too soon: no hammering
+    now[0] += wake.RETRY_AFTER + 1
+    assert w.sync(True, AT) == "ok" and w.at == AT and len(fake.log) == 2
+    w.sync(True, AT)
+    assert len(fake.log) == 2                                                  # success is remembered again

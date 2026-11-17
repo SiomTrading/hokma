@@ -6,7 +6,7 @@ import { setLocale, t } from "@/i18n";
 import type { Locale } from "@/i18n";
 import { ShellProvider } from "@/shell/store";
 import { AgentsSettings } from "./AgentsSettings";
-import { describeSchedule, nextModel, parseWeekly } from "./format";
+import { describeSchedule, formatDateTime, nextModel, parseWeekly, savedToastKey } from "./format";
 import { ModelsSettings } from "./ModelsSettings";
 import { TasksScreen } from "./TasksScreen";
 import type { AgentItem, JobItem, UsageData } from "./types";
@@ -276,7 +276,7 @@ describe.each<Locale>(["es", "en"])("agents, usage and scheduled tasks (%s)", (l
     expect(sent).toMatchObject({ name: "Premarket brief", agent: "hokma", kind: "daily", expr: "07:30" });
 
     expect(await screen.findByText("Premarket brief")).toBeInTheDocument();
-    expect(screen.getByText(t("tasks.when.daily", { time: "07:30" }))).toBeInTheDocument();
+    expect(screen.getByText(`${t("tasks.when.daily", { time: "07:30" })} (${backend.jobs[0]?.timezone})`)).toBeInTheDocument();
     const toggle = screen.getByRole("switch", { name: t("tasks.toggle", { name: "Premarket brief" }) });
     expect(toggle).not.toBeChecked();
 
@@ -314,17 +314,70 @@ describe.each<Locale>(["es", "en"])("agents, usage and scheduled tasks (%s)", (l
     expect(await screen.findByText(t("tasks.empty.title"))).toBeInTheDocument();
     confirm.mockRestore();
   });
+
+  it("shows when it last ran, the zone, and the last skipped run (bugs 1136 and 1140)", async () => {
+    backend.jobs = [{
+      id: 9, name: "Skipper", agent: "hokma", agent_name: "Hokma", agent_active: true, model: "sonnet", prompt: "x",
+      kind: "daily", expr: "07:00", timezone: "America/Bogota", active: true, approved: true,
+      next_run_at: "2026-11-06 12:00:00", last_run_at: "2026-11-05 12:00:00",
+      last: { task_id: 5, status: "done", summary: "ok", error: null, started_at: "2026-11-05 12:00:00", ended_at: "2026-11-05 12:03:00", tokens: 3 },
+      last_skip: { at: "2026-11-06 12:00:00", planned: "2026-11-06 12:00:00", reason: "missed" },
+    }];
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    const skipped = await screen.findByTestId("job-skipped");
+    expect(skipped).toHaveTextContent(t("tasks.skip.missed"));
+    expect(screen.getByText(new RegExp(`\\(America/Bogota\\)`))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(formatDateTime("2026-11-05 12:03:00", locale).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeInTheDocument();
+  });
+
+  it("shows the first run date in the confirmation of turning on (bug 1140)", async () => {
+    const user = userEvent.setup();
+    backend.jobs = [{
+      id: 10, name: "Confirmable", agent: "hokma", agent_name: "Hokma", agent_active: true, model: "sonnet", prompt: "x",
+      kind: "daily", expr: "07:00", timezone: "UTC", active: false, approved: false,
+      next_run_at: "2026-11-06 07:00:00", last_run_at: null, last: null,
+    }];
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    await user.click(await screen.findByRole("switch", { name: t("tasks.toggle", { name: "Confirmable" }) }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(t("tasks.confirm.when", { date: formatDateTime("2026-11-06 07:00:00", locale) }))).toBeInTheDocument();
+  });
+
+  it("a finished run with denied permissions does not read as a clean success (bug 1129)", async () => {
+    backend.jobs = [{
+      id: 8, name: "Writes a file", agent: "hokma", agent_name: "Hokma", agent_active: true, model: "sonnet", prompt: "x",
+      kind: "daily", expr: "07:00", timezone: "UTC", active: true, approved: true,
+      next_run_at: "2026-11-06 07:00:00", last_run_at: "2026-11-05 07:00:00",
+      last: { task_id: 4, status: "done", summary: "Done what I could.", error: null, started_at: null, ended_at: null, tokens: 5, denied: 2 },
+    }];
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    expect(await screen.findByText("Done what I could.")).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(t("tasks.status.doneDenied", { count: 2 })))).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(t("tasks.last", { status: t("tasks.status.done") }) + "$"))).not.toBeInTheDocument();
+  });
+});
+
+describe("saved message", () => {
+  it("only says the task is off when it really is (bug 1138)", () => {
+    expect(savedToastKey(false, false)).toBe("tasks.form.created");
+    expect(savedToastKey(true, false)).toBe("tasks.form.saved");
+    expect(savedToastKey(true, true)).toBe("tasks.form.edited.off");
+  });
 });
 
 describe("schedule text", () => {
   it("describes each kind in the active language", () => {
     setLocale("en");
-    expect(describeSchedule({ kind: "daily", expr: "07:30", timezone: "UTC" }, t, "en")).toBe("Every day, 07:30");
-    expect(describeSchedule({ kind: "weekly", expr: "mon,tue,wed,thu,fri 07:30", timezone: "UTC" }, t, "en")).toBe("Monday - Friday, 07:30");
-    expect(describeSchedule({ kind: "weekly", expr: "sat,sun 09:00", timezone: "UTC" }, t, "en")).toBe("Saturday, Sunday, 09:00");
+    expect(describeSchedule({ kind: "daily", expr: "07:30", timezone: "UTC" }, t, "en")).toBe("Every day, 07:30 (UTC)");
+    expect(describeSchedule({ kind: "weekly", expr: "mon,tue,wed,thu,fri 07:30", timezone: "UTC" }, t, "en")).toBe("Monday - Friday, 07:30 (UTC)");
+    expect(describeSchedule({ kind: "weekly", expr: "sat,sun 09:00", timezone: "UTC" }, t, "en")).toBe("Saturday, Sunday, 09:00 (UTC)");
     expect(describeSchedule({ kind: "interval", expr: "2h", timezone: "UTC" }, t, "en")).toBe("Every 2 h");
     setLocale("es");
-    expect(describeSchedule({ kind: "weekly", expr: "mon,tue,wed,thu,fri 07:30", timezone: "UTC" }, t, "es")).toBe("Lunes - Viernes, 07:30");
+    expect(describeSchedule({ kind: "weekly", expr: "mon,tue,wed,thu,fri 07:30", timezone: "UTC" }, t, "es")).toBe("Lunes - Viernes, 07:30 (UTC)");
+    // bug 1137: nothing but an interval goes through the interval keys, and never a raw key in the panel
+    expect(describeSchedule({ kind: "cron" as never, expr: "0 9 * * 1-5", timezone: "UTC" }, t, "en")).toBe("0 9 * * 1-5");
+    expect(describeSchedule({ kind: "interval", expr: "* * * * *", timezone: "UTC" }, t, "en")).not.toMatch(/tasks\./);
+    expect(describeSchedule({ kind: "daily", expr: "07:30", timezone: "America/Bogota" }, t, "en")).toBe("Todos los d\u00edas, 07:30 (America/Bogota)");
     expect(parseWeekly("mon,fri 07:05")).toEqual({ days: ["mon", "fri"], time: "07:05" });
   });
 });

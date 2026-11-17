@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 from hokma.core.origin import token_matches
 from hokma.agents import errors
@@ -58,7 +58,7 @@ class CapBody(_Body):
 
 
 class JobBody(_Body):
-    name: str = Field(max_length=200)
+    name: str                                   # its length is checked by JobsService (clear error, bug 1140)
     agent: str = Field(max_length=60)
     prompt: str = Field(max_length=20000)
     kind: str = Field(max_length=20)
@@ -67,7 +67,7 @@ class JobBody(_Body):
 
 
 class ActivateBody(_Body):
-    confirm: bool
+    confirm: StrictBool
 
 
 def _auth(header_token: str, query_token: str) -> None:

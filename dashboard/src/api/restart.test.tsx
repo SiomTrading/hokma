@@ -8,6 +8,7 @@ import {
   UPDATE_GIVE_UP_MS,
   getRestartState,
   learnEngineVersion,
+  announceRestore,
   rememberLogPath,
   resetRestartForTests,
   setUpdateHooks,
@@ -225,5 +226,26 @@ describe("the overlay", () => {
     expect(screen.getByText(/\/data\/logs\/engine\.log/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));       // it watches again
     expect(screen.getByText("Restarting Hokma...")).toBeInTheDocument();
+  });
+});
+
+describe("a restore restarts Hokma (task 1150)", () => {
+  it("says the restart is to apply the backup, not that a new version is opening", async () => {
+    health([null]);
+    setLocale("en");
+    announceRestore();
+    watchEngine({ mode: "restart" });
+    expect(getRestartState()).toMatchObject({ phase: "restarting", kind: "restore" });
+    render(<RestartOverlay />);
+    expect(screen.getByText(t("restart.restoreBody", undefined, "en"))).toBeInTheDocument();
+    expect(screen.queryByText(t("restart.body", undefined, "en"))).toBeNull();
+  });
+
+  it("also when the socket closed first and the panel announces the restore a moment later", async () => {
+    health([null]);
+    watchEngine({ mode: "restart" });
+    expect(getRestartState().kind).toBe("restart");
+    announceRestore();
+    expect(getRestartState().kind).toBe("restore");
   });
 });

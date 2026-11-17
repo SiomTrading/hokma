@@ -53,6 +53,15 @@ def _substitute(text: str) -> str:
     return _MARKER.sub(lambda m: values[m.group(1)], text)
 
 
+# Words of a slug that are acronyms and keep their capitals in the name the owner sees ("joel-mcp-builder" is "Joel MCP Builder").
+ACRONYMS = frozenset({"mcp", "qa", "api", "ui", "ux", "ai", "cli", "ci", "cd", "db", "sql", "seo", "css", "html", "pdf",
+                      "sdk", "url", "csv", "json", "yaml", "http", "oauth", "rag", "llm", "ml", "etl", "ide", "pr", "id"})
+
+
+def display_name_from_slug(slug: str) -> str:
+    return " ".join(p.upper() if p in ACRONYMS else p.capitalize() for p in slug.split("-"))
+
+
 def _read_agents(directory: Path) -> dict[str, dict[str, str]]:
     found: dict[str, dict[str, str]] = {}
     for file in sorted(directory.glob("*.md")):
@@ -68,7 +77,7 @@ def _read_agents(directory: Path) -> dict[str, dict[str, str]]:
         except DbError:
             continue
         found[slug] = {
-            "display_name": meta.get("display_name") or " ".join(p.capitalize() for p in slug.split("-")),
+            "display_name": meta.get("display_name") or display_name_from_slug(slug),
             "description": (meta.get("description") or "")[:MAX_DESCRIPTION] or None,
             "model_tier": _TIER.get((meta.get("model") or "").strip().lower(), "balanced"),
             "file": file.name,

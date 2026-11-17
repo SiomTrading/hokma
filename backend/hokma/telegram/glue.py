@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
 import ssl
 from datetime import datetime
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from hokma.connections.store import KeyStore
 from hokma.core.config import hokma_data_dir
@@ -15,13 +18,18 @@ from hokma.db import Database
 from hokma.engine.protocols import DEFAULT_MODEL
 from hokma.i18n import t
 from hokma.telegram.core import TelegramLink
+from hokma.telegram.core.link import GROUP_PLATFORM, PLATFORM, _topic_thread_id
 from hokma.telegram.core.session_policy import SessionResetPolicy, should_reset
+from hokma.telegram.core.telegram_ids import normalize_telegram_chat_id
+from hokma.telegram.link_ext import HokmaApprovalsUI, HokmaPairingStore
 
 log = logging.getLogger("hokma.telegram")
 TOKEN_ENTRY = "telegram_bot"            # entry of the bot token in the system credential store
 CONVERSATION_TITLE = "Telegram"
 TELEGRAM_LIMIT = 4000                  # characters of one message (Telegram allows 4096)
 RETRY_SECONDS = 60
+RECONNECT_BACKOFF = (5, 15, 45, 120, 300)     # seconds between attempts to bring the bot up, capped at the last one
+WATCH_SECONDS = 30                             # how often a bot that should be up is checked
 POLICY = SessionResetPolicy(mode="both", idle_minutes=120, at_hour=4)     # local time
 PROMPT_LIMIT = 3800                    # characters the approval message can show (core truncates beyond)
 
@@ -33,6 +41,27 @@ def tls12_context() -> ssl.SSLContext:
     return ctx
 
 
+API_BASE_ENV = "HOKMA_TELEGRAM_API_BASE"
+
+
+def api_base_override() -> str | None:
+    """Tests only: a local Bot API double (`HOKMA_TELEGRAM_API_BASE=http://127.0.0.1:PORT`). Anything that is not plain
+    http to loopback is ignored, so the variable can never send the bot token to another host."""
+    raw = os.environ.get(API_BASE_ENV, "").strip().rstrip("/")
+    if not raw:
+        return None
+    try:
+        parsed = urlparse(raw)
+        ok = parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost") and not parsed.path
+        parsed.port                                   # a malformed port raises here
+    except ValueError:
+        ok = False
+    if not ok:
+        log.warning("%s ignored: only http://127.0.0.1 or http://localhost are accepted", API_BASE_ENV)
+        return None
+    return raw
+
+
 async def build_application(token: str):
     """core's Application with every Telegram request (calls and long-poll) on a TLS 1.2 context."""
     from telegram.ext import Application
@@ -42,6 +71,10 @@ async def build_application(token: str):
 
     kw = {"connection_pool_size": 512, "pool_timeout": 8.0, "connect_timeout": 10.0,
           "read_timeout": 20.0, "write_timeout": 20.0, "media_write_timeout": 60.0}
+    local = api_base_override()
+    if local:                                         # a loopback double: plain requests, no fallback IPs, no TLS
+        return (Application.builder().token(token).base_url(f"{local}/bot").base_file_url(f"{local}/file/bot")
+                .request(HTTPXRequest(**kw)).get_updates_request(HTTPXRequest(**{**kw, "connection_pool_size": 8})).build())
     try:
         ips = await asyncio.wait_for(discover_fallback_ips(), timeout=5.0)
     except Exception:
@@ -55,6 +88,232 @@ async def build_application(token: str):
 
     # A long-poll is continuously active: never hand getUpdates a pooled socket from a previous poll.
     return Application.builder().token(token).request(request(20)).get_updates_request(request(0)).build()
+
+
+_PERMISSION_HINTS = ("rights", "administrator", "forbidden", "not a forum", "forums_disabled", "chat_admin_required")
+
+
+def classify_failure(exc: BaseException) -> str:
+    """`network` (Telegram not reached), `permission` (Telegram answered and refused) or `other`."""
+    import httpx
+    from telegram.error import Forbidden, NetworkError, TimedOut
+
+    if isinstance(exc, (NetworkError, TimedOut, httpx.HTTPError, OSError, asyncio.TimeoutError)):
+        return "network"
+    if isinstance(exc, Forbidden) or any(h in str(exc).lower() for h in _PERMISSION_HINTS):
+        return "permission"
+    return "other"
+
+
+class HokmaLink(TelegramLink):
+    """`core/` is a verbatim copy of a shared module (see MANIFEST.sha256): what Hokma needs on top is added here.
+    Bug 1126: `connected` is the bot being up, not just an Application object. Bug 1127: the Avisos state tells a
+    network failure from a missing permission and can be checked again."""
+
+    topic_failure: str | None = None
+
+    def __init__(self, data_dir, *args, **kw) -> None:
+        super().__init__(data_dir, *args, **kw)
+        self._pairing = HokmaPairingStore(data_dir)        # knows its lockout and records its rate limit late
+        self._lifecycle = asyncio.Lock()                   # bug 1152: one start or stop at a time
+        self._lifecycle_owner: asyncio.Task | None = None
+        self._started_with: str | None = None
+
+    # ----- bug 1152: connecting is serialized -----
+
+    async def start(self, token: str) -> None:
+        async with self._lifecycle:
+            if self._app is not None and self._started_with == token and self.connected:
+                return                                     # a second Connect finds the bot already up: no second poller
+            self._lifecycle_owner = asyncio.current_task()
+            try:
+                await super().start(token)                 # (core calls self.stop() inside: see `stop`)
+                self._started_with = token
+            finally:
+                self._lifecycle_owner = None
+
+    async def stop(self) -> None:
+        if self._lifecycle_owner is not None and self._lifecycle_owner is asyncio.current_task():
+            self._started_with = None
+            return await super().stop()                    # called by `start` itself, which holds the lock
+        async with self._lifecycle:
+            self._started_with = None
+            await super().stop()
+
+    # ----- the handlers Hokma adds or answers more clearly -----
+
+    def _register_handlers(self, app) -> None:
+        from telegram.ext import MessageHandler, filters
+
+        self._ui = HokmaApprovalsUI(                       # before core registers its callback handler
+            self._bot, is_authorized=self._is_authorized, on_decision=self._on_decision, t=self._t,
+            on_rejected=self._note_ignored, is_sender_ok=self._sender_ok)
+        super()._register_handlers(app)
+        # Bug 1157: voice, photos, documents... were dropped without a word. Added last, so text and commands
+        # still reach core's handlers first.
+        app.add_handler(MessageHandler(filters.ALL & ~filters.TEXT & ~filters.StatusUpdate.ALL, self._handle_unsupported))
+
+    async def _reply(self, chat_id: Any, thread_id: int | None, text: str) -> None:
+        if self._bot is None:
+            return
+        kwargs = {"message_thread_id": thread_id} if thread_id else {}
+        try:
+            await self._bot.send_message(chat_id=normalize_telegram_chat_id(chat_id), text=text, **kwargs)
+        except Exception as exc:                           # a courtesy reply: never in the way
+            log.warning("telegram reply failed: %s", type(exc).__name__)
+
+    async def _handle_unsupported(self, update: Any, context: Any = None) -> None:
+        message = getattr(update, "effective_message", None) or getattr(update, "message", None)
+        chat = getattr(update, "effective_chat", None) or getattr(message, "chat", None)
+        user = getattr(update, "effective_user", None)
+        if message is None or chat is None:
+            return
+        if not self._sender_ok(str(chat.id), str(getattr(user, "id", ""))):
+            self._note_ignored(chat.id)
+            return
+        await self._reply(chat.id, _topic_thread_id(message), self._t("telegram.unsupported"))
+
+    def _avisos_thread(self) -> int | None:
+        return (self._store.load() or {}).get("avisos_thread_id")
+
+    async def _handle_group_text(self, update: Any) -> None:
+        context = self._group_context(update)
+        if context is None:
+            return
+        _, chat, thread_id = context
+        if thread_id is None:
+            return await self._reply(chat.id, None, self._t("telegram.in_general"))
+        if thread_id == self._avisos_thread():
+            return await self._reply(chat.id, thread_id, self._t("telegram.in_avisos"))
+        await super()._handle_group_text(update)
+
+    async def _handle_reset(self, update: Any, context: Any = None) -> None:
+        group = self._group_context(update)
+        if group is None:
+            return
+        _, chat, thread_id = group
+        if thread_id is None or thread_id == self._avisos_thread():
+            return await self._reply(chat.id, thread_id, self._t("telegram.reset_not_in_topic"))
+        await super()._handle_reset(update, context)
+
+    # ----- bug 1154: a code is never lost silently and the user is told why none comes -----
+
+    @staticmethod
+    def _minutes(seconds: int) -> int:
+        return max(1, -(-int(seconds) // 60))
+
+    def pairing_lockout_minutes(self, platform: str = PLATFORM) -> int:
+        """Minutes until codes are accepted again, 0 when they are accepted now."""
+        left = self._pairing.lockout_seconds_left(platform)
+        return self._minutes(left) if left else 0
+
+    async def _issue_code(self, platform: str, user_id: str, user_name: str, chat: Any, thread_id: int | None,
+                          message_key: str) -> None:
+        store = self._pairing
+        locked = store.lockout_seconds_left(platform)
+        if locked:
+            return await self._reply(chat.id, thread_id, self._t("telegram.err.locked", minutes=self._minutes(locked)))
+        code = store.generate_code_deferred(platform, user_id, user_name)
+        if code is None:
+            wait = store.rate_limit_seconds_left(platform, user_id)
+            text = (self._t("telegram.pair_already_sent", minutes=self._minutes(wait)) if wait
+                    else self._t("telegram.pair_pending"))
+            return await self._reply(chat.id, thread_id, text)
+        kwargs = {"message_thread_id": thread_id} if thread_id else {}
+        try:
+            await self._bot.send_message(chat_id=normalize_telegram_chat_id(chat.id),
+                                         text=self._t(message_key, code=code), **kwargs)
+        except Exception as exc:
+            store.discard_code(platform, code)             # it never arrived: it must not count nor take a place
+            log.warning("telegram could not deliver a pairing code: %s", type(exc).__name__)
+            return
+        store.commit_rate_limit(platform, user_id)
+
+    async def _offer_pairing_code(self, message: Any, chat: Any, update: Any) -> None:
+        user = getattr(update, "effective_user", None)
+        user_name = str(getattr(user, "first_name", "") or getattr(chat, "title", "") or "")
+        await self._issue_code(PLATFORM, str(chat.id), user_name, chat, None, "pairing_code_message")
+
+    async def _handle_vincular(self, update: Any, context: Any = None) -> None:
+        message = getattr(update, "effective_message", None) or getattr(update, "message", None)
+        chat = getattr(update, "effective_chat", None) or getattr(message, "chat", None)
+        user = getattr(update, "effective_user", None)
+        if message is None or chat is None:
+            return
+        if str(getattr(user, "id", "")) != self.linked_chat_id():
+            self._note_ignored(chat.id)
+            return
+        thread_id = _topic_thread_id(message)
+        if self.linked_group_id() is not None:
+            return await self._reply(chat.id, thread_id, self._t("telegram.group_already_linked_bot"))
+        await self._issue_code(GROUP_PLATFORM, str(chat.id), str(getattr(chat, "title", "") or ""), chat, thread_id,
+                               "group_pairing_code_message")
+
+    # ----- bug 1155: a permission goes to the chat or topic where it is being talked about -----
+
+    async def send_exec_approval(self, command: str, request_id: str, description: str = "", *,
+                                 thread_id: int | None = None, origin: str | None = None, **kwargs: Any):
+        from hokma.telegram.core.approvals_ui import SendResult
+
+        chat_id, destination = self._destination(thread_id)
+        if self._ui is None or chat_id is None:
+            return SendResult(success=False, error="Not connected")
+        return await self._ui.send_exec_approval(chat_id, command, request_id, description, thread_id=destination,
+                                                 origin=origin)
+
+    @property
+    def connected(self) -> bool:
+        """Up and its long-poll alive. PTB retries a dropped poll by itself, so a short blip still counts as up; a poll
+        that ended for good (revoked token) does not. The watcher (`keep_connected`) brings a fallen bot back."""
+        app = self._app
+        if app is None:
+            return False
+        updater = getattr(app, "updater", None)
+        return bool(getattr(updater, "running", True)) if updater is not None else True
+
+    async def create_topic(self, chat_id, name, icon_color=None, icon_custom_emoji_id=None):
+        self.topic_failure = None
+        if not self._bot:
+            self.topic_failure = "network"
+            return None
+        try:
+            topic = await self._bot.create_forum_topic(chat_id=chat_id, name=name)
+            return topic.message_thread_id
+        except Exception as exc:
+            self.topic_failure = classify_failure(exc)
+            log.warning("could not create topic %r: %s (%s)", name, type(exc).__name__, self.topic_failure)
+            return None
+
+    async def ensure_avisos_topic(self, revalidate: bool = False) -> bool:
+        """Creates the Avisos topic in the linked group and records `avisos`: `ok`, `no_permission` (Telegram refused
+        for lack of rights) or `unreachable` (network or unknown error: not proof of a missing permission).
+        `revalidate`: a stored topic is probed first, so a revoked right or a deleted topic shows up."""
+        from hokma.telegram.core.link import _message_thread_id_for_send
+        from hokma.telegram.core.telegram_ids import normalize_telegram_chat_id
+
+        group_id = self.linked_group_id()
+        if group_id is None or self._bot is None:
+            return False
+        record = self._store.load() or {}
+        thread_id = record.get("avisos_thread_id") if record.get("avisos_group_id") == group_id else None
+        if thread_id and revalidate:
+            try:
+                await self._bot.send_chat_action(chat_id=normalize_telegram_chat_id(group_id), action="typing",
+                                                 message_thread_id=_message_thread_id_for_send(thread_id))
+            except Exception as exc:
+                if classify_failure(exc) == "network":
+                    self._save({"avisos": "unreachable"})
+                    return False
+                thread_id = None                      # gone or refused: create it again below
+        if thread_id:
+            self.topic_failure = None
+        else:
+            thread_id = await self.create_topic(normalize_telegram_chat_id(group_id), self._t("avisos_topic_name"))
+        state = "ok" if thread_id else ("no_permission" if self.topic_failure == "permission" else "unreachable")
+        self._save({"avisos_thread_id": thread_id, "avisos_group_id": group_id if thread_id else None, "avisos": state})
+        if thread_id:
+            self._topics[thread_id] = self._t("avisos_topic_name")
+        return thread_id is not None
 
 
 class LinkStore:
@@ -72,8 +331,9 @@ class LinkStore:
         with self._db().write() as u:
             old = u.session.one("SELECT chat_id, group_id FROM telegram_link WHERE id = 1")
             u.session.execute("DELETE FROM telegram_link WHERE id = 1")
-            if old is not None and old["chat_id"] != chat:       # the queue was meant for the previous chat
+            if old is not None and old["chat_id"] != chat:       # the queue and the sessions were the previous chat's
                 u.session.execute("DELETE FROM telegram_outbox WHERE sent_at IS NULL")
+                u.session.execute("DELETE FROM telegram_session WHERE chat_id != :c", {"c": chat})
             elif old is not None and old["group_id"] != record.get("group_id"):    # topic ids belong to one group
                 u.session.execute("DELETE FROM telegram_outbox WHERE sent_at IS NULL AND thread_id > 0")
                 u.session.execute("DELETE FROM telegram_session WHERE thread_id > 0")
@@ -112,7 +372,7 @@ class TelegramGlue:
         self._db, self._engine = get_db, get_engine
         self.keys = keys or KeyStore()
         self.store = LinkStore(get_db)
-        self.link = TelegramLink(data_dir or hokma_data_dir() / "telegram", self.store, t=t,
+        self.link = HokmaLink(data_dir or hokma_data_dir() / "telegram", self.store, t=t,
                                  on_owner_text=self.on_owner_text, on_decision=self.on_decision, on_reset=self.on_reset,
                                  application_factory=application_factory)
         self._connection, self._conns = Connection, {}          # one per conversation, so its answers know their topic
@@ -120,16 +380,59 @@ class TelegramGlue:
         self._turn_text: dict[str, str] = {}
         self._tasks: set[asyncio.Task] = set()
         self._flushing = asyncio.Lock()
+        self._starting = asyncio.Lock()
+        self._queued: dict[str, list[str]] = {}       # bug 1156: text that arrived while a turn was running
+        self.connect_error: str | None = None       # why the last attempt to connect failed (no token in it)
 
     # ----- lifecycle -----
 
     async def start(self) -> bool:
         """Connect when a token is saved. Without a token nothing happens."""
-        token = self.keys.get(TOKEN_ENTRY)
-        if not token:
-            return False
-        await self.link.start(token)
+        async with self._starting:                  # the API, the startup and the watcher never connect at once
+            token = self.keys.get(TOKEN_ENTRY)      # read inside: a token saved while we waited is the one used
+            if not token:
+                return False
+            await self.link.start(token)
+        self.connect_error = None
+        await self._revalidate_avisos()
         return True
+
+    async def _revalidate_avisos(self) -> None:
+        """Bug 1127: `avisos` is checked again every time the bot comes up, not trusted from the day it was written."""
+        if self.link.linked_group_id() is None:
+            return
+        try:
+            await self.link.ensure_avisos_topic(revalidate=True)
+        except Exception as exc:                      # the bot is up either way
+            log.warning("telegram avisos check failed: %s", type(exc).__name__)
+
+    async def keep_connected(self, backoff: tuple = RECONNECT_BACKOFF, watch: float = WATCH_SECONDS) -> None:
+        """Bring the bot up in the background and bring it back when it falls (no network at start, Telegram blocked,
+        a poll that died). Tries again with a growing pause; stops trying only when the token is gone (unlinked)."""
+        attempt = 0
+        while True:
+            delay = watch
+            try:
+                if self.keys.get(TOKEN_ENTRY) and not self.link.connected:
+                    await self.start()
+                attempt = 0
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:                  # no traceback: a network error may carry the bot token
+                from hokma.telegram.core.approvals_ui import _redact_telegram_error_text
+                self.connect_error = _redact_telegram_error_text(f"{type(exc).__name__}: {exc}")[:300]
+                log.warning("telegram did not connect: %s", self.connect_error)
+                delay = backoff[min(attempt, len(backoff) - 1)]
+                attempt += 1
+            await asyncio.sleep(delay)
+
+    def outbox_state(self) -> dict:
+        """What waits for Telegram: how many messages and the last error Telegram gave for one of them."""
+        with self._db().read() as u:
+            pending = u.session.one("SELECT COUNT(*) AS n FROM telegram_outbox WHERE sent_at IS NULL")["n"]
+            failed = u.session.one("SELECT last_error FROM telegram_outbox WHERE sent_at IS NULL AND last_error IS NOT NULL "
+                                   "ORDER BY id DESC LIMIT 1")
+        return {"pending": int(pending), "last_error": (failed or {}).get("last_error")}
 
     async def stop(self) -> None:
         await self.link.stop()
@@ -191,6 +494,11 @@ class TelegramGlue:
         if reason:
             await self.deliver(t(f"telegram.reset_{reason}"), thread)
         self._touch(cid)
+        running = self._engine().sessions.get(cid)
+        if getattr(running, "state", None) == "running":     # bug 1156: not lost, not refused: sent when the turn ends
+            self._queued.setdefault(cid, []).append(text)
+            await self.deliver(t("telegram.queued"), thread)
+            return
         await self._engine().handle(self._conns[cid], json.dumps({"type": "send", "conversation_id": cid, "text": text}))
 
     def on_reset(self, thread_id: int) -> None:
@@ -210,18 +518,51 @@ class TelegramGlue:
             text = self._turn_text.pop(turn, "").strip()
             if text and not event.get("stopped"):
                 await self.deliver(text, thread_id)
+            self._send_queued(event.get("conversation_id"))
         elif kind == "error":
             self._turn_text.pop(turn, None)
-            await self.deliver(event.get("message", ""), thread_id)
+            await self.deliver(self._error_text(event.get("code")), thread_id)     # bug 1156: never the raw message
+            if turn:                                                  # an error that ended a turn, not a refused send
+                self._send_queued(event.get("conversation_id"))
         elif kind == "permission_request":
             full = json.dumps(event.get("input") or {}, ensure_ascii=False)     # everything the tool will receive
             if len(full) > PROMPT_LIMIT:         # what is approved must be what is shown: too long, so it is denied
                 session = self._engine().sessions.get(event.get("conversation_id"))
                 if session is not None:
                     await session.resolve(event["request_id"], "deny", "system")
-                await self.deliver(t("telegram.prompt_too_long"))      # permissions and notices go to Avisos
+                await self.deliver(t("telegram.prompt_too_long"))      # notices go to Avisos
                 return
-            await self.link.send_exec_approval(full, event["request_id"], event.get("tool", ""))
+            origin = self._origin_label(thread_id) if self.link.linked_group_id() is not None else None
+            result = await self.link.send_exec_approval(full, event["request_id"], event.get("tool", ""),
+                                                        thread_id=thread_id, origin=origin)
+            if not result.success:                # bug 1127: a permission nobody could see must not wait in silence
+                await self.deliver(t("telegram.permission_unsent", tool=event.get("tool", "")))
+
+    @staticmethod
+    def _error_text(code: object) -> str:
+        """What the phone shows for an engine error: our own text for its code, never the engine's English message."""
+        code = code if isinstance(code, str) and re.fullmatch(r"[a-z_0-9]{1,40}", code) else "engine_error"
+        if code == "busy":
+            return t("telegram.err.busy")
+        if code == "unknown_project":
+            return t("telegram.err.unknown_project")
+        return t("telegram.err.engine", code=code)
+
+    def _origin_label(self, thread_id: int) -> str:
+        """Where a permission comes from: the topic it is being talked about in, or the private chat."""
+        if not thread_id:
+            return t("telegram.origin_private")
+        with self._db().read() as u:
+            row = u.session.one("SELECT topic_name FROM telegram_session WHERE chat_id = :c AND thread_id = :t",
+                                {"c": str(self.link.linked_chat_id()), "t": thread_id})
+        return t("telegram.origin_topic", name=(row or {}).get("topic_name") or self.link._topics.get(thread_id) or thread_id)
+
+    def _send_queued(self, cid: object) -> None:
+        """The turn ended: what the owner wrote meanwhile goes to the engine now, as one message."""
+        texts = self._queued.pop(cid, []) if isinstance(cid, str) else []
+        if texts and cid in self._conns:
+            self._spawn(self._engine().handle(self._conns[cid], json.dumps(
+                {"type": "send", "conversation_id": cid, "text": "\n\n".join(texts)})))
 
     # ----- the outbox: nothing is lost if Telegram or Hokma is down -----
 
@@ -284,26 +625,27 @@ class TelegramGlue:
         with self._db().read() as u:
             cids = [r["conversation_id"] for r in u.session.query("SELECT conversation_id FROM telegram_session")]
         cids += [c for c in self._conns if c not in cids]       # a conversation left by /new may still wait
-        cid, session, pending = next(((c, s, s.pending[request_id]) for c in cids
-                                      if (s := engine.sessions.get(c)) is not None and request_id in s.pending),
-                                     (None, None, None))
-        if pending is None:
+        session = next((s for c in cids if (s := engine.sessions.get(c)) is not None and request_id in s.pending), None)
+        if session is None:
             return 0
-        allow = choice != "deny"
-        if not await session.resolve(request_id, "allow" if allow else "deny", "human"):   # ended meanwhile
-            return 0
-        with self._db().write() as u:
-            u.approvals.record_permission(int(cid), pending.tool, "approved" if allow else "rejected",
-                                          channel="telegram", detail=pending.summary.get("target"))
-        return 1
+        # The session records the answer (once, with this channel): bug 1153 was a second row written here.
+        resolved = await session.resolve(request_id, "deny" if choice == "deny" else "allow", "human", channel="telegram")
+        return 1 if resolved else 0           # 0: it ended meanwhile
 
     # ----- a routine ended -----
 
     def notify_job(self, job: Any, outcome: Any) -> None:
-        """Scheduler hook: tell the phone when a routine finishes or fails (skipped runs stay silent)."""
-        if outcome.status not in ("done", "failed") or self.store.load() is None:
+        """Scheduler hook: tell the phone when a routine finishes, fails or is skipped (bug 1136)."""
+        if outcome.status not in ("done", "failed", "skipped") or self.store.load() is None:
             return
-        if outcome.status == "done":
+        if outcome.status == "skipped":
+            code = str(outcome.detail or "")
+            reasons = {"missed": t("sched.reason.missed"), "agent_off": t("sched.reason.agent_off")}
+            detail = reasons.get(code, code[:300])
+            text = t("telegram.job_skipped", name=job.name, detail=detail)
+        elif outcome.status == "done" and getattr(outcome, "denied", 0):     # bug 1129: part of it was refused
+            text = t("telegram.job_done_denied", name=job.name, count=outcome.denied) + "\n\n" + (outcome.detail or "")
+        elif outcome.status == "done":
             text = t("telegram.job_done", name=job.name) + "\n\n" + (outcome.detail or "")
         else:
             text = t("telegram.job_failed", name=job.name, detail=(outcome.detail or "")[:300])

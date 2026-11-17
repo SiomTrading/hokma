@@ -42,7 +42,7 @@ class FakeLibrary {
         const form = body as FormData;
         const file = form.get("file") as File;
         const status = this.reject[file.name];
-        if (status) return this.json({ detail: { code: "rejected", message: "rejected" } }, status);
+        if (status) return this.json({ detail: { code: status === 400 ? "empty_file" : "rejected", message: "rejected" } }, status);
         const doc: DocumentInfo = {
           id: this.nextId++, name: file.name, format: file.name.split(".").pop()!, size_bytes: file.size, status: "ready",
           status_detail: null, chunk_count: 3, source_url: null, description: (form.get("description") as string | null) ?? null,
@@ -198,6 +198,7 @@ describe.each(["es", "en"] as const)("Library screen (%s)", (locale) => {
 
   it.each([
     [409, "library.error.duplicate"],
+    [400, "docs.error.empty"],
     [413, "docs.error.tooBig"],
     [415, "docs.error.unsupported"],
     [500, "docs.error.generic"],

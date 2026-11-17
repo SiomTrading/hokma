@@ -259,3 +259,148 @@ def test_through_the_app_a_confirmed_job_runs_and_shows_its_result(client, db):
     with db.read() as u:
         assert u.approvals.latest_for("scheduled_job", job["id"]).verdict == "approved"
         assert u.tasks.list(created_by_kind="scheduler")[0].title == "Premarket brief"
+
+
+def test_a_run_with_denied_permissions_is_not_a_clean_success(db, work):
+    # bug 1129: "finished" alone hid that the agent was refused; the outcome, the task and the listing say so
+    with db.write() as u:
+        job = u.scheduled_jobs.create("Needs write", "hokma", "[perm] write a file", "once", "2026-11-05T00:00", "UTC")
+    outcome = asyncio.run(runner.JobRunner(db, launch=lambda: work.launch_spec).run(job))
+    assert outcome.status == "done" and outcome.denied == 1               # the status contract is unchanged
+    assert "1" in outcome.detail.splitlines()[0] and "not everything was done" in outcome.detail
+    with db.read() as u:
+        task = u.tasks.get(outcome.task_id)
+        assert task.result_metadata["denied"] == 1
+        assert [(j.kind, j.outcome) for j in u.journal.list(task_id=task.id)] == [("action", "partial")]
+    from hokma.scheduler.service import JobsService
+    assert JobsService(db).get(job.id)["last"]["denied"] == 1
+
+
+def test_a_clean_run_has_no_denied_permissions(db, work):
+    with db.write() as u:
+        job = u.scheduled_jobs.create("Plain", "hokma", "hello", "once", "2026-11-05T00:00", "UTC")
+    outcome = asyncio.run(runner.JobRunner(db, launch=lambda: work.launch_spec).run(job))
+    assert outcome.status == "done" and outcome.denied == 0
+    from hokma.scheduler.service import JobsService
+    assert JobsService(db).get(job.id)["last"]["denied"] == 0
+
+
+# ------------------------------------------------------------------ 0.0.36: hotfix batch (bugs 1134 to 1141)
+
+def test_stopping_mid_run_never_leaves_a_run_marked_running(db, work):
+    """Bug 1134: shut down, restart or update during a run must not leave tasks.status/task_runs.outcome = running."""
+    job_id = activate_due(db, work, next=datetime.now(timezone.utc) + timedelta(seconds=1))
+    with db.write() as u:
+        u.scheduled_jobs.update(job_id, prompt="[slow] keep going")
+
+    async def go():
+        scheduler = make_scheduler(db, work)
+        await scheduler.start()
+        started = await wait_until(lambda: _status(db, job_id) == "running")
+        await scheduler.stop()
+        return started
+
+    assert asyncio.run(go())
+    with db.read() as u:
+        job = u.scheduled_jobs.get(job_id)
+        task = u.tasks.get(job.last_task_id)
+        runs = u.task_runs.list(task.id)
+        alerts = u.journal.list(task_id=task.id, kind="alert")
+    assert task.status == "failed" and runs[-1].outcome != "running" and runs[-1].ended_at
+    assert alerts and "interrupted" in (alerts[0].body or "")
+    with make_client() as client:
+        item = client.get("/api/scheduled-jobs", headers=HEADERS).json()
+    assert item["running"] == [] and item["jobs"][0]["last"]["status"] != "running"
+
+
+def test_a_run_left_running_by_a_crash_is_recovered_on_start(db, work):
+    """Bug 1134 (b): the process was killed, nothing could clean up; the next start marks it interrupted."""
+    job_id = activate_due(db, work)
+    job = _job(db, job_id)
+    assert runner._prepare(db, job, datetime.now(timezone.utc)) not in (None,)      # claimed: running, never finished
+    assert _status(db, job_id) == "running"
+
+    async def go():
+        scheduler = make_scheduler(db, work)
+        await scheduler.start()
+        await scheduler.stop()
+
+    asyncio.run(go())
+    assert _status(db, job_id) == "failed"
+    with db.read() as u:
+        task = u.tasks.get(_job(db, job_id).last_task_id)
+        assert u.task_runs.list(task.id)[-1].outcome == "failure"
+        assert u.journal.list(task_id=task.id, kind="alert")
+
+
+def test_the_listing_shows_the_last_skipped_run(db, work):
+    """Bug 1136: a skipped run was only in the journal; the list now carries it."""
+    job_id = activate_due(db, work)
+    runner.skip(db, _job(db, job_id), datetime.now(timezone.utc), "agent_off")
+    with make_client() as client:
+        item = client.get("/api/scheduled-jobs", headers=HEADERS).json()["jobs"][0]
+    assert item["last_skip"]["reason"] == "agent_off" and item["last_skip"]["at"]
+
+
+def test_a_later_run_clears_the_skip(db, work):
+    job_id = activate_due(db, work)
+    runner.skip(db, _job(db, job_id), datetime.now(timezone.utc), "missed")
+    with db.write() as u:
+        u.scheduled_jobs.mark_ran(job_id, task_id=None, last_run_at=datetime.now(timezone.utc) + timedelta(seconds=5))
+    with make_client() as client:
+        assert client.get("/api/scheduled-jobs", headers=HEADERS).json()["jobs"][0]["last_skip"] is None
+
+
+def test_startup_skips_notify_the_listeners(db, work):
+    job_id = activate_due(db, work)
+    seen = []
+    from hokma.scheduler import loop
+    loop.OUTCOME_LISTENERS.append(lambda job, outcome: seen.append(outcome.status))
+    try:
+        make_scheduler(db, work).process_due(datetime.now(timezone.utc), startup=True)
+    finally:
+        loop.OUTCOME_LISTENERS.clear()
+    assert seen == ["skipped"] and job_id
+
+
+def test_a_name_over_200_characters_gets_a_clear_error(client):
+    res = client.post("/api/scheduled-jobs", json=job_body(name="n" * 201))
+    assert res.status_code == 422 and res.json()["detail"]["code"] == "name_too_long"
+    assert res.json()["detail"]["message"]
+
+
+def test_the_confirmation_must_be_a_real_boolean(client):
+    job = make(client)
+    for bad in ("true", 1, "yes"):
+        assert client.post(f"/api/scheduled-jobs/{job['id']}/activate", json={"confirm": bad}).status_code == 422
+    assert client.get("/api/scheduled-jobs").json()["jobs"][0]["active"] is False
+
+
+def test_a_running_job_cannot_be_edited_turned_off_or_deleted(client, db):
+    """Bug 1140 (6): 409 job_running, with a message."""
+    from hokma.agents import api as agents_api
+    job = make(client)
+    assert client.post(f"/api/scheduled-jobs/{job['id']}/activate", json={"confirm": True}).status_code == 200
+
+    class Busy:
+        def running_ids(self):
+            return [job["id"]]
+
+    agents_api._running["scheduler"], real = Busy(), agents_api._running["scheduler"]
+    try:
+        for res in (client.put(f"/api/scheduled-jobs/{job['id']}", json=job_body()),
+                    client.post(f"/api/scheduled-jobs/{job['id']}/deactivate"),
+                    client.delete(f"/api/scheduled-jobs/{job['id']}")):
+            assert res.status_code == 409 and res.json()["detail"]["code"] == "job_running"
+            assert res.json()["detail"]["message"]
+    finally:
+        agents_api._running["scheduler"] = real
+    assert client.post(f"/api/scheduled-jobs/{job['id']}/deactivate").status_code == 200
+
+
+def test_an_interval_counts_from_the_real_tick(db, work):
+    """Bug 1140 (7), accepted decision: the next run is `tick + interval`, not `planned + interval`."""
+    now = datetime(2026, 11, 5, 10, 0, 40, tzinfo=timezone.utc)           # 40 s after the planned 10:00:00
+    job_id = activate_due(db, work, kind="interval", expr="30m", next=datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc))
+    following, keep = runner.advance(_job(db, job_id), now)
+    assert keep and following == now + timedelta(minutes=30)

@@ -133,3 +133,14 @@ def test_attachment_limits_and_auth(env):
         with connect(client) as ws:
             ws.send_json({"type": "send", "text": "x", "attachments": ["nope"]})
             assert until(ws, "error")[-1]["code"] == "attachment_not_found"
+
+
+def test_attachment_errors_are_code_and_translated_message(env):
+    """Bug 1164: no raw English detail; {code, message} like /api/engines."""
+    with make_client(env.engine()) as client:
+        empty = upload(client, "empty.bin", b"")
+        assert empty.status_code == 400
+        assert empty.json()["detail"]["code"] == "attachments.empty" and empty.json()["detail"]["message"] != "empty file"
+        big = upload(client, "big.bin", b"\0" * (25 * 1024 * 1024 + 1))
+        assert big.status_code == 413 and big.json()["detail"]["code"] == "attachments.too_large"
+        assert big.json()["detail"]["message"] != "attachment too large"

@@ -77,7 +77,7 @@ def test_view_changes_and_restore_one_file_identical(owner):
     listing = owner.client.get("/api/checkpoints", headers=HEADERS).json()
     assert [p["id"] for p in listing["points"]] == [point]
     res = owner.client.post(f"/api/checkpoints/{point}/restore-file", json={"path": "informes/viejo.md"}, headers=HEADERS)
-    assert res.status_code == 200 and res.json() == {"restored": ["informes/viejo.md"], "renamed": False}
+    assert res.status_code == 200 and res.json() == {"restored": ["informes/viejo.md"], "renamed": False, "unchanged": False}
     assert sha(work / "informes" / "viejo.md") == original
 
 
@@ -93,9 +93,34 @@ def test_restore_never_deletes_or_overwrites_what_exists_now(owner):
     assert (work / "data.csv").read_text() == "a,b\nmy newer work\n"            # changed, not deleted: untouched
     assert (work / "created-later.txt").read_text() == "keep me\n"
     one = owner.client.post(f"/api/checkpoints/{point}/restore-file", json={"path": "data.csv"}, headers=HEADERS).json()
-    assert one == {"restored": ["data (restored).csv"], "renamed": True}
+    assert one == {"restored": ["data (restored).csv"], "renamed": True, "unchanged": False}
     assert (work / "data.csv").read_text() == "a,b\nmy newer work\n"
     assert (work / "data (restored).csv").read_text() == "a,b\n1,2\n"
+
+
+def test_restore_file_says_unchanged_when_the_file_already_matches(owner):
+    work = owner.repo()
+    point = checkpoints.take(work)["id"]
+    res = owner.client.post(f"/api/checkpoints/{point}/restore-file", json={"path": "data.csv"}, headers=HEADERS).json()
+    assert res == {"restored": ["data.csv"], "renamed": False, "unchanged": True}
+    assert not (work / "data (restored).csv").exists()
+
+
+def test_restore_deleted_always_lists_skipped(owner):
+    work = owner.repo()
+    point = checkpoints.take(work)["id"]
+    res = owner.client.post(f"/api/checkpoints/{point}/restore-deleted", json={}, headers=HEADERS).json()
+    assert res["skipped"] == [] and res["count"] == 0
+
+
+def test_the_listing_reports_why_the_last_snapshot_failed(owner, monkeypatch):
+    work = owner.repo()
+    point = checkpoints.take(work)["id"]
+    assert owner.client.get("/api/checkpoints", headers=HEADERS).json()["issue"] is None
+    monkeypatch.setattr(checkpoints, "_take", lambda *a, **k: {"taken": False, "reason": "failed"})
+    assert checkpoints.take(work)["taken"] is False
+    listing = owner.client.get("/api/checkpoints", headers=HEADERS).json()
+    assert listing["issue"] == "failed" and [p["id"] for p in listing["points"]] == [point]
 
 
 @pytest.mark.parametrize("path", ["../outside.txt", "/etc/hostname", ".git/config", "a\\b", "", "nope/not-there.txt"])
@@ -196,3 +221,27 @@ def test_the_engine_takes_a_point_before_each_turn_only_in_auto_mode(tmp_path, m
     asyncio.run(go())
     starts = env.entries("start")
     assert starts and "bypassPermissions" in starts[-1]["argv"] and "default" in starts[0]["argv"]
+
+
+def test_a_restore_works_where_the_os_has_no_nofollow_or_fchmod(owner, monkeypatch):
+    """Bug 1148: Windows has neither os.O_NOFOLLOW nor os.fchmod; the restore must not raise AttributeError."""
+    import os
+    work = owner.repo({"a.txt": "one\n"})
+    assert checkpoints.take(work)["taken"] is True
+    point = checkpoints.listing(work)[0]["id"]
+    (work / "a.txt").unlink()
+    monkeypatch.delattr(checkpoints.os, "O_NOFOLLOW", raising=False)
+    monkeypatch.delattr(checkpoints.os, "fchmod", raising=False)
+    assert not hasattr(os, "O_NOFOLLOW") and not hasattr(os, "fchmod")
+    out = checkpoints.restore_file(work, point, "a.txt", [])
+    assert out["restored"] == ["a.txt"] and (work / "a.txt").read_text() == "one\n"
+    assert checkpoints.restore_deleted(work, point, [])["count"] == 0
+
+
+def test_the_renamed_copy_uses_the_panel_language(owner, monkeypatch):
+    work = owner.repo()
+    point = checkpoints.take(work)["id"]
+    (work / "data.csv").write_text("a,b\nmy newer work\n")
+    monkeypatch.setenv("HOKMA_LANG", "es")
+    one = checkpoints.restore_file(work, point, "data.csv", [])
+    assert one == {"restored": ["data (restaurado).csv"], "renamed": True, "unchanged": False}

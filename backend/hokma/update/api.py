@@ -4,6 +4,7 @@
 - `POST /api/update` takes NO source from the request: the update uses the HOKMA_UPDATE_SOURCE override if set and
   the latest GitHub Release otherwise, so a caller cannot point an update at an arbitrary URL.
 - It first asks the source whether there is anything newer; an up-to-date Hokma answers so and keeps running.
+- While an agent works it answers 409 `update.in_use` unless the call carries `?force=true` (the panel asks first).
 - Otherwise it does NOT run the update in this server (task 3146): the server's own files live in a runtime slot and
   Windows cannot replace files a running process loaded. It starts the detached updater (`hokma.update.detached`)
   with the session secrets on its standard input, answers `{"status": "launched", "restarting": true, ...}` and then
@@ -22,6 +23,7 @@ from hokma import __version__
 from hokma.core import enginelock, session
 from hokma.core.lifecycle import WS_UPDATING_REASON
 from hokma.core.origin import token_matches
+from hokma.core.shutdown_api import refuse_if_busy
 from hokma.db.api import current_database
 from hokma.i18n import t
 from hokma.rpc.ws import SESSION_TOKEN
@@ -58,8 +60,9 @@ def update_state(request: Request, x_hokma_token: str = Header(default="")) -> d
 
 
 @router.post("/api/update")
-async def update(request: Request, x_hokma_token: str = Header(default="")) -> JSONResponse:
+async def update(request: Request, x_hokma_token: str = Header(default=""), force: bool = False) -> JSONResponse:
     _auth(x_hokma_token)
+    refuse_if_busy(force, "update.in_use", t("update.err.busy"))
     state, lifecycle = request.app.state.updates, request.app.state.lifecycle
     if not state.begin_update():
         raise HTTPException(status_code=409, detail=t("update.in_progress"))

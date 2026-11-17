@@ -165,9 +165,23 @@ fn close_hides_window(exiting: bool) -> bool {
     !exiting
 }
 
-/// Quitting asks first only when an agent is working.
-fn quit_needs_confirmation(busy: bool) -> bool {
-    busy
+/// Quitting asks first when an agent is working. A health check that failed (timeout, slow engine) while the engine
+/// this app launched is still alive counts as busy: only an engine that is clearly gone lets Quit skip the question.
+fn should_ask_before_quit(health_busy: Option<bool>, engine_alive: bool) -> bool {
+    match health_busy {
+        Some(busy) => busy,
+        None => engine_alive,
+    }
+}
+
+/// The question shared by Quit and Update: an agent is working and the action cuts it. True = go ahead.
+fn ask_cut_agent(app: &AppHandle) -> bool {
+    app.dialog()
+        .message(t("busy_question", &[]))
+        .title("Hokma")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(t("busy_close", &[]), t("busy_keep", &[])))
+        .blocking_show()
 }
 
 fn show_main(app: &AppHandle) {
@@ -209,21 +223,24 @@ fn begin_close(app: AppHandle) {
         inner.closing = true;
     }
     thread::spawn(move || {
-        let port = shared(&app).0.lock().unwrap().port;
-        let busy = port.and_then(http::health).map(|h| h.busy).unwrap_or(false);
-        if quit_needs_confirmation(busy) {
-            let close = app
-                .dialog()
-                .message(t("busy_question", &[]))
-                .title("Hokma")
-                .kind(MessageDialogKind::Warning)
-                .buttons(MessageDialogButtons::OkCancelCustom(t("busy_close", &[]), t("busy_keep", &[])))
-                .blocking_show();
-            if !close {
+        let (port, mut child_alive) = {
+            let mut inner = shared(&app).0.lock().unwrap();
+            let alive = inner.child.as_mut().map(|c| c.try_wait().ok().flatten().is_none()).unwrap_or(false);
+            (inner.port, alive)
+        };
+        let health_busy = port.and_then(http::health).map(|h| h.busy);
+        // Alive: this app launched the engine and it has not exited, or a port is known (an engine adopted from a
+        // previous run). A failed health check then means "slow", never "idle".
+        child_alive = child_alive || port.is_some();
+        if should_ask_before_quit(health_busy, child_alive) {
+            if !ask_cut_agent(&app) {
                 shared(&app).0.lock().unwrap().closing = false;
                 return;
             }
         }
+        // First click on Quit: the window disappears now; the engine stops in the background. The window never stays
+        // on screen navigating to a blank page.
+        engine::hide_main(&app);
         engine::show_splash(&app);
         engine::set_status(&app, "closing", t("closing", &[]), "");
         engine::stop_engine(&app);
@@ -232,7 +249,28 @@ fn begin_close(app: AppHandle) {
     });
 }
 
+/// The window that lost focus at this second (0 = it has focus). A long absence means the PC was locked or asleep.
+static BLURRED_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Away at least this long (screen lock): on coming back the panel is checked and reloaded when it came back blank.
+const LOCK_AWAY_SECS: u64 = 120;
+/// Runs in the page: reloads it only when the panel has no content (WebView2 sometimes comes back blank after unlock).
+const BLANK_CHECK: &str =
+    "(function(){var r=document.getElementById('root');if(!r||!r.children.length){window.location.reload();}})();";
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// True when the window was away long enough that the panel may have come back blank.
+fn needs_blank_check(blurred_at: u64, now: u64) -> bool {
+    blurred_at != 0 && now.saturating_sub(blurred_at) >= LOCK_AWAY_SECS
+}
+
 fn main() {
+    // WebView2 paints this colour before the first page (AARRGGBB). The window's own background_color covers the
+    // window; this variable covers the webview itself, which is what showed white before the first frame.
+    #[cfg(windows)]
+    std::env::set_var("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "FF101516");
     let app = tauri::Builder::default()
         // First: a second launch hands over to this one and only brings the window to the front.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -281,7 +319,7 @@ fn main() {
                 .on_page_load(move |_window, payload| {
                     if let PageLoadEvent::Finished = payload.event() {
                         if is_panel_page(payload.url()) {
-                            engine::reveal_once(&page_handle);
+                            engine::reveal_after_paint(&page_handle);
                         }
                     } else if is_start_screen(payload.url()) {
                         engine::remember_splash(&page_handle, payload.url());
@@ -307,6 +345,18 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let WindowEvent::Focused(focused) = event {
+                if *focused {
+                    let away = BLURRED_AT.swap(0, std::sync::atomic::Ordering::Relaxed);
+                    if needs_blank_check(away, now_secs()) && shared(window.app_handle()).0.lock().unwrap().panel_shown {
+                        if let Some(webview) = window.app_handle().get_webview_window("main") {
+                            let _ = webview.eval(BLANK_CHECK);
+                        }
+                    }
+                } else {
+                    BLURRED_AT.store(now_secs(), std::sync::atomic::Ordering::Relaxed);
+                }
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle().clone();
                 let exiting = shared(&app).0.lock().unwrap().exiting;
@@ -341,9 +391,30 @@ mod tests {
     }
 
     #[test]
+    fn the_window_waits_for_a_painted_dark_page_and_never_opens_early() {
+        assert!(crate::engine::PAINT_DELAY >= std::time::Duration::from_millis(300));
+        assert!(crate::engine::REVEAL_FALLBACK >= std::time::Duration::from_secs(10));
+        assert!(crate::engine::REVEAL_FALLBACK < crate::engine::GIVE_UP_AFTER);
+    }
+
+    #[test]
+    fn the_panel_is_checked_only_after_a_long_absence() {
+        assert!(!needs_blank_check(0, 1_000_000));
+        assert!(!needs_blank_check(1_000, 1_000 + LOCK_AWAY_SECS - 1));
+        assert!(needs_blank_check(1_000, 1_000 + LOCK_AWAY_SECS));
+    }
+
+    #[test]
     fn quit_asks_only_when_an_agent_is_working() {
-        assert!(quit_needs_confirmation(true));
-        assert!(!quit_needs_confirmation(false));
+        assert!(should_ask_before_quit(Some(true), true));
+        assert!(!should_ask_before_quit(Some(false), true));
+        assert!(!should_ask_before_quit(Some(false), false));
+    }
+
+    #[test]
+    fn a_failed_health_check_asks_while_the_engine_lives_and_skips_when_it_is_gone() {
+        assert!(should_ask_before_quit(None, true));
+        assert!(!should_ask_before_quit(None, false));
     }
 
     #[test]

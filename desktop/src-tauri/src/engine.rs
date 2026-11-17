@@ -24,8 +24,12 @@ pub const GIVE_UP_AFTER: Duration = Duration::from_secs(60);
 /// How often the start asks /health. The call is local and answers "refused" at once while the engine is not up, so a
 /// short wait costs nothing and the panel appears as soon as the engine answers (0.0.35: it was 500 ms).
 pub const POLL: Duration = Duration::from_millis(150);
-/// The window stays hidden until the panel has loaded; if that page never reports, it is shown after this long.
-pub const REVEAL_FALLBACK: Duration = Duration::from_secs(6);
+/// The window stays hidden until the panel has loaded; if that page never reports, it is shown after this long. Long
+/// enough that a slow start never shows the window early: shown early it only has a dark page to show, never white.
+pub const REVEAL_FALLBACK: Duration = Duration::from_secs(15);
+/// After the panel page reports it loaded, the window waits this long so its first frame is painted (dark) before it
+/// becomes visible: a window shown a moment too early flashes the webview's default white.
+pub const PAINT_DELAY: Duration = Duration::from_millis(400);
 pub const STOP_WAIT: Duration = Duration::from_secs(30);
 pub const UPDATE_CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 const TAIL_LINES: usize = 50;
@@ -115,9 +119,32 @@ pub fn reveal(app: &AppHandle) {
 
 /// Show the window only if it was never shown (the panel loaded, or the fallback timer ran out).
 pub fn reveal_once(app: &AppHandle) {
-    let first = !shared(app).0.lock().unwrap().revealed;
+    let first = {
+        let inner = shared(app).0.lock().unwrap();
+        // Quit was pressed: the window was hidden on purpose and must stay hidden while Hokma shuts down.
+        !inner.revealed && !inner.closing && !inner.exiting
+    };
     if first {
         reveal(app);
+    }
+}
+
+/// The panel page loaded: show the window after `PAINT_DELAY`, once (the dark first frame is already painted).
+pub fn reveal_after_paint(app: &AppHandle) {
+    if shared(app).0.lock().unwrap().revealed {
+        return;
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(PAINT_DELAY);
+        reveal_once(&app);
+    });
+}
+
+/// Hide the window at once (Quit was pressed): nothing stays on screen, white or not, while the engine stops.
+pub fn hide_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
     }
 }
 

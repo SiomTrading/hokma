@@ -24,6 +24,10 @@ interface Entry {
   cwd: string | null;
   command?: string;
   sawExit: boolean;
+  /** Started by the dock on its own (not by the student). */
+  auto: boolean;
+  /** The student typed into it: it is theirs now and is never replaced. */
+  typed: boolean;
 }
 
 export interface TerminalSnapshot {
@@ -191,9 +195,14 @@ export function launchTerminal(options: LaunchOptions = {}): string | null {
     cwd: null,
     command: options.command,
     sawExit: false,
+    auto: options.auto === true,
+    typed: false,
   };
   term.attachCustomKeyEventHandler((event) => handleKey(term, event));
-  term.onData((data) => entry.socket?.send({ type: "input", data }));
+  term.onData((data) => {
+    entry.typed = true;
+    entry.socket?.send({ type: "input", data });
+  });
   term.onResize(() => sendResize(entry));
 
   const projectId = options.projectId === undefined ? activeProjectId : options.projectId;
@@ -216,6 +225,17 @@ export function launchTerminal(options: LaunchOptions = {}): string | null {
   activeId = id;
   publish();
   return id;
+}
+
+/**
+ * The setup wizard changed the working folder: the terminal the dock opened on its own started in the old one.
+ * Close and reopen each such terminal that the student has not typed into; the new shell opens in the new folder.
+ */
+export function relaunchAutoTerminals(): void {
+  for (const entry of entries.filter((e) => e.auto && !e.typed)) {
+    closeTerminal(entry.id);
+    launchTerminal({ auto: true });
+  }
 }
 
 export function activate(id: string): void {

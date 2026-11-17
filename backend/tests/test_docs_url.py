@@ -475,3 +475,11 @@ def test_the_endpoints_need_the_token_and_a_known_project(client, project, serve
 def test_a_body_without_url_is_rejected(client, project):
     res = client.post(f"/api/projects/{project}/documents/discover", headers=H, json={})
     assert res.status_code == 422
+
+
+def test_a_title_keeps_brackets_and_accents_and_loses_only_what_a_file_system_rejects():
+    from hokma.docs.web import readable_name
+
+    assert readable_name("[1706.03762] Attention Is All You Need") == "[1706.03762] Attention Is All You Need"
+    assert readable_name("Caf\u00e9: a/b?") == "Caf\u00e9_ a_b_"
+    assert readable_name("...") == "file"

@@ -78,6 +78,15 @@ def turns_running() -> int:
     return sum(1 for s in engine.sessions.values() if s.state == "running") if engine is not None else 0
 
 
+def refuse_if_busy(force: bool, code: str, message: str) -> None:
+    """409 `{code}` while an agent works (a turn, a permission waiting, a scheduled job) and the caller did not send
+    `force=true`. Shared by shutdown, update and restore: the panel asks the owner once and sends the call again with force."""
+    from hokma.core.app import agent_working          # lazy: app imports this module
+
+    if not force and agent_working():
+        raise _fail(409, code, message)
+
+
 def _journal(title: str) -> None:
     try:
         if current_version() == 0:
@@ -177,7 +186,7 @@ def _guard_session(token: str) -> None:
 
 @router.post("/api/system/shutdown", status_code=202)
 async def shutdown(request: Request, x_hokma_token: str = Header(default=""),
-                   x_hokma_shutdown_nonce: str = Header(default="")) -> JSONResponse:
+                   x_hokma_shutdown_nonce: str = Header(default=""), force: bool = False) -> JSONResponse:
     state = request.app.state
     headers = request.headers
     if headers.get("sec-fetch-site", "").lower() != "same-origin":
@@ -186,6 +195,7 @@ async def shutdown(request: Request, x_hokma_token: str = Header(default=""),
     if with_session:
         if not token_matches(x_hokma_token, SESSION_TOKEN):
             raise _fail(401, "shutdown.unauthorized", t("shutdown.err.unauthorized"))
+        refuse_if_busy(force, "shutdown.in_use", t("shutdown.err.busy"))
     else:
         origin = headers.get("origin", "").lower()
         if not origin or origin not in origins_for(state.allowed_hosts):

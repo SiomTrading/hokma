@@ -13,6 +13,8 @@ export interface AttachmentChip {
   /** Object URL for the thumbnail of images. Revoked when the chip is dropped. */
   previewUrl?: string;
   status: "uploading" | "ready" | "error";
+  /** Why the upload failed, as a catalog reason (empty_file, too_large); absent when the server gave none we know. */
+  reason?: "empty_file" | "too_large";
   /** A voice note whose text was transcribed into the message. */
   transcribed?: boolean;
 }

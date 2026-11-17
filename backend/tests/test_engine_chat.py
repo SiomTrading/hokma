@@ -122,6 +122,20 @@ def test_permission_allow_reaches_the_cli_and_is_recorded_as_human(env):
     assert (env.store.permissions[0]["decided_by_kind"], env.store.permissions[0]["channel"]) == ("human", "dashboard")
 
 
+def test_a_denied_tool_line_is_closed_by_a_result_with_the_same_tool_use_id(env):
+    """Bug 1164: the recorded deny answer carried another tool_use_id, so the tool line stayed 'in progress' after Reject."""
+    with make_client(env.engine()) as client, connect(client) as ws:
+        ws.send_json({"type": "send", "text": "[perm] write a file"})
+        events = until(ws, "permission_request")
+        started = [e["tool_use_id"] for e in events if e["type"] == "tool_use"]
+        request = events[-1]
+        ws.send_json({"type": "permission_response", "conversation_id": request["conversation_id"],
+                      "request_id": request["request_id"], "decision": "deny"})
+        rest = until(ws, "done", "error")
+    finished = [e["tool_use_id"] for e in rest if e["type"] == "tool_result"]
+    assert started and finished and set(started) == set(finished)
+
+
 def test_permission_deny_reaches_the_cli(env):
     with make_client(env.engine()) as client, connect(client) as ws:
         ws.send_json({"type": "send", "text": "[perm] write a file"})

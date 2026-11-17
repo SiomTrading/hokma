@@ -80,6 +80,14 @@ def data_files() -> list:
     return [p for p in root.rglob("*") if p.is_file()] if root.exists() else []
 
 
+def read_if_present(path) -> bytes:
+    """A SQLite -shm or -wal file can disappear between the listing and the read (the database closes); that is not a leak."""
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return b""
+
+
 def test_c3_a_saved_key_is_in_the_system_store_and_nowhere_else(live):
     with live.app() as client:
         response = client.put("/api/connections/alpaca/key", json={"key_id": KEY_ID, "secret": SECRET}, headers=AUTH)
@@ -91,7 +99,7 @@ def test_c3_a_saved_key_is_in_the_system_store_and_nowhere_else(live):
         stored = live.keyring.items[("hokma-market", "alpaca")]
         assert json.loads(stored) == {"key_id": KEY_ID, "secret": SECRET}
         for path in data_files():
-            body = path.read_bytes()
+            body = read_if_present(path)
             assert KEY_ID.encode() not in body and SECRET.encode() not in body, path
         state = json.loads((hokma_data_dir() / "connections.json").read_text()) if (
             hokma_data_dir() / "connections.json").exists() else {}
@@ -135,7 +143,7 @@ def test_c4_without_a_system_credential_store_nothing_is_saved(live):
         assert detail["message"] == "System credential store not available"
         assert cards(client)["alpaca"]["key_state"] == "missing"
         for path in data_files():
-            body = path.read_bytes()
+            body = read_if_present(path)
             assert KEY_ID.encode() not in body and SECRET.encode() not in body, path
         assert not any(p.name.startswith(("key", "secret")) for p in data_files())
 

@@ -30,6 +30,8 @@ _TEXT: dict[str, Callable[[], str]] = {
     "interval_out_of_range": lambda: t("agents.error.interval_out_of_range"),
     "confirmation_required": lambda: t("agents.error.confirmation_required"),
     "agent_off": lambda: t("agents.error.agent_off"),
+    "job_running": lambda: t("agents.error.job_running"),
+    "name_too_long": lambda: t("agents.error.name_too_long"),
     "run_in_past": lambda: t("agents.error.run_in_past"),
 }
 

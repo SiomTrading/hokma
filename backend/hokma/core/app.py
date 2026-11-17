@@ -38,9 +38,17 @@ from hokma.update.state import UpdateState
 from hokma.voice.api import router as voice_router
 
 
+def _permission_waiting() -> bool:
+    """A permission question is waiting for an answer: that conversation is still work in progress."""
+    from hokma.engine import api as engine_api
+
+    engine = engine_api._engine
+    return engine is not None and any(s.pending for s in list(engine.sessions.values()))
+
+
 def agent_working() -> bool:
-    """A chat turn or a scheduled job is running right now."""
-    if turns_running() > 0:
+    """A chat turn, a permission waiting for an answer or a scheduled job is running right now."""
+    if turns_running() > 0 or _permission_waiting():
         return True
     active = current_scheduler()
     return bool(active and active.running_ids())

@@ -13,7 +13,9 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "publish_release.py"
 FILES = {"pyproject.toml": "x", "uv.lock": "x", "backend/hokma/__init__.py": '__version__ = "0.3.0"\n',
          "cli/hokma_cli/main.py": "x", "dashboard/dist/index.html": "x",
-         "installer/lock.json": "{}", "kit/template/CLAUDE.md": "x"}
+         "installer/lock.json": "{}",
+         "desktop/src-tauri/tauri.conf.json": '{"version": "0.3.0"}',
+         "desktop/src-tauri/Cargo.toml": '[package]\nname = "x"\nversion = "0.3.0"\n', "kit/template/CLAUDE.md": "x"}
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
@@ -138,3 +140,18 @@ def test_a_failed_release_leaves_no_orphan_tag(tmp_path, monkeypatch):
     with pytest.raises(module.PublishError, match="boom"):
         module.publish(repo, "0.3.0", package, None)
     assert removed == [("push", "origin", ":refs/tags/v0.3.0")]
+
+
+def test_stale_desktop_version_fails_the_publish(tmp_path):
+    module = load_script()
+    root = tmp_path / "r"
+    (root / "desktop/src-tauri").mkdir(parents=True)
+    (root / "desktop/src-tauri/tauri.conf.json").write_text('{"version": "0.0.0"}')
+    (root / "desktop/src-tauri/Cargo.toml").write_text('[package]\nversion = "0.3.0"\n')
+    with pytest.raises(module.PublishError, match="tauri.conf.json says version 0.0.0"):
+        module.check_desktop_versions(root, "0.3.0")
+    (root / "desktop/src-tauri/tauri.conf.json").write_text('{"version": "0.3.0"}')
+    module.check_desktop_versions(root, "0.3.0")
+    (root / "desktop/src-tauri/Cargo.toml").write_text('[package]\nversion = "0.0.0"\n')
+    with pytest.raises(module.PublishError, match="Cargo.toml says version 0.0.0"):
+        module.check_desktop_versions(root, "0.3.0")

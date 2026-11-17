@@ -36,11 +36,12 @@ def ready(env, monkeypatch):
     # A computer without Claude Code: the first connection saved becomes the default (with Claude Code signed in it does
     # not, bug 1095, see test_engine_choice_1095.py). Without this the result would depend on the machine running the test.
     monkeypatch.setattr(effective, "installed", lambda kind, path=None: False)
+    previous = keyring.get_keyring()
     ring = MemoryKeyring()
     keyring.set_keyring(ring)
     migrate()
     yield ring
-    keyring.set_keyring(fail.Keyring())
+    keyring.set_keyring(previous)
 
 
 def test_a_key_goes_to_the_secure_store_and_never_to_the_view(ready):
@@ -54,7 +55,8 @@ def test_a_key_goes_to_the_secure_store_and_never_to_the_view(ready):
     assert service.list_connections() == []
 
 
-def test_without_a_secure_store_nothing_is_saved(env):
+def test_without_a_secure_store_nothing_is_saved(env, request):
+    request.addfinalizer(lambda previous=keyring.get_keyring(): keyring.set_keyring(previous))
     keyring.set_keyring(fail.Keyring())
     migrate()
     with pytest.raises(ServiceError) as info:

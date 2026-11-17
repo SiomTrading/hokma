@@ -105,6 +105,30 @@ def test_routines_and_extensions_wait_for_the_owner(db):
     assert not err and req["status"] == "pending"
 
 
+@pytest.mark.parametrize("patch", [
+    {"schedule_kind": "interval", "schedule_expr": "1m"},
+    {"schedule_kind": "daily", "schedule_expr": "25:99"},
+    {"schedule_kind": "daily", "schedule_expr": "09:00", "timezone": "Mars/Base"},
+    {"schedule_kind": "daily", "schedule_expr": "09:00", "agent": "nobody"},
+    {"schedule_kind": "daily", "schedule_expr": "09:00", "prompt": "x" * 50000},
+    {"schedule_kind": "cron", "schedule_expr": "* * * * *"},
+    {"schedule_kind": "daily", "schedule_expr": "09:00", "name": "n" * 201},
+])
+def test_schedule_create_refuses_what_the_panel_refuses(db, patch):
+    """Bug 1137: nothing invalid is saved and the answer is a translated message, not a database error."""
+    args = {"name": "Bad", "prompt": "report", "schedule_kind": "daily", "schedule_expr": "09:00", **patch}
+    text, err = run("schedule_create", args)
+    assert err and "IntegrityViolation" not in text
+    assert run("schedule_list", {})[0] == []
+
+
+def test_schedule_create_normalizes_and_reports_a_taken_name(db):
+    job, err = run("schedule_create", {"name": "Dup", "prompt": "r", "schedule_kind": "daily", "schedule_expr": "9:05"})
+    assert not err and run("schedule_list", {})[0][0]["expr"] == "09:05"
+    text, err = run("schedule_create", {"name": "Dup", "prompt": "r", "schedule_kind": "daily", "schedule_expr": "10:00"})
+    assert err and "IntegrityViolation" not in text
+
+
 def test_agents_and_bugs(db):
     assert {a["slug"] for a in run("agents_list", {})[0]} == {"hokma", "joel", "vera", "iris"}
     bug, err = run("bug_report", {"title": "Chart flickers", "severity": "high"})

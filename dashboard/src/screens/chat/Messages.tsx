@@ -7,6 +7,7 @@ import type { AttachmentChip, Item } from "./state";
 import type { SummaryKind } from "./types";
 
 export interface MessageActions {
+  /** Project the conversation runs in; empty when it has none (the permission card then says the work folder). */
   projectName: string;
   canSave: boolean;
   onPermission: (requestId: string, decision: "allow" | "deny") => void;
@@ -79,7 +80,8 @@ function PermissionCard({ item, actions }: { item: Extract<Item, { kind: "permis
   const { t } = useI18n();
   const { summary, tool, request_id: requestId } = item.body;
   const kind = summary.kind;
-  const params = { tool, target: summary.target, project: actions.projectName };
+  const place = actions.projectName ? t("chat.perm.inProject", { project: actions.projectName }) : t("chat.perm.inWorkdir");
+  const params = { tool, target: summary.target, place };
   if (item.resolution) {
     const { decision, by } = item.resolution;
     const label = decision === "allow" ? t("chat.perm.allowed") : by === "timeout" ? t("chat.perm.timeout") : by === "stop" ? t("chat.perm.stopped") : t("chat.perm.denied");

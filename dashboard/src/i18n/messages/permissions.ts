@@ -60,6 +60,7 @@ export default defineMessages({
     "block.why.real_money": "Las órdenes con dinero real las envías solo tú, nunca un agente.",
     "block.why.other": "Esta acción está siempre bloqueada, en los dos modos.",
     "block.viewTrash": "Ver en la Papelera",
+    "block.why.deleteBlocked": "Hokma bloqueó el borrado. No se borró nada.",
 
     "trash.title": "Papelera de Hokma",
     "trash.intro": "Lo que los agentes quisieron borrar llega aquí. Nada sale de la Papelera si no lo decides tú.",
@@ -103,6 +104,13 @@ export default defineMessages({
     "points.restoreFile": "Restaurar este archivo",
     "points.restoreAll": "Restaurar todo lo borrado",
     "points.fileRestored": "Restaurado: {path}",
+    "points.fileRestoredAs": "Restaurado como {path}. El archivo original se dejó intacto.",
+    "points.fileUnchanged": "{path} ya estaba igual, no se escribió nada.",
+    "points.skipped": "Omitidos por protección ({count}): {paths}",
+    "points.issue.failed": "La última foto no se pudo guardar. Hokma no pudo leer o escribir en el Git de esta carpeta.",
+    "points.issue.missing": "La última foto no se guardó: falta el historial de Git de esta carpeta.",
+    "points.issue.unsafe": "La última foto no se guardó: la configuración de Git de esta carpeta no es segura.",
+    "points.issue.no_repo": "La última foto no se guardó: esta carpeta no es un repositorio Git.",
     "points.allRestored": "Se restauraron {count} archivos",
   },
   en: {
@@ -164,6 +172,7 @@ export default defineMessages({
     "block.why.real_money": "Real-money orders are placed only by you, never by an agent.",
     "block.why.other": "This action is always blocked, in both modes.",
     "block.viewTrash": "View in Trash",
+    "block.why.deleteBlocked": "Hokma blocked the deletion. Nothing was deleted.",
 
     "trash.title": "Hokma Trash",
     "trash.intro": "What the agents wanted to delete ends up here. Nothing leaves the Trash unless you decide it.",
@@ -207,6 +216,13 @@ export default defineMessages({
     "points.restoreFile": "Restore this file",
     "points.restoreAll": "Restore all deleted",
     "points.fileRestored": "Restored: {path}",
+    "points.fileRestoredAs": "Restored as {path}. The original file was left untouched.",
+    "points.fileUnchanged": "{path} was already the same, nothing was written.",
+    "points.skipped": "Skipped for protection ({count}): {paths}",
+    "points.issue.failed": "The last snapshot could not be saved. Hokma could not read or write this folder's Git.",
+    "points.issue.missing": "The last snapshot was not saved: this folder's Git history is missing.",
+    "points.issue.unsafe": "The last snapshot was not saved: this folder's Git configuration is not safe.",
+    "points.issue.no_repo": "The last snapshot was not saved: this folder is not a Git repository.",
     "points.allRestored": "{count} files restored",
   },
 });

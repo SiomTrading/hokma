@@ -14,7 +14,9 @@ import type { DbChoice, SetupState, WorkdirOption } from "./types";
 
 type StepId = "claude" | "folder" | "database" | "name" | "done";
 const ALL_STEPS: StepId[] = ["claude", "folder", "database", "name", "done"];
-const MAX_NAME = 60;
+const MAX_NAME = 60; // the same limit as backend/hokma/kit/owner.py
+/** What the backend removes from a name (same set as `_FORBIDDEN` in kit/owner.py, without control characters). */
+const REMOVED_CHARS = /[{}<>|[\]()!]/;
 
 /** Steps a returning owner (profile already there) still has to do. The name is known; the rest is checked live. */
 async function missingSteps(state: SetupState): Promise<StepId[]> {
@@ -66,13 +68,18 @@ export function FirstRun({ pollMs }: Props) {
 
   const skipThemePatch = useRef(false);
   const themeApplied = useRef(false);
+  /** The student typed in the name step: a later read of the state (after the database step) must not wipe it. */
+  const namesTouched = useRef(false);
 
-  const fill = useCallback((next: SetupState) => {
+  const fill = useCallback((next: SetupState, force = false) => {
     setState(next);
     setWorkPath(next.workdir.exists ? next.workdir.path : (next.workdir.options[0]?.path ?? next.workdir.path));
     setEngine(next.database.engine);
-    setOwnerName(next.owner.owner_name);
-    setFundName(next.owner.fund_name);
+    if (force || !namesTouched.current) {
+      setOwnerName(next.owner.owner_name);
+      setFundName(next.owner.fund_name);
+      namesTouched.current = false;
+    }
   }, []);
 
   const load = useCallback(async () => {
@@ -115,7 +122,7 @@ export function FirstRun({ pollMs }: Props) {
     void (async () => {
       try {
         const next = await setupApi.state();
-        fill(next);
+        fill(next, true);
         setRelaunch(true);
         setOrder(ALL_STEPS);
         setReturning(false);
@@ -183,7 +190,7 @@ export function FirstRun({ pollMs }: Props) {
     } else if (id === "name") {
       void run(async () => {
         const saved = await setupApi.setOwner({ owner_name: ownerName, fund_name: fundName, language: shell.locale, theme: shell.theme });
-        fill(saved);
+        fill(saved, true);
         shell.emit("setup:changed");
         setStep(step + 1);
       });
@@ -305,11 +312,21 @@ export function FirstRun({ pollMs }: Props) {
                 <label htmlFor="hk-owner" className="lbl">
                   {t("firstrun.name.owner")}
                 </label>
-                <Input id="hk-owner" maxLength={MAX_NAME} value={ownerName} autoComplete="off" onChange={(e) => setOwnerName(e.target.value)} />
+                <Input id="hk-owner" maxLength={MAX_NAME} value={ownerName} autoComplete="off" onChange={(e) => {
+                    namesTouched.current = true;
+                    setOwnerName(e.target.value);
+                  }} />
                 <label htmlFor="hk-fund" className="lbl">
                   {t("firstrun.name.fund")}
                 </label>
-                <Input id="hk-fund" maxLength={MAX_NAME} value={fundName} placeholder={t("firstrun.name.fundPlaceholder")} autoComplete="off" onChange={(e) => setFundName(e.target.value)} />
+                <Input id="hk-fund" maxLength={MAX_NAME} value={fundName} placeholder={t("firstrun.name.fundPlaceholder")} autoComplete="off" onChange={(e) => {
+                    namesTouched.current = true;
+                    setFundName(e.target.value);
+                  }} />
+                <span className="hint" aria-live="polite">
+                  {t("firstrun.name.count", { n: String(Math.max(ownerName.length, fundName.length)), max: String(MAX_NAME) })}
+                  {REMOVED_CHARS.test(ownerName + fundName) ? ` ${t("firstrun.name.removed")}` : ""}
+                </span>
                 <p className="p" style={{ fontSize: 12 }}>
                   {t("firstrun.name.note")}
                 </p>
@@ -319,13 +336,16 @@ export function FirstRun({ pollMs }: Props) {
                   </p>
                 ) : null}
               </div>
+              <div style={{ flex: "1 1 260px", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+              <span className="hint" role="note">{t("firstrun.name.previewLang")}</span>
               <pre
                 className="mono"
                 aria-label={t("firstrun.name.preview")}
-                style={{ flex: "1 1 260px", margin: 0, padding: 14, borderRadius: 12, background: "var(--term)", border: "1px solid var(--border)", fontSize: 11, lineHeight: 1.7, whiteSpace: "pre-wrap", color: "var(--t1)", maxHeight: 300, overflow: "auto" }}
+                style={{ margin: 0, padding: 14, borderRadius: 12, background: "var(--term)", border: "1px solid var(--border)", fontSize: 11, lineHeight: 1.7, whiteSpace: "pre-wrap", color: "var(--t1)", maxHeight: 300, overflow: "auto" }}
               >
                 {preview}
               </pre>
+              </div>
             </div>
           ) : null}
 

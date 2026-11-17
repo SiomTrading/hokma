@@ -15,10 +15,10 @@ restore, empty or delete for good. Errors are `{"detail": {"code", "message"}}`.
     POST /api/trash/{id}/restore                 -> {id, restored_to, renamed}
     POST /api/trash/{id}/purge        {confirm}  -> {id}            (delete for good)
     POST /api/trash/empty             {confirm}  -> {count}
-    GET  /api/checkpoints                        ?project_id=  -> {project, points[{id, at, conversation_id}]}
+    GET  /api/checkpoints                        ?project_id=  -> {project, points[{id, at, conversation_id}], issue}
     GET  /api/checkpoints/{point}/changes        ?project_id=  -> {deleted[], changed[], truncated}
-    POST /api/checkpoints/{point}/restore-file   {path, project_id?} -> {restored[], renamed}
-    POST /api/checkpoints/{point}/restore-deleted {project_id?}     -> {restored[], count}
+    POST /api/checkpoints/{point}/restore-file   {path, project_id?} -> {restored[], renamed, unchanged}
+    POST /api/checkpoints/{point}/restore-deleted {project_id?}     -> {restored[], count, skipped[]}
 
 The calls that change something the owner decides (the PUT of the mode, restore, purge and empty of the Trash, the two
 restores of a restore point) also need `X-Hokma-Owner`: the confirmation the open tab registered. A token read from
@@ -424,7 +424,8 @@ def create_router(engine_getter=None) -> APIRouter:
         _auth(x_hokma_token, token)
         project = _project_path(_db(), project_id)
         points = await asyncio.to_thread(_point_call, checkpoints.listing, project.path)
-        return {"project": {"id": project.id, "name": project.name}, "points": points}
+        return {"project": {"id": project.id, "name": project.name}, "points": points,
+                "issue": checkpoints.last_issue(project.path)}
 
     @router.get("/api/checkpoints/{point_id}/changes")
     async def points_changes(point_id: str, project_id: str | None = Query(default=None, max_length=32),

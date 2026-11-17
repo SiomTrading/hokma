@@ -24,7 +24,7 @@ export interface RestartState {
   /** Where the supervisor wrote why the engine could not start. */
   logPath: string | null;
   /** "update" while the detached updater replaces Hokma, and when it failed. */
-  kind?: "restart" | "update";
+  kind?: "restart" | "update" | "restore";
   /** Why the update failed, in plain words from the engine. */
   message?: string | null;
 }
@@ -46,6 +46,8 @@ export const UPDATE_GIVE_UP_MS = 30 * 60_000;
 const UPDATED_KEY = "hokma.updated";
 
 let state: RestartState = { phase: "idle", logPath: null };
+/** The panel asked for a restore: the restart that follows says so instead of "the new version is opening". */
+let restoring = false;
 let knownLogPath: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let activeMode: WatchMode | null = null;
@@ -55,6 +57,12 @@ const listeners = new Set<() => void>();
 function set(next: RestartState): void {
   state = next;
   listeners.forEach((l) => l());
+}
+
+/** The restore was accepted and the engine restarts to apply it. Works before or after the restart screen opens. */
+export function announceRestore(): void {
+  restoring = true;
+  if (state.phase === "restarting" && state.kind === "restart") set({ ...state, kind: "restore" });
 }
 
 export function getRestartState(): RestartState {
@@ -141,7 +149,7 @@ export function watchEngine(options: WatchOptions): void {
   const startedAt = now();
   let sawDown = false;
   let busy = false;
-  if (options.mode !== "crash") set({ phase: "restarting", logPath: knownLogPath, kind: updating ? "update" : "restart" });
+  if (options.mode !== "crash") set({ phase: "restarting", logPath: knownLogPath, kind: updating ? "update" : restoring ? "restore" : "restart" });
 
   const tick = async (): Promise<void> => {
     if (busy) return;
@@ -234,5 +242,6 @@ export function resetRestartForTests(): void {
   knownLogPath = null;
   pageEngineVersion = null;
   hooks = null;
+  restoring = false;
   set({ phase: "idle", logPath: null });
 }

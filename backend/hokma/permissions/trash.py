@@ -183,10 +183,11 @@ def listing(db: Any) -> dict[str, Any]:
 
 
 def free_name(target: Path) -> Path:
-    """`name (restored).ext`, then `name (restored 2).ext`, when the original name is taken."""
+    """`name (restored).ext`, then `name (restored 2).ext`, when the original name is taken (word from the catalog)."""
     stem, suffix = target.stem, target.suffix
+    word = t("permissions.restored_label")
     for n in range(1, 1000):
-        label = "(restored)" if n == 1 else f"(restored {n})"
+        label = f"({word})" if n == 1 else f"({word} {n})"
         candidate = target.with_name(f"{stem} {label}{suffix}")
         if not os.path.lexists(candidate):
             return candidate

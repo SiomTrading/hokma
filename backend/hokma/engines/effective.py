@@ -31,9 +31,26 @@ def installed(kind: str) -> bool:
     return bool(binary and find_cli(binary))
 
 
+def claude_disabled_by_user() -> bool:
+    """The student pressed Disconnect on the Claude card: there is a Claude subscription row with status 'removed' and no
+    live one. The row is the durable record of that intent (no migration); `claude auth logout` is never run, so the
+    student's own Claude Code session outside Hokma stays open. Connect revives the row and the flag falls."""
+    try:
+        from hokma.db import get_database
+
+        with get_database().read() as u:
+            rows = [c for c in u.engine_connections.list(include_removed=True)
+                    if c.engine == "claude_code" and c.auth_kind == "subscription"]
+    except Exception:                                   # noqa: BLE001  (no database yet: nothing was disconnected)
+        return False
+    return any(c.status == "removed" for c in rows) and not any(c.status != "removed" for c in rows)
+
+
 def claude_connected() -> bool:
-    """Claude Code is installed and not known to be signed out (the state Hokma saved from `claude auth status`;
-    "unknown" counts as usable, the turn itself reports a real sign-in problem)."""
+    """Claude Code is installed, not disconnected by the student and not known to be signed out (the state Hokma saved
+    from `claude auth status`; "unknown" counts as usable, the turn itself reports a real sign-in problem)."""
+    if claude_disabled_by_user():
+        return False
     if not installed("claude_code"):
         return False
     try:
@@ -65,6 +82,10 @@ def verified(conn: dict[str, Any] | None, *, is_installed: Callable[[str], bool]
     return conn is None or conn.get("status") == "connected"
 
 
+def _is_claude_row(conn: dict[str, Any] | None) -> bool:
+    return bool(conn) and conn.get("engine") == "claude_code" and conn.get("auth_kind") == "subscription"
+
+
 def _last_choice(conn: dict[str, Any] | None) -> str:
     return str((conn or {}).get("chosen_at") or "")
 
@@ -76,6 +97,10 @@ def resolve(conn: dict[str, Any] | None, others: list[dict[str, Any]], *, is_ins
     (nothing better exists, the turn tests it). Else `conn` (stuck)."""
     is_installed = is_installed or installed
     claude_ok = claude_connected() if claude_ok is None else claude_ok
+    if claude_ok and claude_disabled_by_user():
+        claude_ok = False                               # the chat passes "the program is there"; the student's Disconnect wins
+    if conn is not None and conn.get("status") == "removed" and _is_claude_row(conn):
+        conn = None                                     # a removed Claude row is "Claude without a row" (bug 1159)
     if conn is not None and conn.get("status") == "removed":
         return Effective(conn)                          # the chat has its own clear message for this one
     if verified(conn, is_installed=is_installed, claude_ok=claude_ok):
@@ -92,6 +117,8 @@ def resolve(conn: dict[str, Any] | None, others: list[dict[str, Any]], *, is_ins
     # latest choice first; among equals Claude goes first
     candidates.sort(key=lambda c: (_last_choice(c), c is None or c.get("engine") == "claude_code"), reverse=True)
     if candidates:
+        if conn is None and candidates[0] is not None and _is_claude_row(candidates[0]):
+            return Effective(candidates[0])             # Claude without a row, answered by its own row: the same engine (bug 1160)
         return Effective(candidates[0], fallback_from=stand_in)
     return Effective(conn)
 

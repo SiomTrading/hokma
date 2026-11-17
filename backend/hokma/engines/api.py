@@ -22,7 +22,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from hokma.core.origin import token_matches
 from hokma.db import NotFound, get_database
 from hokma.engine.api import get_engine
-from hokma.engines import codex_login, secrets, service
+from hokma.engines import codex_login, effective, secrets, service
 from hokma.engines.service import ServiceError
 from hokma.i18n import t
 from hokma.rpc.ws import SESSION_TOKEN
@@ -98,7 +98,7 @@ async def listing(x_hokma_token: str = Header(default=""), token: str = Query(de
     _guard(x_hokma_token, token)
     return {"connections": await _run(service.list_connections), "detect": await _run(service.detect),
             "store_available": secrets.available(), "active": await _run(service.active_engine, conversation_id),
-            "models": await _run(service.model_menu)}
+            "models": await _run(service.model_menu), "claude_disabled_by_user": await _run(effective.claude_disabled_by_user)}
 
 
 @router.post("/engines/claude")

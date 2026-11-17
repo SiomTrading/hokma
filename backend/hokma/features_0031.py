@@ -25,7 +25,6 @@ async def on_startup(app: FastAPI) -> None:
     from hokma.engine.api import get_engine
     from hokma.power.api import watch
     from hokma.scheduler import loop
-    from hokma.telegram.core.approvals_ui import _redact_telegram_error_text
     from hokma.telegram.glue import TelegramGlue
 
     app.state.power_task = asyncio.create_task(watch(app, app.state.power_busy))
@@ -34,13 +33,8 @@ async def on_startup(app: FastAPI) -> None:
     glue = app.state.telegram = TelegramGlue(lambda: app.state.db, get_engine)
     loop.OUTCOME_LISTENERS.append(glue.notify_job)
 
-    async def connect() -> None:             # in the background: a slow network must not delay the start
-        try:
-            await glue.start()
-        except Exception as exc:                 # no traceback: a network error may carry the bot token
-            log.warning("telegram did not connect: %s", _redact_telegram_error_text(exc))
-
-    app.state.telegram_task = asyncio.create_task(connect())
+    # in the background (a slow network must not delay the start); it keeps retrying if Telegram is unreachable
+    app.state.telegram_task = asyncio.create_task(glue.keep_connected())
     app.state.telegram_outbox_task = asyncio.create_task(glue.retry_loop())
 
 
@@ -70,6 +64,9 @@ def attach(app: FastAPI, busy: Callable[[], bool]) -> None:
     """Add the routes and run `on_startup` / `on_shutdown` inside the app's own lifespan (after the database opens,
     before it closes)."""
     app.state.power_busy = busy
+    from hokma.validation import attach as attach_validation
+
+    attach_validation(app)       # 422 answers in the panel's language, same envelope as the routes' own errors
     for router in routers():
         app.include_router(router)
     inner: Any = app.router.lifespan_context

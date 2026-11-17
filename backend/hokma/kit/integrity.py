@@ -27,13 +27,28 @@ def is_installed_app() -> bool:
     return root.name == "app" and root.parent.parent == runtime_root().resolve()
 
 
+def covers(file: str, only: tuple[str, ...]) -> bool:
+    """Is `file` (a posix path relative to the app) under one of the `only` prefixes? A prefix ending in "/*" means only
+    the loose files directly in that folder, not its subfolders (backend/* is on the import path: a stray .py or .pth there runs)."""
+    for prefix in only:
+        if prefix.endswith("/*"):
+            base = prefix[:-1]
+            if file.startswith(base) and "/" not in file[len(base):]:
+                return True
+        elif file.startswith(prefix):
+            return True
+    return False
+
+
 def compute(root: Path, only: tuple[str, ...] | None = None) -> dict[str, str]:
-    """sha256 of every file under `root`; with `only` (folder prefixes such as "backend/"), only the files under them."""
+    """sha256 of every file under `root`; with `only` (folder prefixes such as "backend/hokma/", or "backend/*" for the
+    loose files of one folder), only those files."""
     files: dict[str, str] = {}
     if only is None:
         found = root.rglob("*")
     else:
-        found = (p for prefix in only for p in (root / prefix.strip("/")).rglob("*"))
+        found = (p for prefix in only for p in (
+            (root / prefix[:-2]).glob("*") if prefix.endswith("/*") else (root / prefix.strip("/")).rglob("*")))
     for p in sorted(found):
         if not p.is_file() or p.suffix == ".pyc" or SKIP_DIRS & set(p.relative_to(root).parts):
             continue
@@ -69,7 +84,7 @@ def find_problems(only: tuple[str, ...] | None = None) -> list[tuple[str, str]]:
         return [(t("integrity.bad_manifest"), "")]
     actual = compute(app_root(), only)
     if only is not None:
-        expected = {f: digest for f, digest in expected.items() if f.startswith(only)}
+        expected = {f: digest for f, digest in expected.items() if covers(f, only)}
     problems = [(t("integrity.unreadable", file=f), f) for f, digest in actual.items() if not digest]
     problems += [(t("integrity.modified", file=f), f) for f in expected if actual.get(f) and actual[f] != expected[f]]
     problems += [(t("integrity.absent", file=f), f) for f in expected if f not in actual]

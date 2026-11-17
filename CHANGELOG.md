@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.36
+
+- Fix: the window never shows white. It opens only after the panel painted its first dark frame, it does not open early on a slow start, and Quit hides the window at the first click while Hokma shuts down in the background (bug 1122). This changes Hokma.exe: run the latest Hokma-Setup once.
+- Fix: Settings > Engines reads the real state of Claude: a working session shows Connected, and the saved connection that was missing is restored by itself (bug 1124).
+- Check: no process launched by Hokma opens a console window on Windows. A test now fails when any launch (including launchers passed as parameters, the command line and the Mac keep-awake) lacks `spawn_kwargs()` (bug 1107; the backup's git calls already had it).
+- Check: Telegram topic sessions are dropped when the group changes, and a permission left pending by `/new` can still be answered from Telegram (bugs 1109 and 1110, already in 0.0.35, kept under test).
+- Fix: Settings > Engines: Connect Gemini is disabled when Gemini is not installed, and connecting the same engine again reuses its row instead of adding another (bug 1158).
+- Fix: disconnecting and connecting Claude again no longer leaves old conversations broken; a conversation keeps working with Claude, and a disabled Claude says so in your language (bugs 1159 and 1160).
+- Fix: a permission card says "in your working folder" when the conversation has no project, and Engines no longer says "Connect an engine" while Claude answers (bugs 1161 and 1162).
+- Fix: Settings > Engines shows each state in your language, Test shows its result, and a failed attachment says why and can be removed (bugs 1162 and 1164).
+- Fix: after the first-run wizard the Projects panel and the terminal use the folder you chose, without reloading (bug 1165).
+- Fix: first run keeps what you typed when you go back, a path that cannot be created says why in your language, an empty file in the Library says it is empty, and Library names keep their brackets (bug 1166).
+- Fix: forms and API calls show validation errors in your language instead of raw English, the agent names keep acronyms such as MCP, and Learn lists the commands of your language (bug 1167).
+- Fix: updating, shutting down or restoring while an agent works asks you first, instead of cutting it (task 3248).
+- Check: the start also verifies the loose files at the top of backend/ and cli/, and two unstable connection tests no longer depend on a SQLite file or on a leftover credential store.
+
 ## 0.0.35
 
 - Fix: Hokma opens faster and the window no longer shows a white screen. The window stays hidden, with Hokma's dark background, until Hokma has loaded; the icon in the tray shows that it is opening. If something goes wrong the window opens and says what (bug 1122).

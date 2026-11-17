@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import type { DragEvent } from "react";
 import { Button, Dot, EmptyState, ErrorState, Icon, IconButton, Loading, Segmented } from "@/design";
 import { useI18n } from "@/i18n";
+import { useShellEvent } from "@/shell/store";
 import { useShell } from "@/shell/useShell";
 import { FoldersSection } from "./FoldersSection";
 import { CreateProjectDialog, LinkDialog, RenameProjectDialog } from "./Dialogs";
@@ -102,6 +103,9 @@ export function ProjectsPanel() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  // The wizard changes the working folder after this panel mounted: read the list again (1165).
+  useShellEvent("setup:changed", () => void refresh());
 
   // Tell the other panels (chat, terminal) which project is active, once loaded and on every change.
   useEffect(() => {

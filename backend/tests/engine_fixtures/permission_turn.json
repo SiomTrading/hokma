@@ -1357,7 +1357,7 @@
       "type": "tool_result",
       "content": "Denied by owner",
       "is_error": true,
-      "tool_use_id": "toolu_01Lo7mx2WStYMhEvM95mhqxA"
+      "tool_use_id": "toolu_01UorvwdsMCjiy8CkMFiTSwz"
      }
     ]
    },
@@ -1368,7 +1368,7 @@
    "tool_use_result": "Error: Denied by owner",
    "tool_result_meta": [
     {
-     "id": "toolu_01Lo7mx2WStYMhEvM95mhqxA",
+     "id": "toolu_01UorvwdsMCjiy8CkMFiTSwz",
      "non_execution_kind": "permission-rule",
      "permission_decision": {
       "decision": "reject",
@@ -1983,7 +1983,7 @@
    "permission_denials": [
     {
      "tool_name": "Write",
-     "tool_use_id": "toolu_01Lo7mx2WStYMhEvM95mhqxA",
+     "tool_use_id": "toolu_01UorvwdsMCjiy8CkMFiTSwz",
      "tool_input": {
       "file_path": "{{CWD}}/out.txt",
       "content": "x"

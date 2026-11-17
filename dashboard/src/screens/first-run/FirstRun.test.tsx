@@ -277,6 +277,36 @@ describe.each<Locale>(["es", "en"])("first run, complete flow in %s", (locale) =
   });
 });
 
+describe("first run, name step (1166)", () => {
+  beforeEach(() => setLocale("es"));
+
+  it("keeps what was typed when going back and forward, counts characters and labels the English preview", async () => {
+    backend.claude = "connected";
+    const user = userEvent.setup();
+    render(
+      <Harness>
+        <FirstRun pollMs={20} />
+      </Harness>,
+    );
+    await screen.findByRole("dialog", { name: t("firstrun.dialog") });
+    await user.click(await screen.findByRole("button", { name: t("firstrun.next") }));
+    await screen.findByRole("heading", { name: t("firstrun.folder.title") });
+    await user.click(nextButton());
+    await screen.findByRole("heading", { name: t("firstrun.db.title") });
+    await user.click(nextButton());
+    await screen.findByRole("heading", { name: t("firstrun.name.title") });
+    expect(screen.getByText(t("firstrun.name.previewLang"))).toBeInTheDocument();
+    await user.type(screen.getByLabelText(t("firstrun.name.owner")), "Ana <b>");
+    expect(screen.getByText(new RegExp(t("firstrun.name.removed").slice(0, 20)))).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: t("firstrun.back") }));
+    await screen.findByRole("heading", { name: t("firstrun.db.title") });
+    await user.click(nextButton());
+    await screen.findByRole("heading", { name: t("firstrun.name.title") });
+    expect(screen.getByLabelText(t("firstrun.name.owner"))).toHaveValue("Ana <b>");
+    expect(nextButton()).toBeEnabled();
+  });
+});
+
 describe("first run, permission mode card", () => {
   beforeEach(() => setLocale("en"));
 

@@ -6,7 +6,15 @@ from fastapi.responses import JSONResponse, Response
 from hokma.core.origin import token_matches
 from hokma.engine import attachments as att
 from hokma.engine.engine import ChatEngine, Connection
+from hokma.i18n import t
 from hokma.rpc.ws import SESSION_TOKEN
+
+
+
+def _attachment_error(status: int, code: str, message: str) -> HTTPException:
+    """{code, message} with the message already in the active language, like /api/engines."""
+    return HTTPException(status_code=status, detail={"code": code, "message": message})
+
 
 _engine: ChatEngine | None = None
 _in_memory = False
@@ -72,24 +80,24 @@ def create_router(engine_getter=get_engine) -> APIRouter:
             raise HTTPException(status_code=401, detail="bad token")
         declared = request.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > att.MAX_ATTACHMENT_BYTES + 64 * 1024:
-            raise HTTPException(status_code=413, detail="attachment too large")
+            raise _attachment_error(413, "attachments.too_large", t("attachments.too_large"))
         body = bytearray()
         async for chunk in request.stream():
             body += chunk
             if len(body) > att.MAX_ATTACHMENT_BYTES + 64 * 1024:
-                raise HTTPException(status_code=413, detail="attachment too large")
+                raise _attachment_error(413, "attachments.too_large", t("attachments.too_large"))
         content_type = request.headers.get("content-type", "")
         parsed = att.parse_multipart(content_type, bytes(body))
         if parsed is not None:
             name, declared_type, data = parsed
         elif content_type.lower().startswith("multipart/"):
-            raise HTTPException(status_code=400, detail="no file in the request")
+            raise _attachment_error(400, "attachments.no_file", t("attachments.no_file"))
         else:
             name, declared_type, data = x_filename or "file", content_type.split(";")[0], bytes(body)
         if not data:
-            raise HTTPException(status_code=400, detail="empty file")
+            raise _attachment_error(400, "attachments.empty", t("attachments.empty"))
         if len(data) > att.MAX_ATTACHMENT_BYTES:
-            raise HTTPException(status_code=413, detail="attachment too large")
+            raise _attachment_error(413, "attachments.too_large", t("attachments.too_large"))
         mime = att.sniff_mime(data, declared_type)
         record = engine_getter().store.add_attachment(att.save_blob(data), att.safe_name(name), mime, len(data))
         return JSONResponse({"id": record.id, "name": record.name, "mime": record.mime, "size": record.size,

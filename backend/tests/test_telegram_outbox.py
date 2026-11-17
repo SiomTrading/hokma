@@ -83,7 +83,7 @@ async def test_without_a_link_nothing_is_sent_or_stored_and_the_tool_says_so(env
     env.glue.notify_job(SimpleNamespace(name="Daily"), SimpleNamespace(status="done", detail="x"))
     assert rows(env.db) == [] and await env.glue.flush() == 0
     out, err = hokma_tools.call("notify_owner", {"text": "hi"}, Caller({"HOKMA_AGENT": "joel"}))
-    assert not err and json.loads(out)["sent"] is False and "not connected" in json.loads(out)["message"]
+    assert not err and json.loads(out)["sent"] is False and "not linked" in json.loads(out)["message"]
     assert rows(env.db) == []
 
 
@@ -91,7 +91,7 @@ async def test_without_a_link_nothing_is_sent_or_stored_and_the_tool_says_so(env
 async def test_notify_owner_queues_for_the_linked_chat_and_the_sender_delivers(env):
     await linked(env)
     out, err = hokma_tools.call("notify_owner", {"text": "  look at the report "}, Caller({"HOKMA_AGENT": "joel"}))
-    assert not err and json.loads(out)["sent"] is True
+    assert not err and json.loads(out)["sent"] is False and json.loads(out)["queued"] is True   # only queued
     assert [r["text"] for r in rows(env.db)] == ["look at the report"]
     assert await env.glue.flush() == 1 and env.app.bot.sent[-1]["text"] == "look at the report"
     assert hokma_tools.call("notify_owner", {"text": "  "}, Caller({"HOKMA_AGENT": "joel"}))[1] is True

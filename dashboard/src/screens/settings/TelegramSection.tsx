@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError, useApiQuery } from "@/api";
-import { Button, ErrorState, Field, Input, Loading, Pane, Pill } from "@/design";
+import { Button, ErrorState, Field, Input, Loading, Modal, Pane, Pill } from "@/design";
 import { useI18n } from "@/i18n";
 
 export interface TelegramState {
@@ -8,14 +8,36 @@ export interface TelegramState {
   connected: boolean;
   user_name: string;
   group_linked?: boolean;
-  avisos?: "ok" | "no_permission" | null;
+  avisos?: "ok" | "no_permission" | "unreachable" | null;
+  outbox?: { pending: number; last_error: string | null };
+  connect_error?: string | null;
 }
 
-export function telegramStatus(state: TelegramState): "linked" | "waiting" | "off" {
-  return state.linked ? "linked" : state.connected ? "waiting" : "off";
+/** `offline`: the link exists but the bot is not up (no network, Telegram blocked, token revoked). */
+export function telegramStatus(state: TelegramState): "linked" | "offline" | "waiting" | "off" {
+  if (state.linked) return state.connected ? "linked" : "offline";
+  return state.connected ? "waiting" : "off";
 }
 
-const TONE = { linked: "ok", waiting: "warn", off: undefined } as const;
+type Confirming = "unlink" | "unlinkGroup" | null;
+
+function ConfirmUnlink({ kind, busy, onCancel, onConfirm }: { kind: Exclude<Confirming, null>; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const { t } = useI18n();
+  const prefix = kind === "unlink" ? "telegram.unlink" : "telegram.group.unlink";
+  return (
+    <Modal label={t(`${prefix}.title`)} onClose={onCancel} style={{ width: "min(440px, 100%)", flexDirection: "column", padding: 22, gap: 12 }}>
+      <h2 className="h1">{t(`${prefix}.title`)}</h2>
+      <p className="p">{t(`${prefix}.body`)}</p>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <Button variant="ghost" onClick={onCancel}>{t("telegram.cancel")}</Button>
+        <Button variant="danger" disabled={busy} onClick={onConfirm}>{t(prefix)}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+const TONE = { linked: "ok", offline: "warn", waiting: "warn", off: undefined } as const;
+const RECHECK_MS = 10000;
 
 /** Settings > Telegram: paste the bot token, connect, approve the code the bot sends, unlink. */
 export function TelegramSection() {
@@ -27,6 +49,17 @@ export function TelegramSection() {
   const [groupCode, setGroupCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState<Confirming>(null);
+  const { reload } = status;
+
+  // What the server says wins: a result kept from a click lasts only until the next answer arrives.
+  useEffect(() => setSaved(null), [status.data]);
+  const watching = status.data?.linked === true && (!status.data.connected || (status.data.outbox?.pending ?? 0) > 0);
+  useEffect(() => {
+    if (!watching) return;
+    const timer = setInterval(reload, RECHECK_MS);
+    return () => clearInterval(timer);
+  }, [watching, reload]);
 
   if (status.loading && !status.data) return <Loading />;
   if (status.error || !status.data) return <ErrorState message={status.error?.message} onRetry={status.reload} />;
@@ -38,6 +71,7 @@ export function TelegramSection() {
     setError(null);
     try {
       setSaved(await action());
+      reload();
     } catch (cause) {
       setError(cause instanceof ApiError || cause instanceof Error ? cause.message : t("api.error"));
     } finally {
@@ -49,6 +83,11 @@ export function TelegramSection() {
     run(async () => {
       const res = await api.put<{ connected: boolean }>("/api/telegram/token", { token: token.trim() });
       setToken("");
+      return { ...state, connected: res.connected };
+    });
+  const reconnect = () =>
+    run(async () => {
+      const res = await api.post<{ connected: boolean }>("/api/telegram/reconnect");
       return { ...state, connected: res.connected };
     });
   const approve = () =>
@@ -73,6 +112,17 @@ export function TelegramSection() {
       await api.delete("/api/telegram/group");
       return { ...state, group_linked: false, avisos: null };
     });
+  const retryAvisos = () =>
+    run(async () => {
+      const res = await api.post<{ avisos?: TelegramState["avisos"] }>("/api/telegram/group/avisos");
+      return { ...state, avisos: res.avisos ?? null };
+    });
+  const confirmed = () => {
+    const kind = confirming;
+    setConfirming(null);
+    if (kind === "unlink") void unlink();
+    if (kind === "unlinkGroup") void unlinkGroup();
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -81,6 +131,19 @@ export function TelegramSection() {
           <Pill tone={TONE[current]} data-testid="telegram-status">{t(`telegram.status.${current}`)}</Pill>
           {state.linked && state.user_name ? <span className="p">{t("telegram.linkedTo", { name: state.user_name })}</span> : null}
         </span>
+        {current === "offline" ? (
+          <>
+            <p className="p" role="status">{t("telegram.offline.hint")}</p>
+            {state.connect_error ? <p className="p" style={{ fontSize: 12, color: "var(--t3)" }}>{state.connect_error}</p> : null}
+            <div><Button variant="primary" disabled={busy} onClick={() => void reconnect()}>{t("telegram.reconnect")}</Button></div>
+          </>
+        ) : null}
+        {state.outbox && state.outbox.pending > 0 ? (
+          <p className="p" data-testid="telegram-outbox" style={{ color: "var(--bad)" }}>
+            {t("telegram.outbox.pending", { count: state.outbox.pending })}
+            {state.outbox.last_error ? ` ${t("telegram.outbox.error", { error: state.outbox.last_error })}` : ""}
+          </p>
+        ) : null}
         {current === "off" ? (
           <>
             <Field label={t("telegram.token")} hint={t("telegram.token.hint")}>
@@ -98,7 +161,7 @@ export function TelegramSection() {
             <div><Button variant="primary" disabled={busy || code.trim() === ""} onClick={() => void approve()}>{t("telegram.approve")}</Button></div>
           </>
         ) : null}
-        {current !== "off" ? <div><Button disabled={busy} onClick={() => void unlink()}>{t("telegram.unlink")}</Button></div> : null}
+        {current !== "off" ? <div><Button disabled={busy} onClick={() => setConfirming("unlink")}>{t("telegram.unlink")}</Button></div> : null}
       </Pane>
       <Pane style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
         <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -120,8 +183,15 @@ export function TelegramSection() {
             <div><Button variant="primary" disabled={busy || groupCode.trim() === ""} onClick={() => void approveGroup()}>{t("telegram.group.approve")}</Button></div>
           </>
         ) : null}
-        {state.group_linked ? <div><Button disabled={busy} onClick={() => void unlinkGroup()}>{t("telegram.group.unlink")}</Button></div> : null}
+        {state.group_linked && (state.avisos === "no_permission" || state.avisos === "unreachable") ? (
+          <>
+            <p className="p" role="status">{t(`telegram.avisos.hint.${state.avisos}`)}</p>
+            <div><Button variant="primary" disabled={busy} onClick={() => void retryAvisos()}>{t("telegram.avisos.retry")}</Button></div>
+          </>
+        ) : null}
+        {state.group_linked ? <div><Button disabled={busy} onClick={() => setConfirming("unlinkGroup")}>{t("telegram.group.unlink")}</Button></div> : null}
       </Pane>
+      {confirming ? <ConfirmUnlink kind={confirming} busy={busy} onCancel={() => setConfirming(null)} onConfirm={confirmed} /> : null}
       {error !== null ? <p className="p" role="alert" style={{ color: "var(--bad)" }}>{error}</p> : null}
     </div>
   );

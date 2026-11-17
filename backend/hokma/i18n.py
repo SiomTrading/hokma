@@ -6,6 +6,8 @@ scripts (guard hook, MCP launcher) can use it too.
 """
 import json
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 
@@ -19,7 +21,29 @@ def _data_dir() -> Path | None:
     return Path(value) if value else None
 
 
+_override: ContextVar[str | None] = ContextVar("hokma_language_override", default=None)
+
+
+@contextmanager
+def use_language(lang: str | None):
+    """Messages raised inside the block use `lang` (the language of the panel that asked), not the engine's own."""
+    token = _override.set(lang if lang in LANGUAGES else None)
+    try:
+        yield
+    finally:
+        _override.reset(token)
+
+
+def accepted_language(header: str) -> str | None:
+    """The first language of an Accept-Language header that Hokma has, or None."""
+    code = (header or "").split(",")[0].split(";")[0].strip().lower().split("-")[0]
+    return code if code in LANGUAGES else None
+
+
 def language() -> str:
+    forced = _override.get()
+    if forced:
+        return forced
     chosen = os.environ.get("HOKMA_LANG", "").strip().lower()
     if chosen not in LANGUAGES:
         chosen = ""

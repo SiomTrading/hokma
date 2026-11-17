@@ -5,6 +5,7 @@
 use crate::engine::shared;
 use crate::http::{self, UpdateOutcome};
 use crate::i18n::t;
+use crate::{ask_cut_agent, should_ask_before_quit};
 use std::thread;
 use tauri::menu::MenuItem;
 use tauri::{AppHandle, Manager, Wry};
@@ -26,8 +27,22 @@ fn info(app: &AppHandle, text: String, kind: MessageDialogKind) {
 }
 
 fn run_update(app: &AppHandle, port: u16, token: &str) {
-    match http::start_update(port, token) {
-        UpdateOutcome::Launched => {}
+    // Same rule as Quit: an agent that works is cut by the update, so the owner is asked first (bug 1135).
+    let health_busy = http::health(port).map(|h| h.busy);
+    let asked = should_ask_before_quit(health_busy, true);
+    if asked && !ask_cut_agent(app) {
+        return;
+    }
+    let mut outcome = http::start_update(port, token, asked);
+    if matches!(outcome, UpdateOutcome::InUse) {
+        // it started working after the check above: ask now and repeat with force
+        if !ask_cut_agent(app) {
+            return;
+        }
+        outcome = http::start_update(port, token, true);
+    }
+    match outcome {
+        UpdateOutcome::Launched | UpdateOutcome::InUse => {}
         UpdateOutcome::UpToDate(version) => info(app, t("up_to_date", &[("version", &version)]), MessageDialogKind::Info),
         UpdateOutcome::Failed(why) => info(app, t("update_failed", &[("error", &why)]), MessageDialogKind::Error),
     }

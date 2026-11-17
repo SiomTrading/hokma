@@ -38,7 +38,7 @@ export function TerminalPanel() {
 
   // The first time the dock opens it starts one terminal; closing them all leaves the empty state.
   useEffect(() => {
-    if (takeAutoStart()) launchTerminal();
+    if (takeAutoStart()) launchTerminal({ auto: true });
   }, []);
 
   // Show the active session and keep it fitted to the dock.

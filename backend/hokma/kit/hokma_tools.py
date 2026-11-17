@@ -268,12 +268,24 @@ def decision_list(u, c: Caller, a: dict) -> str:
 # ------------------------------------------------------------------------ schedules
 
 def schedule_create(u, c: Caller, a: dict) -> str:
-    """Created inactive: the owner turns it on."""
-    from hokma.db.repos.profile import ProfileRepo  # noqa: F401  (timezone default below)
+    """Created inactive: the owner turns it on. Validated like the panel's API (bug 1137): nothing invalid is saved."""
+    from hokma.agents import errors
+    from hokma.agents.service import AgentsError
+    from hokma.db import IntegrityViolation
+    from hokma.scheduler.service import JobsService
 
     tz = a.get("timezone") or u.profile.get_or_default().timezone or "UTC"
-    job = u.scheduled_jobs.create(a["name"], a.get("agent") or c.slug, a["prompt"], a["schedule_kind"],
-                                  a["schedule_expr"], tz, is_active=False)
+    slug = a.get("agent") or c.slug
+    try:
+        values = JobsService._fields(a["name"], slug, a["prompt"], a["schedule_kind"], a["schedule_expr"], tz)
+        if u.agents.find(slug) is None:
+            raise AgentsError("agent_not_found", 404)
+        job = u.scheduled_jobs.create(values["name"], slug, values["prompt"], a["schedule_kind"],
+                                      values["schedule_expr"], tz, is_active=False)
+    except AgentsError as exc:
+        raise ValueError(errors.message(exc.code, str(exc))) from exc
+    except IntegrityViolation as exc:
+        raise ValueError(errors.message("job_name_taken")) from exc
     return _dump({"id": job.id, "name": job.name, "is_active": job.is_active, "note": "inactive until the owner turns it on"})
 
 
@@ -437,7 +449,9 @@ def notify_owner(u, c: Caller, a: dict) -> str:
     if not text:
         raise ValueError("text is empty")
     enqueue(u, text)
-    return _dump({"sent": True, "message": "queued for the owner's linked Telegram chat"})
+    # Only queued: the sender delivers it when Telegram accepts it, so this cannot say it was sent (bug 1127).
+    return _dump({"sent": False, "queued": True,
+                  "message": "queued for the owner's linked Telegram chat; it is delivered as soon as Telegram accepts it"})
 
 
 def docs_list(u, c: Caller, a: dict) -> str:
@@ -536,7 +550,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
         "project_id": _i()}, ["topic", "proposal"], decision_propose, True),
     "decision_list": ("List decisions.", {"status": _s(), "project_id": _i(), "limit": _i()}, [], decision_list, False),
     "schedule_create": ("Create a routine. It starts inactive: the owner turns it on.", {
-        "name": _s(), "agent": _s(), "prompt": _s(), "schedule_kind": _s(enum=["interval", "daily", "weekly", "cron", "once"]),
+        "name": _s(), "agent": _s(), "prompt": _s(), "schedule_kind": _s(enum=["interval", "daily", "weekly", "once"]),
         "schedule_expr": _s(), "timezone": _s()}, ["name", "prompt", "schedule_kind", "schedule_expr"],
                         schedule_create, True),
     "schedule_list": ("List routines.", {"active": _b()}, [], schedule_list, False),

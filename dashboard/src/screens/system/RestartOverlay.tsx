@@ -67,7 +67,7 @@ export function RestartOverlay() {
             </Button>
           </>
         ) : (
-          <p className="p">{updating ? t("restart.updatingBody") : t("restart.body")}</p>
+          <p className="p">{updating ? t("restart.updatingBody") : restart.kind === "restore" ? t("restart.restoreBody") : t("restart.body")}</p>
         )}
       </Pane>
     </div>

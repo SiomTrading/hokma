@@ -63,6 +63,7 @@ export interface RestorePoint {
 export interface RestorePointList {
   project: { id: string | number; name: string };
   points: RestorePoint[];
+  issue?: string | null;
 }
 
 export interface PointChanges {
@@ -74,6 +75,8 @@ export interface PointChanges {
 
 export interface RestoreResult {
   restored: string[];
-  renamed?: unknown;
+  renamed?: boolean;
+  unchanged?: boolean;
+  skipped?: string[];
   count?: number;
 }

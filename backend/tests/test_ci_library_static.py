@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 CI = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 SMOKE = (ROOT / ".github" / "workflows" / "model-smoke.yml").read_text(encoding="utf-8")
-VERSION = "0.0.35"
+VERSION = "0.0.36"
 
 
 def job(name: str) -> str:
@@ -78,4 +78,8 @@ def test_every_version_place_says_the_new_version():
     package = json.loads((ROOT / "dashboard" / "package.json").read_text(encoding="utf-8"))
     lock = json.loads((ROOT / "dashboard" / "package-lock.json").read_text(encoding="utf-8"))
     assert package["version"] == lock["version"] == lock["packages"][""]["version"] == VERSION
+    tauri = json.loads((ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+    assert tauri["version"] == VERSION
+    cargo = (ROOT / "desktop" / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8")
+    assert re.search(rf'^version = "{re.escape(VERSION)}"', cargo, re.M)
     assert (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").startswith(f"# Changelog\n\n## {VERSION}\n")

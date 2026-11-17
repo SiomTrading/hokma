@@ -109,8 +109,26 @@ def _prune(project: Path, rows: list[dict[str, Any]], now: float, db: Any = None
     return dropped
 
 
+_last_issue: dict[str, str] = {}      # project key -> why the latest snapshot was not taken (memory only)
+
+
+def last_issue(project: str | Path) -> str | None:
+    """Why the latest snapshot of `project` failed in this run, or None (also None for "unchanged": that is fine)."""
+    return _last_issue.get(_key(Path(project)))
+
+
 def take(project: str | Path, conversation_id: str | int | None = None, *, now: float | None = None) -> dict[str, Any]:
     """Snapshot `project`. Returns {"taken": bool, "reason": ..., "id": ...}; never raises for a normal "no"."""
+    result = _take(project, conversation_id, now=now)
+    key = _key(Path(project))
+    if result["taken"] or result["reason"] == "unchanged":
+        _last_issue.pop(key, None)
+    else:
+        _last_issue[key] = result["reason"] or "failed"
+    return result
+
+
+def _take(project: str | Path, conversation_id: str | int | None = None, *, now: float | None = None) -> dict[str, Any]:
     project = Path(project)
     now = time.time() if now is None else now
     state = gitops.repo_state(project)
@@ -252,7 +270,8 @@ def _check_target(project: Path, rel: str, protect: list[str]) -> Path:
     return target
 
 
-def _write_back(project: Path, rel: str, mode: str, sha: str, protect: list[str]) -> tuple[Path, bool]:
+def _write_back(project: Path, rel: str, mode: str, sha: str, protect: list[str]) -> tuple[Path, bool, bool]:
+    """(target, renamed, written). `written` is False when the file already held exactly this content."""
     target = _check_target(project, rel, protect)
     data = _blob(project, sha)
     real_parent = os.path.realpath(target.parent)
@@ -261,7 +280,7 @@ def _write_back(project: Path, rel: str, mode: str, sha: str, protect: list[str]
     if os.path.lexists(real_target):
         try:
             if real_target.is_file() and not real_target.is_symlink() and real_target.read_bytes() == data:
-                return target, False
+                return target, False, False
         except OSError:
             pass
         real_target, renamed = free_name(real_target), True
@@ -270,17 +289,18 @@ def _write_back(project: Path, rel: str, mode: str, sha: str, protect: list[str]
         real_target.parent.mkdir(parents=True, exist_ok=True)
         if os.path.realpath(real_target.parent) != real_parent:    # the folder changed under us
             raise OSError("folder changed")
-        fd = os.open(real_target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        fd = os.open(real_target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_BINARY", 0), 0o644)    # Windows has neither O_NOFOLLOW nor fchmod; links are checked above
         with os.fdopen(fd, "wb") as handle:
             fd = -1
             handle.write(data)
-            if mode == "100755":
+            if mode == "100755" and hasattr(os, "fchmod"):
                 os.fchmod(handle.fileno(), 0o755)
     except OSError as exc:
         if fd >= 0:
             os.close(fd)
         raise CheckpointError("restore_failed", t("permissions.err.restore_failed", error=str(exc))) from exc
-    return project / os.path.relpath(real_target, os.path.realpath(project)), renamed
+    return project / os.path.relpath(real_target, os.path.realpath(project)), renamed, True
 
 
 def _protect(protect: list[str] | None) -> list[str]:
@@ -295,8 +315,8 @@ def restore_file(project: str | Path, point_id: str, rel: str, protect: list[str
     rel = _safe_relative(rel)
     for mode, sha, path in _tree_files(project, commit):
         if path == rel:
-            target, renamed = _write_back(project, rel, mode, sha, protect)
-            return {"restored": [str(target.relative_to(project))], "renamed": renamed}
+            target, renamed, written = _write_back(project, rel, mode, sha, protect)
+            return {"restored": [str(target.relative_to(project))], "renamed": renamed, "unchanged": not written}
     raise CheckpointError("bad_path", t("permissions.err.bad_path"))
 
 
@@ -312,7 +332,7 @@ def restore_deleted(project: str | Path, point_id: str, protect: list[str] | Non
         if not os.path.lexists(project / path):
             try:
                 _safe_relative(path)
-                target, _renamed = _write_back(project, path, mode, sha, protect)
+                target, _renamed, _written = _write_back(project, path, mode, sha, protect)
             except CheckpointError as exc:
                 if exc.code not in ("bad_path", "protected"):
                     raise

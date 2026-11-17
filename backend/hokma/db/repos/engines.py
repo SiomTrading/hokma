@@ -80,7 +80,10 @@ class EngineConnectionsRepo(Repo):
         self.get(id)
         values: dict[str, Any] = {"updated_at": utcnow()}
         if label is not None:
-            values["label"] = " ".join(label.split())[:60] or self.get(id).label
+            clean = " ".join(label.split())[:60]
+            if not clean:
+                raise ValidationError("label must be 1 to 60 characters")
+            values["label"] = clean
         if tier_models is not None:
             values["tier_models"] = json.dumps(tier_models)
         if base_url is not None:
@@ -93,6 +96,10 @@ class EngineConnectionsRepo(Repo):
         self.get(id)
         self.s.update("engine_connections", {"id": id}, {"status": "removed", "is_default": 0, "updated_at": utcnow()})
         return self.get(id)
+
+    def detach_conversations(self, connection_id: int) -> None:
+        """Conversations that used this connection go back to "no saved connection" (the default way in)."""
+        self.s.execute("UPDATE conversations SET connection_id = NULL WHERE connection_id = :id", {"id": connection_id})
 
     def for_conversation(self, conversation_id: int) -> EngineConnection | None:
         row = self.s.one("SELECT c.* FROM engine_connections c JOIN conversations v ON v.connection_id = c.id "

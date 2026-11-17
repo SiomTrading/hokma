@@ -7,6 +7,7 @@ repository could plant is executed.
 """
 from __future__ import annotations
 
+import errno
 import os
 import re
 import string
@@ -193,6 +194,17 @@ def list_dirs(raw: str | None) -> dict:
     return {"path": str(path), "parent": parent, "dirs": dirs, "roots": roots()}
 
 
+def _create_error(exc: OSError) -> SetupError:
+    """A folder that cannot be created is the user's choice of place, not a server fault: 400 with a message by errno."""
+    if exc.errno == errno.ENOENT:
+        return SetupError(400, t("setup.err.create_missing"))
+    if exc.errno in (errno.EACCES, errno.EPERM):
+        return SetupError(400, t("setup.err.create_denied"))
+    if exc.errno == errno.EROFS:
+        return SetupError(400, t("setup.err.create_readonly"))
+    return SetupError(400, t("setup.err.create_failed"))
+
+
 def make_dir(parent_raw: object, name: object) -> dict:
     parent = parse_path(parent_raw)
     if not parent.is_dir():
@@ -210,7 +222,7 @@ def make_dir(parent_raw: object, name: object) -> dict:
     try:
         target.mkdir()
     except OSError as exc:
-        raise SetupError(500, t("setup.err.create_failed", error=exc.strerror or str(exc))) from exc
+        raise _create_error(exc) from exc
     return {"path": str(target)}
 
 
@@ -266,7 +278,7 @@ def apply(raw: object) -> dict:
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise SetupError(500, t("setup.err.create_failed", error=exc.strerror or str(exc))) from exc
+        raise _create_error(exc) from exc
     if not _writable(path):
         raise SetupError(400, t("setup.err.not_writable"))
     initialized = git_init(path)

@@ -88,11 +88,13 @@ class FakeSession:
     def __init__(self, tool, target, request_id):
         self.pending = {request_id: SimpleNamespace(tool=tool, summary={"target": target})}
         self.resolved = []
+        self.channels = []
 
-    async def resolve(self, request_id, decision, by):
+    async def resolve(self, request_id, decision, by, channel="dashboard"):
         if request_id not in self.pending:
             return False
         self.resolved.append((request_id, decision, by))
+        self.channels.append(channel)
         del self.pending[request_id]
         return True
 
@@ -149,7 +151,7 @@ def text_update(chat_id, text):
 
 
 def tap(data, chat_id):
-    answers = []
+    answers, edits = [], []
 
     async def answer(text=None):
         answers.append(text)
@@ -157,11 +159,17 @@ def tap(data, chat_id):
     async def edit_message_text(**kw):
         pass
 
+    async def edit_message_reply_markup(**kw):
+        edits.append(kw)
+
     query = SimpleNamespace(data=data, answer=answer, edit_message_text=edit_message_text,
+                            edit_message_reply_markup=edit_message_reply_markup,
                             from_user=SimpleNamespace(id=int(chat_id), first_name="Ana"),
                             message=SimpleNamespace(chat_id=int(chat_id), chat=SimpleNamespace(type="private"),
                                                     message_thread_id=None))
-    return SimpleNamespace(callback_query=query), answers
+    update = SimpleNamespace(callback_query=query)
+    update.keyboard_edits = edits
+    return update, answers
 
 
 def button(bot, position):
@@ -215,9 +223,8 @@ async def test_permission_arrives_with_buttons_and_a_tap_leaves_the_telegram_cha
     session = env.engine.sessions[cid] = FakeSession("Bash", "ls -la", "r1")
     update, answers = tap(button(env.app.bot, 0), 111)
     await env.glue.link._ui.handle_callback_query(update)
-    assert session.resolved == [("r1", "allow", "human")]
-    assert approvals(env.db) == [{"subject_type": "permission", "verdict": "approved", "channel": "telegram",
-                                  "decided_by_kind": "human"}]
+    assert session.resolved == [("r1", "allow", "human")] and session.channels == ["telegram"]
+    assert approvals(env.db) == []          # the session records the answer (see the bug 1153 test), not the glue
 
 
 @aio
@@ -240,16 +247,16 @@ async def test_deny_is_recorded_and_a_late_tap_says_expired(env):
     session = env.engine.sessions[cid] = FakeSession("Bash", "rm x", "r2")
     update, _ = tap(button(env.app.bot, 1), 111)
     await env.glue.link._ui.handle_callback_query(update)
-    assert session.resolved == [("r2", "deny", "human")] and approvals(env.db)[0]["verdict"] == "rejected"
+    assert session.resolved == [("r2", "deny", "human")] and session.channels == ["telegram"]
     # the permission already ended (the engine no longer holds it): a new prompt's tap resolves nothing
     await env.glue.link.send_exec_approval("rm y", "r3", "Bash")
     late, answers = tap(button(env.app.bot, 0), 111)
     await env.glue.link._ui.handle_callback_query(late)
-    assert answers == ["⌛ Expired"] and len(approvals(env.db)) == 1
+    assert answers == ["⌛ Expired"] and session.resolved == [("r2", "deny", "human")]
 
 
 @aio
-async def test_finished_and_failed_routines_notify_and_skipped_stays_silent(env):
+async def test_finished_failed_and_skipped_routines_notify(env):
     await linked(env)
     job = SimpleNamespace(name="Daily report")
     env.glue.notify_job(job, SimpleNamespace(status="done", detail="ok"))
@@ -258,7 +265,8 @@ async def test_finished_and_failed_routines_notify_and_skipped_stays_silent(env)
     for task in list(env.glue._tasks):
         await task
     texts = [m["text"] for m in env.app.bot.sent]
-    assert texts == ["Routine finished: Daily report\n\nok", "Routine failed: Daily report. timeout"]
+    assert texts == ["Routine finished: Daily report\n\nok", "Routine failed: Daily report. timeout",
+                     "Routine skipped: Daily report. Its agent is off."]       # bug 1136: a skip is no longer silent
 
 
 def test_api_connects_links_and_unlinks_without_a_console(env):
@@ -270,7 +278,8 @@ def test_api_connects_links_and_unlinks_without_a_console(env):
         assert client.put("/api/telegram/token", json={"token": TOKEN},
                           headers={"X-Hokma-Token": HEADERS["X-Hokma-Token"]}).status_code == 403   # no owner tab
         assert client.get("/api/telegram", headers=HEADERS).json() == {
-            "linked": False, "connected": False, "user_name": "", "group_linked": False, "avisos": None}
+            "linked": False, "connected": False, "user_name": "", "group_linked": False, "avisos": None,
+            "outbox": {"pending": 0, "last_error": None}, "connect_error": None}
         bad = client.put("/api/telegram/token", json={"token": "nope"}, headers=HEADERS)
         assert bad.status_code == 400 and bad.json()["detail"]["code"] == "invalid_token"
         assert TOKEN_ENTRY not in env.glue.keys.items

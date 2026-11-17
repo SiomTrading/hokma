@@ -40,6 +40,10 @@ class FakeBackend {
     total_bytes: 1050624,
   };
   noGit = false;
+  fileResult: Record<string, unknown> | null = null;
+  skipped: string[] = [];
+  points: unknown[] | null = null;
+  issue: string | null = null;
   changes = { id: "20261105T120000Z-abcd", deleted: ["src/a.py", "docs/b.md"], changed: ["README.md"], truncated: false };
 
   json(body: unknown, status = 200): Response {
@@ -86,18 +90,18 @@ class FakeBackend {
     }
     if (route === "GET /api/checkpoints") {
       if (this.noGit) return this.json({ detail: { code: "no_git", message: "no git" } }, 409);
-      return this.json({ project: { id: "1", name: "Main" }, points: [{ id: "20261105T120000Z-abcd", at: "2026-11-05T12:00:00Z", conversation_id: "7" }] });
+      return this.json({ project: { id: "1", name: "Main" }, points: this.points ?? [{ id: "20261105T120000Z-abcd", at: "2026-11-05T12:00:00Z", conversation_id: "7" }], issue: this.issue });
     }
     if (/^GET \/api\/checkpoints\/[^/]+\/changes$/.test(route)) return this.json(this.changes);
     if (/^POST \/api\/checkpoints\/[^/]+\/restore-file$/.test(route)) {
       const path = (body as { path: string }).path;
       this.changes = { ...this.changes, deleted: this.changes.deleted.filter((p) => p !== path), changed: this.changes.changed.filter((p) => p !== path) };
-      return this.json({ restored: [path], renamed: [] });
+      return this.json(this.fileResult ?? { restored: [path], renamed: false, unchanged: false });
     }
     if (/^POST \/api\/checkpoints\/[^/]+\/restore-deleted$/.test(route)) {
       const count = this.changes.deleted.length;
       this.changes = { ...this.changes, deleted: [] };
-      return this.json({ restored: [], count });
+      return this.json({ restored: [], count, skipped: this.skipped });
     }
     if (url.pathname.startsWith("/api/chat/options")) return this.json({ agents: [], projects: [], default_project: { id: "default", name: "Main" } });
     if (url.pathname.startsWith("/api/conversations")) return this.json({ conversations: [] });
@@ -357,15 +361,26 @@ describe("chat: pill and Blocked card", () => {
   it("shows a Blocked card live with the rule, what it tried and the reason, and goes to the Trash", async () => {
     const user = userEvent.setup();
     await mount(stored);
-    server.emit({ type: "guard_block", ...base, id: 11, rule: "delete", tool: "Bash", target: "rm -rf informes", at: "2026-11-05 12:00:00" });
+    server.emit({ type: "guard_block", ...base, id: 11, rule: "delete", tool: "Bash", target: "rm -rf informes", at: "2026-11-05 12:25:00" });
     const card = screen.getByTestId("block-card");
     expect(card).toHaveTextContent(t("block.title.delete"));
     expect(card).toHaveTextContent(t("block.wanted", { target: "rm -rf informes" }));
+    expect(await within(card).findByRole("button", { name: t("block.viewTrash") })).toBeInTheDocument();
     expect(card).toHaveTextContent(t("block.why.delete"));
-    server.emit({ type: "guard_block", ...base, id: 11, rule: "delete", tool: "Bash", target: "rm -rf informes", at: "2026-11-05 12:00:00" });
+    server.emit({ type: "guard_block", ...base, id: 11, rule: "delete", tool: "Bash", target: "rm -rf informes", at: "2026-11-05 12:25:00" });
     expect(screen.getAllByTestId("block-card")).toHaveLength(1); // the same event twice is one card
     await user.click(within(card).getByRole("button", { name: t("block.viewTrash") }));
     expect(screen.getByTestId("settings")).toHaveTextContent("trash");
+  });
+
+  it("a delete block with nothing in the Trash says nothing was deleted and offers no Trash button", async () => {
+    await mount(stored);
+    server.emit({ type: "guard_block", ...base, id: 12, rule: "delete", tool: "Bash", target: "rm notes.md", at: "2026-11-05 12:00:00" });
+    const card = screen.getByTestId("block-card");
+    await waitFor(() => expect(backend.sent("GET", "/api/trash").length).toBeGreaterThan(0));
+    expect(card).toHaveTextContent(t("block.why.deleteBlocked"));
+    expect(card).not.toHaveTextContent(t("block.why.delete"));
+    expect(within(card).queryByRole("button", { name: t("block.viewTrash") })).toBeNull();
   });
 
   it("every rule has its own title and reason, and only 'delete' offers the Trash", async () => {
@@ -376,8 +391,8 @@ describe("chat: pill and Blocked card", () => {
     cards.forEach((card, index) => {
       const rule = RULE_IDS[index]!;
       expect(card).toHaveTextContent(t(`block.title.${rule}`));
-      expect(card).toHaveTextContent(t(`block.why.${rule}`));
-      expect(within(card).queryByRole("button", { name: t("block.viewTrash") })).toBe(rule === "delete" ? within(card).getByRole("button") : null);
+      expect(card).toHaveTextContent(rule === "delete" ? t("block.why.deleteBlocked") : t(`block.why.${rule}`));
+      expect(within(card).queryByRole("button", { name: t("block.viewTrash") })).toBeNull();
     });
   });
 
@@ -516,6 +531,59 @@ describe("Settings > Trash", () => {
     await user.click(await screen.findByRole("button", { name: t("points.restoreAll") }));
     expect(await screen.findByText(t("points.allRestored", { count: 1 }))).toBeInTheDocument();
     expect(backend.sent("POST", "/api/checkpoints/20261105T120000Z-abcd/restore-deleted")[0]!.body).toEqual({ project_id: "1" });
+  });
+
+  it("restore points: says where a renamed file went, and that an identical one was left alone", async () => {
+    const user = userEvent.setup();
+    backend.fileResult = { restored: ["README (restored).md"], renamed: true, unchanged: false };
+    render(
+      <Harness>
+        <TrashSection />
+        <Toasts />
+      </Harness>,
+    );
+    await user.click(await screen.findByRole("button", { name: t("points.viewChanges") }));
+    const changes = await screen.findByTestId("point-changes");
+    await user.click(within(changes).getAllByRole("button", { name: t("points.restoreFile") })[2]!);
+    expect(await screen.findByText(t("points.fileRestoredAs", { path: "README (restored).md" }))).toBeInTheDocument();
+    backend.fileResult = { restored: ["src/a.py"], renamed: false, unchanged: true };
+    await user.click(within(await screen.findByTestId("point-changes")).getAllByRole("button", { name: t("points.restoreFile") })[0]!);
+    expect(await screen.findByText(t("points.fileUnchanged", { path: "src/a.py" }))).toBeInTheDocument();
+  });
+
+  it("restore points: restore all lists the paths skipped by protection", async () => {
+    const user = userEvent.setup();
+    backend.skipped = [".claude/x.md", ".git/y"];
+    render(
+      <Harness>
+        <TrashSection />
+        <Toasts />
+      </Harness>,
+    );
+    await user.click(await screen.findByRole("button", { name: t("points.viewChanges") }));
+    await user.click(await screen.findByRole("button", { name: t("points.restoreAll") }));
+    expect(await screen.findByText(new RegExp(".claude/x.md, .git/y"))).toBeInTheDocument();
+  });
+
+  it("restore points: shows why the last snapshot failed, with and without older points", async () => {
+    backend.issue = "failed";
+    const { unmount } = render(
+      <Harness>
+        <TrashSection />
+        <Toasts />
+      </Harness>,
+    );
+    expect(await screen.findByTestId("points-issue")).toHaveTextContent(t("points.issue.failed"));
+    unmount();
+    backend.points = [];
+    render(
+      <Harness>
+        <TrashSection />
+        <Toasts />
+      </Harness>,
+    );
+    expect(await screen.findByText(t("points.none"))).toBeInTheDocument();
+    expect(screen.getByTestId("points-issue")).toHaveTextContent(t("points.issue.failed"));
   });
 
   it("restore points: a folder without Git shows the catalog message, not a broken list", async () => {

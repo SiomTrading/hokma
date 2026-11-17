@@ -99,6 +99,11 @@ def add_cli(engine: str, auth_kind: str, label: str, key: str | None = None) -> 
     if engine not in ("claude_code", "codex", "gemini_cli"):
         raise ServiceError(422, "engines.bad_engine")
     with get_database().write() as u:
+        wanted = " ".join(str(label or "").split())
+        same = [c for c in u.engine_connections.list()
+                if c.engine == engine and c.auth_kind == auth_kind and c.label == wanted]
+        if same and not key:
+            return public_view(same[0])                          # a double click is one row, not two (bug 1158)
         conn = u.engine_connections.add(engine, label, auth_kind, auto_default=False)
     conn = _default_if_needed(conn.id)
     if key and auth_kind in ("api_key", "oauth_token"):
@@ -181,11 +186,16 @@ def model_menu() -> list[dict[str, Any]]:
 
 def ensure_claude_connection() -> dict[str, Any]:
     """The connection row of Claude Code itself, made once when the student picks Claude in the model button, so that
-    every engine the button lists is a saved connection (a conversation can be attached to it)."""
+    every engine the button lists is a saved connection (a conversation can be attached to it). This is also "Connect"
+    after a Disconnect: the removed row is revived (same id), which drops claude_disabled_by_user."""
     with get_database().write() as u:
-        for c in u.engine_connections.list():
-            if c.engine == "claude_code" and c.auth_kind == "subscription":
+        rows = [c for c in u.engine_connections.list(include_removed=True)
+                if c.engine == "claude_code" and c.auth_kind == "subscription"]
+        for c in rows:
+            if c.status != "removed":
                 return public_view(c)
+        if rows:
+            return public_view(u.engine_connections.set_status(rows[-1].id, "connected", None))
         conn = u.engine_connections.add("claude_code", "Claude", "subscription", auto_default=False)
         u.engine_connections.set_status(conn.id, "connected", None)
         return public_view(u.engine_connections.get(conn.id))
@@ -205,7 +215,9 @@ def startup_check() -> None:
 
 def remove(connection_id: int) -> None:
     with get_database().write() as u:
-        u.engine_connections.remove(connection_id)
+        row = u.engine_connections.remove(connection_id)
+        if row.engine == "claude_code" and row.auth_kind == "subscription":
+            u.engine_connections.detach_conversations(connection_id)     # Connect later: they answer with Claude again (bug 1159)
     secrets.delete(connection_id)
 
 
@@ -215,6 +227,8 @@ def set_default(connection_id: int) -> None:
 
 
 def rename(connection_id: int, label: str) -> dict[str, Any]:
+    if not " ".join(str(label or "").split()):
+        raise ServiceError(422, "engines.bad_request")           # an empty name is a mistake, not "keep the old one" (bug 1162)
     with get_database().write() as u:
         return public_view(u.engine_connections.update(connection_id, label=label))
 

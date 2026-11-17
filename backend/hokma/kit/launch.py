@@ -37,19 +37,20 @@ class LaunchSpec:
 
 
 # What the start checks: the Python code of the engine (backend/hokma/, with its loose .py files), the command line
-# (cli/hokma_cli/) and the kit. Not the tests, the dashboard or the installer.
-CODE_FOLDERS = ("backend/hokma/", "cli/hokma_cli/", "kit/")
+# (cli/hokma_cli/), the kit, and the loose files at the top of backend/ and cli/ (they are on the import path, so a stray
+# .py or .pth there would run). Not the tests, the dashboard or the installer.
+CODE_FOLDERS = ("backend/hokma/", "cli/hokma_cli/", "kit/", "backend/*", "cli/*")
 
 
 def check_integrity() -> None:
     if not integrity.is_installed_app():
         return  # dev checkout: no manifest
     # Only code that Claude runs (backend/hokma/, kit/) blocks the chat; a blocked or changed dashboard or installer file
-    # (an antivirus false positive, bug 1113) does not. So only those two folders are read (not the tests, the dashboard or the installer): on Windows an antivirus
+    # (an antivirus false positive, bug 1113) does not. So only the code folders are read (not the tests, the dashboard or the installer): on Windows an antivirus
     # scans every file that is opened, and reading the whole app twice made the start slow (bug 1122, 0.0.35).
     # `hokma doctor` still reports every problem of every file.
     found = integrity.find_problems(only=CODE_FOLDERS)
-    if any(not f or f.startswith(CODE_FOLDERS) for _, f in found):
+    if any(not f or integrity.covers(f, CODE_FOLDERS) for _, f in found):
         raise IntegrityError("; ".join(text for text, _ in found[:5]))
 
 

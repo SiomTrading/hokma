@@ -59,18 +59,30 @@ pub enum UpdateOutcome {
     /// The detached updater of the engine started: the panel shows "Updating Hokma" and reconnects by itself.
     Launched,
     UpToDate(String),
+    /// An agent started working after the window asked `/health`: ask again, then repeat with force.
+    InUse,
     Failed(String),
+}
+
+/// `POST /api/update`; `force=true` is sent only after the owner accepted to cut a working agent.
+fn update_url(port: u16, force: bool) -> String {
+    format!("{}/api/update{}", base(port), if force { "?force=true" } else { "" })
+}
+
+/// The engine refuses with 409 `update.in_use` while an agent works and the call carried no `force`.
+fn is_in_use(body: &Value) -> bool {
+    body.pointer("/detail/code").and_then(Value::as_str) == Some("update.in_use")
 }
 
 /// The same request as the panel's Update button: the engine runs the detached updater (0.0.14), which stops
 /// Hokma, updates outside the runtime slots and starts it again with the same session.
-pub fn start_update(port: u16, token: &str) -> UpdateOutcome {
+pub fn start_update(port: u16, token: &str, force: bool) -> UpdateOutcome {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(2))
         .timeout(Duration::from_secs(120))
         .build();
     let result = agent
-        .post(&format!("{}/api/update", base(port)))
+        .post(&update_url(port, force))
         .set("X-Hokma-Token", token)
         .call();
     let read = |response: ureq::Response| -> Value {
@@ -91,10 +103,32 @@ pub fn start_update(port: u16, token: &str) -> UpdateOutcome {
                 _ => UpdateOutcome::Failed(body.to_string()),
             }
         }
-        Err(ureq::Error::Status(_, response)) => {
+        Err(ureq::Error::Status(code, response)) => {
             let body = read(response);
+            if code == 409 && is_in_use(&body) {
+                return UpdateOutcome::InUse;
+            }
             UpdateOutcome::Failed(body.get("detail").and_then(Value::as_str).unwrap_or("").to_string())
         }
         Err(error) => UpdateOutcome::Failed(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn force_is_sent_only_when_asked_for() {
+        assert_eq!(update_url(8765, false), "http://127.0.0.1:8765/api/update");
+        assert_eq!(update_url(8765, true), "http://127.0.0.1:8765/api/update?force=true");
+    }
+
+    #[test]
+    fn only_the_in_use_code_counts_as_a_working_agent() {
+        let busy: Value = serde_json::from_str(r#"{"detail":{"code":"update.in_use","message":"x"}}"#).unwrap();
+        let other: Value = serde_json::from_str(r#"{"detail":"a plain string detail"}"#).unwrap();
+        assert!(is_in_use(&busy));
+        assert!(!is_in_use(&other));
     }
 }

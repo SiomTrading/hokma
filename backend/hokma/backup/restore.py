@@ -3,6 +3,7 @@
 `prepare` only stages the files; nothing live is touched. `apply_pending` runs when the engine starts, before the
 database opens: it keeps the current database in `backups/` and puts the staged data in place.
 """
+import json
 import logging
 import shutil
 import sqlite3
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from hokma.backup import github_release
 from hokma.backup.bundle import DB_ENTRY, BackupError, open_bundle
+from hokma.backup import cloud_runner
 from hokma.backup.cloud_runner import REPO_NAME, memory_dir
 from hokma.backup.fund_git import FundGit, FundGitError, https_token_env
 from hokma.backup.snapshot import safe_copy_db, safe_restore_db
@@ -78,6 +80,27 @@ def prepare(db, name: str, key: str) -> dict:
     return {"status": "restart_required", "reconnect": reconnect}
 
 
+KEEP_BEFORE_RESTORE = 3
+
+
+def _prune_before_restore() -> None:
+    """Keep the newest `KEEP_BEFORE_RESTORE` copies of the replaced database (the name carries the UTC time)."""
+    for old in sorted(backups_dir().glob("before-restore-*.db"))[:-KEEP_BEFORE_RESTORE]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
+def dismiss_failure() -> None:
+    """The student read the notice of a restore that could not be applied: forget it and the staged copy."""
+    shutil.rmtree(hokma_data_dir() / STAGE, ignore_errors=True)
+    try:
+        cloud_runner.restore_failure_path().unlink()
+    except OSError:
+        pass
+
+
 def _copy(src: Path, dst: Path) -> None:
     if src.is_dir():
         shutil.copytree(src, dst, dirs_exist_ok=True)
@@ -93,9 +116,19 @@ def apply_pending() -> None:
     if target.is_file():
         backups_dir().mkdir(parents=True, exist_ok=True)
         safe_copy_db(target, backups_dir() / f"before-restore-{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.db")
+        _prune_before_restore()
     if not safe_restore_db(staged, target):
         log.error("restore: the database could not be replaced; the staged copy is kept in %s", stage)
+        try:                                                     # GET /api/backup shows it until the student dismisses it
+            cloud_runner.restore_failure_path().write_text(
+                json.dumps({"at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")}), encoding="utf-8")
+        except OSError:
+            pass
         return
+    try:
+        cloud_runner.restore_failure_path().unlink()
+    except OSError:
+        pass
     files = stage / "files"
     _copy(stage / "memory", memory_dir())
     _copy(files / "libraries", libraries_dir())

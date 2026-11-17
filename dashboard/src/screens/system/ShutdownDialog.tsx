@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ApiError, shutdownFromEntry, shutdownHokma } from "@/api";
+import { useEffect, useState } from "react";
+import { agentBusy, ApiError, shutdownFromEntry, shutdownHokma } from "@/api";
 import { Button, Modal } from "@/design";
 import { useI18n } from "@/i18n";
 
@@ -16,12 +16,22 @@ export function ShutdownDialog({ withSession, onClose, onError }: ShutdownDialog
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [working, setWorking] = useState(false); // an agent is working: shutting down cuts it off
+
+  useEffect(() => {
+    if (withSession) void agentBusy().then(setWorking);
+  }, [withSession]);
 
   const confirm = async () => {
     setBusy(true);
     try {
-      await (withSession ? shutdownHokma() : shutdownFromEntry());
+      await (withSession ? shutdownHokma(working) : shutdownFromEntry());
     } catch (error) {
+      if (withSession && error instanceof ApiError && error.status === 409 && error.code === "shutdown.in_use") {
+        setWorking(true); // it started working after the dialog opened: ask again
+        setBusy(false);
+        return;
+      }
       const message = error instanceof ApiError && error.message ? error.message : t("shutdown.failed");
       if (onError) {
         onError(message);
@@ -39,6 +49,11 @@ export function ShutdownDialog({ withSession, onClose, onError }: ShutdownDialog
       <p className="p" style={{ marginTop: 8 }}>
         {t("shutdown.confirmBody")}
       </p>
+      {working ? (
+        <p className="p" role="alert" data-testid="shutdown-busy" style={{ marginTop: 8 }}>
+          {t("busy.warning")}
+        </p>
+      ) : null}
       {problem ? (
         <p className="p" role="alert" data-testid="shutdown-problem" style={{ marginTop: 8 }}>
           {problem}
@@ -49,7 +64,7 @@ export function ShutdownDialog({ withSession, onClose, onError }: ShutdownDialog
           {t("shutdown.cancel")}
         </Button>
         <Button size="sm" variant="primary" onClick={() => void confirm()} disabled={busy} data-testid="shutdown-confirm">
-          {t("shutdown.confirm")}
+          {working ? t("busy.continue") : t("shutdown.confirm")}
         </Button>
       </div>
     </Modal>

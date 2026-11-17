@@ -25,7 +25,8 @@ describe("keys and providers live in one place", () => {
     // in Settings > Engines and in the engines step of the first run, so its card is another password field. The Telegram bot token (Settings > Telegram) is the third.
     expect(filesWith('type="password"')).toEqual(["./screens/connections/ProviderCard.tsx", "./screens/engines/ConnectCards.tsx", "./screens/settings/BackupSection.tsx", "./screens/settings/TelegramSection.tsx"]);
     for (const file of filesWith(/\bkey_id\b|\bsecret\b/)) {
-      expect(file.startsWith("./screens/connections/") || file === "./i18n/messages/connections.ts", file).toBe(true);
+      // backup.ts names the omitted-file reason "secret" (a backend code, not a provider key field).
+      expect(file.startsWith("./screens/connections/") || file === "./i18n/messages/connections.ts" || file === "./i18n/messages/backup.ts" || file === "./screens/settings/BackupSection.tsx", file).toBe(true);
     }
   });
 

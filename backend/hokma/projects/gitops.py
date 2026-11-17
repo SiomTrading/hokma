@@ -27,7 +27,8 @@ _IDENTITY = ["-c", "user.name=Hokma", "-c", "user.email=hokma@localhost"]
 # below (global and system config pointed at the null device) no filter, alias or helper defined anywhere
 # outside the validated local config can run program code during add or commit.
 _HARDEN = ["-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-c", "commit.gpgsign=false",
-           "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "-c", f"core.attributesFile={os.devnull}"]
+           "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "-c", f"core.attributesFile={os.devnull}",
+           "-c", "core.longpaths=true"]                 # Windows: paths over 260 characters
 
 
 def _env(cwd: str) -> dict[str, str]:

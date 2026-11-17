@@ -13,6 +13,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from hokma.db import Database, DbError, from_db_time, get_database
+from hokma.i18n import t
 from hokma.power import resume
 from hokma.scheduler import runner
 
@@ -60,7 +61,32 @@ class Scheduler:
         if self._task is not None:
             return
         self._stop.clear()
+        self.recover_interrupted()
         self._task = asyncio.create_task(self._loop(), name="hokma-scheduler")
+
+    def recover_interrupted(self) -> list[int]:
+        """Bug 1134: a run that was still `running` when Hokma went down (killed, power cut) has no process any more.
+        Mark it failed as interrupted so the list does not show it as running forever. Returns the task ids."""
+        if not self._ready():
+            return []
+        fixed: list[int] = []
+        try:
+            with self.db.write() as u:
+                for job in u.scheduled_jobs.list():
+                    if job.id in self._running or job.last_task_id is None:
+                        continue
+                    task = u.tasks.find(job.last_task_id)
+                    if task is None or task.status != "running":
+                        continue
+                    reason = t("sched.error.interrupted")
+                    u.tasks.fail(task.id, reason)
+                    u.journal.add("alert", t("sched.journal.failed", name=job.name), actor=runner.SYSTEM,
+                                  outcome="failure", agent_slug=job.agent_slug, task_id=task.id, body=reason,
+                                  refs={"scheduled_job": job.id, "outcome": "interrupted"})
+                    fixed.append(task.id)
+        except DbError:
+            log.exception("could not recover interrupted runs")
+        return fixed
 
     async def stop(self) -> None:
         self._stop.set()
@@ -103,7 +129,9 @@ class Scheduler:
                 continue
             planned = from_db_time(job.next_run_at) if job.next_run_at else now
             if startup or now - planned > (grace or self.grace):
-                skipped.append(runner.skip(self.db, job, now, "missed"))
+                outcome = runner.skip(self.db, job, now, "missed")
+                skipped.append(outcome)
+                self._notify(job, outcome)
                 continue
             self._launch(job, now)
         return skipped
@@ -115,16 +143,20 @@ class Scheduler:
         except Exception:
             return False
 
+    @staticmethod
+    def _notify(job, outcome: runner.RunOutcome) -> None:
+        for listener in list(OUTCOME_LISTENERS):
+            try:
+                listener(job, outcome)
+            except Exception:
+                log.exception("outcome listener failed")
+
     def _launch(self, job, now: datetime) -> None:
         async def go() -> None:
             async with self._gate:
                 outcome = await self.job_runner.run(job, now)
                 log.info("scheduled job %s: %s", job.name, outcome.status)
-                for listener in list(OUTCOME_LISTENERS):
-                    try:
-                        listener(job, outcome)
-                    except Exception:
-                        log.exception("outcome listener failed")
+                self._notify(job, outcome)
 
         task = asyncio.create_task(go(), name=f"hokma-job-{job.id}")
         self._running[job.id] = task

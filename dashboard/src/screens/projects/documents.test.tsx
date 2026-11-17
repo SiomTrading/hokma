@@ -40,7 +40,7 @@ class FakeDocs {
         const form = body as FormData;
         const file = form.get("file") as File;
         const status = this.reject[file.name];
-        if (status) return this.json({ detail: { code: "rejected", message: "rejected" } }, status);
+        if (status) return this.json({ detail: { code: status === 400 ? "empty_file" : "rejected", message: "rejected" } }, status);
         const doc: DocumentInfo = {
           id: this.nextId++, name: file.name, format: file.name.split(".").pop()!, size_bytes: file.size, status: "ready",
           status_detail: null, chunk_count: 3, source_url: null, description: (form.get("description") as string | null) ?? null,
@@ -132,6 +132,14 @@ describe.each(["es", "en"] as const)("documents tab (%s)", (locale) => {
     expect(row).toHaveTextContent(t("docs.passage"));
   });
 
+  it("shows the format as a readable name, not the raw key in capitals", async () => {
+    backend.docs.push({ id: 9, name: "nota.txt", format: "text", size_bytes: 10, status: "ready", status_detail: null, chunk_count: 1, source_url: null, description: null });
+    await mountDocuments();
+    const row = within(await screen.findByRole("list", { name: t("docs.list") })).getByRole("listitem");
+    expect(row).toHaveTextContent(t("docs.format.text"));
+    expect(row).not.toHaveTextContent("TEXT");
+  });
+
   it("sends dropped files one by one", async () => {
     await mountDocuments();
     await screen.findByText(t("docs.empty.title"));
@@ -166,6 +174,7 @@ describe.each(["es", "en"] as const)("documents tab (%s)", (locale) => {
 
   it.each([
     [409, "docs.error.duplicate"],
+    [400, "docs.error.empty"],
     [413, "docs.error.tooBig"],
     [415, "docs.error.unsupported"],
     [500, "docs.error.generic"],

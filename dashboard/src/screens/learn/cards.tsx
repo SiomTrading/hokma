@@ -8,7 +8,12 @@ import type { FirstDayProgress } from "./types";
 const CARD = { padding: 18, display: "flex", flexDirection: "column", gap: 8 } as const;
 const PRE = { margin: 0, fontSize: 12, lineHeight: 1.7, color: "var(--t1)", whiteSpace: "pre-wrap" } as const;
 const COMMANDS = ["start", "doctor", "update", "owner"] as const;
-const SLASH = ["modelo", "agente", "proyecto"] as const;
+/** The command text follows the language (`chat.cmd.*`: /modelo or /model); the description keys keep their ids. */
+const SLASH = [
+  { cmd: "chat.cmd.model", help: "learn.slash.modelo" },
+  { cmd: "chat.cmd.agent", help: "learn.slash.agente" },
+  { cmd: "chat.cmd.project", help: "learn.slash.proyecto" },
+] as const;
 
 /** "Your first day with Hokma": the three steps with their real progress. */
 export function FirstDayCard({ onOpenGuide }: { onOpenGuide?: () => void }) {
@@ -90,10 +95,10 @@ export function ShortcutsCard() {
       </dl>
       <span className="lbl">{t("learn.shortcuts.slash")}</span>
       <dl className="mono" style={{ ...PRE, display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 14, rowGap: 2 }}>
-        {SLASH.map((name) => (
-          <div key={name} style={{ display: "contents" }}>
-            <dt>/{name}</dt>
-            <dd style={{ margin: 0, color: "var(--t2)" }}>{t(`learn.slash.${name}`)}</dd>
+        {SLASH.map((slash) => (
+          <div key={slash.cmd} style={{ display: "contents" }}>
+            <dt>{t(slash.cmd)}</dt>
+            <dd style={{ margin: 0, color: "var(--t2)" }}>{t(slash.help)}</dd>
           </div>
         ))}
       </dl>

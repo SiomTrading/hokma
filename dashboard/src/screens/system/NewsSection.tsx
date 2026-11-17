@@ -3,6 +3,7 @@ import { api, ApiError, justUpdated, watchEngine } from "@/api";
 import { Button, ErrorState, Loading, Pane, Pill } from "@/design";
 import { useI18n } from "@/i18n";
 import { Markdown } from "@/screens/learn/Markdown";
+import { BusyConfirmDialog } from "./BusyConfirmDialog";
 import type { NewsData, UpdateStage } from "./types";
 import { refreshUpdateStatus, startUpdate, useUpdateStatus } from "./updateStatus";
 
@@ -91,13 +92,16 @@ export function NewsSection() {
     if (status?.phase === "restart_required") setOutcome("manual");
   }, [status?.phase, status?.target_version]);
 
-  const update = async () => {
+  const [askBusy, setAskBusy] = useState(false); // the engine said an agent is working: ask before cutting it off
+
+  const update = async (force = false) => {
+    setAskBusy(false);
     setUpdating(true);
     setUpdateError(null);
     setOutcome(null);
     startedAt.current = Date.now();
     try {
-      const result = await startUpdate();
+      const result = await startUpdate(force);
       if (result.status === "launched") {
         setOutcome("restarting");                     // startUpdate() already watches the engine
       } else if (result.status !== "updated") {
@@ -109,7 +113,8 @@ export function NewsSection() {
         setOutcome("manual");
       }
     } catch (cause) {
-      setUpdateError(messageOf(cause, t("api.error")));
+      if (cause instanceof ApiError && cause.code === "update.in_use") setAskBusy(true);
+      else setUpdateError(messageOf(cause, t("api.error")));
     } finally {
       setUpdating(false);
       void refreshUpdateStatus();
@@ -144,6 +149,7 @@ export function NewsSection() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {askBusy ? <BusyConfirmDialog title={t("news.update")} onContinue={() => void update(true)} onCancel={() => setAskBusy(false)} /> : null}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <Pill tone="acc">v{news.installed.version}</Pill>
         <Pill tone="ok">{t("news.installed")}</Pill>
@@ -239,6 +245,7 @@ export function NewsSection() {
       {news.changelog.length > 0 ? (
         <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <span className="lbl">{t("news.history")}</span>
+          {locale !== "en" ? <span className="hint" role="note">{t("news.historyEnglish")}</span> : null}
           {news.changelog.map((section) => (
             <div key={section.version} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
               <Pill style={{ flex: "none" }}>v{section.version}</Pill>

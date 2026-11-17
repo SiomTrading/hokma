@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "@/api";
 import { Button, Dot, Loading, Pill } from "@/design";
 import { useI18n } from "@/i18n";
@@ -19,13 +19,28 @@ function isClaudeRow(c: Connection): boolean {
   return c.engine === "claude_code" && (!c.auth_kind || c.auth_kind === "subscription");
 }
 
+/** What the CLI check says when it could not be read at all: unknown, never "signed out" (bug 1128). */
+const UNKNOWN_CLAUDE: ClaudeDto = { state: "unknown", installed: true, plan: null, version: null, login: { running: false, url: null } };
+
+/** The saved status of a connection in the student's language; a status the catalog does not know is shown as it is. */
+function useStatusLabel() {
+  const { t } = useI18n();
+  return (status: string) => {
+    const key = `eng.status.${status}`;
+    const text = t(key);
+    return text === key ? status : text;
+  };
+}
+
 /** Settings > Engines: connect, change the active engine, test and disconnect. Claude is always the first card. */
 export function EnginesSettings() {
   const { t } = useI18n();
-  const { data, failed, reload } = useEngines();
+  const statusLabel = useStatusLabel();
+  const { data, failed, reload, active } = useEngines();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [claude, setClaude] = useState<ClaudeDto | null>(null);
+  const restoring = useRef(false);
 
   // The saved connection can say "connected" while the Claude session expired, and it can be gone after a disconnect
   // (bugs 1112, 1123): the status shown is the CLI's own.
@@ -33,12 +48,29 @@ export function EnginesSettings() {
     try {
       setClaude(await setupApi.claude());
     } catch {
-      setClaude(null);
+      setClaude(UNKNOWN_CLAUDE);                  // a failed read is "could not check", not an endless "checking"
     }
   }, []);
   useEffect(() => {
     void readClaude();
   }, [data, readClaude]);
+
+  // A working Claude session with no saved row (the row was removed, or never made) is restored by itself, so the card
+  // and the chat agree (bug 1124). Never while the server says the student disconnected Claude: that flag is durable, so
+  // leaving Settings and coming back does not bring Claude back by itself.
+  const disabled = data?.claude_disabled_by_user ?? false;
+  const hasClaudeRow = data?.connections.some((c) => c.status !== "removed" && isClaudeRow(c)) ?? true;
+  useEffect(() => {
+    if (!data || claude?.state !== "connected" || hasClaudeRow || disabled || restoring.current) return;
+    restoring.current = true;
+    void enginesApi
+      .claudeConnection()
+      .then(() => reload())
+      .catch(() => undefined)
+      .finally(() => {
+        restoring.current = false;
+      });
+  }, [data, claude, hasClaudeRow, disabled, reload]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -66,7 +98,7 @@ export function EnginesSettings() {
   // The Claude CLI changed state (the student signed in, or the session ended): show it in the pill. After a sign-in
   // make sure Claude is a saved connection and that its saved status is not an old error.
   const claudeChanged = async (state: ClaudeDto["state"]) => {
-    if (state === "connected") {
+    if (state === "connected" && !disabled) {
       await act(async () => {
         if (claudeRow) {
           if (claudeRow.status !== "connected") await enginesApi.test(claudeRow.id);
@@ -81,17 +113,17 @@ export function EnginesSettings() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p className="p">{t("eng.settings.lead")}</p>
-      {list.length === 0 ? <p className="p">{t("eng.none_banner")}</p> : null}
-      <ClaudeCard row={claudeRow} claude={claude} act={act} onState={(state) => void claudeChanged(state)} />
+      {(data.active ? !data.active.available : list.length === 0) ? <p className="p">{t("eng.none_banner")}</p> : null}
+      <ClaudeCard row={claudeRow} claude={claude} act={act} onState={(state) => void claudeChanged(state)} disabled={disabled} activeId={active?.id ?? null} onRecheck={() => void readClaude()} />
       {others.map((c) => (
         <div key={c.id} className="pane" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong>{c.label}</strong>
             <Pill tone={tone(c)}>
               <Dot />
-              {c.status}
+              {statusLabel(c.status)}
             </Pill>
-            {c.is_default ? <Pill tone="ok">{t("eng.active")}</Pill> : null}
+            {active?.id === c.id ? <Pill tone="ok">{t("eng.active")}</Pill> : null}
           </div>
           {c.status === "error" && c.status_detail === "region" ? (
             <RegionCard provider={c.label} onRetry={() => void act(() => enginesApi.test(c.id))} onOther={() => setAdding(true)} />

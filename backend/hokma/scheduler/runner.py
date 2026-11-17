@@ -42,6 +42,7 @@ class RunOutcome:
     task_id: int | None
     status: str                   # done | failed | skipped
     detail: str = ""
+    denied: int = 0               # permission requests refused during a `done` run (it did not do everything)
 
 
 def _now() -> datetime:
@@ -49,7 +50,10 @@ def _now() -> datetime:
 
 
 def advance(job: ScheduledJob, now: datetime) -> tuple[datetime | None, bool]:
-    """(next run time, keep the job on). A `once` job turns itself off after it fires or is skipped."""
+    """(next run time, keep the job on). A `once` job turns itself off after it fires or is skipped.
+
+    An `interval` job counts from the tick that really fired (or skipped) it, not from the planned time: a late tick
+    shifts the following runs. Accepted decision (bug 1140); `test_an_interval_counts_from_the_real_tick` pins it."""
     if job.schedule_kind == "once":
         return None, False
     following = schedule.next_run(job.schedule_kind, job.schedule_expr, job.timezone, now)
@@ -95,6 +99,7 @@ class JobRunner:
                  claude_bin: str | None = None, session_token: str = "") -> None:
         self.db, self.launch, self.claude_bin, self.session_token = db, launch, claude_bin, session_token
         self.adapters = {"claude_code": ClaudeCodeAdapter(self)}
+        self._denied: dict[int, int] = {}                      # task id -> permission requests refused in that run
 
     async def run(self, job: ScheduledJob, now: datetime | None = None) -> RunOutcome:
         now = now or _now()
@@ -110,6 +115,9 @@ class JobRunner:
             text, usage = await asyncio.wait_for(self._execute(job, task_id, model), max_seconds)
         except asyncio.TimeoutError:
             return self._fail(job, task_id, t("sched.error.timeout", seconds=max_seconds), "timed_out")
+        except asyncio.CancelledError:                                # bug 1134: shutdown, restart or update mid-run
+            self._fail(job, task_id, t("sched.error.interrupted"), "crashed")
+            raise
         except _RunFailed as exc:
             return self._fail(job, task_id, str(exc), "failure", exc.usage)
         except Exception as exc:                                      # never leave a task running
@@ -190,6 +198,7 @@ class JobRunner:
         if (ev.get("input") or {}).get("cancelled"):
             return
         tool = str(ev.get("tool", ""))
+        self._denied[task_id] = self._denied.get(task_id, 0) + 1
         await eng.answer_permission(str(ev.get("request_id", "")), False, t("sched.permission.denied"), ev.get("input"))
         with self.db.write() as u:
             u.guard_events.record("permission", "blocked", "unattended scheduled run: nobody can answer",
@@ -199,20 +208,25 @@ class JobRunner:
 
     def _finish(self, job: ScheduledJob, task_id: int, text: str, usage: dict[str, Any]) -> RunOutcome:
         summary = (text.strip() or t("sched.result.empty"))[:MAX_SUMMARY]
+        denied = self._denied.pop(task_id, 0)
+        if denied:                         # bug 1129: "finished" alone would hide that part of the work was refused
+            summary = (t("sched.result.denied", count=denied) + "\n\n" + summary)[:MAX_SUMMARY]
         with self.db.write() as u:
             run = u.task_runs.current(task_id)
             if run is not None:
                 u.task_runs.add_tokens(run.id, usage["tokens_in"], usage["tokens_out"])
             u.tasks.complete(task_id, summary, actor=SYSTEM,
                              metadata={"scheduled_job": job.id, "cache_read": usage["cache_read"],
-                                       "cost_usd": usage["cost_usd"]})
-            u.journal.add("action", t("sched.journal.done", name=job.name), actor=SYSTEM, outcome="success",
+                                       "cost_usd": usage["cost_usd"], "denied": denied})
+            u.journal.add("action", t("sched.journal.done", name=job.name), actor=SYSTEM,
+                          outcome="partial" if denied else "success",
                           agent_slug=job.agent_slug, task_id=task_id, body=summary[:2000],
                           refs={"scheduled_job": job.id})
-        return RunOutcome(job.id, task_id, "done", summary)
+        return RunOutcome(job.id, task_id, "done", summary, denied)
 
     def _fail(self, job: ScheduledJob, task_id: int, error: str, outcome: str,
               usage: dict[str, Any] | None = None) -> RunOutcome:
+        self._denied.pop(task_id, None)
         try:
             with self.db.write() as u:
                 run = u.task_runs.current(task_id)

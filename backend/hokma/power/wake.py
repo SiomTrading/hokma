@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import sys
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from hokma.db import from_db_time
 from hokma.i18n import t
 
 LEAD = timedelta(seconds=120)
+RETRY_AFTER = 300.0      # seconds between attempts while the system refuses to register the wake-up
 
 
 class Backend(Protocol):
@@ -49,16 +51,22 @@ def next_wake(db: Any, now: datetime | None = None) -> datetime | None:
 class Waker:
     """Keeps exactly one wake-up registered: the next one, or none. Idempotent; talks to the system only on a change."""
 
-    def __init__(self, backend: Backend | None = None) -> None:
+    def __init__(self, backend: Backend | None = None, clock: Callable[[], float] = time.monotonic) -> None:
         self.backend = backend or platform_backend()
         self.status, self.reason, self.at = "off", None, None
         self._key: Any = None
+        self._clock = clock
+        self._retry_key: Any = None          # the (enabled, at) whose registration failed, and when to try again
+        self._retry_at = 0.0
 
     def sync(self, enabled: bool, at: datetime | None) -> str:
         key = (bool(enabled), at)
         if key == self._key:
             return self.status
+        if key == self._retry_key and self._clock() < self._retry_at:       # bug 1141: failed lately, wait a bit
+            return self.status
         self._key = key
+        self._retry_key = None
         self.reason = self.backend.check() if enabled else None
         if not enabled:
             if self.at is not None:
@@ -73,7 +81,9 @@ class Waker:
         elif self.backend.schedule(at):
             self.status, self.at = "ok", at
         else:
+            # bug 1141: do not remember the key, so the next sync retries (at most every RETRY_AFTER seconds)
             self.status, self.at = "needs_permission", None
+            self._key, self._retry_key, self._retry_at = None, key, self._clock() + RETRY_AFTER
         return self.status
 
     def info(self) -> dict[str, Any]:

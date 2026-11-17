@@ -146,12 +146,12 @@ export function ConnectCards({ listing, onChanged, onOther }: { listing: Engines
       <div className="pane" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
         <h3 className="h2">{t("eng.gemini.title")}</h3>
         <p className="p">{t("eng.gemini.body")}</p>
-        {cli.gemini === false ? (
+        {cli.gemini_cli === false ? (
           <Pill tone="warn" style={{ alignSelf: "flex-start" }}>
             {t("eng.err.not_found", { cli: "Gemini" })}
           </Pill>
         ) : null}
-        <Button size="sm" style={{ alignSelf: "flex-start" }} disabled={busy || cli.gemini === false} onClick={() => void addGemini()}>
+        <Button size="sm" style={{ alignSelf: "flex-start" }} disabled={busy || cli.gemini_cli === false} onClick={() => void addGemini()}>
           {t("eng.gemini.connect")}
         </Button>
       </div>

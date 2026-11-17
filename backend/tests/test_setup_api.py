@@ -119,7 +119,7 @@ def test_login_that_fails_shows_the_real_output_without_secrets(client, fake_cli
     for lang in ("en", "es"):
         lead = claude.t("setup.err.login_exited", code=3, output="").text(lang).split("Claude")[0]
         resp = client.post("/api/claude/login", headers=lang_headers(lang))
-        assert resp.status_code == 500
+        assert resp.status_code == 502
         message = resp.json()["detail"]["message"]
         assert message.startswith(lead)
         assert "Error: OAuth flow failed" in message          # the real output, not discarded
@@ -517,3 +517,15 @@ def test_claude_without_debug_file_support_still_signs_in(client, fake_cli, monk
     assert client.post("/api/claude/login", headers=HEADERS).json()["running"] is True
     assert "--debug-file" not in claude._login.proc.args
     assert "does not know --debug-file" in _engine_log()
+
+
+@pytest.mark.parametrize("code,key", [(2, "create_missing"), (13, "create_denied"), (30, "create_readonly"), (5, "create_failed")])
+def test_workdir_that_cannot_be_created_is_a_400_in_the_panel_language(client, env, monkeypatch, code, key):  # noqa: F811
+    def refuse(self, *args, **kwargs):
+        raise OSError(code, "Raw system text")
+
+    monkeypatch.setattr(Path, "mkdir", refuse)
+    r = client.post("/api/workdir", headers=lang_headers("es"), json={"path": str(env / "nope" / "x")})
+    assert r.status_code == 400
+    assert r.json()["detail"]["code"] == key
+    assert r.json()["detail"]["message"] == t(f"setup.err.{key}").text("es") and "Raw system text" not in r.text

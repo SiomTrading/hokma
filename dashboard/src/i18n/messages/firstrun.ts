@@ -88,6 +88,9 @@ export default defineMessages({
     "firstrun.name.fundPlaceholder": "Ej: Mi fondo",
     "firstrun.name.note": "Las reglas de trabajo de tus agentes ya vienen listas en tu CLAUDE.md.",
     "firstrun.name.preview": "Vista previa de tu manual",
+    "firstrun.name.previewLang": "Este archivo está en inglés: así lo leen tus agentes.",
+    "firstrun.name.count": "{n} de {max} caracteres como máximo.",
+    "firstrun.name.removed": "Se quitarán las llaves y los símbolos < > | [ ] ( ) !",
     "firstrun.name.required": "Escribe tu nombre para continuar.",
 
     "firstrun.done.folder": "Carpeta",
@@ -207,6 +210,9 @@ export default defineMessages({
     "firstrun.name.fundPlaceholder": "E.g. My fund",
     "firstrun.name.note": "The working rules for your agents are already in your CLAUDE.md.",
     "firstrun.name.preview": "Preview of your manual",
+    "firstrun.name.previewLang": "This file is in English: that is how your agents read it.",
+    "firstrun.name.count": "{n} of {max} characters at most.",
+    "firstrun.name.removed": "Braces and the symbols < > | [ ] ( ) ! will be removed.",
     "firstrun.name.required": "Type your name to continue.",
 
     "firstrun.done.folder": "Folder",

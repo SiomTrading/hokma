@@ -2,13 +2,23 @@ import { getLocale, t } from "@/i18n";
 import { ApiError, request } from "./client";
 import { enterOff } from "./restart";
 
+/** True while an agent works (a turn, a permission waiting, a scheduled job): `/health.busy`. Unreachable counts as not busy. */
+export async function agentBusy(): Promise<boolean> {
+  try {
+    const res = await fetch("/health", { cache: "no-store" });
+    return res.ok && ((await res.json()) as { busy?: unknown }).busy === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Shut down Hokma from the panel (the Shut down Hokma button): `POST /api/system/shutdown` with the session token.
  * With the answer 202 this tab goes to the shutdown screen at once; the other tabs get there when their socket
  * closes with the reason `shutting_down`.
  */
-export async function shutdownHokma(): Promise<void> {
-  await request("/api/system/shutdown", { method: "POST" });
+export async function shutdownHokma(force = false): Promise<void> {
+  await request(force ? "/api/system/shutdown?force=true" : "/api/system/shutdown", { method: "POST" });
   enterOff();
 }
 

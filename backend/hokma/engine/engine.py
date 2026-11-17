@@ -103,8 +103,12 @@ class ChatEngine:
             # The saved choice runs when it can. If its program is gone and another way in is connected, that one runs
             # this turn and the chat says so; nothing is written (bug 1095).
             others = listing()
-            chosen = effective.resolve(conn, others, claude_ok=True if self.claude_bin else None)
-            if self.claude_bin is None and chosen.fallback_from is None and effective.is_stuck(conn, others):
+            # Claude disconnected by the student (bug 1124, 0.0.36) is not an engine for the chat, whatever the CLI says.
+            claude_usable = bool(self.claude_bin) and not effective.claude_disabled_by_user()
+            chosen = effective.resolve(conn, others, claude_ok=True if claude_usable else None)
+            if not claude_usable and chosen.fallback_from is None and effective.is_stuck(conn, others):
+                if effective.claude_disabled_by_user():
+                    raise TurnError("claude_disabled", "claude is disconnected from hokma")
                 raise TurnError("no_engine", "no engine is installed and connected")
             if chosen.fallback_from is not None:
                 replaced = {"from": effective.label_of(chosen.fallback_from), "to": effective.label_of(chosen.conn)}
@@ -117,7 +121,7 @@ class ChatEngine:
         if conn is None:
             return self.adapter_for("claude_code"), None, conv.model
         if conn.get("status") == "removed":
-            raise TurnError("connection_removed", "the connection of this conversation was removed; pick another")
+            raise TurnError("connection_removed", "connection removed")
         tier = tier_of(conv.model)
         model = catalog.tier_model(conn, tier) or ""
         return self.adapter_for(conn["engine"]), conn, model

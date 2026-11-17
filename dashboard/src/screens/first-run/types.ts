@@ -38,7 +38,7 @@ export interface LoginInfo {
 }
 
 export interface ClaudeDto {
-  state: "connected" | "no_session" | "no_cli";
+  state: "connected" | "no_session" | "no_cli" | "unknown";
   installed: boolean;
   plan: string | null;
   version: string | null;

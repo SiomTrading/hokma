@@ -31,12 +31,13 @@ class MemoryKeyring(keyring.backend.KeyringBackend):
 
 @pytest.fixture
 def ready(env):
+    previous = keyring.get_keyring()
     keyring.set_keyring(MemoryKeyring())
     migrate()
     with get_database().write() as u:
         u.profile.save(owner_name="Ana", workdir=str(env / "work"))
     yield
-    keyring.set_keyring(fail.Keyring())
+    keyring.set_keyring(previous)
 
 
 def programs(monkeypatch, *present):

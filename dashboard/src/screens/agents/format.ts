@@ -52,29 +52,38 @@ function daysText(days: Day[], t: Translate): string {
 }
 
 function intervalText(expr: string, t: Translate): string {
-  const unit = expr.slice(-1);
-  return t(`tasks.when.every.${unit}`, { n: expr.slice(0, -1) });
+  const match = /^(\d+)([mhd])$/.exec(expr.trim());
+  return match ? t(`tasks.when.every.${match[2]}`, { n: match[1] ?? "" }) : expr;     // never a raw key in the panel
 }
 
-/** "Every day, 07:30" in the user's language. `once` shows the local date and time of the job's zone. */
+/** "Every day, 07:30 (America/Bogota)" in the user's language. `once` shows the date and time as typed, in the job's zone. */
 export function describeSchedule(job: Pick<JobItem, "kind" | "expr" | "timezone">, t: Translate, locale: string): string {
+  const zone = job.timezone ? ` (${job.timezone})` : "";
   switch (job.kind) {
     case "once": {
       const date = new Date(`${job.expr}:00Z`);
       const text = Number.isNaN(date.getTime())
         ? job.expr
         : date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
-      return t("tasks.when.once", { date: text });
+      return t("tasks.when.once", { date: text }) + zone;
     }
     case "daily":
-      return t("tasks.when.daily", { time: job.expr });
+      return t("tasks.when.daily", { time: job.expr }) + zone;
     case "weekly": {
       const { days, time } = parseWeekly(job.expr);
-      return t("tasks.when.weekly", { days: daysText(days, t), time });
+      return t("tasks.when.weekly", { days: daysText(days, t), time }) + zone;
     }
-    default:
+    case "interval":
       return t("tasks.when.interval", { every: intervalText(job.expr, t) });
+    default:
+      return String(job.expr);                      // a kind the panel does not know (cron): the expression as stored
   }
+}
+
+/** Which message follows a save (bug 1138): a creation, an edit that kept the switch, or an edit that turned it off. */
+export function savedToastKey(edited: boolean, turnedOff: boolean): string {
+  if (!edited) return "tasks.form.created";
+  return turnedOff ? "tasks.form.edited.off" : "tasks.form.saved";
 }
 
 /** The browser's time zone, used as the default of a new task. */

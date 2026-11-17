@@ -5,7 +5,7 @@ import { useI18n } from "@/i18n";
 import type { ScreenProps } from "@/shell/registry";
 import { useShell } from "@/shell/useShell";
 import { jobsApi } from "./api";
-import { describeSchedule, formatDateTime, formatTokens } from "./format";
+import { describeSchedule, formatDateTime, formatTokens, savedToastKey } from "./format";
 import { JobForm } from "./JobForm";
 import type { AgentItem, AgentsData, JobItem, JobsData } from "./types";
 
@@ -108,9 +108,15 @@ export function TasksScreen(_props: ScreenProps) {
           agents={choices}
           onClose={() => setEditing(null)}
           onSaved={(saved, wasActive) => {
+            const edited = editing !== "new";
+            const turnedOff = wasActive && !saved.active;
             setEditing(null);
             jobs.reload();
-            shell.toast({ tone: wasActive && !saved.active ? "warn" : "ok", text: t(wasActive && !saved.active ? "tasks.form.edited.off" : "tasks.form.created") });
+            // create: "created, off until you turn it on"; edit: "saved", or "saved and turned off" (bug 1138)
+            shell.toast({
+              tone: turnedOff ? "warn" : "ok",
+              text: t(savedToastKey(edited, turnedOff)),
+            });
           }}
         />
       ) : null}
@@ -126,6 +132,9 @@ export function TasksScreen(_props: ScreenProps) {
               })}
             </p>
             <p className="p" style={{ fontSize: 12 }}>{describeSchedule(confirming, t, locale)}</p>
+            {confirming.next_run_at ? (
+              <p className="p" style={{ fontSize: 12 }}>{t("tasks.confirm.when", { date: formatDateTime(confirming.next_run_at, locale) })}</p>
+            ) : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <Button variant="ghost" onClick={() => setConfirming(null)}>{t("tasks.confirm.no")}</Button>
               <Button variant="primary" disabled={busy} onClick={() => void activate(confirming)}>{t("tasks.confirm.yes")}</Button>
@@ -135,6 +144,12 @@ export function TasksScreen(_props: ScreenProps) {
       ) : null}
     </section>
   );
+}
+
+function skipReason(reason: string, t: (key: string) => string): string {
+  if (reason === "missed") return t("tasks.skip.missed");
+  if (reason === "agent_off") return t("tasks.skip.agent_off");
+  return reason || t("tasks.skip.other");
 }
 
 interface RowProps {
@@ -150,6 +165,7 @@ interface RowProps {
 function JobRow({ job, running, locale, disabled, onToggle, onEdit, onDelete }: RowProps) {
   const { t } = useI18n();
   const last = job.last;
+  const partial = last?.status === "done" && (last.denied ?? 0) > 0;     // finished, but permissions were refused
   const statusKey = last ? `tasks.status.${last.status}` : "";
   const known = ["done", "failed", "running", "review", "awaiting_approval"].includes(last?.status ?? "");
   return (
@@ -166,11 +182,20 @@ function JobRow({ job, running, locale, disabled, onToggle, onEdit, onDelete }: 
                 ? t("tasks.next", { date: formatDateTime(job.next_run_at, locale) })
                 : t("tasks.off")}
         </span>
+        {job.last_skip ? (
+          <span className="p" style={{ fontSize: 12, color: "var(--warn)" }} data-testid="job-skipped">
+            {t("tasks.skipped", { date: formatDateTime(job.last_skip.at, locale), reason: skipReason(job.last_skip.reason, t) })}
+          </span>
+        ) : null}
         {last ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <span className="p" style={{ fontSize: 12 }}>
-              {t("tasks.last", { status: known ? t(statusKey) : t("tasks.status.other", { status: last.status }) })}
+              {t("tasks.last", {
+                status: partial ? t("tasks.status.doneDenied", { count: last.denied ?? 0 })
+                  : known ? t(statusKey) : t("tasks.status.other", { status: last.status }),
+              })}
               {last.tokens ? ` · ${t("tasks.last.tokens", { tokens: formatTokens(last.tokens, locale) })}` : ""}
+              {last.ended_at ? ` · ${formatDateTime(last.ended_at, locale)}` : ""}
             </span>
             {last.summary || last.error ? (
               <span className="p" style={{ fontSize: 12, color: last.status === "failed" ? "var(--bad)" : "var(--t2)", whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 96, overflow: "auto" }}>

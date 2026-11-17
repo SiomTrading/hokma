@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, Iterable
 
 from hokma.agents.files import TIER_MODEL, clean_name, clean_text
 from hokma.agents.service import AgentsError
@@ -10,6 +10,21 @@ from hokma.db import Database, DbError, IntegrityViolation, NotFound, get_databa
 from hokma.scheduler import schedule
 
 MAX_PROMPT = 4000
+MAX_NAME_INPUT = 200
+SKIP_SCAN = 300          # newest journal notes read to find the last skipped run of each routine
+
+
+def last_skips(u) -> dict[int, dict[str, Any]]:
+    """Bug 1136: the newest skipped run of each routine, read from the journal (no new table): newest first, so the
+    first note seen for a job wins."""
+    found: dict[int, dict[str, Any]] = {}
+    for entry in u.journal.list(kind="note", limit=SKIP_SCAN):
+        refs = entry.refs if isinstance(entry.refs, dict) else {}
+        job_id = refs.get("scheduled_job")
+        if entry.outcome != "partial" or not isinstance(job_id, int) or job_id in found:
+            continue
+        found[job_id] = {"at": entry.created_at, "planned": refs.get("planned"), "reason": str(refs.get("reason") or "")}
+    return found
 
 
 def _schedule_error(exc: schedule.ScheduleError) -> AgentsError:
@@ -17,8 +32,21 @@ def _schedule_error(exc: schedule.ScheduleError) -> AgentsError:
 
 
 class JobsService:
-    def __init__(self, db: Database | None = None) -> None:
+    def __init__(self, db: Database | None = None, running: Callable[[], Iterable[int]] | None = None) -> None:
         self._db = db
+        self._running = running
+
+    def _refuse_if_running(self, job_id: int) -> None:
+        """Bug 1140: a run in progress cannot be edited, turned off or deleted under its feet."""
+        from hokma.agents.api import current_scheduler
+
+        if self._running is not None:
+            ids = self._running()
+        else:
+            active = current_scheduler()
+            ids = active.running_ids() if active else []
+        if job_id in ids:
+            raise AgentsError("job_running", 409)
 
     @property
     def db(self) -> Database:
@@ -26,8 +54,11 @@ class JobsService:
 
     # ------------------------------------------------------------------ reading
 
-    def _item(self, u, job, agents: dict[str, Any]) -> dict[str, Any]:
+    def _item(self, u, job, agents: dict[str, Any], skips: dict[int, dict[str, Any]] | None = None) -> dict[str, Any]:
         agent = agents.get(job.agent_slug)
+        skip = (skips if skips is not None else last_skips(u)).get(job.id)
+        if skip is not None and job.last_run_at and skip["at"] <= job.last_run_at:
+            skip = None                                  # a later run happened: the skip is old news
         last = None
         if job.last_task_id is not None:
             task = u.tasks.find(job.last_task_id)
@@ -37,19 +68,22 @@ class JobsService:
                 last = {"task_id": task.id, "status": task.status, "summary": (task.result_summary or "")[:2000],
                         "error": run.error if run else None, "started_at": run.started_at if run else None,
                         "ended_at": run.ended_at if run else None,
-                        "tokens": (run.tokens_in + run.tokens_out) if run else 0}
+                        "tokens": (run.tokens_in + run.tokens_out) if run else 0,
+                        "denied": int((task.result_metadata or {}).get("denied") or 0)
+                        if isinstance(task.result_metadata, dict) else 0}
         return {"id": job.id, "name": job.name, "agent": job.agent_slug,
                 "agent_name": agent.display_name if agent else job.agent_slug,
                 "agent_active": bool(agent and agent.status == "active"),
                 "model": TIER_MODEL[agent.model_tier] if agent else None,
                 "prompt": job.prompt, "kind": job.schedule_kind, "expr": job.schedule_expr,
                 "timezone": job.timezone, "active": job.is_active, "approved": job.approval_id is not None,
-                "next_run_at": job.next_run_at, "last_run_at": job.last_run_at, "last": last}
+                "next_run_at": job.next_run_at, "last_run_at": job.last_run_at, "last": last, "last_skip": skip}
 
     def list(self) -> list[dict[str, Any]]:
         with self.db.read() as u:
             agents = {a.slug: a for a in u.agents.list()}
-            return [self._item(u, job, agents) for job in u.scheduled_jobs.list()]
+            skips = last_skips(u)
+            return [self._item(u, job, agents, skips) for job in u.scheduled_jobs.list()]
 
     def get(self, job_id: int) -> dict[str, Any]:
         with self.db.read() as u:
@@ -63,6 +97,8 @@ class JobsService:
 
     @staticmethod
     def _fields(name: str, agent: str, prompt: str, kind: str, expr: str, tz: str) -> dict[str, str]:
+        if isinstance(name, str) and len(name) > MAX_NAME_INPUT:        # bug 1140: a clear error, not pydantic's array
+            raise AgentsError("name_too_long", 422)
         clean = clean_name(name)
         text = clean_text(prompt, MAX_PROMPT)
         if not clean:
@@ -95,6 +131,7 @@ class JobsService:
 
     def update(self, job_id: int, name: str, agent: str, prompt: str, kind: str, expr: str, tz: str) -> dict[str, Any]:
         values = self._fields(name, agent, prompt, kind, expr, tz)
+        self._refuse_if_running(job_id)
         try:
             with self.db.write() as u:
                 try:
@@ -117,6 +154,7 @@ class JobsService:
         return self.get(job_id)
 
     def delete(self, job_id: int) -> None:
+        self._refuse_if_running(job_id)
         try:
             with self.db.write() as u:
                 u.scheduled_jobs.get(job_id)
@@ -158,6 +196,7 @@ class JobsService:
         return self.get(job_id)
 
     def deactivate(self, job_id: int) -> dict[str, Any]:
+        self._refuse_if_running(job_id)
         try:
             with self.db.write() as u:
                 u.scheduled_jobs.get(job_id)

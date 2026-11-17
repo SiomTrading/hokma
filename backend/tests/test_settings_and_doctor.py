@@ -179,7 +179,7 @@ def test_a_file_the_system_will_not_let_us_read_is_a_named_problem(tmp_path, mon
 
 def test_the_start_reads_only_the_code_folders_but_the_doctor_reads_everything(tmp_path, monkeypatch):
     """Bug 1122 (0.0.35): on Windows an antivirus scans every file that is read, so the start (the supervisor and the
-    engine it starts, each one) hashes only backend/hokma/, cli/hokma_cli/ and kit/. A changed dashboard or installer
+    engine it starts, each one) hashes only backend/hokma/, cli/hokma_cli/, kit/ and the loose files at the top of backend/ and cli/. A changed dashboard or installer
     file does not block the start, `hokma doctor` still reports it, and a changed, new or missing code file blocks."""
     from hokma_cli.main import NO_INTEGRITY_GATE
 
@@ -189,10 +189,13 @@ def test_the_start_reads_only_the_code_folders_but_the_doctor_reads_everything(t
     for folder in folders:
         (app / folder).mkdir(parents=True)
         (app / folder / "f.py").write_text(folder)
+    (app / "backend" / "top.py").write_text("top")                  # loose files at the top of backend/ and cli/ are on the import path
+    (app / "cli" / "top.py").write_text("top")
     monkeypatch.setenv("HOKMA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(integrity, "app_root", lambda: app)
     integrity.write_manifest()
-    assert sorted(integrity.compute(app, CODE_FOLDERS)) == ["backend/hokma/f.py", "cli/hokma_cli/f.py", "kit/f.py"]
+    assert sorted(integrity.compute(app, CODE_FOLDERS)) == [
+        "backend/hokma/f.py", "backend/top.py", "cli/hokma_cli/f.py", "cli/top.py", "kit/f.py"]
 
     read: list[str] = []
     real = Path.read_bytes
@@ -203,7 +206,7 @@ def test_the_start_reads_only_the_code_folders_but_the_doctor_reads_everything(t
 
     monkeypatch.setattr(Path, "read_bytes", spy)
     check_integrity()
-    assert sorted(read) == ["hokma", "hokma_cli", "kit"]            # tests, dashboard and installer were not opened
+    assert sorted(read) == ["backend", "cli", "hokma", "hokma_cli", "kit"]   # tests, dashboard and installer were not opened
     monkeypatch.setattr(Path, "read_bytes", real)
     for folder in ("dashboard", "installer", "backend/tests"):
         (app / folder / "f.py").write_text("changed")
@@ -220,6 +223,15 @@ def test_the_start_reads_only_the_code_folders_but_the_doctor_reads_everything(t
     with pytest.raises(IntegrityError):                             # a new file in a code folder blocks
         check_integrity()
     (app / "backend" / "hokma" / "loose.py").unlink()
+    for loose in ("backend/top.py", "cli/top.py"):
+        (app / loose).write_text("changed")
+        with pytest.raises(IntegrityError):                         # a changed loose file at the top blocks
+            check_integrity()
+        (app / loose).write_text("top")
+    (app / "backend" / "stray.pth").write_text("import os")
+    with pytest.raises(IntegrityError):                             # and a new one (a .pth runs at start)
+        check_integrity()
+    (app / "backend" / "stray.pth").unlink()
     (app / "kit" / "f.py").unlink()
     with pytest.raises(IntegrityError):                             # a missing code file blocks
         check_integrity()

@@ -30,11 +30,11 @@ def _auth(header_token: str, query_token: str) -> None:
         raise HTTPException(status_code=401, detail={"code": "unauthorized", "message": "bad token"})
 
 
-def _state(db: Any) -> dict[str, Any]:
+def _state(db: Any, busy: Callable[[], bool] | None = None) -> dict[str, Any]:
     with db.read() as u:
         profile = u.profile.get_or_default()
     return {"keep_awake": profile.keep_awake, "wake_enabled": profile.wake_enabled,
-            "active": keepawake.keep_awake().is_active(), "supported": keepawake.supported(), "wake": wake.waker().info()}
+            "active": keepawake.keep_awake().is_active(), "working": bool(busy and busy()), "supported": keepawake.supported(), "wake": wake.waker().info()}
 
 
 def apply_preference(db: Any, busy: Callable[[], bool]) -> bool:
@@ -64,7 +64,7 @@ def create_router() -> APIRouter:
     def get_power(request: Request, x_hokma_token: str = Header(default=""),
                   token: str = Query(default="")) -> dict[str, Any]:
         _auth(x_hokma_token, token)
-        return _state(request.app.state.db)
+        return _state(request.app.state.db, getattr(request.app.state, "power_busy", None))
 
     @router.put("/api/power")
     def set_power(body: PowerBody, request: Request, x_hokma_token: str = Header(default=""),
@@ -83,6 +83,6 @@ def create_router() -> APIRouter:
                 raise HTTPException(status_code=422, detail={"code": "invalid", "message": str(exc)}) from exc
             busy = getattr(request.app.state, "power_busy", None)
             apply_preference(db, busy or (lambda: False))
-        return _state(db)
+        return _state(db, getattr(request.app.state, "power_busy", None))
 
     return router

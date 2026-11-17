@@ -35,6 +35,7 @@ function mockFetch(handlers: Record<string, (call: Call) => unknown> = {}) {
       const custom = handlers[key];
       if (custom) {
         const out = custom(call);
+        if (out instanceof Response) return out;
         return new Response(JSON.stringify(out), { status: key.startsWith("POST /api/attachments") ? 201 : 200 });
       }
       if (url.startsWith("/api/chat/options")) return new Response(JSON.stringify(OPTIONS));
@@ -229,6 +230,53 @@ describe("composer", () => {
     fireEvent.paste(box(), { clipboardData: { files: [image], getData: () => "" } });
     await screen.findByText("pasted.png");
     expect(calls.filter((c) => c.url === "/api/attachments")).toHaveLength(2);
+  });
+
+  it("a refused upload shows the translated reason on its chip and the x removes it (1164)", async () => {
+    mockFetch({
+      "POST /api/attachments": () => new Response(JSON.stringify({ detail: { code: "attachments.empty", message: "vacio" } }), { status: 400 }),
+    });
+    await mount();
+    await userEvent.upload(screen.getByTestId("file-input"), new File(["x"], "void.txt", { type: "text/plain" }));
+    const chip = await screen.findByTestId("pending-attachment");
+    await waitFor(() => expect(chip).toHaveTextContent(t("chat.composer.reason.empty_file")));
+    await userEvent.click(within(chip).getByRole("button", { name: t("chat.composer.removeAttachment", { name: "void.txt" }) }));
+    expect(screen.queryByTestId("pending-attachment")).toBeNull();
+  });
+
+  it("the message box id belongs to its conversation (1164)", async () => {
+    await mount();
+    expect(box().id).toBe("chat-message-new");
+    await userEvent.type(box(), "hi{Enter}");
+    server.emit(conversationEvent);
+    await waitFor(() => expect(box().id).toBe("chat-message-7"));
+  });
+
+  it("the permission card names the header project, or the work folder when there is none (1161)", async () => {
+    await mount();
+    await userEvent.type(box(), "write it{Enter}");
+    server.emit(conversationEvent);
+    server.emit({ type: "permission_request", ...base, request_id: "p1", tool_use_id: "p1", tool: "Write", input: {}, summary: { kind: "write_file", target: "a.md" }, expires_at: 1 });
+    expect(screen.getByTestId("permission-card")).toHaveTextContent(t("chat.perm.inProject", { project: "Main" }));
+  });
+
+  it("the permission card says the work folder when the conversation has no project (1161)", async () => {
+    await mount();
+    await userEvent.type(box(), "write it{Enter}");
+    server.emit({ ...conversationEvent, project: null });
+    server.emit({ type: "permission_request", ...base, request_id: "p2", tool_use_id: "p2", tool: "Write", input: {}, summary: { kind: "write_file", target: "a.md" }, expires_at: 1 });
+    const card = screen.getByTestId("permission-card");
+    expect(card).toHaveTextContent(t("chat.perm.inWorkdir"));
+    expect(card).not.toHaveTextContent("Main");
+  });
+
+  it("shows the translated text for claude_disabled and connection_removed (1159)", async () => {
+    await mount();
+    await userEvent.type(box(), "hi{Enter}");
+    server.emit({ type: "error", code: "claude_disabled", message: "x" });
+    expect(screen.getByRole("alert")).toHaveTextContent(t("chat.err.claude_disabled"));
+    expect(t("chat.err.claude_disabled")).not.toBe("chat.err.claude_disabled");
+    expect(t("chat.err.connection_removed")).not.toBe("chat.err.connection_removed");
   });
 
   it("rejects a file over 25 MB without uploading it", async () => {

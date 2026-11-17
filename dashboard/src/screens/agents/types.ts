@@ -61,6 +61,8 @@ export interface JobLast {
   started_at: string | null;
   ended_at: string | null;
   tokens: number;
+  /** Permission requests refused during a run that ended `done`: it did not do everything. */
+  denied?: number;
 }
 
 export interface JobItem {
@@ -79,6 +81,8 @@ export interface JobItem {
   next_run_at: string | null;
   last_run_at: string | null;
   last: JobLast | null;
+  /** The newest run that did not happen (Hokma closed, agent off); null when a later run happened. */
+  last_skip?: { at: string; planned: string | null; reason: string } | null;
 }
 
 export interface JobsData {

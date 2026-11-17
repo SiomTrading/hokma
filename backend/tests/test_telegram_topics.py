@@ -102,12 +102,14 @@ async def test_idle_and_daily_close_the_session_but_a_running_turn_does_not(env)
 
 
 @aio
-async def test_notices_and_permissions_go_to_avisos_and_private_answers_stay_private(env):
+async def test_notices_go_to_avisos_permissions_to_their_topic_and_private_answers_stay_private(env):
     await grouped(env)
     env.engine.script = [{"type": "permission_request", "turn_id": "t1", "request_id": "r1", "tool": "Bash",
                           "input": {"command": "ls"}, "summary": {"kind": "run", "target": "ls"}}]
+    env.glue.link._topics[10] = "Daniel"
     await say(env, "lista", 10)
-    assert env.app.bot.sent[-1]["message_thread_id"] == AVISOS and "reply_markup" in env.app.bot.sent[-1]
+    prompt = env.app.bot.sent[-1]                      # bug 1155: the permission goes to the topic it comes from
+    assert prompt["message_thread_id"] == 10 and "reply_markup" in prompt and "Topic Daniel" in prompt["text"]
     cid = env.engine.handled[0]["conversation_id"]
     session = env.engine.sessions[cid] = FakeSession("Bash", "ls", "r1")
     assert await env.glue.on_decision("r1", "once") == 1 and session.resolved == [("r1", "allow", "human")]
@@ -204,8 +206,9 @@ async def test_the_group_routes_link_unlink_and_report_their_state(env):
         assert bad.status_code == 400 and bad.json()["detail"]["code"] == "invalid_code"
         assert call(client, "post", "/api/telegram/group/approve", json={"code": code}).json() == {
             "group_linked": True, "avisos": "ok"}
-        assert call(client, "get", "/api/telegram").json() == {"linked": True, "connected": True, "user_name": "Ana",
-                                                               "group_linked": True, "avisos": "ok"}
+        assert call(client, "get", "/api/telegram").json() == {
+            "linked": True, "connected": True, "user_name": "Ana", "group_linked": True, "avisos": "ok",
+            "outbox": {"pending": 0, "last_error": None}, "connect_error": None}
         assert call(client, "delete", "/api/telegram/group").json() == {"group_linked": False}
         state = call(client, "get", "/api/telegram").json()
         assert state["linked"] is True and state["group_linked"] is False and state["avisos"] is None

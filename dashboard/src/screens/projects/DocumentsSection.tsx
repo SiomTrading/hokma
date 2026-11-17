@@ -109,9 +109,17 @@ export function DocumentsSection({
     return () => clearTimeout(timer);
   }, [settling, docs, load]);
 
+  /** Readable format name in the panel language; an unknown format falls back to its upper-case key. */
+  const formatLabel = (format: string): string => {
+    const key = `docs.format.${format}`;
+    const label = t(key);
+    return label === key ? format.toUpperCase() : label;
+  };
+
   const reasonOf = useCallback(
     (cause: unknown): string => {
       if (cause instanceof ApiError) {
+        if (cause.status === 400 && cause.code === "empty_file") return t("docs.error.empty");
         if (cause.status === 409) return t(inLibrary ? "library.error.duplicate" : "docs.error.duplicate");
         if (cause.status === 413) return t("docs.error.tooBig");
         if (cause.status === 415) return t("docs.error.unsupported");
@@ -302,7 +310,7 @@ export function DocumentsSection({
                 </Button>
               </div>
               <div className="mono" style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 10, color: "var(--t3)" }}>
-                <span>{doc.format.toUpperCase()}</span>
+                <span>{formatLabel(doc.format)}</span>
                 <span>{doc.chunk_count === 1 ? t("docs.passage") : t("docs.passages", { n: doc.chunk_count })}</span>
                 <span>{doc.source_url ? t("docs.origin.link") : t("docs.origin.file")}</span>
                 {inLibrary && doc.origin_project_id != null && projectNames.has(doc.origin_project_id) ? (

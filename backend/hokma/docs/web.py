@@ -24,7 +24,6 @@ from urllib.parse import unquote, urldefrag, urljoin, urlsplit
 from hokma import __version__
 from hokma.docs import ingest
 from hokma.docs.readers import detect_format
-from hokma.engine.attachments import safe_name
 from hokma.projects.errors import ProjectError
 from hokma.projects.fetch import Resolver, is_public, system_resolver
 
@@ -385,13 +384,23 @@ def _disposition_name(value: str | None) -> str:
     return unquote(value.split("filename=", 1)[1].split(";")[0].strip().strip('"'))
 
 
+_FS_FORBIDDEN = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]+')
+
+
+def readable_name(name: str) -> str:
+    """The name a student sees in the Library: only what a file system cannot hold is replaced (brackets, accents and
+    spaces stay). The stored copy still gets the strict `safe_name`."""
+    base = _FS_FORBIDDEN.sub("_", name).strip().strip(".").strip()
+    return base[:120].strip() or "file"
+
+
 def _document_name(opened: _Opened, title: str | None, extension: str) -> str:
-    base = safe_name(_disposition_name(opened.response.getheader("Content-Disposition"))
-                     or _path_of(opened.url).rstrip("/").rsplit("/", 1)[-1])
+    base = readable_name(_disposition_name(opened.response.getheader("Content-Disposition"))
+                         or _path_of(opened.url).rstrip("/").rsplit("/", 1)[-1])
     stem = " ".join((title or "").split()) or base
     if detect_format(stem) is not None:
         stem = stem.rsplit(".", 1)[0]
-    stem = safe_name(stem[:MAX_TITLE_CHARS]) if stem else "document"
+    stem = readable_name(stem[:MAX_TITLE_CHARS]) if stem else "document"
     return ("document" if stem == "file" else stem) + extension
 
 

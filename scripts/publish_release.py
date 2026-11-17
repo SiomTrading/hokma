@@ -15,6 +15,7 @@ Release notes are read by students: English, no references to where ideas came f
 """
 import argparse
 import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -29,6 +30,7 @@ from hokma.update.safe_exec import clean_env, find_executable, run_isolated  # n
 from hokma.update.source import UpdateError  # noqa: E402
 
 VERSION_LINE = re.compile(r'^__version__\s*=\s*"(\d+\.\d+\.\d+)"', re.M)
+CARGO_VERSION = re.compile(r'^version\s*=\s*"([^"]+)"', re.M)
 
 
 class PublishError(RuntimeError):
@@ -62,6 +64,22 @@ def read_version(root: Path) -> str:
     if not match:
         raise PublishError("could not read __version__ from backend/hokma/__init__.py")
     return match.group(1)
+
+
+def check_desktop_versions(root: Path, version: str) -> None:
+    """The desktop shell carries the release version in two files; a stale one fails the publish."""
+    tauri = root / "desktop/src-tauri/tauri.conf.json"
+    cargo = root / "desktop/src-tauri/Cargo.toml"
+    try:
+        tauri_version = json.loads(tauri.read_text(encoding="utf-8")).get("version")
+        cargo_match = CARGO_VERSION.search(cargo.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PublishError(f"could not read the desktop version files: {exc}")
+    cargo_version = cargo_match.group(1) if cargo_match else None
+    for name, found in (("desktop/src-tauri/tauri.conf.json", tauri_version),
+                        ("desktop/src-tauri/Cargo.toml", cargo_version)):
+        if found != version:
+            raise PublishError(f"{name} says version {found}, expected {version}")
 
 
 def check_state(root: Path, tag: str, dry_run: bool) -> list[str]:
@@ -152,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         root = repo_root()
         version = read_version(root)
+        check_desktop_versions(root, version)
         for note in check_state(root, f"v{version}", args.dry_run):
             print(f"note: {note}")
         check_gh_login()

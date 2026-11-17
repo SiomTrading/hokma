@@ -104,7 +104,8 @@ def test_backup_then_restore_on_a_new_computer(world, tmp_path):
     assert state["status"] == "error" and "recovery key" in state["message"]
 
     key = api.post("/api/backup/key", headers=HEAD).json()["key"]
-    assert api.post("/api/backup/key/confirm", json={"last4": "ZZZZ"}, headers=HEAD).json() == {"ok": False}
+    wrong = api.post("/api/backup/key/confirm", json={"last4": "ZZZZ"}, headers=HEAD)
+    assert wrong.status_code == 400 and wrong.json()["detail"]["code"] == "key_mismatch"
     last4 = key.replace("-", "").replace(" ", "")[-4:]
     assert api.post("/api/backup/key/confirm", json={"last4": last4}, headers=HEAD).json() == {"ok": True}
 
@@ -140,6 +141,49 @@ def test_backup_then_restore_on_a_new_computer(world, tmp_path):
     assert not (tmp_path / "new" / "work" / "projects" / project["slug"] / ".env").exists()
     assert not (tmp_path / "new" / "data" / restore.STAGE).exists()
     restore.apply_pending()                                             # nothing staged: nothing happens
+
+
+def _first_backup(world):
+    db = world("old")
+    api = client(db)
+    service.create_project("Mi proyecto", onboarding=False)
+    key = api.post("/api/backup/key", headers=HEAD).json()["key"]
+    api.post("/api/backup/key/confirm", json={"last4": key.replace("-", "").replace(" ", "")[-4:]}, headers=HEAD)
+    api.post("/api/backup/run", headers=HEAD)
+    assert wait_idle(api)["status"] == "ok" and len(world.uploads) == 1
+    return db, api
+
+
+def test_a_release_deleted_on_github_is_uploaded_again_even_if_nothing_changed(world):
+    db, api = _first_backup(world)
+    for gone in world.cloud.iterdir():                                  # the release was deleted on GitHub
+        gone.unlink()
+    cloud_runner.run(db)
+    state = api.get("/api/backup", headers=HEAD).json()
+    assert state["status"] == "ok" and len(world.uploads) == 2 and len(list(world.cloud.iterdir())) == 1
+    assert state["last_size"] == next(world.cloud.iterdir()).stat().st_size
+
+
+def test_unchanged_and_verified_in_the_release_does_not_upload_and_keeps_the_real_size(world):
+    db, api = _first_backup(world)
+    before = api.get("/api/backup", headers=HEAD).json()
+    cloud_runner.run(db)
+    after = api.get("/api/backup", headers=HEAD).json()
+    assert len(world.uploads) == 1 and after["status"] == "ok" and after["last_size"] == before["last_size"]
+
+
+def test_unchanged_but_unverifiable_is_not_reported_as_done(world, monkeypatch):
+    db, api = _first_backup(world)
+    before = api.get("/api/backup", headers=HEAD).json()
+
+    def offline(repo, **kw):
+        raise github_release.BackupError("no network")
+
+    monkeypatch.setattr(github_release, "list_backups", offline)
+    cloud_runner.run(db)
+    after = api.get("/api/backup", headers=HEAD).json()
+    assert after["status"] == "error" and after["last_backup_at"] == before["last_backup_at"]
+    assert len(world.uploads) == 1
 
 
 def test_apply_without_staged_restore_does_nothing(world):

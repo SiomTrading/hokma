@@ -67,7 +67,8 @@ describe.each([
       expect(within(card).getByText(formatShortcut(shortcut))).toBeInTheDocument();
       expect(within(card).getByText(t(shortcut.labelKey, undefined, locale))).toBeInTheDocument();
     }
-    for (const slash of ["/modelo", "/agente", "/proyecto"]) expect(within(card).getByText(slash)).toBeInTheDocument();
+    const commands = locale === "es" ? ["/modelo", "/agente", "/proyecto"] : ["/model", "/agent", "/project"];
+    for (const slash of commands) expect(within(card).getByText(slash)).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: words.search })).toBeInTheDocument();
   });
 

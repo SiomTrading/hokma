@@ -127,11 +127,25 @@ def test_denied_and_expired_end_the_flow(client, monkeypatch, store, error, stat
 def test_status_connected_and_disconnect(client, monkeypatch, store):
     store.items[("hokma-market", "github")] = SECRET
     fake = net(monkeypatch, {("GET", USER): {"login": "ana"}})
-    assert client.get("/api/github", headers=AUTH).json() == {"connected": True, "user": "ana", "store_available": True}
+    assert client.get("/api/github", headers=AUTH).json() == {"connected": True, "user": "ana", "store_available": True, "offline": False, "pending": None}
     assert fake.requests[0].get_header("Authorization") == f"Bearer {SECRET}"
     assert client.delete("/api/github", headers=AUTH).json() == {"connected": False}
     assert not store.items
     assert client.get("/api/github", headers=AUTH).json()["connected"] is False
+
+
+def test_status_says_offline_when_a_token_exists_but_there_is_no_network(client, monkeypatch, store):
+    store.items[("hokma-market", "github")] = SECRET
+    net(monkeypatch, {("GET", USER): urllib.error.URLError("down")})
+    body = client.get("/api/github", headers=AUTH).json()
+    assert body["connected"] is False and body["offline"] is True
+    assert store.items                                       # the token is kept: it is the network that failed
+
+
+def test_status_without_token_and_without_network_is_just_not_connected(client, monkeypatch, store):
+    net(monkeypatch, {})
+    body = client.get("/api/github", headers=AUTH).json()
+    assert body["connected"] is False and body["offline"] is False
 
 
 def test_a_revoked_token_is_dropped(client, monkeypatch, store):
@@ -191,3 +205,63 @@ def test_the_app_mounts_the_routes():
 def test_the_catalogs_carry_every_message():
     for code in ("github.not_connected", "github.unreachable", "github.store_unavailable", "github.repo_failed"):
         assert code in catalog("es") and code in catalog("en")
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 403, 429])
+def test_a_github_failure_is_unreachable_and_the_connection_stays(client, monkeypatch, store, status):
+    store.items[("hokma-market", "github")] = SECRET
+    net(monkeypatch, {("GET", USER): status})
+    with pytest.raises(flow.GitHubError) as caught:
+        flow.user()
+    assert caught.value.code == "github.unreachable"
+    assert store.items                                       # the token is kept: only a 401 means disconnected
+    body = client.get("/api/github", headers=AUTH).json()
+    assert body["connected"] is False and body["offline"] is True
+
+
+@pytest.mark.parametrize("status", [500, 403, 429])
+def test_ensure_private_repo_says_unreachable_not_connect_first_when_github_fails(monkeypatch, store, status):
+    store.items[("hokma-market", "github")] = SECRET
+    net(monkeypatch, {("GET", USER): status})
+    with pytest.raises(flow.GitHubError) as caught:
+        flow.ensure_private_repo("x")
+    assert caught.value.code == "github.unreachable" and store.items
+
+
+def test_a_401_is_the_only_status_that_disconnects(monkeypatch, store):
+    store.items[("hokma-market", "github")] = SECRET
+    net(monkeypatch, {("GET", USER): 401})
+    assert flow.user() is None and not store.items
+    with pytest.raises(flow.GitHubError) as caught:
+        flow.ensure_private_repo("x")
+    assert caught.value.code == "github.not_connected"
+
+
+def test_the_open_flow_is_exposed_so_a_reload_does_not_lose_the_code(client, monkeypatch, store):
+    net(monkeypatch, {("POST", CODE): DEVICE})
+    assert client.get("/api/github", headers=AUTH).json()["pending"] is None
+    client.post("/api/github/connect", headers=AUTH)
+    pending = client.get("/api/github", headers=AUTH).json()["pending"]
+    assert pending["user_code"] == "ABCD-1234" and pending["verification_uri"] == DEVICE["verification_uri"]
+    assert pending["interval"] == 5 and 0 < pending["expires_in"] <= 900
+    client.delete("/api/github", headers=AUTH)
+    assert client.get("/api/github", headers=AUTH).json()["pending"] is None
+
+
+def test_an_expired_flow_is_not_exposed(client, monkeypatch, store):
+    net(monkeypatch, {("POST", CODE): DEVICE})
+    client.post("/api/github/connect", headers=AUTH)
+    flow._pending["expires"] = 0
+    assert client.get("/api/github", headers=AUTH).json()["pending"] is None
+
+
+def test_errors_follow_the_language_of_the_panel(client, monkeypatch):
+    net(monkeypatch, {("POST", CODE): urllib.error.URLError("down")})
+    english = client.post("/api/github/connect", headers={**AUTH, "Accept-Language": "en"})
+    spanish = client.post("/api/github/connect", headers={**AUTH, "Accept-Language": "es-CO,es;q=0.9"})
+    assert english.json()["detail"]["message"] == catalog("en")["github.unreachable"]
+    assert spanish.json()["detail"]["message"] == catalog("es")["github.unreachable"]
+
+
+def test_the_scope_is_documented_as_the_smallest_possible():
+    assert flow.SCOPE == "repo"

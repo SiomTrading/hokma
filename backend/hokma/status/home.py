@@ -1,11 +1,17 @@
 """Numbers for the home screen: owner and fund, engine, active agents, projects and the weekly allowance.
 Everything comes from the database; before it exists the screen gets `ready: false` and no numbers."""
 from hokma.db import current_version, get_database
+from hokma.projects import service as projects
+from hokma.projects.errors import ProjectError
 
 
 def collect() -> dict:
     if current_version() == 0:
         return {"ready": False}
+    try:
+        projects.ensure_default()      # creation is lazy: without this the first home read says 0 projects (1165)
+    except ProjectError:
+        pass                           # the home numbers must still load; the Projects panel shows the real error
     with get_database().read() as unit:
         profile = unit.profile.get_or_default()
         week = unit.usage.week()

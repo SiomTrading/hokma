@@ -2,7 +2,7 @@
 
 Projects go to branches `hokma-projects/<slug>` (`FundGit`); the database, the memory, the Library originals, the disk
 folders added to projects and the project files too big for Git go into one encrypted `.hkb`, attached to a private
-release. A new `.hkb` is only uploaded when something changed. The recovery key lives in the system credential store.
+release. A new `.hkb` is only uploaded when something changed, or when the release no longer holds one. The recovery key lives in the system credential store.
 """
 import asyncio
 import hashlib
@@ -24,7 +24,7 @@ from hokma.db.paths import db_path
 from hokma.db.timeutil import utcnow
 from hokma.docs.ingest import libraries_dir
 from hokma.github_connect import flow
-from hokma.i18n import t
+from hokma.i18n import t, use_language
 from hokma.projects.service import workdir
 
 log = logging.getLogger("hokma.backup")
@@ -34,10 +34,27 @@ EVERY_SECONDS = 6 * 3600
 FIRST_RUN_SECONDS = 60
 KEY, CONFIRMED = "backup-key", "backup-key-confirmed"
 _lock = threading.Lock()
+_cache_lock = threading.RLock()       # the read-modify-write of the status cache (the backup thread and the status poll)
 
 
 class KeyExists(BackupError):
     """The recovery key was already generated on this computer."""
+
+
+class Failure(BackupError):
+    """A failed backup with a stable `code` (a catalog key) the panel can act on; the text is already translated."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+# What a failed state was waiting for: once it is true the failure no longer applies and the state goes back to idle.
+_RESOLVED = {
+    "backup.key.missing": lambda: key_ready(),
+    "backup.cloud.no_token": lambda: bool(flow.token()),
+    "github.not_connected": lambda: bool(flow.token()),
+}
 
 
 # ---------------------------------------------------------------------------------------------- recovery key
@@ -128,19 +145,39 @@ def _cache_path() -> Path:
     return hokma_data_dir() / "cloud-backup.json"
 
 
+def _read_cache() -> dict:
+    return json.loads(_cache_path().read_text(encoding="utf-8"))
+
+
 def _cache(db) -> dict:
     try:
-        return json.loads(_cache_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        extra, omitted = plan(db)
+        return _read_cache()
+    except (OSError, ValueError) as exc:
+        extra, omitted = plan(db)                # slow: outside the lock
         cache = {"omitted": omitted, "total": _estimate(extra)}
-        _save_cache(cache)
+        # Rebuild on disk a file that is missing or holds invalid JSON; a read that merely failed on a good file (busy,
+        # locked) must not overwrite its `failed_code`. The status poll gets here too, while a backup writes the file:
+        # under the lock the file is read again, so a rebuild that took long never lands over what the backup saved.
+        if isinstance(exc, (FileNotFoundError, ValueError)):
+            with _cache_lock:
+                try:
+                    return _read_cache()
+                except (OSError, ValueError):
+                    _save_cache(cache)
         return cache
 
 
 def _save_cache(cache: dict) -> None:
-    _cache_path().parent.mkdir(parents=True, exist_ok=True)
-    _cache_path().write_text(json.dumps(cache), encoding="utf-8")
+    """Atomic: the panel polls the status while a backup ends, and a half-written file would be read as broken, rebuilt
+    and saved over `failed_code` (the failure then showed no code)."""
+    path = _cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(json.dumps(cache), encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)             # nothing left behind when the write or the replace fails
 
 
 def _save(db, status: str, detail: str | None = None, **fields) -> None:
@@ -151,29 +188,60 @@ def _save(db, status: str, detail: str | None = None, **fields) -> None:
             u.session.insert("cloud_backup_state", {"destination": "github", **values})
 
 
+def restore_failure_path() -> Path:
+    return hokma_data_dir() / "restore-failed.json"
+
+
+def restore_failure() -> dict | None:
+    """Set when a staged restore could not be applied at start-up: {"at": iso}. Cleared when it is dismissed."""
+    try:
+        value = json.loads(restore_failure_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _warning_text(warnings: dict) -> str:
+    parts = []
+    if warnings.get("conflict"):
+        parts.append(t("backup.cloud.conflict", branches=", ".join(warnings["conflict"])))
+    if warnings.get("projects"):
+        parts.append(t("backup.cloud.project_skipped", projects=", ".join(warnings["projects"])))
+    return " ".join(parts)
+
+
 def status(db) -> dict:
     with db.read() as u:
         row = u.session.one("SELECT * FROM cloud_backup_state WHERE destination = 'github'") or {}
     cache = _cache(db)
     state = "running" if _lock.locked() else ("error" if row.get("status") == "failed" else row.get("status") or "idle")
+    message, code = row.get("status_detail"), None
+    if state == "ok" and cache.get("warnings"):                 # saved, but not all of it where it should be
+        state, message = "warning", _warning_text(cache["warnings"])
+    if state == "error":
+        code = cache.get("failed_code")
+        if code in _RESOLVED and _RESOLVED[code]():             # the reason of the failure is gone: it is not an error now
+            state, message, code = "idle", None, None
+        elif code in _RESOLVED:
+            message = t(code)                                   # in the language of the panel that asks
     return {"connected": bool(flow.token()), "repo": cache.get("repo"), "last_backup_at": row.get("last_backup_at"),
-            "last_size": row.get("last_size_bytes"), "status": state, "message": row.get("status_detail"),
+            "last_size": row.get("last_size_bytes"), "status": state, "message": message, "code": code,
             "total_size_estimate": cache.get("total", 0), "omitted": cache.get("omitted", []),
-            "key_ready": key_ready()}
+            "key_ready": key_ready(), "restore_failed": restore_failure()}
 
 
 # ---------------------------------------------------------------------------------------------- the backup
 
 def _backup(db) -> None:
     if not key_ready():
-        raise BackupError(t("backup.key.missing"))
+        raise Failure("backup.key.missing", t("backup.key.missing"))
     token = flow.token()
     if not token:
-        raise BackupError(t("backup.cloud.no_token"))
+        raise Failure("backup.cloud.no_token", t("backup.cloud.no_token"))
     try:
         repo = flow.ensure_private_repo(REPO_NAME)
     except flow.GitHubError as exc:
-        raise BackupError(t(exc.code)) from None
+        raise Failure(exc.code, t(exc.code)) from None
     root = workdir(db)
     try:
         synced = FundGit(root, remote=repo["clone_url"], auth_env=lambda: https_token_env(token)).sync(
@@ -181,6 +249,14 @@ def _backup(db) -> None:
     except FundGitError as exc:
         raise BackupError(str(exc)) from None
     extra, omitted = plan(db)
+    warnings: dict = {}
+    branches = list(dict.fromkeys([*synced.branches, *([synced.branch] if synced.branch else [])]))
+    if synced.status == "conflict_branch" or branches:       # the copy went to a side branch, not to the main one
+        warnings["conflict"] = branches or [desktop_branch()]
+    unsafe = [slug for slug, value in synced.projects.items() if isinstance(value, str)]
+    if unsafe:                                               # git refused the project: it is NOT in the backup
+        warnings["projects"] = unsafe
+        omitted.extend({"path": f"projects/{slug}", "reason": "git"} for slug in unsafe)
     for item in synced.skipped:                              # too big for Git: into the `.hkb`; secrets: left out
         rel = f"projects/{item.project}/{item.path}" if item.project else item.path
         if item.reason == "too_large":
@@ -189,37 +265,77 @@ def _backup(db) -> None:
             omitted.append({"path": rel, "reason": item.reason})
     fingerprint, cache = _fingerprint(extra), _cache(db)
     cache.update(omitted=omitted, total=_estimate(extra), repo=repo["full_name"])
-    fields = {"last_backup_at": utcnow()}
-    if cache.get("fingerprint") != fingerprint:
+    fields: dict = {}
+    remote = None
+    if cache.get("fingerprint") == fingerprint:
+        # Unchanged locally: the local fingerprint alone proves nothing about GitHub (the release may have been
+        # deleted there), so only skip the upload when the newest backup is really in the release.
+        # A network failure raises BackupError: the state becomes "failed", never a false "ok".
+        found = github_release.list_backups(repo["full_name"], token=token)
+        remote = found[0] if found else None
+    if remote is None:
         name = f"hokma-{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.hkb"
         with tempfile.TemporaryDirectory(dir=hokma_data_dir(), prefix="backup-") as tmp:
             info = create_bundle(Path(tmp) / name, db_path=db_path(), key=KeyStore().get(KEY), memory_dir=memory_dir(),
                                  extra=extra)
             github_release.upload(info.path, repo["full_name"], token=token)
         fields.update(last_size_bytes=info.size, last_remote_name=name)
-    _save(db, "ok", None, **fields)
+    else:
+        fields.update(last_size_bytes=remote["size"], last_remote_name=remote["name"])
+    fields["last_backup_at"] = utcnow()
+    _save(db, "ok", None, **fields)                          # the table only allows ok: the warning lives in the cache
     cache["fingerprint"] = _fingerprint(extra)               # after the save: its own write is not a change
+    cache.pop("failed_code", None)
+    if warnings:
+        cache["warnings"] = warnings
+    else:
+        cache.pop("warnings", None)
     _save_cache(cache)
 
 
-def run(db) -> None:
-    """One backup, now. Does nothing when one is already running."""
-    if not _lock.acquire(blocking=False):
-        return
+def _failed(db, detail: str, code: str | None) -> None:
+    _save(db, "failed", detail)
+    with _cache_lock:
+        cache = _cache(db)
+        if code:
+            cache["failed_code"] = code
+        else:
+            cache.pop("failed_code", None)
+        _save_cache(cache)
+
+
+def _run_held(db, lang: str | None) -> None:
+    """The work of one backup. The caller already holds `_lock`; it is released here."""
     try:
-        try:
-            _backup(db)
-        except BackupError as exc:
-            _save(db, "failed", str(exc))
-        except Exception as exc:                                 # never let a thread die silently
-            log.warning("backup failed: %s", type(exc).__name__)
-            _save(db, "failed", t("backup.cloud.failed", error=type(exc).__name__))
+        with use_language(lang):
+            try:
+                _backup(db)
+            except Failure as exc:
+                _failed(db, str(exc), exc.code)
+            except BackupError as exc:
+                _failed(db, str(exc), None)
+            except Exception as exc:                             # never let a thread die silently
+                log.warning("backup failed: %s", type(exc).__name__)
+                _failed(db, t("backup.cloud.failed", error=type(exc).__name__), None)
     finally:
         _lock.release()
 
 
-def start(db) -> None:
-    threading.Thread(target=run, args=(db,), daemon=True, name="hokma-backup").start()
+def run(db, lang: str | None = None) -> None:
+    """One backup, now. Does nothing when one is already running. `lang`: the panel's language for its messages."""
+    if _lock.acquire(blocking=False):
+        _run_held(db, lang)
+
+
+def start(db, lang: str | None = None) -> None:
+    """One backup in a thread. The lock is taken here, before the thread exists: `POST /api/backup/run` answers
+    "running", so the next status read must say "running" too, not the previous state while the thread is still starting."""
+    if _lock.acquire(blocking=False):
+        try:
+            threading.Thread(target=_run_held, args=(db, lang), daemon=True, name="hokma-backup").start()
+        except BaseException:
+            _lock.release()
+            raise
 
 
 async def loop(app) -> None:

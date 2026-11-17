@@ -23,4 +23,6 @@ export interface LaunchOptions {
   command?: string;
   /** Project whose folder the shell opens in. Default: the active project, else the working folder. */
   projectId?: string | null;
+  /** The dock opened it by itself; the wizard changing the working folder may replace it if nothing was typed. */
+  auto?: boolean;
 }

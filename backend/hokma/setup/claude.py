@@ -42,7 +42,7 @@ _PLANS = {"pro": "Pro", "max": "Max", "team": "Team", "enterprise": "Enterprise"
 
 @dataclass
 class ClaudeState:
-    state: str                      # connected | no_session | no_cli
+    state: str                      # connected | no_session | no_cli | unknown (the CLI could not be read: not a sign-out)
     installed: bool
     plan: str | None = None
     version: str | None = None
@@ -140,7 +140,8 @@ def detect() -> ClaudeState:
                               stdin=subprocess.DEVNULL, env=_env(), cwd=str(hokma_data_dir()), **spawn_kwargs())
         data = json.loads(proc.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
-        return ClaudeState("no_session", True, version=_version(path))
+        # Timeout, the program could not run, or output that is not JSON: we do not KNOW. It is not a sign-out (bug 1128).
+        return ClaudeState("unknown", True)
     if not isinstance(data, dict) or data.get("loggedIn") is not True:
         return ClaudeState("no_session", True, version=_version(path))
     return ClaudeState("connected", True, plan=_plan_name(data.get("subscriptionType")), version=_version(path))
@@ -304,7 +305,7 @@ def start_login(wait_for_link: float = 4.0, *, debug: bool = True) -> dict:
         stop_login()
         return start_login(wait_for_link, debug=False)
     if failure is not None:
-        raise SetupError(500, failure)
+        raise SetupError(502, failure)                  # the program answered with a failure: not our own error (bug 1162)
     return login_info()
 
 
@@ -326,7 +327,8 @@ def login_info(lang: str | None = None) -> dict:
         login = _login
     if login is None:
         return {"running": False, "url": None}
-    info: dict = {"running": _alive(login), "url": login.url}
+    alive = _alive(login)
+    info: dict = {"running": alive, "url": login.url if alive else None}      # a finished login's link is dead (bug 1162)
     failure = _failure(login)
     if failure is not None:
         info["error"] = failure.text(lang or language())

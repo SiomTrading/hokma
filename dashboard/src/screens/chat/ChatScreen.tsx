@@ -253,8 +253,8 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
   const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
   // The header says where the conversation really runs: its project, or General. Not the active project of the panel.
   const projectName = state.loading ? "" : (state.project?.name ?? t("chat.scope.general"));
-  // "Save to project" goes to the conversation's project or, without one, to the active project.
-  const saveProjectName = state.project?.name ?? options?.default_project?.name ?? "";
+  // The permission card names the project the conversation runs in (the header's), or says the work folder when it has none.
+  const permissionProject = state.project ? projectName : "";
   const showScope = draft !== null && state.id === null && state.items.length === 0 && !state.loading && !state.loadError;
 
   return (
@@ -317,7 +317,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
             key={item.key}
             item={item}
             actions={{
-              projectName: saveProjectName,
+              projectName: permissionProject,
               canSave: state.id !== null,
               onPermission: answerPermission,
               onSaveMessage: (id) => save({ message_id: id }),

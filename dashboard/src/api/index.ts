@@ -27,5 +27,5 @@ export {
   useRestartState,
   watchEngine,
 } from "./restart";
-export { getBrowserPref, openInBrowser, openInBrowserFromEntry, setBrowserPref, shutdownFromEntry, shutdownHokma } from "./shutdown";
+export { agentBusy, getBrowserPref, openInBrowser, openInBrowserFromEntry, setBrowserPref, shutdownFromEntry, shutdownHokma } from "./shutdown";
 export type { RestartState, UpdateHooks } from "./restart";

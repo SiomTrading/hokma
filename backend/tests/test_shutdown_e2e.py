@@ -45,7 +45,7 @@ def _descendants(root: int) -> dict[int, str]:
     return found
 
 
-def _post(port: int, token: str | None) -> int:
+def _post(port: int, token: str | None, force: bool = False) -> int:
     headers = {"Sec-Fetch-Site": "same-origin", "Origin": f"http://127.0.0.1:{port}"}
     if token:
         headers["X-Hokma-Token"] = token
@@ -53,7 +53,7 @@ def _post(port: int, token: str | None) -> int:
         ask = urllib.request.Request(f"http://127.0.0.1:{port}/api/system/shutdown-nonce", headers={"Sec-Fetch-Site": "same-origin"})
         with urllib.request.urlopen(ask, timeout=20) as r:
             headers["X-Hokma-Shutdown-Nonce"] = json.loads(r.read())["nonce"]
-    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/system/shutdown", method="POST", headers=headers)
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/system/shutdown{'?force=true' if force else ''}", method="POST", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return r.status
@@ -108,7 +108,8 @@ def test_a11_the_shutdown_leaves_nothing_behind_and_saves_the_turn(tmp_path, mon
         assert below, f"the fake claude and the terminal shell should be running: {_descendants(proc.pid)!r} {TERMINAL_OUTPUT!r}"
         tracked = list(below)
         assert _post(port, None) == 409                              # a turn and sockets are open: no entry-screen form
-        assert _post(port, token) == 202
+        assert _post(port, token) == 409                             # the panel session is refused too while an agent works...
+        assert _post(port, token, force=True) == 202                 # ...until the owner accepts to cut it (0.0.36)
         assert wait_until(lambda: not session_pids(proc.pid), 15), f"left behind: {session_pids(proc.pid)}"
         assert health(port) is None
         assert wait_until(lambda: not [p for p in tracked if Path(f"/proc/{p}").exists()

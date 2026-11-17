@@ -52,7 +52,7 @@ def test_connections_use_foreign_keys_wal_and_busy_timeout(env):
     try:
         assert session.scalar("PRAGMA foreign_keys") == 1
         assert session.scalar("PRAGMA journal_mode") == "wal"
-        assert session.scalar("PRAGMA busy_timeout") == 5000
+        assert session.scalar("PRAGMA busy_timeout") == 10000
     finally:
         session.close()
 
@@ -264,3 +264,12 @@ def test_no_profile_without_a_name(env):
     migrate()
     with get_database().read() as u:
         assert u.profile.get() is None
+
+
+def test_a_name_derived_from_the_slug_keeps_acronyms_in_capitals():
+    from hokma.db.seeds import display_name_from_slug
+
+    assert display_name_from_slug("joel-mcp-builder") == "Joel MCP Builder"
+    assert display_name_from_slug("vera-qa") == "Vera QA"
+    assert display_name_from_slug("api-ui-helper") == "API UI Helper"
+    assert display_name_from_slug("joel") == "Joel"

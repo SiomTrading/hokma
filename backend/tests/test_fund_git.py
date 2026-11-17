@@ -411,3 +411,14 @@ def test_a_hook_file_never_runs_during_a_sync(tmp_path, remote, monkeypatch):
     f.pull()
     f._push_ref("refs/heads/main")
     assert not marker.exists()
+
+
+def test_every_git_call_allows_long_paths(monkeypatch):
+    """Windows: paths over 260 characters. The shared lock-down carries `core.longpaths=true`."""
+    from hokma.projects import gitops
+    pairs = list(zip(gitops._HARDEN[::2], gitops._HARDEN[1::2]))
+    assert ("-c", "core.longpaths=true") in pairs
+    seen = []
+    monkeypatch.setattr(gitops, "_run", lambda argv, timeout=None: seen.append(argv))
+    gitops._git(Path("/tmp/p"), "status")
+    assert seen and "core.longpaths=true" in seen[0]

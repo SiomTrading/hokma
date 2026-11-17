@@ -140,10 +140,29 @@ def test_api_saves_the_flags_and_holds_while_busy(env, fake_keep):
             u.profile.save(owner_name="Ana")
         first = client.get("/api/power", headers=HEADERS).json()
         assert {k: v for k, v in first.items() if k != "wake"} == {
-            "keep_awake": False, "wake_enabled": False, "active": False, "supported": keepawake.supported()}
+            "keep_awake": False, "wake_enabled": False, "active": False, "working": True,
+            "supported": keepawake.supported()}
         on = client.put("/api/power", json={"keep_awake": True}, headers=HEADERS).json()
         assert on["keep_awake"] is True and on["active"] is True
         off = client.put("/api/power", json={"keep_awake": False, "wake_enabled": True}, headers=HEADERS).json()
         assert off["keep_awake"] is False and off["wake_enabled"] is True and off["active"] is False
         assert client.put("/api/power", json={"other": 1}, headers=HEADERS).status_code == 422
     assert not fake_keep.is_active()                           # shutdown released the block
+
+
+def test_a_permission_waiting_counts_as_work(monkeypatch):
+    """Task 1132: /health busy is true while a permission question waits, even if the turn state is not running."""
+    from types import SimpleNamespace
+
+    from hokma.core import app as core_app
+    from hokma.engine import api as engine_api
+
+    monkeypatch.setattr(core_app, "turns_running", lambda: 0)
+    monkeypatch.setattr(core_app, "current_scheduler", lambda: None)
+    monkeypatch.setattr(engine_api, "_engine", None)
+    assert core_app.agent_working() is False
+    waiting = SimpleNamespace(sessions={"c": SimpleNamespace(pending={"r": object()})})
+    monkeypatch.setattr(engine_api, "_engine", waiting)
+    assert core_app.agent_working() is True
+    monkeypatch.setattr(engine_api, "_engine", SimpleNamespace(sessions={"c": SimpleNamespace(pending={})}))
+    assert core_app.agent_working() is False

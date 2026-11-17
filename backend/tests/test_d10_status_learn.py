@@ -320,5 +320,11 @@ def test_home_numbers(client, db):  # noqa: F811
     assert body["usage"]["pct"] == 0.0
 
 
+def test_home_counts_the_default_project_before_the_projects_panel_was_opened(client, db):  # noqa: F811
+    with db.write() as u:
+        u.profile.save(owner_name="Ana Perez", fund_name="Fondo Uno")
+    assert client.get("/api/home").json()["projects"] == 1
+
+
 def test_home_without_database(env):  # noqa: F811
     assert TestClient(create_app(), headers=HEADERS).get("/api/home").json() == {"ready": False}

@@ -42,8 +42,8 @@ export async function refreshUpdateStatus(): Promise<UpdateStateData | null> {
  * Starts an update. The engine answers `launched`, starts the detached updater and goes down by itself; the tab
  * then waits for it ("Updating Hokma, it will restart by itself") and reconnects when it is back.
  */
-export async function startUpdate(): Promise<UpdateResult> {
-  const result = await api.post<UpdateResult>("/api/update", undefined, { timeoutMs: 120_000 });
+export async function startUpdate(force = false): Promise<UpdateResult> {
+  const result = await api.post<UpdateResult>(force ? "/api/update?force=true" : "/api/update", undefined, { timeoutMs: 120_000 });
   if (result.status === "launched") watchEngine({ mode: "update", expectedVersion: result.to_version });
   return result;
 }

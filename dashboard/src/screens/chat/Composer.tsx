@@ -1,4 +1,5 @@
 import { enginesApi, type ModelGroup } from "../engines/api";
+import { ApiError } from "@/api";
 import { useEngines } from "../engines/useEngines";
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, Ref } from "react";
@@ -37,6 +38,14 @@ interface ComposerProps {
   onStop: () => void;
 }
 
+/** The reason the server gave for refusing a file, as the catalog key suffix. */
+function uploadReason(cause: unknown): AttachmentChip["reason"] {
+  const code = cause instanceof ApiError ? cause.code : "";
+  if (code === "attachments.empty") return "empty_file";
+  if (code === "attachments.too_large") return "too_large";
+  return undefined;
+}
+
 const TIER_OF: Record<ModelId, "fast" | "balanced" | "deep"> = { haiku: "fast", sonnet: "balanced", opus: "deep" };
 const MODEL_DOT: Record<ModelId, string> = { haiku: "var(--ok)", sonnet: "var(--acc)", opus: "var(--org)" };
 
@@ -57,6 +66,8 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
   const label = (m: ModelId) => (tiers ? t(`eng.tier.${TIER_OF[m]}`) : t(`chat.model.${m}`));
   const hint = (m: ModelId) => (tiers ? t(`eng.tier.${TIER_OF[m]}.hint`) : t(`chat.model.${m}.hint`));
   const [modelMenu, setModelMenu] = useState(false);
+  // One id per conversation: two open chats never share the id of their message box (1164).
+  const inputId = `chat-message-${conversationId ?? "new"}`;
   const reloadEngines = engines.reload;
   useEffect(() => {
     if (modelMenu) void reloadEngines();                      // the list follows what is connected right now, no restart
@@ -126,7 +137,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
         setChips((list) => [...list, chip]);
         uploadAttachment(f.name ? f : new File([f], chip.name, { type: f.type })).then(
           (done) => patchChip(chip.key, { id: done.id, kind: done.kind, mime: done.mime, size: done.size, status: "ready" }),
-          () => patchChip(chip.key, { status: "error" }),
+          (cause) => patchChip(chip.key, { status: "error", reason: uploadReason(cause) }),
         );
       }
     },
@@ -299,7 +310,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
               ) : chip.status === "uploading" ? (
                 <span className="pill">{t("chat.composer.uploading")}</span>
               ) : chip.status === "error" ? (
-                <span className="pill bad">{t("chat.composer.uploadFailed")}</span>
+                <span className="pill bad">{chip.reason === "empty_file" ? t("chat.composer.reason.empty_file") : chip.reason === "too_large" ? t("chat.composer.reason.too_large") : t("chat.composer.uploadFailed")}</span>
               ) : chip.size > 0 ? (
                 <span className="chat-small">{formatSize(chip.size)}</span>
               ) : null}
@@ -324,11 +335,11 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
             event.target.value = "";
           }}
         />
-        <label htmlFor="chat-message" className="sr-only">
+        <label htmlFor={inputId} className="sr-only">
           {t("chat.composer.label")}
         </label>
         <textarea
-          id="chat-message"
+          id={inputId}
           ref={input}
           className="in chat-input"
           rows={1}
