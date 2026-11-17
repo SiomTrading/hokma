@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -29,7 +30,6 @@ from hokma.projects.service import workdir
 
 log = logging.getLogger("hokma.backup")
 
-REPO_NAME = "hokma-backup"
 EVERY_SECONDS = 6 * 3600
 FIRST_RUN_SECONDS = 60
 KEY, CONFIRMED = "backup-key", "backup-key-confirmed"
@@ -51,9 +51,12 @@ class Failure(BackupError):
 
 # What a failed state was waiting for: once it is true the failure no longer applies and the state goes back to idle.
 _RESOLVED = {
-    "backup.key.missing": lambda: key_ready(),
-    "backup.cloud.no_token": lambda: bool(flow.token()),
-    "github.not_connected": lambda: bool(flow.token()),
+    "backup.key.missing": lambda cache: key_ready(),
+    "backup.cloud.no_token": lambda cache: bool(flow.token()),
+    "github.not_connected": lambda cache: bool(flow.token()),
+    "github.no_repo": lambda cache: bool(flow.repo_name()),
+    # another repository was picked (or GitHub was connected again, which asks for one): the old failure is not current
+    "github.repo_gone": lambda cache: flow.repo_name() != cache.get("failed_repo"),
 }
 
 
@@ -116,8 +119,25 @@ def plan(db) -> tuple[list[tuple[Path, str]], list[dict]]:
 
 
 def _watched(extra) -> list[Path]:
-    db = db_path()
-    return [db, db.with_name(db.name + "-wal"), *(p for p, _ in _files(memory_dir(), "m")), *(p for p, _ in extra)]
+    # Only the main database file, never its `-wal`: SQLite creates an empty `-wal` when any connection opens the
+    # database and deletes it when the last one closes, so its presence says nothing about the data.
+    return [db_path(), *(p for p, _ in _files(memory_dir(), "m")), *(p for p, _ in extra)]
+
+
+def _settle_db() -> None:
+    """Fold the WAL into the main file before it is measured. Without this, the main file changes (a checkpoint when the
+    last connection closes) at a moment nobody chose, and an unchanged computer looked changed: a second, identical
+    backup was uploaded. With an empty WAL only a real write changes the file again. A busy database is left as it is."""
+    if not db_path().exists():                  # connect() would create an empty file
+        return
+    try:
+        con = sqlite3.connect(db_path(), timeout=1)
+        try:
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        pass
 
 
 def _stats(extra):
@@ -129,6 +149,7 @@ def _stats(extra):
 
 
 def _fingerprint(extra) -> str:
+    _settle_db()
     digest = hashlib.sha256()
     for path, st in _stats(extra):
         digest.update(f"{path}|{st.st_size}|{st.st_mtime_ns}\n".encode())
@@ -211,20 +232,23 @@ def _warning_text(warnings: dict) -> str:
 
 
 def status(db) -> dict:
+    # The lock is looked at BEFORE the row: read after it, a backup that ended between the two reads left a row read
+    # before its result was saved and a lock already free, and the state came out "idle" instead of its real outcome.
+    running = _lock.locked()
     with db.read() as u:
         row = u.session.one("SELECT * FROM cloud_backup_state WHERE destination = 'github'") or {}
     cache = _cache(db)
-    state = "running" if _lock.locked() else ("error" if row.get("status") == "failed" else row.get("status") or "idle")
+    state = "running" if running else ("error" if row.get("status") == "failed" else row.get("status") or "idle")
     message, code = row.get("status_detail"), None
     if state == "ok" and cache.get("warnings"):                 # saved, but not all of it where it should be
         state, message = "warning", _warning_text(cache["warnings"])
     if state == "error":
         code = cache.get("failed_code")
-        if code in _RESOLVED and _RESOLVED[code]():             # the reason of the failure is gone: it is not an error now
+        if code in _RESOLVED and _RESOLVED[code](cache):             # the reason of the failure is gone: it is not an error now
             state, message, code = "idle", None, None
         elif code in _RESOLVED:
             message = t(code)                                   # in the language of the panel that asks
-    return {"connected": bool(flow.token()), "repo": cache.get("repo"), "last_backup_at": row.get("last_backup_at"),
+    return {"connected": bool(flow.token()), "repo": flow.repo_name(), "last_backup_at": row.get("last_backup_at"),
             "last_size": row.get("last_size_bytes"), "status": state, "message": message, "code": code,
             "total_size_estimate": cache.get("total", 0), "omitted": cache.get("omitted", []),
             "key_ready": key_ready(), "restore_failed": restore_failure()}
@@ -239,7 +263,7 @@ def _backup(db) -> None:
     if not token:
         raise Failure("backup.cloud.no_token", t("backup.cloud.no_token"))
     try:
-        repo = flow.ensure_private_repo(REPO_NAME)
+        repo = flow.connected_repo()
     except flow.GitHubError as exc:
         raise Failure(exc.code, t(exc.code)) from None
     root = workdir(db)
@@ -286,6 +310,7 @@ def _backup(db) -> None:
     _save(db, "ok", None, **fields)                          # the table only allows ok: the warning lives in the cache
     cache["fingerprint"] = _fingerprint(extra)               # after the save: its own write is not a change
     cache.pop("failed_code", None)
+    cache.pop("failed_repo", None)
     if warnings:
         cache["warnings"] = warnings
     else:
@@ -299,8 +324,10 @@ def _failed(db, detail: str, code: str | None) -> None:
         cache = _cache(db)
         if code:
             cache["failed_code"] = code
+            cache["failed_repo"] = flow.repo_name()
         else:
             cache.pop("failed_code", None)
+            cache.pop("failed_repo", None)
         _save_cache(cache)
 
 

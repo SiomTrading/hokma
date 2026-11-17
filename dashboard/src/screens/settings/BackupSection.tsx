@@ -23,7 +23,20 @@ export interface BackupState {
   restore_failed?: { at: string } | null;
 }
 interface DeviceCode { user_code: string; verification_uri: string; interval: number; expires_in?: number }
-interface GithubState { connected: boolean; user: string | null; offline?: boolean; pending?: DeviceCode | null }
+interface GithubState {
+  connected: boolean;
+  user: string | null;
+  /** "owner/name" the student picked; Hokma only sees this repository. */
+  repo?: string | null;
+  /** An old all-repositories connection was dropped: the student has to connect again and pick a repository. */
+  legacy?: boolean;
+  offline?: boolean;
+  pending?: DeviceCode | null;
+  install_url?: string;
+  new_repo_url?: string;
+  legacy_url?: string;
+}
+interface RepoItem { full_name: string; private: boolean }
 interface Reconnect { kind: "engine" | "telegram" | "folder" | "projects"; name: string }
 interface BackupEntry { name: string; size: number; created_at: string }
 
@@ -74,6 +87,7 @@ export function BackupSection() {
   const [state, setState] = useState<BackupState | null>(null);
   const [gh, setGh] = useState<GithubState | null>(null);
   const [device, setDevice] = useState<DeviceCode | null>(null);
+  const [repos, setRepos] = useState<RepoItem[] | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [last4, setLast4] = useState("");
   const [entries, setEntries] = useState<BackupEntry[] | null>(null);
@@ -87,6 +101,9 @@ export function BackupSection() {
   const current = state ?? backup.data;
   const user = (gh ?? github.data)?.user ?? null;
   const connected = (gh ?? github.data)?.connected ?? false;
+  const repo = (gh ?? github.data)?.repo ?? null;
+  const picking = connected && repo === null;                  // connected, but no repository chosen yet
+  const links = github.data;
   const offline = !gh && (github.data?.offline ?? false);
 
   const refresh = useCallback(async () => {
@@ -99,7 +116,7 @@ export function BackupSection() {
   const reloadGithub = github.reload;
   // The engine drops the token when GitHub rejects it: the "Connected as" pill must not outlive it.
   useEffect(() => {
-    if (current?.status === "error" && current.code === "github.not_connected") {
+    if (current?.status === "error" && (current.code === "github.not_connected" || current.code === "github.repo_gone")) {
       setGh(null);
       reloadGithub();
     }
@@ -113,7 +130,7 @@ export function BackupSection() {
   const check = useCallback(async () => {
     const res = await api.get<{ status: string; user?: string }>("/api/github/connect");
     if (res.status === "connected") {
-      setGh({ connected: true, user: res.user ?? null });
+      setGh({ connected: true, user: res.user ?? null, repo: null });
       setDevice(null);
       void refresh();
       return true;
@@ -130,6 +147,22 @@ export function BackupSection() {
     setError(cause instanceof ApiError || cause instanceof Error ? cause.message : t("api.error"));
   }, [t]);
   usePoll(device !== null && !connected, device?.interval ?? 5, check, checkFailed);
+
+  // The repository list: loaded when the picker opens, and every 4 seconds until GitHub shows at least one (the student
+  // is installing the App in another window).
+  const loadRepos = useCallback(async () => {
+    const list = await api.get<RepoItem[]>("/api/github/repos");
+    setRepos(list);
+    return list.length > 0;
+  }, []);
+  useEffect(() => {
+    if (picking) void loadRepos().catch(() => setRepos([]));
+    else setRepos(null);
+  }, [picking, loadRepos]);
+  const repoPollFailed = useCallback((cause: unknown) => {
+    setError(cause instanceof ApiError || cause instanceof Error ? cause.message : t("api.error"));
+  }, [t]);
+  usePoll(picking && (repos === null || repos.length === 0), 4, loadRepos, repoPollFailed);
 
   if ((backup.loading && !backup.data) || (github.loading && !github.data)) return <Loading />;
   if (backup.error || !current) return <ErrorState message={backup.error?.message} onRetry={backup.reload} />;
@@ -150,9 +183,21 @@ export function BackupSection() {
   const disconnect = () =>
     run(async () => {
       await api.delete("/api/github");
-      setGh({ connected: false, user: null });
+      setGh({ connected: false, user: null, repo: null });
       setDevice(null);
       await refresh();                                      // an error that only said "connect GitHub" is gone
+    });
+  const pickRepo = (fullName: string) =>
+    run(async () => {
+      const res = await api.put<{ repo: string }>("/api/github/repo", { full_name: fullName });
+      setGh({ connected: true, user, repo: res.repo });
+      await refresh();
+    });
+  const changeRepo = () =>
+    run(async () => {
+      await api.delete("/api/github/repo");
+      setGh({ connected: true, user, repo: null });
+      await refresh();
     });
   const makeKey = () => run(async () => setNewKey((await api.post<{ key: string }>("/api/backup/key")).key));
   const confirmKey = () =>
@@ -203,11 +248,43 @@ export function BackupSection() {
     <div style={stack}>
       <Pane style={{ ...stack, padding: 16 }}>
         <span className="h2">{t("backup.step1")}</span>
-        {connected ? (
-          <span style={inline}>
-            <Pill tone="ok" data-testid="github-status">{t("backup.github.connected", { user: user ?? "" })}</Pill>
-            <Button disabled={busy} onClick={() => void disconnect()}>{t("backup.github.disconnect")}</Button>
-          </span>
+        {connected && picking ? (
+          <>
+            <span style={inline}>
+              <Pill tone="ok" data-testid="github-status">{t("backup.github.connected", { user: user ?? "" })}</Pill>
+              <Button disabled={busy} onClick={() => void disconnect()}>{t("backup.github.disconnect")}</Button>
+            </span>
+            <p className="p">{t("backup.github.pick")}</p>
+            {repos !== null && repos.length > 0 ? (
+              <span style={stack} role="radiogroup" aria-label={t("backup.github.pick")} data-testid="repo-list">
+                {repos.map((r) => (
+                  <Button key={r.full_name} role="radio" aria-checked={false} disabled={busy} onClick={() => void pickRepo(r.full_name)}>
+                    {r.full_name}
+                  </Button>
+                ))}
+              </span>
+            ) : repos !== null ? (
+              <p className="p" data-testid="repo-empty">{t("backup.github.pick.empty")}</p>
+            ) : null}
+            <span style={inline}>
+              {links?.install_url ? <a className="btn primary" href={links.install_url} target="_blank" rel="noreferrer">{t("backup.github.pick.install")}</a> : null}
+              {links?.new_repo_url ? <a className="btn" href={links.new_repo_url} target="_blank" rel="noreferrer">{t("backup.github.pick.new")}</a> : null}
+              <Button disabled={busy} onClick={() => void loadRepos().catch((cause) => setError(cause instanceof Error ? cause.message : t("api.error")))}>
+                {t("backup.github.pick.refresh")}
+              </Button>
+            </span>
+          </>
+        ) : connected ? (
+          <>
+            <span style={inline}>
+              <Pill tone="ok" data-testid="github-status">{t("backup.github.connected", { user: user ?? "" })}</Pill>
+              <Button disabled={busy} onClick={() => void disconnect()}>{t("backup.github.disconnect")}</Button>
+            </span>
+            <span style={inline}>
+              <Pill tone="ok" data-testid="github-repo">{t("backup.github.repo", { repo: repo ?? "" })}</Pill>
+              <Button disabled={busy} onClick={() => void changeRepo()}>{t("backup.github.change")}</Button>
+            </span>
+          </>
         ) : offline ? (
           <span style={inline}>
             <Pill tone="warn" data-testid="github-offline">{t("backup.github.offline")}</Pill>
@@ -224,6 +301,12 @@ export function BackupSection() {
           </>
         ) : (
           <>
+            {(gh ?? github.data)?.legacy ? (
+              <span style={stack} role="alert" data-testid="github-legacy">
+                <p className="p">{t("backup.github.legacy")}</p>
+                {links?.legacy_url ? <a className="btn" href={links.legacy_url} target="_blank" rel="noreferrer">{t("backup.github.legacy.revoke")}</a> : null}
+              </span>
+            ) : null}
             <p className="p">{t("backup.github.hint")}</p>
             <p className="p" style={{ fontSize: 12 }}>{t("backup.github.scope")}</p>
             <div><Button variant="primary" disabled={busy} onClick={() => void startConnect()}>{t("backup.github.connect")}</Button></div>
@@ -279,7 +362,7 @@ export function BackupSection() {
           </>
         ) : null}
         <div>
-          <Button variant="primary" disabled={busy || !connected || !current.key_ready || current.status === "running"} onClick={() => void backupNow()}>
+          <Button variant="primary" disabled={busy || !connected || repo === null || !current.key_ready || current.status === "running"} onClick={() => void backupNow()}>
             {t("backup.now")}
           </Button>
         </div>
@@ -309,7 +392,7 @@ export function BackupSection() {
         ) : entries === null ? (
           <>
             <p className="p">{t("backup.restore.hint")}</p>
-            <div><Button disabled={busy || !connected} onClick={() => void openRestore()}>{t("backup.restore")}</Button></div>
+            <div><Button disabled={busy || !connected || repo === null} onClick={() => void openRestore()}>{t("backup.restore")}</Button></div>
           </>
         ) : entries.length === 0 ? (
           <p className="p">{t("backup.restore.empty")}</p>

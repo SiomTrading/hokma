@@ -1,5 +1,7 @@
-"""GitHub device flow and the private repository of the student. The token lives only in the system credential
-store (`KeyStore`, entry `github`). Every request goes through `hokma.update.github._open`, the single network point."""
+"""GitHub connection of the backup: a GitHub App (device flow, no secret) installed by the student on ONE repository.
+The user token of a GitHub App only reaches the repositories of the installation, so Hokma never sees the rest of the
+account. The token lives only in the system credential store (`KeyStore`, entry `github`); the chosen repository
+("owner/name") is kept next to it. Every request goes through `hokma.update.github._open`, the single network point."""
 import json
 import time
 import urllib.error
@@ -9,14 +11,19 @@ import urllib.request
 from hokma.connections.store import KeyStore, StoreUnavailable
 from hokma.update import github
 
-CLIENT_ID = "Ov23ctVfAiSnfjdeYKpW"           # public: a device-flow OAuth App has no secret
-# Scope decision (task 3248, nit 8): `repo` is the smallest scope that works. A device-flow OAuth App has no
-# per-repository scope: `public_repo` cannot create or write a PRIVATE repository, and the fine-grained permissions
-# exist only for GitHub Apps, whose tokens cannot create a repository under the user. So the token can reach every
-# private repository of the account; the panel says so before connecting and Hokma only touches `hokma-backup`.
-SCOPE = "repo"
+# GitHub App "Hokma Respaldo" of SiomTrading (app id 5802690). Both values are public: the device flow of a GitHub App
+# needs no client secret and no private key.
+CLIENT_ID = "Iv23li6zbHcTgEEiHNP6"
+APP_SLUG = "hokma-respaldo"
+INSTALL_URL = f"https://github.com/apps/{APP_SLUG}/installations/new"       # GitHub's "Only select repositories" picker
+NEW_REPO_URL = "https://github.com/new?name=hokma-respaldo&visibility=private"
+LEGACY_APP_URL = "https://github.com/settings/connections/applications/Ov23ctVfAiSnfjdeYKpW"   # the old OAuth App
 KEY = "github"
+KEY_APP = "github-app"          # the client_id the token was issued to: any other token is the old all-repositories one
+KEY_REPO = "github-repo"        # "owner/name" the student picked
+KEY_LEGACY = "github-legacy"    # set when an old token was dropped, until the student connects again
 _pending: dict = {}
+PAGES = 5                       # 500 repositories is far beyond what a student installs
 
 
 class GitHubError(Exception):
@@ -46,11 +53,34 @@ def _call(method: str, url: str, data: dict | None = None, token: str | None = N
 
 
 def token() -> str | None:
-    return KeyStore().get(KEY)
+    """The saved token, unless it is the old all-repositories one: that one is dropped here, for every caller."""
+    store = KeyStore()
+    saved = store.get(KEY)
+    if saved and store.get(KEY_APP) != CLIENT_ID:
+        _drop_legacy(store)
+        return None
+    return saved
+
+
+def _drop_legacy(store: KeyStore) -> None:
+    """The OAuth App token reached every repository of the account. It is deleted and the student is told to connect
+    again and pick a repository (`legacy()`); the old authorization itself can only be revoked by them on GitHub."""
+    store.delete(KEY)
+    store.delete(KEY_REPO)
+    store.set(KEY_LEGACY, "1")
+
+
+def legacy() -> bool:
+    return bool(KeyStore().get(KEY_LEGACY))
+
+
+def repo_name() -> str | None:
+    """"owner/name" the student picked, or None. Without a token there is no repository."""
+    return KeyStore().get(KEY_REPO) if token() else None
 
 
 def start() -> dict:
-    status, body = _call("POST", "https://github.com/login/device/code", {"client_id": CLIENT_ID, "scope": SCOPE})
+    status, body = _call("POST", "https://github.com/login/device/code", {"client_id": CLIENT_ID})
     if status != 200 or "device_code" not in body:
         raise GitHubError("github.unreachable")
     _pending.update(device_code=body["device_code"], interval=body.get("interval", 5),
@@ -89,7 +119,11 @@ def poll() -> dict:
         _pending.clear()
         return {"status": "expired" if error == "expired_token" else "denied"}
     try:
-        KeyStore().set(KEY, body["access_token"])
+        store = KeyStore()
+        store.set(KEY, body["access_token"])
+        store.set(KEY_APP, CLIENT_ID)
+        store.delete(KEY_REPO)                              # a new connection always asks which repository
+        store.delete(KEY_LEGACY)
     except StoreUnavailable:
         raise GitHubError("github.store_unavailable", 503) from None
     _pending.clear()
@@ -112,19 +146,77 @@ def user() -> str | None:
 
 def disconnect() -> None:
     _pending.clear()
-    KeyStore().delete(KEY)
+    store = KeyStore()
+    for key in (KEY, KEY_APP, KEY_REPO, KEY_LEGACY):
+        store.delete(key)
 
 
-def ensure_private_repo(name: str) -> dict:
-    """The student's private repository `name`, created when missing. Returns GitHub's repository object."""
-    saved, login = token(), user()
-    if not saved or not login:
+def _get(path: str, saved: str) -> dict:
+    status, body = _call("GET", f"{github.API_BASE}{path}", token=saved)
+    if status == 401:
+        disconnect()
         raise GitHubError("github.not_connected", 409)
-    status, repo = _call("GET", f"{github.API_BASE}/repos/{login}/{name}", token=saved)
-    if status == 404:
-        status, repo = _call("POST", f"{github.API_BASE}/user/repos", {"name": name, "private": True}, saved)
-    if status >= 500 or status == 429:
+    if status >= 500 or status in (403, 429):
         raise GitHubError("github.unreachable")
-    if status not in (200, 201) or not isinstance(repo, dict) or repo.get("private") is not True:
-        raise GitHubError("github.repo_failed")          # an existing public repository would hold the projects in the clear
+    return body if status == 200 and isinstance(body, dict) else {}
+
+
+def repos() -> list[dict]:
+    """The private repositories the student gave the App on GitHub (`Only select repositories`), as
+    `{"full_name", "private"}`. Empty until the App is installed."""
+    saved = token()
+    if not saved:
+        raise GitHubError("github.not_connected", 409)
+    found: dict[str, dict] = {}
+    for page in range(1, PAGES + 1):
+        installations = _get(f"/user/installations?per_page=100&page={page}", saved).get("installations") or []
+        for installation in installations:
+            if not isinstance(installation.get("id"), int):
+                continue
+            for number in range(1, PAGES + 1):
+                listing = _get(f"/user/installations/{installation['id']}/repositories?per_page=100&page={number}",
+                               saved).get("repositories") or []
+                for repo in listing:
+                    if isinstance(repo, dict) and repo.get("private") is True and isinstance(repo.get("full_name"), str):
+                        found[repo["full_name"]] = {"full_name": repo["full_name"], "private": True}
+                if len(listing) < 100:
+                    break
+        if len(installations) < 100:
+            break
+    return sorted(found.values(), key=lambda r: r["full_name"].lower())
+
+
+def select_repo(full_name: str) -> str:
+    """Keep `full_name` as the repository of the backup. Only a repository of the installation can be picked."""
+    if full_name not in {r["full_name"] for r in repos()}:
+        raise GitHubError("github.repo_failed", 400)
+    try:
+        KeyStore().set(KEY_REPO, full_name)
+    except StoreUnavailable:
+        raise GitHubError("github.store_unavailable", 503) from None
+    return full_name
+
+
+def clear_repo() -> None:
+    KeyStore().delete(KEY_REPO)
+
+
+def connected_repo() -> dict:
+    """GitHub's object of the repository the student picked, which must still be reachable and private."""
+    saved = token()
+    if not saved:
+        raise GitHubError("github.not_connected", 409)
+    name = repo_name()
+    if not name:
+        raise GitHubError("github.no_repo", 409)
+    status, repo = _call("GET", f"{github.API_BASE}/repos/{name}", token=saved)
+    if status == 401:
+        disconnect()
+        raise GitHubError("github.not_connected", 409)
+    if status >= 500 or status in (403, 429):
+        raise GitHubError("github.unreachable")
+    if status == 404:                                        # removed from the installation, deleted or renamed
+        raise GitHubError("github.repo_gone", 409)
+    if status != 200 or not isinstance(repo, dict) or repo.get("private") is not True:
+        raise GitHubError("github.repo_failed")              # a public repository would hold the projects in the clear
     return repo

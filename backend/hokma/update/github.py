@@ -75,9 +75,9 @@ def github_token() -> str | None:
     The detached updater runs on the bare base Python, where `keyring` is not installed: the store is imported here,
     not at module level, and its absence only means there is no saved token (bug 1111)."""
     try:
-        from hokma.connections.store import KeyStore
+        from hokma.github_connect import flow
 
-        saved = KeyStore().get("github")
+        saved = flow.token()                      # drops the old all-repositories token instead of handing it out
     except ImportError:
         saved = None
     return saved or _token_from_git() or _token_from_gh()

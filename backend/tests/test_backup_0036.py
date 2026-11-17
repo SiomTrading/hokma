@@ -107,6 +107,48 @@ def test_the_no_token_error_goes_away_once_github_is_connected(world, monkeypatc
     assert api.get("/api/backup", headers=HEAD).json()["status"] == "idle"
 
 
+def test_a_backup_without_a_picked_repository_asks_for_one_and_clears_when_it_is_picked(world, monkeypatch):
+    from hokma.github_connect import flow
+    api = client(world("solo"))
+    _confirmed(api)
+    picked = {"repo": None}
+    monkeypatch.setattr(flow, "token", lambda: "tok")
+    monkeypatch.setattr(flow, "repo_name", lambda: picked["repo"])
+
+    def repo():
+        if not picked["repo"]:
+            raise flow.GitHubError("github.no_repo", 409)
+
+    monkeypatch.setattr(flow, "connected_repo", repo)
+    api.post("/api/backup/run", headers=HEAD)
+    failed = wait_idle(api)
+    assert failed["status"] == "error" and failed["code"] == "github.no_repo" and failed["repo"] is None
+    picked["repo"] = "ana/hokma-respaldo"
+    state = api.get("/api/backup", headers=HEAD).json()
+    assert state["status"] == "idle" and state["repo"] == "ana/hokma-respaldo"
+
+
+def test_the_repo_gone_error_stays_until_another_repository_is_picked(world, monkeypatch):
+    from hokma.github_connect import flow
+    api = client(world("solo"))
+    _confirmed(api)
+    picked = {"repo": "ana/borrado"}
+    monkeypatch.setattr(flow, "token", lambda: "tok")
+    monkeypatch.setattr(flow, "repo_name", lambda: picked["repo"])
+
+    def repo():
+        raise flow.GitHubError("github.repo_gone", 409)
+
+    monkeypatch.setattr(flow, "connected_repo", repo)
+    api.post("/api/backup/run", headers=HEAD)
+    failed = wait_idle(api)
+    assert failed["status"] == "error" and failed["code"] == "github.repo_gone"
+    assert api.get("/api/backup", headers=HEAD).json()["status"] == "error"          # same repository: still an error
+    picked["repo"] = "ana/otro"                                                      # "Change repo" and pick another
+    state = api.get("/api/backup", headers=HEAD).json()
+    assert state["status"] == "idle" and state["code"] is None and state["message"] is None
+
+
 def test_a_failed_backup_that_does_not_depend_on_connection_stays_an_error(world, monkeypatch):
     from hokma.backup import github_release
     db, api = _first_backup(world)
@@ -258,6 +300,50 @@ def test_a_started_backup_reads_as_running_before_its_thread_runs(world, monkeyp
         time.sleep(0.05)
     assert cloud_runner.status(db)["status"] != "running"
 
+
+
+def test_a_backup_that_ends_while_the_status_is_read_never_reads_as_idle(world, monkeypatch):
+    """CI of 0.0.38: the status read the row, then the backup saved its failure and released the lock, then the status
+    looked at the lock: free, with the old row, so it said idle. The lock is now looked at first."""
+    import threading
+
+    db = world("solo")
+    client(db)
+    reading, finish = threading.Event(), threading.Event()
+    real_cache = cloud_runner._cache
+
+    def slow_cache(d):                                        # the status is between the row and the lock
+        reading.set()
+        finish.wait(10)
+        return real_cache(d)
+
+    monkeypatch.setattr(cloud_runner, "_backup", lambda _db: (_ for _ in ()).throw(
+        cloud_runner.Failure("github.no_repo", "x")))
+    monkeypatch.setattr(cloud_runner.flow, "repo_name", lambda: None)
+    started = threading.Event()
+    real_run_held = cloud_runner._run_held
+
+    def held(d, lang):
+        started.wait(10)
+        real_run_held(d, lang)
+
+    monkeypatch.setattr(cloud_runner, "_run_held", held)
+    cloud_runner.start(db)
+    monkeypatch.setattr(cloud_runner, "_cache", slow_cache)
+    result = {}
+    reader = threading.Thread(target=lambda: result.update(cloud_runner.status(db)))
+    reader.start()
+    assert reading.wait(10)
+    started.set()                                             # the backup fails and frees the lock now
+    for _ in range(200):
+        if not cloud_runner._lock.locked():
+            break
+        threading.Event().wait(0.01)
+    finish.set()
+    reader.join(10)
+    assert result["status"] in ("running", "error")
+    monkeypatch.setattr(cloud_runner, "_cache", real_cache)
+    assert cloud_runner.status(db)["status"] == "error"
 
 
 def test_a_slow_rebuild_of_the_cache_never_lands_over_the_failure_code(world, monkeypatch):

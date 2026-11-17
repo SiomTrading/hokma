@@ -847,7 +847,7 @@ wheels = [
 
 [[package]]
 name = "hokma"
-version = "0.0.37"
+version = "0.0.38"
 source = { editable = "." }
 dependencies = [
     { name = "av" },

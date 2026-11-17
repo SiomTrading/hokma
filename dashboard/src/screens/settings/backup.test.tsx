@@ -43,6 +43,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
       "GET /api/github": off,
       "POST /api/github/connect": { user_code: "AB12-CD34", verification_uri: "https://github.com/login/device", interval: 0.01 },
       "GET /api/github/connect": () => (++checks < 2 ? { status: "pending" } : { status: "connected", user: "ana" }),
+      "GET /api/github/repos": [],
       "DELETE /api/github": { connected: false },
     });
     renderWithApp(<BackupSection />);
@@ -56,11 +57,64 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
     expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/github")).toBe(true);
   });
 
+  it("after connecting, asks for ONE repository and keeps only the one picked", async () => {
+    setLocale(locale);
+    const links = { install_url: "https://github.com/apps/hokma-respaldo/installations/new", new_repo_url: "https://github.com/new?name=hokma-respaldo&visibility=private" };
+    let picked: string | null = null;
+    const calls = mockApi({
+      "GET /api/backup": base,
+      "GET /api/github": { connected: true, user: "ana", repo: null, ...links },
+      "GET /api/github/repos": [{ full_name: "ana/hokma-respaldo", private: true }, { full_name: "ana/otro", private: true }],
+      "PUT /api/github/repo": (call: { body?: unknown }) => { picked = (call.body as { full_name: string }).full_name; return { repo: picked }; },
+    });
+    renderWithApp(<BackupSection />);
+    expect(await screen.findByText(T("backup.github.pick"))).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: T("backup.github.pick.install") })).toHaveAttribute("href", links.install_url);
+    expect(screen.getByRole("link", { name: T("backup.github.pick.new") })).toHaveAttribute("href", links.new_repo_url);
+    await userEvent.click(await screen.findByRole("radio", { name: "ana/hokma-respaldo" }));
+    expect(await screen.findByTestId("github-repo")).toHaveTextContent(T("backup.github.repo", { repo: "ana/hokma-respaldo" }));
+    expect(picked).toBe("ana/hokma-respaldo");
+    expect(calls.some((c) => c.method === "PUT" && c.path === "/api/github/repo")).toBe(true);
+  });
+
+  it("explains how to pick when GitHub shows no repository yet", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/backup": base, "GET /api/github": { connected: true, user: "ana", repo: null }, "GET /api/github/repos": [] });
+    renderWithApp(<BackupSection />);
+    expect(await screen.findByTestId("repo-empty")).toHaveTextContent(T("backup.github.pick.empty"));
+  });
+
+  it("Change repo goes back to the picker and the backup cannot run without a repository", async () => {
+    setLocale(locale);
+    const calls = mockApi({
+      "GET /api/backup": { ...base, key_ready: true },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
+      "GET /api/github/repos": [],
+      "DELETE /api/github/repo": { repo: null },
+    });
+    renderWithApp(<BackupSection />);
+    expect(await screen.findByTestId("github-repo")).toHaveTextContent("ana/hokma-respaldo");
+    expect(screen.getByRole("button", { name: T("backup.now") })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: T("backup.github.change") }));
+    expect(await screen.findByText(T("backup.github.pick"))).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/github/repo")).toBe(true);
+    expect(screen.getByRole("button", { name: T("backup.now") })).toBeDisabled();
+  });
+
+  it("tells a student with the old all-repositories connection to connect again and offers to revoke it", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/backup": base, "GET /api/github": { connected: false, user: null, repo: null, legacy: true, legacy_url: "https://github.com/settings/connections/applications/Ov23ctVfAiSnfjdeYKpW" } });
+    renderWithApp(<BackupSection />);
+    expect(await screen.findByTestId("github-legacy")).toHaveTextContent(T("backup.github.legacy"));
+    expect(screen.getByRole("link", { name: T("backup.github.legacy.revoke") })).toHaveAttribute("href", expect.stringContaining("/settings/connections/applications/"));
+    expect(screen.getByRole("button", { name: T("backup.github.connect") })).toBeInTheDocument();
+  });
+
   it("shows the recovery key once and confirms it with the last 4 characters", async () => {
     setLocale(locale);
     const calls = mockApi({
       "GET /api/backup": base,
-      "GET /api/github": { connected: true, user: "ana" },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
       "POST /api/backup/key": { key: "ABCDEFGHJKLMNPQRSTUVWXYZ" },
       "POST /api/backup/key/confirm": { ok: true },
     });
@@ -83,7 +137,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
       "GET /api/backup": () => (++reads < 2
         ? { ...base, connected: true, key_ready: true, last_backup_at: "2026-11-01T10:00:00Z", last_size: 2048, status: "ok", omitted: [{ path: ".env", reason: "secret" }] }
         : { ...base, connected: true, key_ready: true, status: "ok" }),
-      "GET /api/github": { connected: true, user: "ana" },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
       "POST /api/backup/run": { status: "running" },
     });
     renderWithApp(<BackupSection />);
@@ -102,7 +156,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
     setLocale(locale);
     const calls = mockApi({
       "GET /api/backup": { ...base, connected: true, key_ready: true },
-      "GET /api/github": { connected: true, user: "ana" },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
       "GET /api/backup/list": [{ name: "hokma-1.hkb", size: 1024 ** 2, created_at: "2026-11-01T10:00:00Z" }],
       "POST /api/backup/restore": {      // the real shape of restore.prepare: objects, not strings
         status: "restart_required",
@@ -128,7 +182,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
     setLocale(locale);
     mockApi({
       "GET /api/backup": base,
-      "GET /api/github": { connected: true, user: "ana" },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
       "POST /api/backup/key": { key: "ABCDEFGHJKLMNPQRSTUVWXYZ" },
       "POST /api/backup/key/confirm": new Response(JSON.stringify({ detail: { code: "key_mismatch", message: T("backup.key.last4.wrong") } }), { status: 400 }),
     });
@@ -145,7 +199,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
     setLocale(locale);
     mockApi({
       "GET /api/backup": base,
-      "GET /api/github": { connected: true, user: "ana" },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
       "POST /api/backup/key": { key: "ABCDEFGHJKLMNPQRSTUVWXYZ" },
       "POST /api/backup/key/confirm": { ok: false },
     });
@@ -165,7 +219,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
     try {
       mockApi({
         "GET /api/backup": { ...base, connected: true, key_ready: true, status: "ok", last_size: 2048, last_backup_at: "2026-11-17 03:23:46" },
-        "GET /api/github": { connected: true, user: "ana" },
+        "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
       });
       renderWithApp(<BackupSection />);
       const line = await screen.findByText(/2\.0 KB/);
@@ -183,7 +237,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
     setLocale(locale);
     mockApi({
       "GET /api/backup": { ...base, connected: true, key_ready: true, status: "warning", message: "went to desktop/2026-11-17", omitted: [{ path: "projects/p1", reason: "git" }] },
-      "GET /api/github": { connected: true, user: "ana" },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
     });
     renderWithApp(<BackupSection />);
     expect(await screen.findByTestId("backup-status")).toHaveTextContent(T("backup.status.warning"));
@@ -279,7 +333,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
     let dismissed = false;
     const calls = mockApi({
       "GET /api/backup": () => ({ ...base, connected: true, key_ready: true, restore_failed: dismissed ? null : { at: "2026-11-17 03:23:46" } }),
-      "GET /api/github": { connected: true, user: "ana" },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
       "DELETE /api/backup/restore-failed": () => { dismissed = true; return { ok: true }; },
     });
     renderWithApp(<BackupSection />);
@@ -300,7 +354,7 @@ describe.each(["es", "en"] as const)("BackupSection (%s)", (locale) => {
     setLocale(locale);
     mockApi({
       "GET /api/backup": { ...base, connected: true, key_ready: true },
-      "GET /api/github": { connected: true, user: "ana" },
+      "GET /api/github": { connected: true, user: "ana", repo: "ana/hokma-respaldo" },
       "GET /api/backup/list": [{ name: "a.hkb", size: 10, created_at: "2026-11-01T10:00:00Z" }],
       "POST /api/backup/restore": new Response(JSON.stringify({ detail: { code: "bad_key", message: "Wrong key" } }), { status: 400 }),
     });

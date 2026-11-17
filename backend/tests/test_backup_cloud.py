@@ -31,7 +31,8 @@ def world(tmp_path, monkeypatch):
     cloud.mkdir()
     uploads = []
     monkeypatch.setattr(flow, "token", lambda: "tok")
-    monkeypatch.setattr(flow, "ensure_private_repo", lambda name: {"full_name": f"student/{name}", "clone_url": str(bare)})
+    monkeypatch.setattr(flow, "connected_repo", lambda: {"full_name": "student/hokma-respaldo", "clone_url": str(bare)})
+    monkeypatch.setattr(flow, "repo_name", lambda: "student/hokma-respaldo")
 
     def upload(path, repo, **kw):
         uploads.append(path.name)
@@ -76,6 +77,40 @@ def wait_idle(api):
     raise AssertionError("the backup never finished")
 
 
+def test_the_fingerprint_does_not_move_when_a_connection_opens_or_closes(world):
+    """Bug of the 0.0.37 QA: an idle computer uploaded a second, identical backup. SQLite makes an empty `-wal` when a
+    connection opens the database and checkpoints the main file when the last one closes; neither is a change of data."""
+    import sqlite3
+    from hokma.db.paths import db_path
+    world("old")
+    closed = cloud_runner._fingerprint([])
+    reader = sqlite3.connect(db_path())
+    reader.execute("SELECT count(*) FROM sqlite_master").fetchall()          # the `-wal` exists now
+    assert cloud_runner._fingerprint([]) == closed
+    reader.close()                                                           # the last connection leaves
+    assert cloud_runner._fingerprint([]) == closed
+
+
+def test_settling_without_a_database_does_not_create_one(world):
+    from hokma.db.paths import db_path
+    world("old")
+    db_path().unlink()
+    for extra in (db_path().with_name(db_path().name + "-wal"), db_path().with_name(db_path().name + "-shm")):
+        extra.unlink(missing_ok=True)
+    cloud_runner._settle_db()
+    assert not db_path().exists()
+
+
+def test_a_real_write_moves_the_fingerprint(world):
+    import sqlite3
+    from hokma.db.paths import db_path
+    db = world("old")
+    before = cloud_runner._fingerprint([])
+    with db.write() as u:
+        u.profile.save(owner_name="Beto")
+    assert cloud_runner._fingerprint([]) != before
+
+
 def test_backup_then_restore_on_a_new_computer(world, tmp_path):
     db = world("old")
     api = client(db)
@@ -111,7 +146,7 @@ def test_backup_then_restore_on_a_new_computer(world, tmp_path):
 
     api.post("/api/backup/run", headers=HEAD)
     state = wait_idle(api)
-    assert state["status"] == "ok" and state["repo"] == "student/hokma-backup" and state["last_size"]
+    assert state["status"] == "ok" and state["repo"] == "student/hokma-respaldo" and state["last_size"]
     assert {"path": f"projects/{project['slug']}/.env", "reason": "secret"} in state["omitted"]
     assert state["key_ready"] and len(world.uploads) == 1
 

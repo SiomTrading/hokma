@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.38
+
+- Security: the GitHub backup no longer reaches your whole GitHub. Hokma connects as a GitHub App that you install on ONE repository ("Only select repositories"), and it only sees that repository (bug 1169). Pick it in Settings > Backup; "Change repo" picks another one. Hokma no longer creates repositories: you choose an existing private one or create it from a button.
+- Fix: a student who had GitHub connected the old way gets a notice to connect again and choose a repo; the old token is deleted from this computer, and a button opens GitHub to remove the old authorization.
+
 ## 0.0.37
 
 - Fix: Telegram says why the Avisos topic could not be created. Before, any refusal from Telegram (no right to manage topics, group not found) was shown as "could not reach Telegram", even with the bot answering. Now the screen shows Telegram's code and a message in your language, Hokma writes the real error in `logs/engine.log` and, if the group became a supergroup after it was linked, Hokma keeps its new id and creates the topic (bug 1170).

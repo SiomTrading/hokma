@@ -14,7 +14,7 @@ from pathlib import Path
 from hokma.backup import github_release
 from hokma.backup.bundle import DB_ENTRY, BackupError, open_bundle
 from hokma.backup import cloud_runner
-from hokma.backup.cloud_runner import REPO_NAME, memory_dir
+from hokma.backup.cloud_runner import memory_dir
 from hokma.backup.fund_git import FundGit, FundGitError, https_token_env
 from hokma.backup.snapshot import safe_copy_db, safe_restore_db
 from hokma.core.config import hokma_data_dir, hokma_home
@@ -31,7 +31,7 @@ STAGE = "restore-pending"
 
 def _repo() -> dict:
     try:
-        return flow.ensure_private_repo(REPO_NAME)
+        return flow.connected_repo()
     except flow.GitHubError as exc:
         raise BackupError(t(exc.code)) from None
 

@@ -64,6 +64,9 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with database_lifespan(app):
+            from hokma.github_connect import flow as github_flow
+
+            github_flow.token()                    # 0.0.38: an old all-repositories GitHub token is dropped at start-up
             checker = None
             if auto_update_check:
                 from hokma.status.mcp_auth import start_legacy_cleanup, start_refresher
