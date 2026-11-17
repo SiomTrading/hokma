@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.39
+
+- New: Hokma keeps no model name of its own. When you connect a key (Google, OpenAI, Anthropic, DeepSeek, Kimi or any other provider), Hokma reads the models that key can use from the provider itself, keeps the list, and reads it again in the background at every start (without network it uses the last list). Fast, Balanced and Powerful are picked from that list: stable chat models only, the newest of each size. The connection test uses the same model the chat will use (bug 1173).
+- New: when a model disappears or the provider refuses it, Hokma picks the replacement from the list and tells you in the chat: "The model X no longer exists; you now use Y". A model you chose yourself is never replaced: the chat says so and Settings > Engines > Models shows the list to pick another. Codex and the Gemini CLI use their own default model (bug 1173).
+- New: Settings > Engines > Models lets you leave each level on Automatic or choose a model from your provider's list (bug 1173).
+- Fix: connecting an engine with an API key says why it failed instead of "The engine answered with an error": invalid key, a model your key cannot use (with its name), quota used up, service not available in your country, or the provider is down. Google answers a bad key with 400 and Hokma now reads it as a rejected key (bug 1173).
+- Fix: the provider's real answer is written to `logs/engine.log`, without the key (bug 1173).
+- Fix: with a ChatGPT account managed by an admin, Codex says why it cannot connect: Codex is not enabled for the account (your ChatGPT admin must enable it), or signing in with a device code is not allowed. After signing in with ChatGPT, Hokma tests the connection before calling it connected, and Codex's real error goes to `logs/engine.log` (bug 1175).
+- Fix: an engine error in the chat shows only its text in your language, wrapped to the width of the chat. The provider's raw answer no longer appears as one long line of English JSON, and the Claude disconnected notice no longer carries an English line under it (bug 1174).
+- Fix: on Windows, the projects Hokma creates keep Git on. `git init` writes `symlinks = false` there, and Hokma's own check refused it (bug 1174).
+
 ## 0.0.38
 
 - Security: the GitHub backup no longer reaches your whole GitHub. Hokma connects as a GitHub App that you install on ONE repository ("Only select repositories"), and it only sees that repository (bug 1169). Pick it in Settings > Backup; "Change repo" picks another one. Hokma no longer creates repositories: you choose an existing private one or create it from a button.

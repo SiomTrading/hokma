@@ -279,6 +279,31 @@ describe("composer", () => {
     expect(t("chat.err.connection_removed")).not.toBe("chat.err.connection_removed");
   });
 
+  it("a provider refusal shows only the translated text, never its raw JSON (1174)", async () => {
+    await mount();
+    await userEvent.type(box(), "hi{Enter}");
+    const raw = 'HTTP 404: [{"error": {"code": 404, "message": "This model models/gemini-2.5-flash is no longer available to new users.", "status": "NOT_FOUND"}}]';
+    server.emit({ type: "error", code: "model", message: raw });
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(t("chat.err.model"));
+    expect(alert).not.toHaveTextContent("NOT_FOUND");
+    expect(alert).not.toHaveTextContent("HTTP 404");
+  });
+
+  it("claude_disabled carries no raw English line under its text (1174)", async () => {
+    await mount();
+    await userEvent.type(box(), "hi{Enter}");
+    server.emit({ type: "error", code: "claude_disabled", message: "claude is disconnected from hokma" });
+    expect(screen.getByRole("alert").textContent?.trim()).toBe(t("chat.err.claude_disabled"));
+  });
+
+  it("an engine_error keeps a readable detail but drops a raw HTTP body (1174)", async () => {
+    await mount();
+    await userEvent.type(box(), "hi{Enter}");
+    server.emit({ type: "error", code: "engine_error", message: 'HTTP 400: {"error": {"message": "bad"}}' });
+    expect(screen.getByRole("alert").textContent?.trim()).toBe(t("chat.err.engine_error"));
+  });
+
   it("rejects a file over 25 MB without uploading it", async () => {
     await mount();
     const big = new File(["x"], "big.bin");

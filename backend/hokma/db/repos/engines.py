@@ -76,9 +76,11 @@ class EngineConnectionsRepo(Repo):
         return self.get(id)
 
     def update(self, id: int, *, label: str | None = None, tier_models: dict[str, str] | None = None,
-               base_url: str | None = None) -> EngineConnection:
+               base_url: str | None = None, settings: dict[str, Any] | None = None) -> EngineConnection:
         self.get(id)
         values: dict[str, Any] = {"updated_at": utcnow()}
+        if settings is not None:                     # the provider's model list and what Hokma did with it (bug 1173)
+            values["settings"] = json.dumps(settings)
         if label is not None:
             clean = " ".join(label.split())[:60]
             if not clean:

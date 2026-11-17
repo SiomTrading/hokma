@@ -46,9 +46,9 @@ export function ConnectCards({ listing, onChanged, onOther }: { listing: Engines
           if (!alive.current) return;
           setLogin(next);
           if (next.state === "done") {
-            await enginesApi.addCli({ engine: "codex", auth_kind: "subscription", label: "ChatGPT (Codex)" }).catch(() => undefined);
-            setDone("ChatGPT (Codex)");
-            onChanged();
+            const conn = await enginesApi.addCli({ engine: "codex", auth_kind: "subscription", label: "ChatGPT (Codex)" }).catch(() => null);
+            if (conn && alive.current) await verify(conn, "ChatGPT (Codex)").catch(() => onChanged());
+            else onChanged();
           }
         },
         () => undefined,
@@ -65,7 +65,8 @@ export function ConnectCards({ listing, onChanged, onOther }: { listing: Engines
     } else if (result.code === "region") {
       setRegion(label);
     } else {
-      setError(t(errorKey(result.code), { provider: label, cli: label }));
+      const reason = t(errorKey(result.code), { provider: label, cli: label });
+      setError(result.code === "model" && result.model ? `${reason} ${t("eng.err.model_name", { model: result.model })}` : reason);
     }
     onChanged();
   };
@@ -138,7 +139,7 @@ export function ConnectCards({ listing, onChanged, onOther }: { listing: Engines
         ) : null}
         {login?.state === "failed" ? (
           <p className="err" role="alert" style={{ color: "var(--bad)", fontSize: 12 }}>
-            {t("eng.err.auth", { provider: "ChatGPT" })}
+            {t(errorKey(login.reason || "auth"), { provider: "ChatGPT", cli: "Codex" })}
           </p>
         ) : null}
       </div>

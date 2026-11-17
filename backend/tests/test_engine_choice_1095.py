@@ -217,7 +217,8 @@ def test_only_gemini_connected_the_menu_has_no_claude(ready, monkeypatch):
     connected_gemini()
     groups = service.model_menu()
     assert [g["label"] for g in groups] == ["Gemini"]
-    assert [m["name"] for m in groups[0]["models"]] == ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]   # the catalog
+    # no model name: the Gemini CLI answers with its own default model, and the menu shows the levels (bug 1173)
+    assert [m["name"] for m in groups[0]["models"]] == ["", "", ""]
     assert [m["id"] for m in groups[0]["models"]] == ["haiku", "sonnet", "opus"]
 
 
@@ -261,7 +262,7 @@ def test_picking_a_model_of_another_engine_changes_the_engine_the_backend_uses(r
     # the button: Gemini's model, then Claude's again (Claude gets its saved connection the first time it is picked)
     store.set_connection(conv.id, gemini)
     adapter, connection, model = engine.resolve_engine(store.get_conversation(conv.id))
-    assert adapter.kind == "gemini_cli" and connection["id"] == gemini and model == "gemini-2.5-flash-lite"
+    assert adapter.kind == "gemini_cli" and connection["id"] == gemini and model == ""
     claude = service.ensure_claude_connection()
     store.set_connection(conv.id, claude["id"])
     adapter, connection, _ = engine.resolve_engine(store.get_conversation(conv.id))

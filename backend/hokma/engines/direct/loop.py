@@ -12,7 +12,7 @@ import uuid
 from typing import Any, AsyncIterator, Callable, Iterator
 
 from hokma.core.config import hokma_data_dir, hokma_home
-from hokma.engines import catalog, diagnose, secrets
+from hokma.engines import catalog, diagnose, models, secrets
 from hokma.engines.base import EngineCaps, EngineContext, EngineError, EngineEvent, user_images, user_text
 from hokma.engines.envfilter import filtered_env
 from hokma.permissions import modes
@@ -21,6 +21,7 @@ from hokma.engines.direct.wire import WireError
 from hokma.permissions.broker import BrokerCtx, check
 
 MAX_ROUNDS = 40
+MAX_REPLACEMENTS = 3               # models tried in one turn after the saved one was refused (bug 1173)
 MAX_RESULT_EVENT = 4000
 WIRES = {"openai": wire_openai, "anthropic": wire_anthropic}
 
@@ -91,6 +92,9 @@ class DirectSession:
         defs = tools.definitions() + (self.extra_tools.definitions() if self.extra_tools else [])
         bctx = broker_ctx(self.ctx)
         tools.PROTECTED[:] = bctx.protect
+        for message in await asyncio.to_thread(models.take_notices, self.conn.get("id")):
+            yield {"type": "engine_notice", "message": message}         # a model replaced at start (bug 1173)
+        replaced = 0
         for _ in range(MAX_ROUNDS):
             text, calls = "", []
             self._stream = self.wire.open_stream(self.base_url, self.key, self.ctx.model, self.ctx.instructions,
@@ -109,8 +113,28 @@ class DirectSession:
                 if self._interrupted:
                     yield {"type": "done", "status": "stopped"}
                 else:
-                    yield {"type": "error", "code": diagnose.classify(self.provider, exc.status, exc.body),
-                           "message": str(exc)}
+                    code = diagnose.classify(self.provider, exc.status, exc.body)
+                    message = diagnose.redact(str(exc), self.key)
+                    from hokma.engine import errlog          # bug 1173: the provider's real answer, never the key
+
+                    errlog.log(f"{self.provider or 'api'} model {self.ctx.model!r}: {code}: {message}", scope="engines")
+                    if code == "model" and replaced < MAX_REPLACEMENTS and self.conn.get("id") is not None:
+                        # The model is gone or does not take this request: ask the provider's list again, take the
+                        # replacement for this level, say so and go on. A model the student chose is not replaced.
+                        old = self.ctx.model
+                        try:
+                            new, manual = await asyncio.to_thread(models.replace, self.conn["id"], self.ctx.tier, old)
+                        except Exception as exc:          # noqa: BLE001  (the refusal is still told as it came)
+                            errlog.log(f"model replacement failed: {type(exc).__name__}", scope="engines")
+                            new, manual = None, False
+                        if new and new != old:
+                            replaced += 1
+                            self.ctx.model = new
+                            yield {"type": "engine_notice", "message": models.replaced_text(old, new)}
+                            continue
+                        if manual:
+                            code = "model_choice"
+                    yield {"type": "error", "code": code, "message": message}
                 return
             except Exception as exc:
                 if self._interrupted:
@@ -276,6 +300,21 @@ class DirectAdapter:
         conn = ctx.connection
         if not conn:
             raise EngineError("no_connection", "no engine is connected")
+        if not ctx.model and conn.get("id") is not None:
+            # Never tested, or saved before 0.0.39: the model comes from the provider's list now (bug 1173). When the
+            # list itself is refused (a bad key, the region, the quota) that refusal is the reason shown.
+            try:
+                ctx.model = (await asyncio.to_thread(models.replace, conn["id"], ctx.tier, ""))[0] or ""
+                err = None if ctx.model else await asyncio.to_thread(models.list_error, conn["id"])
+            except Exception as exc:                     # noqa: BLE001  (no saved row: "no model", never a crash)
+                from hokma.engine import errlog
+
+                errlog.log(f"model for connection {conn['id']} not resolved: {type(exc).__name__}", scope="engines")
+                err = None
+            if not ctx.model:
+                if err:
+                    raise EngineError(diagnose.classify(conn.get("provider"), err["status"], err["body"]),
+                                      f"model list: HTTP {err['status']}: {err['body'][:400]}")
         if not ctx.model:
             raise EngineError("no_model", "no model is set for this level; pick one in Settings > Engines")
         if not (conn.get("base_url") or catalog.provider(conn.get("provider")).get("base_url")):

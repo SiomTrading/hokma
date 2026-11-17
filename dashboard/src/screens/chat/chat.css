@@ -57,6 +57,9 @@ textarea.chat-input:focus { outline: none; }
 .chat-perm-actions { display: flex; gap: 8px; }
 .chat-perm-done { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .chat-notice { align-self: center; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+/* Bug 1174: the notice is a pill, and a pill never wraps: a long error made the whole chat scroll sideways. */
+.chat-notice .pill { white-space: pre-wrap; overflow-wrap: anywhere; height: auto; min-height: 24px; padding: 4px 10px;
+  border-radius: 12px; max-width: 100%; line-height: 1.5; }
 
 .chat-drop { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; background: var(--scrim); border: 2px dashed var(--acc); border-radius: 14px; pointer-events: none; }
 

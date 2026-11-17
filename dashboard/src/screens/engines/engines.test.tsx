@@ -29,12 +29,16 @@ function reply(body: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
 }
 
-let pingBody: { ok: boolean; status: string; code: string };
+let pingBody: { ok: boolean; status: string; code: string; model?: string };
+let loginBody: { state: string; url: string; code: string; reason?: string };
+let codexTested = false;
 
 beforeEach(() => {
   clearToken();
   setToken(TEST_TOKEN);
   pingBody = { ok: false, status: "error", code: "auth" };
+  loginBody = { state: "waiting", url: "https://auth.example/device", code: "AB12-CD34E" };
+  codexTested = false;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -44,6 +48,12 @@ beforeEach(() => {
       if (url.endsWith("/api/engines") && method === "GET") return reply(LISTING);
       if (url.endsWith("/api/engines/api")) return reply({ id: 7, engine: "api", label: "OpenAI", status: "unknown", is_default: false });
       if (url.endsWith("/api/engines/7/test")) return reply(pingBody);
+      if (url.endsWith("/api/engines/codex/login")) return reply(loginBody);
+      if (url.endsWith("/api/engines/cli")) return reply({ id: 9, engine: "codex", label: "ChatGPT (Codex)", status: "unknown", is_default: false });
+      if (url.endsWith("/api/engines/9/test")) {
+        codexTested = true;
+        return reply({ ok: false, status: "error", code: "workspace" });
+      }
       return reply({}, 404);
     }),
   );
@@ -70,6 +80,43 @@ describe("connect your AI", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(t("eng.err.auth", { provider: "OpenAI" }));
     expect(document.body.textContent).not.toContain("sk-fake-123");
+  });
+
+  it("a model the key cannot use says so and names the model, not a generic error (bug 1173)", async () => {
+    pingBody = { ok: false, status: "error", code: "model", model: "gemini-9-gone" };
+    renderWithApp(<EnginesStep onLater={() => undefined} />);
+    await screen.findByText(t("eng.key.title"));
+    await userEvent.type(screen.getByLabelText(t("eng.key.label")), "sk-fake-123");
+    await userEvent.click(screen.getByRole("button", { name: t("eng.key.connect") }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(t("eng.err.model", { provider: "OpenAI" }));
+    expect(alert).toHaveTextContent("gemini-9-gone");
+    expect(alert).not.toHaveTextContent(t("eng.err.engine_error"));
+  });
+
+  it("an unavailable provider says it is down for now (bug 1173)", async () => {
+    pingBody = { ok: false, status: "error", code: "unavailable" };
+    renderWithApp(<EnginesStep onLater={() => undefined} />);
+    await screen.findByText(t("eng.key.title"));
+    await userEvent.type(screen.getByLabelText(t("eng.key.label")), "sk-fake-123");
+    await userEvent.click(screen.getByRole("button", { name: t("eng.key.connect") }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(t("eng.err.unavailable", { provider: "OpenAI" }));
+  });
+
+  it("a ChatGPT sign-in refused by the workspace says why, not a bad session (bug 1175)", async () => {
+    renderWithApp(<EnginesStep onLater={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: t("eng.codex.login") }));
+    loginBody = { state: "failed", url: "", code: "", reason: "device_auth" };
+    const alert = await screen.findByText(t("eng.err.device_auth", { provider: "ChatGPT" }), undefined, { timeout: 4000 });
+    expect(alert).toBeInTheDocument();
+  });
+
+  it("after a ChatGPT sign-in the connection is tested and a workspace without Codex is reported (bug 1175)", async () => {
+    renderWithApp(<EnginesStep onLater={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: t("eng.codex.login") }));
+    loginBody = { state: "done", url: "", code: "" };
+    expect(await screen.findByText(t("eng.err.workspace", { provider: "ChatGPT (Codex)" }), undefined, { timeout: 4000 })).toBeInTheDocument();
+    expect(codexTested).toBe(true);
   });
 
   it("shows the region card with another engine and no mention of a VPN", async () => {
@@ -368,6 +415,8 @@ describe("Claude is always listed in Settings > Engines (bug 1123)", () => {
   it("every adapter code ending in _not_found reads as not found (1158)", () => {
     for (const code of ["claude_not_found", "codex_not_found", "gemini_not_found", "not_found"]) expect(errorKey(code)).toBe("eng.err.not_found");
     expect(errorKey("auth")).toBe("eng.err.auth");
+    expect(errorKey("model")).toBe("eng.err.model");
+    expect(errorKey("unavailable")).toBe("eng.err.unavailable");
     expect(errorKey("weird")).toBe("eng.err.engine_error");
   });
 

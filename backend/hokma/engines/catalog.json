@@ -1,9 +1,17 @@
 {
-  "version": 1,
+  "version": 2,
   "min_cli": {
     "claude_code": "2.0.0",
     "codex": "0.46.0",
     "gemini_cli": "0.8.0"
+  },
+  "model_rules": {
+    "note": "Bug 1173: no model name lives in Hokma. The models come from the provider's own list (models_path, with the student's key); these words only sort them. skip: not a stable chat model. fast / deep: size markers of a model id; a model with neither is a balanced one.",
+    "skip": ["preview", "exp", "experimental", "beta", "alpha", "tts", "audio", "realtime", "transcribe", "transcription",
+             "embedding", "embed", "image", "dall-e", "whisper", "moderation", "search", "computer-use", "guard",
+             "rerank", "ocr", "live", "omni", "video", "speech", "aqa"],
+    "fast": ["lite", "mini", "nano", "small", "haiku", "highspeed", "turbo", "fast", "instant"],
+    "deep": ["pro", "opus", "max", "ultra", "large", "reasoner", "thinking"]
   },
   "providers": {
     "openai": {
@@ -11,24 +19,14 @@
       "wire": "openai",
       "base_url": "https://api.openai.com/v1",
       "models_path": "/models",
-      "host": "api.openai.com",
-      "tiers": {
-        "fast": "gpt-4.1-mini",
-        "balanced": "gpt-4.1",
-        "deep": "o3"
-      }
+      "host": "api.openai.com"
     },
     "anthropic": {
       "label": "Anthropic",
       "wire": "anthropic",
       "base_url": "https://api.anthropic.com",
-      "models_path": "/v1/models",
-      "host": "api.anthropic.com",
-      "tiers": {
-        "fast": "claude-haiku-5-5",
-        "balanced": "claude-sonnet-5-5",
-        "deep": "claude-opus-5-5"
-      }
+      "models_path": "/v1/models?limit=1000",
+      "host": "api.anthropic.com"
     },
     "google": {
       "label": "Google",
@@ -36,81 +34,54 @@
       "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
       "models_path": "/models",
       "host": "generativelanguage.googleapis.com",
-      "tiers": {
-        "fast": "gemini-2.5-flash-lite",
-        "balanced": "gemini-2.5-flash",
-        "deep": "gemini-2.5-pro"
-      }
+      "id_prefix": "gemini-"
     },
     "openrouter": {
       "label": "OpenRouter",
       "wire": "openai",
       "base_url": "https://openrouter.ai/api/v1",
       "models_path": "/models",
-      "host": "openrouter.ai",
-      "tiers": {
-        "fast": "anthropic/claude-haiku-5.5",
-        "balanced": "anthropic/claude-sonnet-5.5",
-        "deep": "anthropic/claude-opus-5.5"
-      }
+      "host": "openrouter.ai"
     },
     "deepseek": {
       "label": "DeepSeek",
       "wire": "openai",
-      "base_url": "https://api.deepseek.com/v1",
+      "base_url": "https://api.deepseek.com",
       "models_path": "/models",
-      "host": "api.deepseek.com",
-      "tiers": {
-        "fast": "deepseek-chat",
-        "balanced": "deepseek-chat",
-        "deep": "deepseek-reasoner"
-      }
+      "host": "api.deepseek.com"
     },
     "moonshot": {
       "label": "Kimi (Moonshot)",
       "wire": "openai",
       "base_url": "https://api.moonshot.ai/v1",
       "models_path": "/models",
-      "host": "api.moonshot.ai",
-      "tiers": {
-        "fast": "kimi-k3.1-pro-highspeed",
-        "balanced": "kimi-k3",
-        "deep": "kimi-k3.1-pro"
-      }
+      "host": "api.moonshot.ai"
     },
     "ollama": {
       "label": "Ollama",
       "wire": "openai",
       "base_url": "http://localhost:11434/v1",
       "models_path": "/models",
-      "local": true,
-      "tiers": {}
+      "local": true
     },
     "lmstudio": {
       "label": "LM Studio",
       "wire": "openai",
       "base_url": "http://localhost:1234/v1",
       "models_path": "/models",
-      "local": true,
-      "tiers": {}
+      "local": true
     },
     "custom": {
       "label": "OpenAI compatible",
       "wire": "openai",
       "base_url": "",
-      "models_path": "/models",
-      "tiers": {}
+      "models_path": "/models"
     },
     "gemini_cli": {
       "label": "Gemini",
       "wire": "openai",
       "base_url": "",
-      "local": false,
-      "tiers": {
-        "fast": "gemini-2.5-flash-lite",
-        "balanced": "gemini-2.5-flash",
-        "deep": "gemini-2.5-pro"
-      }
+      "local": false
     }
   },
   "region_patterns": {

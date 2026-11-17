@@ -75,3 +75,23 @@ def test_identity_and_branch_keys_allowed(tmp_path):
     with open(p / ".git" / "config", "a") as f:
         f.write("[user]\n\tname = A\n\temail = a@b.c\n[init]\n\tdefaultBranch = main\n")
     assert gitops.repo_state(p).ok
+
+
+# Bug 1174: what `git init` writes on Windows (Git for Windows probes the disk: no symlinks, case insensitive).
+WINDOWS_INIT = ("[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n\tlogallrefupdates = true\n"
+                "\tsymlinks = false\n\tignorecase = true\n")
+
+
+def test_the_config_git_init_writes_on_windows_keeps_git_on(tmp_path):
+    p = repo(tmp_path)
+    (p / ".git" / "config").write_text(WINDOWS_INIT)
+    assert gitops.repo_state(p) == gitops.GitResult(True)
+    assert gitops.commit(p, ["."], "m").ok
+
+
+def test_symlinks_next_to_a_dangerous_key_still_disables_git(tmp_path):
+    p = repo(tmp_path)
+    pwned = tmp_path / "pwned"
+    (p / ".git" / "config").write_text(WINDOWS_INIT + f"\tsshCommand = touch {pwned}\n")
+    assert gitops.repo_state(p) == gitops.GitResult(False, "unsafe")
+    assert not pwned.exists()

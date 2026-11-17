@@ -99,8 +99,24 @@ function sql(data: string, query: string): string {
 let server: Backend | null = null;
 const realFetch = globalThis.fetch;
 
+// Vera B3: the done step appears when POST /api/owner answers, and that call syncs the kit against the real backend,
+// which can take longer than a default findBy wait under a loaded run. The test waits for that answer itself.
+const waiters: { method: string; path: string; resolve: () => void }[] = [];
+
+function responseOf(method: string, path: string): Promise<void> {
+  return new Promise((resolve) => waiters.push({ method, path, resolve }));
+}
+
 beforeEach(() => {
-  vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => realFetch(server!.base + String(input), init));
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const response = await realFetch(server!.base + String(input), init);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const path = String(input).split("?")[0];
+    for (let i = waiters.length - 1; i >= 0; i--) {
+      if (waiters[i]!.method === method && waiters[i]!.path === path) waiters.splice(i, 1)[0]!.resolve();
+    }
+    return response;
+  });
 });
 
 afterEach(() => {
@@ -159,9 +175,11 @@ describe.skipIf(!runnable).each<Locale>(["es", "en"])("real backend, first run i
     await user.type(screen.getByLabelText(t("firstrun.name.owner")), "Ana Torres");
     await user.type(screen.getByLabelText(t("firstrun.name.fund")), "Torres Capital");
     await waitFor(() => expect(screen.getByLabelText(t("firstrun.name.preview"))).toHaveTextContent("Torres Capital"), { timeout: 5000 });
+    const ownerSaved = responseOf("POST", "/api/owner");
     await user.click(screen.getByRole("button", { name: t("firstrun.next") }));
 
-    // 5. done
+    // 5. done: shown once the owner is saved and the kit synced (the answer carries CLAUDE.md ready)
+    await ownerSaved;
     await screen.findByText(t("firstrun.done.manualReady"));
     expect(screen.getByText(t("firstrun.done.agentsCount", { count: String(Number(sql(server.data, "select count(*) from agents")) - 1) }))).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: t("firstrun.open") }));

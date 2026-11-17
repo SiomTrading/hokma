@@ -7,6 +7,7 @@ import type { ClaudeDto } from "../first-run/types";
 import { enginesApi, errorKey, type Connection } from "./api";
 import { ClaudeCard } from "./ClaudeCard";
 import { ConnectCards } from "./ConnectCards";
+import { ModelPicker } from "./ModelPicker";
 import { RegionCard } from "./RegionCard";
 import { useEngines } from "./useEngines";
 
@@ -145,6 +146,7 @@ export function EnginesSettings() {
               {t("eng.disconnect")}
             </Button>
           </div>
+          {c.engine === "api" ? <ModelPicker key={JSON.stringify(c.tier_models ?? {})} conn={c} onSaved={() => void reload()} /> : null}
         </div>
       ))}
       {error ? (

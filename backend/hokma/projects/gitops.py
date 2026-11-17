@@ -21,6 +21,10 @@ from hokma.update.safe_exec import clean_env, find_executable
 _ALLOWED_KEYS = frozenset({
     "core.repositoryformatversion", "core.filemode", "core.bare", "core.logallrefupdates", "core.ignorecase",
     "core.precomposeunicode", "user.name", "user.email", "init.defaultbranch",
+    # Bug 1174: `git init` probes the disk and writes `symlinks = false` where links cannot be made (Windows without
+    # Developer Mode): without it the project Hokma creates failed its own check. It only says how a link is stored,
+    # it never runs anything.
+    "core.symlinks",
 })
 _IDENTITY = ["-c", "user.name=Hokma", "-c", "user.email=hokma@localhost"]
 # Every project git call: no hooks, no fsmonitor, no attributes file, no signing. Together with the environment

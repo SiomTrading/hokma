@@ -316,6 +316,8 @@ class ChatSession:
                             parts.append(str(ev["result"]))
                             await self.emit({"type": "delta", "turn_id": turn_id, "text": parts[0]})
                     break
+                elif kind == "engine_notice":                   # bug 1173: "model X is gone, you now use Y"
+                    await self.emit({"type": "engine_notice", "message": str(ev.get("message") or "")[:500]})
                 elif kind == "error":
                     result_seen = True
                     if self._stop_requested:

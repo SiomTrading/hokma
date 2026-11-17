@@ -10,6 +10,8 @@ export interface Connection {
   status: string;
   status_detail: string | null;
   is_default: boolean;
+  /** Levels to models: picked from the provider's list ("auto" mark) or chosen by the student (bug 1173). */
+  tier_models?: Record<string, string>;
 }
 
 export interface Provider {
@@ -52,12 +54,16 @@ export interface PingResult {
   ok: boolean;
   status: string;
   code: string;
+  /** The model the test used (bug 1173: named when the provider refuses it). */
+  model?: string;
 }
 
 export interface DeviceLogin {
   state: "idle" | "waiting" | "done" | "failed" | "no_cli";
   url: string;
   code: string;
+  /** Why a sign-in failed (bug 1175): workspace, device_auth, auth... Empty when unknown. */
+  reason?: string;
 }
 
 export const enginesApi = {
@@ -75,11 +81,16 @@ export const enginesApi = {
   loginStart: () => api.post<DeviceLogin>("/api/engines/codex/login", undefined, { timeoutMs: 30000 }),
   loginStatus: () => api.get<DeviceLogin>("/api/engines/codex/login"),
   loginCancel: () => api.delete<{ ok: boolean }>("/api/engines/codex/login"),
+  /** The provider's chat models for this key, newest first (read again; the saved list without network). */
+  models: (id: number) => api.get<{ models: string[] }>(`/api/engines/${id}/models`, { timeoutMs: 30000 }),
+  setTiers: (id: number, tiers: Record<string, string>) => api.put<Connection>(`/api/engines/${id}/tiers`, { tiers }),
 };
 
 /** The failure codes of the ping, mapped to a text key. Unknown codes fall back to the generic engine error. */
 export function errorKey(code: string): string {
   // Adapter codes carry the CLI name (claude_not_found, gemini_not_found): all of them read "I cannot find it" (1158).
   if (code.endsWith("_not_found")) return "eng.err.not_found";
-  return ["region", "auth", "quota", "network", "not_found"].includes(code) ? `eng.err.${code}` : "eng.err.engine_error";
+  return ["region", "auth", "model", "model_choice", "quota", "unavailable", "network", "not_found", "workspace", "device_auth"].includes(code)
+    ? `eng.err.${code}`
+    : "eng.err.engine_error";
 }

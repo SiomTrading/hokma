@@ -173,7 +173,7 @@ def test_anthropic_wire_streams_and_calls_tools(env, box):
 
 @pytest.mark.parametrize("status,body,code", [
     (403, "Country, region, or territory not supported", "region"),
-    (401, "invalid api key", "auth"), (429, "rate", "quota"), (500, "boom", "engine_error")])
+    (401, "invalid api key", "auth"), (429, "rate", "quota"), (500, "boom", "unavailable")])
 def test_provider_failures_become_codes(env, box, status, body, code):
     srv = Server([], status=status, error_body=body)
     try:

@@ -10,9 +10,13 @@ A wire turns them into its own shape and turns the stream back into items:
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Iterator
+
+MAX_JSON_BYTES = 8 * 1024 * 1024        # a provider's model list; more than this is not a list (Vera B2, 0.0.39)
+MAX_ERROR_BYTES = 64 * 1024
 
 
 class WireError(Exception):
@@ -62,12 +66,40 @@ class Stream:
                 pass
 
 
+def _read_capped(resp: Any, limit: int, deadline: float) -> bytes:
+    """At most `limit` bytes, and never past `deadline` in total: a server that drips its answer one byte at a time
+    cannot hold the caller longer than that (a per-read timeout alone would let it)."""
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        if time.monotonic() > deadline:
+            raise WireError(0, "the answer took too long")
+        sock = getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
+        if sock is not None:
+            sock.settimeout(max(0.1, deadline - time.monotonic()))
+        chunk = resp.read1(65536) if hasattr(resp, "read1") else resp.read(65536)
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > limit:
+            raise WireError(0, f"the answer is larger than {limit} bytes")
+        chunks.append(chunk)
+
+
 def get_json(url: str, headers: dict[str, str], timeout: float = 20.0) -> Any:
+    """GET a JSON document with a cap on its size and on the total time (connect, wait and read)."""
     req = urllib.request.Request(url, headers={"User-Agent": "Hokma", **headers})
+    deadline = time.monotonic() + timeout
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:                  # noqa: S310
-            return json.loads(resp.read().decode("utf-8", "replace"))
+            return json.loads(_read_capped(resp, MAX_JSON_BYTES, deadline).decode("utf-8", "replace"))
     except urllib.error.HTTPError as exc:
-        raise WireError(exc.code, exc.read().decode("utf-8", "replace")) from exc
+        try:
+            body = exc.read(MAX_ERROR_BYTES)                 # one bounded read: the start of the refusal is enough
+        except (OSError, ValueError):
+            body = b""
+        raise WireError(exc.code, (body or b"").decode("utf-8", "replace")) from exc
     except urllib.error.URLError as exc:
         raise WireError(0, str(exc.reason)) from exc
+    except (TimeoutError, OSError) as exc:
+        raise WireError(0, f"{type(exc).__name__}: {exc}") from exc

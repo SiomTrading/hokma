@@ -62,7 +62,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
   // The group of the engine that answers, or none: the button never shows another engine's name (bug 1104).
   const activeGroup = groups.find((g) => g.connection_id === activeId) ?? null;
   const answering = engines.data?.active ?? null;
-  const modelName = (m: ModelId) => activeGroup?.models.find((x) => x.id === m)?.name ?? (tiers ? t(`eng.tier.${TIER_OF[m]}`) : t(`chat.model.${m}`));
+  const modelName = (m: ModelId) => activeGroup?.models.find((x) => x.id === m)?.name || (tiers ? t(`eng.tier.${TIER_OF[m]}`) : t(`chat.model.${m}`));
   const label = (m: ModelId) => (tiers ? t(`eng.tier.${TIER_OF[m]}`) : t(`chat.model.${m}`));
   const hint = (m: ModelId) => (tiers ? t(`eng.tier.${TIER_OF[m]}.hint`) : t(`chat.model.${m}.hint`));
   const [modelMenu, setModelMenu] = useState(false);
@@ -253,7 +253,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
                     hint={group.engine === "claude_code" ? t(`chat.model.${m.id}.hint`) : t(`eng.tier.${TIER_OF[m.id]}.hint`)}
                     onClick={() => void pickModel(group, m.id)}
                   >
-                    {m.name}
+                    {m.name || (group.engine === "claude_code" ? t(`chat.model.${m.id}`) : t(`eng.tier.${TIER_OF[m.id]}`))}
                   </MenuItem>
                 ))}
               </div>

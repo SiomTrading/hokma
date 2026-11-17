@@ -54,7 +54,18 @@ export type Action =
 let counter = 0;
 /** Error codes whose own text says it all; any other code shows the message from the engine under the translated text (bug 1095). */
 const SELF_EXPLAINED = new Set(["bad_json", "bad_message", "unknown_conversation", "busy", "unknown_model", "unknown_agent",
-  "unknown_project", "unknown_request", "attachment_not_found", "too_many_sessions", "no_engine"]);
+  "unknown_project", "unknown_request", "attachment_not_found", "too_many_sessions", "no_engine",
+  // Bug 1174: a provider's refusal already has its own translated text; its raw answer goes only to engine.log.
+  "auth", "region", "quota", "network", "model", "unavailable", "claude_disabled", "workspace", "device_auth", "model_choice"]);
+
+/** Bug 1174: the engine's own words help ("command not found: git"); a provider's raw HTTP answer or JSON does not:
+ * it is English, one long line, and engine.log already has it. */
+export function readableDetail(message: unknown): string {
+  if (typeof message !== "string") return "";
+  const text = message.trim();
+  if (!text || /^HTTP \d{3}\b/.test(text) || /^[[{]/.test(text) || /[[{]\s*"(error|code|message)"/.test(text)) return "";
+  return text.slice(0, 600);
+}
 
 export function nextKey(prefix: string): string {
   counter += 1;
@@ -225,9 +236,9 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
       }
       const base = errorText ? errorText(event.code) : event.code;
       // The engine's own words after the short text (task 3171): "something failed" alone told nobody what to fix.
-      const detail = !SELF_EXPLAINED.has(event.code) && typeof event.message === "string" ? event.message.trim().slice(0, 600) : "";
+      const detail = !SELF_EXPLAINED.has(event.code) ? readableDetail(event.message) : "";
       const text = detail ? `${base}\n${detail}` : base;
-      const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text, ...(event.code === "no_engine" || event.code === "auth" ? { action: "open_engines" as const } : {}) };
+      const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text, ...(event.code === "no_engine" || event.code === "auth" || event.code === "model_choice" ? { action: "open_engines" as const } : {}) };
       if (event.code === "busy" || event.code === "unknown_request") return { ...state, items: [...state.items, notice] };
       return { ...state, items: [...closeStreaming(state.items, "error"), notice], running: false, stopping: false };
     }

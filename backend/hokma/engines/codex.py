@@ -22,7 +22,7 @@ from typing import Any, AsyncIterator
 
 from hokma.core.config import codex_home_dir, hokma_data_dir, hokma_home
 from hokma.engine.process import ClaudeProcess
-from hokma.engines import catalog, secrets
+from hokma.engines import catalog, diagnose, secrets
 from hokma.engine.process import find_cli
 from hokma.engines.base import EngineCaps, EngineContext, EngineError, EngineEvent, user_text
 from hokma.engines.envfilter import filtered_env
@@ -51,6 +51,17 @@ def command_request(command: Any) -> tuple[str, dict[str, Any]]:
         return "PowerShell", {"command": argv[-1]}
     return "Bash", {"command": shlex.join(argv)}
 
+
+
+def _failure(raw: str) -> tuple[str, str]:
+    """Bug 1175: Codex's refusal as a code the panel and the chat translate (a Business workspace without Codex,
+    device code sign-in off, an expired session, the usage limit), with its real text in engine.log."""
+    message = raw[:500]
+    code = diagnose.classify_codex(raw)
+    from hokma.engine import errlog
+
+    errlog.log(f"codex: {code}: {message}", scope="engines")
+    return code, message
 
 class RpcProcess(ClaudeProcess):
     """A child process that speaks JSON lines with no `type` field (JSON-RPC)."""
@@ -141,7 +152,7 @@ class CodexSession:
                 raise EngineError("engine_exited", f"codex exited: {self._proc.stderr_tail()}")
             if msg.get("id") == rid and "method" not in msg:
                 if "error" in msg:
-                    raise EngineError("engine_error", json.dumps(msg["error"])[:500])
+                    raise EngineError(*_failure(json.dumps(msg["error"])))
                 return msg.get("result") or {}
 
     async def _start(self) -> None:
@@ -202,7 +213,8 @@ class CodexSession:
                 async for ev in self._on_request(msg["id"], method, params):
                     yield ev
             elif "id" in msg and "error" in msg:                         # the answer to turn/start failed
-                yield {"type": "error", "code": "engine_error", "message": json.dumps(msg["error"])[:500]}
+                code, message = _failure(json.dumps(msg["error"]))
+                yield {"type": "error", "code": code, "message": message}
                 return
             elif method.endswith("agentMessage/delta"):
                 delta = str(params.get("delta") or "")
@@ -232,14 +244,16 @@ class CodexSession:
                     yield {"type": "done", "status": "stopped"}
                 elif status in ("failed", "error"):
                     err = json.dumps(turn.get("error") or params.get("error") or status)
-                    yield {"type": "error", "code": "engine_error", "message": err[:500]}
+                    code, message = _failure(err)
+                    yield {"type": "error", "code": code, "message": message}
                 else:
                     yield {"type": "done", "status": "complete", "usage": usage}
                 return
             elif method == "error" or method.endswith("/error"):
                 if not params.get("willRetry"):
                     err = json.dumps(params.get("error") or params)[:500]
-                    yield {"type": "error", "code": "engine_error", "message": err}
+                    code, message = _failure(err)
+                    yield {"type": "error", "code": code, "message": message}
                     return
 
     # ---------------------------------------------------------------- items

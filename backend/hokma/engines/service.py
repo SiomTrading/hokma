@@ -16,10 +16,9 @@ from urllib.parse import urlparse
 from hokma.db import get_database
 from hokma.engines import effective
 from hokma.engine.dbstore import DbChatStore
-from hokma.engines import catalog, diagnose, secrets
+from hokma.engines import catalog, diagnose, models, secrets
 from hokma.engines.base import EngineContext, EngineError
 from hokma.engines.registry import build_adapter, installed_clis
-from hokma.engines.direct import wire
 from hokma.connections.store import StoreUnavailable
 
 PING_SECONDS = 30
@@ -59,7 +58,7 @@ def detect() -> dict[str, Any]:
     return {"cli": found, "codex_login": (Path.home() / ".codex" / "auth.json").is_file(),
             "claude_import": bool(claude_import_preview()["found"]), "providers": [
                 {"id": k, "label": v["label"], "wire": v["wire"], "base_url": v.get("base_url", ""),
-                 "local": bool(v.get("local")), "tiers": v.get("tiers", {})}
+                 "local": bool(v.get("local"))}
                 for k, v in catalog.load()["providers"].items() if k != "gemini_cli"]}
 
 
@@ -165,7 +164,8 @@ def model_menu() -> list[dict[str, Any]]:
             models = [{"id": m, "tier": tier, "name": name} for m, tier, name in _CLAUDE_MODELS]
         else:
             label = conn["label"]
-            models = [{"id": m, "tier": tier, "name": catalog.tier_model(conn, tier) or name} for m, tier, name in _CLAUDE_MODELS]
+            # the model picked from the provider's list, or "" when the engine uses its own default (a CLI)
+            models = [{"id": m, "tier": tier, "name": catalog.tier_model(conn, tier) or ""} for m, tier, _ in _CLAUDE_MODELS]
         return {"connection_id": None if conn is None else conn["id"], "engine": "claude_code" if conn is None else conn["engine"],
                 "label": label, "models": models}
 
@@ -211,6 +211,26 @@ def startup_check() -> None:
                    + (f", replaced the saved {info['saved']}" if info["replaced"] else ""), scope="engines")
     except Exception:                                   # noqa: BLE001  (a log problem never stops the start)
         pass
+    import threading
+
+    threading.Thread(target=refresh_all_tiers, name="hokma-engine-tiers", daemon=True).start()
+
+
+def refresh_all_tiers() -> None:
+    """Bug 1173: at start, every saved key connection takes the models its key can use today (in the background: a
+    slow provider never delays the start). Never raises."""
+    try:
+        with get_database().read() as u:
+            ids = [c.id for c in u.engine_connections.list() if c.engine == "api" and c.status != "removed"]
+        for cid in ids:
+            try:
+                refresh_tiers(cid)
+            except Exception as exc:                    # noqa: BLE001
+                from hokma.engine import errlog
+
+                errlog.log(f"engine tiers refresh failed for connection {cid}: {type(exc).__name__}", scope="engines")
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 def remove(connection_id: int) -> None:
@@ -234,16 +254,30 @@ def rename(connection_id: int, label: str) -> dict[str, Any]:
 
 
 def set_tiers(connection_id: int, tiers: dict[str, str]) -> dict[str, Any]:
-    clean = {k: str(v).strip()[:120] for k, v in tiers.items() if k in catalog.TIERS and str(v).strip()}
+    """The student's own models per level. An empty map (or every level "auto") goes back to the automatic pick from
+    the provider's list (bug 1173)."""
+    clean = models.manual_map({k: str(v).strip()[:120] for k, v in tiers.items() if k in catalog.TIERS})
     with get_database().write() as u:
-        return public_view(u.engine_connections.update(connection_id, tier_models=clean))
+        view = public_view(u.engine_connections.update(connection_id, tier_models=clean))
+    if not models.is_manual(clean):                 # automatic levels are filled from the saved list
+        models.refresh(connection_id, network=False)
+        with get_database().read() as u:
+            view = public_view(u.engine_connections.get(connection_id))
+    return view
 
 
 # --------------------------------------------------------------------- test
 
+def refresh_tiers(connection_id: int) -> dict[str, str] | None:
+    """Bug 1173: the provider's list for this key and the levels picked from it, saved in the connection, so the test
+    and the chat use the same model (see engines/models.py)."""
+    return models.refresh(connection_id)
+
+
 async def ping(connection_id: int, owner: Any = None) -> dict[str, Any]:
-    """A short real turn at the Fast level. The result is saved in the connection (status and, for a region block,
-    status_detail = 'region')."""
+    """A short real turn at the Fast level, with the model the chat will use. The result is saved in the connection
+    (status and, for a region block, status_detail = 'region')."""
+    await asyncio.to_thread(refresh_tiers, connection_id)
     with get_database().read() as u:
         c = u.engine_connections.get(connection_id)
     conn = DbChatStore._conn(c)
@@ -299,13 +333,17 @@ async def ping(connection_id: int, owner: Any = None) -> dict[str, Any]:
         status, detail = "no_session", "auth"
     elif code:
         status = "error"
-        detail = code if code in ("region", "quota", "network") else diagnose.classify_text(c.provider, message)
+        detail = code if code in ("region", "quota", "network", "model", "model_choice", "unavailable", "workspace",
+                                  "device_auth") \
+            else diagnose.classify_text(c.provider, message)
     else:
         status, detail = "connected", None
     with get_database().write() as u:
         u.engine_connections.set_status(connection_id, status, detail)
 
-    return {"ok": not code, "status": status, "code": detail or "", "latency_ok": bool(said or not code)}
+    # ctx.model: the model the test ended with (a refused one is replaced from the list during the turn, bug 1173)
+    return {"ok": not code, "status": status, "code": detail or "", "model": ctx.model or model,
+            "latency_ok": bool(said or not code)}
 
 
 class _Owner:
@@ -340,25 +378,12 @@ def _cwd() -> Path:
 # --------------------------------------------------------------- live models
 
 def live_models(connection_id: int) -> list[str]:
+    """The provider's chat models for this key, read again and saved; the last saved list when there is no network."""
     with get_database().read() as u:
         c = u.engine_connections.get(connection_id)
     if c.engine != "api":
         return []
-    info = catalog.provider(c.provider)
-    key = secrets.get(c.id)
-    base = (c.base_url or info.get("base_url") or "").rstrip("/")
-    headers: dict[str, str] = {}
-    if c.wire == "anthropic":
-        headers = {"x-api-key": key or "", "anthropic-version": "2023-06-01"}
-    elif key:
-        headers = {"Authorization": f"Bearer {key}"}
-    try:
-        data = wire.get_json(base + info.get("models_path", "/models"), headers)
-    except wire.WireError:
-        return []
-    items = data.get("data") or data.get("models") or []
-    names = [str(i.get("id") or i.get("name") or "").removeprefix("models/") for i in items if isinstance(i, dict)]
-    return sorted(n for n in names if n)[:500]
+    return models.choices(connection_id)
 
 
 # ------------------------------------------------------- import from Claude

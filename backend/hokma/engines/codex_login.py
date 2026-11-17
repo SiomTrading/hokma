@@ -20,7 +20,8 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _URL = re.compile(r"https://\S+")
 _CODE = re.compile(r"\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b")
 _lock = threading.Lock()
-_state: dict[str, Any] = {"state": "idle", "url": "", "code": "", "proc": None}
+_state: dict[str, Any] = {"state": "idle", "url": "", "code": "", "proc": None, "reason": "", "tail": []}
+TAIL_LINES = 20
 
 
 def _reader(proc: subprocess.Popen) -> None:
@@ -33,16 +34,28 @@ def _reader(proc: subprocess.Popen) -> None:
                 _state["url"] = m.group(0)
             if not _state["code"] and _state["url"] and (m := _CODE.search(clean)):
                 _state["code"] = m.group(0)
+            line_text = _CODE.sub("[code]", clean).strip()          # the one-time code never reaches the log
+            if line_text:
+                _state["tail"] = (_state["tail"] + [line_text])[-TAIL_LINES:]
     code = proc.wait()
     with _lock:
-        if proc is _state["proc"]:
-            _state["state"] = "done" if code == 0 else "failed"
+        if proc is not _state["proc"]:
+            return
+        _state["state"] = "done" if code == 0 else "failed"
+        if code != 0:
+            # Bug 1175: why the sign-in failed (a Business workspace without Codex, device code sign-in off...).
+            from hokma.engine import errlog
+            from hokma.engines import diagnose
+
+            text = "\n".join(_state["tail"])
+            _state["reason"] = diagnose.classify_codex(text)
+            errlog.log(f"codex login failed (exit {code}, {_state['reason']}): {text[-2000:]}", scope="engines")
 
 
 def start() -> dict[str, Any]:
     binary = shutil.which("codex")
     if not binary:
-        return {"state": "no_cli", "url": "", "code": ""}
+        return {"state": "no_cli", "url": "", "code": "", "reason": ""}
     with _lock:
         old = _state["proc"]
         if old is not None and old.poll() is None:
@@ -51,7 +64,7 @@ def start() -> dict[str, Any]:
         env["CODEX_HOME"] = str(codex_home_dir())
         proc = subprocess.Popen([binary, "login", "--device-auth"], env=env, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **spawn_kwargs())
-        _state.update(state="waiting", url="", code="", proc=proc)
+        _state.update(state="waiting", url="", code="", proc=proc, reason="", tail=[])
     threading.Thread(target=_reader, args=(proc,), daemon=True).start()
     for _ in range(100):                                       # up to 10 s for the link and the code
         time.sleep(0.1)
@@ -63,7 +76,7 @@ def start() -> dict[str, Any]:
 def status() -> dict[str, Any]:
     with _lock:
         url = _state["url"] if _state["url"].startswith("https://") else ""
-        return {"state": _state["state"], "url": url, "code": _state["code"]}
+        return {"state": _state["state"], "url": url, "code": _state["code"], "reason": _state["reason"]}
 
 
 def cancel() -> None:
@@ -71,4 +84,4 @@ def cancel() -> None:
         proc = _state["proc"]
         if proc is not None and proc.poll() is None:
             proc.terminate()
-        _state.update(state="idle", url="", code="", proc=None)
+        _state.update(state="idle", url="", code="", proc=None, reason="", tail=[])
