@@ -288,8 +288,9 @@ async def test_avisos_can_be_tried_again_from_the_api(env):
 
     env.app.bot.create_forum_topic = create_forum_topic
     with client_for(env.glue) as client:
-        assert client.post("/api/telegram/group/avisos", headers=HEADERS).json() == {"avisos": "no_permission"}
-        assert client.post("/api/telegram/group/avisos", headers=HEADERS).json() == {"avisos": "ok"}
+        refused = client.post("/api/telegram/group/avisos", headers=HEADERS).json()
+        assert refused["avisos"] == "no_permission" and refused["avisos_detail"]["message"]
+        assert client.post("/api/telegram/group/avisos", headers=HEADERS).json() == {"avisos": "ok", "avisos_detail": None}
         assert client.post("/api/telegram/group/avisos", headers={"X-Hokma-Token": HEADERS["X-Hokma-Token"]}
                            ).status_code == 403
         env.glue.link.unlink_group()

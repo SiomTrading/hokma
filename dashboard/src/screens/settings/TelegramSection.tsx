@@ -8,7 +8,10 @@ export interface TelegramState {
   connected: boolean;
   user_name: string;
   group_linked?: boolean;
-  avisos?: "ok" | "no_permission" | "unreachable" | null;
+  avisos?: "ok" | "no_permission" | "unreachable" | "failed" | null;
+  /** Bug 1170: what Telegram answered when the Avisos topic failed (code, error class and a translated message). */
+  permission_mode?: "ask" | "auto";
+  avisos_detail?: { code: number | null; error: string; message: string } | null;
   outbox?: { pending: number; last_error: string | null };
   connect_error?: string | null;
 }
@@ -103,19 +106,19 @@ export function TelegramSection() {
     });
   const approveGroup = () =>
     run(async () => {
-      const res = await api.post<{ avisos?: "ok" | "no_permission" | null }>("/api/telegram/group/approve", { code: groupCode.trim() });
+      const res = await api.post<{ avisos?: TelegramState["avisos"]; avisos_detail?: TelegramState["avisos_detail"] }>("/api/telegram/group/approve", { code: groupCode.trim() });
       setGroupCode("");
-      return { ...state, group_linked: true, avisos: res.avisos ?? null };
+      return { ...state, group_linked: true, avisos: res.avisos ?? null, avisos_detail: res.avisos_detail ?? null };
     });
   const unlinkGroup = () =>
     run(async () => {
       await api.delete("/api/telegram/group");
-      return { ...state, group_linked: false, avisos: null };
+      return { ...state, group_linked: false, avisos: null, avisos_detail: null };
     });
   const retryAvisos = () =>
     run(async () => {
-      const res = await api.post<{ avisos?: TelegramState["avisos"] }>("/api/telegram/group/avisos");
-      return { ...state, avisos: res.avisos ?? null };
+      const res = await api.post<{ avisos?: TelegramState["avisos"]; avisos_detail?: TelegramState["avisos_detail"] }>("/api/telegram/group/avisos");
+      return { ...state, avisos: res.avisos ?? null, avisos_detail: res.avisos_detail ?? null };
     });
   const confirmed = () => {
     const kind = confirming;
@@ -131,6 +134,12 @@ export function TelegramSection() {
           <Pill tone={TONE[current]} data-testid="telegram-status">{t(`telegram.status.${current}`)}</Pill>
           {state.linked && state.user_name ? <span className="p">{t("telegram.linkedTo", { name: state.user_name })}</span> : null}
         </span>
+        {state.linked && state.permission_mode ? (
+          <p className="p" data-testid="telegram-mode">
+            {t("telegram.mode.label", { mode: t(`permissions.mode.${state.permission_mode}`) })}
+            {state.permission_mode === "auto" ? ` ${t("telegram.mode.auto_hint")}` : ` ${t("telegram.mode.ask_hint")}`}
+          </p>
+        ) : null}
         {current === "offline" ? (
           <>
             <p className="p" role="status">{t("telegram.offline.hint")}</p>
@@ -183,9 +192,14 @@ export function TelegramSection() {
             <div><Button variant="primary" disabled={busy || groupCode.trim() === ""} onClick={() => void approveGroup()}>{t("telegram.group.approve")}</Button></div>
           </>
         ) : null}
-        {state.group_linked && (state.avisos === "no_permission" || state.avisos === "unreachable") ? (
+        {state.group_linked && (state.avisos === "no_permission" || state.avisos === "unreachable" || state.avisos === "failed") ? (
           <>
             <p className="p" role="status">{t(`telegram.avisos.hint.${state.avisos}`)}</p>
+            {state.avisos_detail ? (
+              <p className="p" data-testid="telegram-avisos-detail">
+                {state.avisos_detail.code ? `${t("telegram.avisos.code", { code: state.avisos_detail.code })} ` : ""}{state.avisos_detail.message}
+              </p>
+            ) : null}
             <div><Button variant="primary" disabled={busy} onClick={() => void retryAvisos()}>{t("telegram.avisos.retry")}</Button></div>
           </>
         ) : null}

@@ -108,6 +108,7 @@ class FakeEngine:
         self.handled = []
         self.conn = None
         self.script = []
+        self.permission_mode = lambda: "ask"      # the mode of Settings > General
 
     def subscribe(self, conn, conversation_id):
         self.conn = conn
@@ -279,6 +280,7 @@ def test_api_connects_links_and_unlinks_without_a_console(env):
                           headers={"X-Hokma-Token": HEADERS["X-Hokma-Token"]}).status_code == 403   # no owner tab
         assert client.get("/api/telegram", headers=HEADERS).json() == {
             "linked": False, "connected": False, "user_name": "", "group_linked": False, "avisos": None,
+            "avisos_detail": None, "permission_mode": "ask",
             "outbox": {"pending": 0, "last_error": None}, "connect_error": None}
         bad = client.put("/api/telegram/token", json={"token": "nope"}, headers=HEADERS)
         assert bad.status_code == 400 and bad.json()["detail"]["code"] == "invalid_token"

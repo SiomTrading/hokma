@@ -94,15 +94,64 @@ _PERMISSION_HINTS = ("rights", "administrator", "forbidden", "not a forum", "for
 
 
 def classify_failure(exc: BaseException) -> str:
-    """`network` (Telegram not reached), `permission` (Telegram answered and refused) or `other`."""
+    """`network` (Telegram not reached), `permission` (Telegram refused for lack of rights), `refused` (Telegram answered
+    with another refusal: chat not found, bad request), `migrated` (the group became a supergroup) or `other`.
+    Bug 1170: python-telegram-bot makes BadRequest a NetworkError, so the class of the API answer is read first."""
     import httpx
-    from telegram.error import Forbidden, NetworkError, TimedOut
+    from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError, TimedOut
 
+    if isinstance(exc, ChatMigrated):
+        return "migrated"
+    text = str(exc).lower()
+    if isinstance(exc, Forbidden) or (isinstance(exc, BadRequest) and any(h in text for h in _PERMISSION_HINTS)):
+        return "permission"
+    if isinstance(exc, BadRequest):
+        return "refused"
     if isinstance(exc, (NetworkError, TimedOut, httpx.HTTPError, OSError, asyncio.TimeoutError)):
         return "network"
-    if isinstance(exc, Forbidden) or any(h in str(exc).lower() for h in _PERMISSION_HINTS):
+    if any(h in text for h in _PERMISSION_HINTS):
         return "permission"
     return "other"
+
+
+_TELEGRAM_CODES = {"BadRequest": 400, "ChatMigrated": 400, "Forbidden": 403, "Conflict": 409, "RetryAfter": 429,
+                   "InvalidToken": 401}
+
+
+def describe_failure(exc: BaseException) -> dict:
+    """What the screen and engine.log say about a failed topic call: the Telegram code, its text and a translation."""
+    from hokma.telegram.core.approvals_ui import _redact_telegram_error_text
+
+    kind = classify_failure(exc)
+    original = _redact_telegram_error_text(str(exc))[:300]
+    text = original.lower()
+    detail = original or type(exc).__name__
+    if kind == "permission":
+        message = t("telegram.topic.err.no_rights", detail=detail)
+    elif kind == "network":
+        message = t("telegram.topic.err.network", detail=detail)
+    elif "chat not found" in text or "chat_id is empty" in text:
+        message = t("telegram.topic.err.chat_not_found", detail=detail)
+    elif kind == "migrated":
+        message = t("telegram.topic.err.migrated", detail=detail)
+    else:
+        message = t("telegram.topic.err.other", detail=detail)
+    name = type(exc).__name__
+    return {"kind": kind, "code": _TELEGRAM_CODES.get(name), "error": name, "telegram": original,
+            "message": message}
+
+
+LABEL_LIMIT = 60                       # characters of the name that `/new Name` adds to the conversation title
+
+
+def reset_label(text: str | None) -> str:
+    """The name after `/new` or `/reset` (`/new@bot Nasdaq` too): one line, no control characters, at most 60
+    characters. Empty when the command came without one."""
+    parts = (text or "").strip().split(None, 1)
+    if len(parts) < 2:
+        return ""
+    clean = "".join(" " if (c.isspace() or not c.isprintable()) else c for c in parts[1])
+    return " ".join(clean.split())[:LABEL_LIMIT].strip()
 
 
 class HokmaLink(TelegramLink):
@@ -194,7 +243,20 @@ class HokmaLink(TelegramLink):
         _, chat, thread_id = group
         if thread_id is None or thread_id == self._avisos_thread():
             return await self._reply(chat.id, thread_id, self._t("telegram.reset_not_in_topic"))
-        await super()._handle_reset(update, context)
+        message = getattr(update, "effective_message", None) or getattr(update, "message", None)
+        label = reset_label(getattr(message, "text", None))
+        if self._on_reset is None:
+            return
+        result = self._on_reset(thread_id, label) if label else self._on_reset(thread_id)
+        if hasattr(result, "__await__"):
+            title = await result
+        else:
+            title = result
+        text = self._t("telegram.session_reset_named", title=title) if label and title else self._t("session_reset")
+        await self._bot.send_message(chat_id=normalize_telegram_chat_id(chat.id), text=text, message_thread_id=thread_id)
+        if label and self.mode_text is not None:
+            await self._bot.send_message(chat_id=normalize_telegram_chat_id(chat.id), text=self.mode_text(),
+                                         message_thread_id=thread_id)
 
     # ----- bug 1154: a code is never lost silently and the user is told why none comes -----
 
@@ -271,18 +333,46 @@ class HokmaLink(TelegramLink):
         updater = getattr(app, "updater", None)
         return bool(getattr(updater, "running", True)) if updater is not None else True
 
+    topic_error: dict | None = None
+    mode_text = None                       # () -> str: the permission mode in words (bug 1171), set by the glue
+
     async def create_topic(self, chat_id, name, icon_color=None, icon_custom_emoji_id=None):
         self.topic_failure = None
+        self.topic_error = None
         if not self._bot:
             self.topic_failure = "network"
+            self.topic_error = {"kind": "network", "code": None, "error": "NoBot", "telegram": "",
+                                "message": t("telegram.topic.err.network", detail="")}
             return None
         try:
             topic = await self._bot.create_forum_topic(chat_id=chat_id, name=name)
             return topic.message_thread_id
         except Exception as exc:
-            self.topic_failure = classify_failure(exc)
-            log.warning("could not create topic %r: %s (%s)", name, type(exc).__name__, self.topic_failure)
+            from telegram.error import ChatMigrated
+
+            if isinstance(exc, ChatMigrated) and getattr(exc, "new_chat_id", None):
+                return await self._create_topic_after_migration(chat_id, name, exc)
+            self._note_topic_failure(exc, name)
             return None
+
+    def _note_topic_failure(self, exc: BaseException, name) -> None:
+        info = describe_failure(exc)
+        self.topic_failure, self.topic_error = info["kind"], info
+        log.warning("could not create topic %r: %s (%s)", name, info["error"], info["kind"])
+        from hokma.engine import errlog
+        errlog.log(f"telegram avisos topic failed: {info['error']} code={info['code']} kind={info['kind']} "
+                   f"telegram={info['telegram']!r}", scope="telegram")
+
+    async def _create_topic_after_migration(self, old_id, name, exc):
+        """Bug 1170: the group became a supergroup after it was linked. Telegram says the new id: keep it and retry once."""
+        new_id = str(exc.new_chat_id)
+        try:
+            topic = await self._bot.create_forum_topic(chat_id=normalize_telegram_chat_id(new_id), name=name)
+        except Exception as again:
+            self._note_topic_failure(again, name)
+            return None
+        self._save({"group_id": new_id})
+        return topic.message_thread_id
 
     async def ensure_avisos_topic(self, revalidate: bool = False) -> bool:
         """Creates the Avisos topic in the linked group and records `avisos`: `ok`, `no_permission` (Telegram refused
@@ -302,6 +392,7 @@ class HokmaLink(TelegramLink):
                                                  message_thread_id=_message_thread_id_for_send(thread_id))
             except Exception as exc:
                 if classify_failure(exc) == "network":
+                    self.topic_error = describe_failure(exc)
                     self._save({"avisos": "unreachable"})
                     return False
                 thread_id = None                      # gone or refused: create it again below
@@ -309,7 +400,10 @@ class HokmaLink(TelegramLink):
             self.topic_failure = None
         else:
             thread_id = await self.create_topic(normalize_telegram_chat_id(group_id), self._t("avisos_topic_name"))
-        state = "ok" if thread_id else ("no_permission" if self.topic_failure == "permission" else "unreachable")
+        state = "ok" if thread_id else {"permission": "no_permission", "network": "unreachable"}.get(self.topic_failure or "", "failed")
+        if state == "ok":
+            self.topic_error = None
+        group_id = self.linked_group_id() or group_id           # a migration may have changed it
         self._save({"avisos_thread_id": thread_id, "avisos_group_id": group_id if thread_id else None, "avisos": state})
         if thread_id:
             self._topics[thread_id] = self._t("avisos_topic_name")
@@ -375,6 +469,8 @@ class TelegramGlue:
         self.link = HokmaLink(data_dir or hokma_data_dir() / "telegram", self.store, t=t,
                                  on_owner_text=self.on_owner_text, on_decision=self.on_decision, on_reset=self.on_reset,
                                  application_factory=application_factory)
+        self.link.mode_text = self.mode_notice
+        self._announce: set[str] = set()                # conversations born here that still owe the mode notice
         self._connection, self._conns = Connection, {}          # one per conversation, so its answers know their topic
         self._now = now
         self._turn_text: dict[str, str] = {}
@@ -425,6 +521,13 @@ class TelegramGlue:
                 delay = backoff[min(attempt, len(backoff) - 1)]
                 attempt += 1
             await asyncio.sleep(delay)
+
+    def permission_mode(self) -> str:
+        """Bug 1171: the mode of Settings > Permissions, the one every Telegram conversation runs with."""
+        return self._engine().permission_mode()
+
+    def mode_notice(self) -> str:
+        return t("telegram.mode_auto") if self.permission_mode() == "auto" else t("telegram.mode_ask")
 
     def outbox_state(self) -> dict:
         """What waits for Telegram: how many messages and the last error Telegram gave for one of them."""
@@ -477,6 +580,7 @@ class TelegramGlue:
         if row is None or reason is not None or engine.store.get_conversation(row["conversation_id"]) is None:
             name = topic_name or (row or {}).get("topic_name") or CONVERSATION_TITLE
             cid = engine.store.create_conversation(f"{name} {self._now():%Y-%m-%d}", DEFAULT_MODEL, None, None).id
+            self._announce.add(cid)
             with self._db().write() as u:
                 u.session.execute("DELETE FROM telegram_session WHERE chat_id = :c AND thread_id = :t", key)
                 u.session.insert_row("telegram_session", {"chat_id": chat, "thread_id": thread_id, "conversation_id": cid,
@@ -493,6 +597,9 @@ class TelegramGlue:
         cid, reason = self._conversation(thread, topic_name)
         if reason:
             await self.deliver(t(f"telegram.reset_{reason}"), thread)
+        if cid in self._announce:                        # bug 1171: a new conversation says which mode it runs in
+            self._announce.discard(cid)
+            await self.deliver(self.mode_notice(), thread)
         self._touch(cid)
         running = self._engine().sessions.get(cid)
         if getattr(running, "state", None) == "running":     # bug 1156: not lost, not refused: sent when the turn ends
@@ -501,11 +608,24 @@ class TelegramGlue:
             return
         await self._engine().handle(self._conns[cid], json.dumps({"type": "send", "conversation_id": cid, "text": text}))
 
-    def on_reset(self, thread_id: int) -> None:
-        """`/new` in a topic: forget its session; the next message opens another and the old conversation stays."""
+    def on_reset(self, thread_id: int, label: str = "") -> str | None:
+        """`/new` in a topic: forget its session; the next message opens another and the old conversation stays.
+        `/new Name`: the new conversation opens now, titled "<topic> · Name"; returns that title."""
+        chat = str(self.link.linked_chat_id())
+        key = {"c": chat, "t": thread_id}
+        with self._db().read() as u:
+            row = u.session.one("SELECT topic_name FROM telegram_session WHERE chat_id = :c AND thread_id = :t", key)
         with self._db().write() as u:
-            u.session.execute("DELETE FROM telegram_session WHERE chat_id = :c AND thread_id = :t",
-                              {"c": str(self.link.linked_chat_id()), "t": thread_id})
+            u.session.execute("DELETE FROM telegram_session WHERE chat_id = :c AND thread_id = :t", key)
+        if not label:
+            return None
+        topic = (row or {}).get("topic_name") or self.link._topics.get(thread_id) or CONVERSATION_TITLE
+        title = f"{topic} \u00b7 {label}"
+        cid = self._engine().store.create_conversation(title, DEFAULT_MODEL, None, None).id
+        with self._db().write() as u:
+            u.session.insert_row("telegram_session", {"chat_id": chat, "thread_id": thread_id, "conversation_id": cid,
+                                                      "topic_name": topic, "updated_at": int(self._now().timestamp())})
+        return title
 
     async def _on_event(self, raw: str, thread_id: int = 0) -> None:
         event = json.loads(raw)

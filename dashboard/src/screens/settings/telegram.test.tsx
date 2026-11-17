@@ -145,6 +145,28 @@ describe.each(["es", "en"] as const)("TelegramSection (%s)", (locale) => {
     expect(await screen.findByTestId("telegram-group-avisos")).toHaveTextContent(T("telegram.group.avisos.unreachable"));
   });
 
+  it("group: a refusal from Telegram shows its code and message, not a network failure (bug 1170)", async () => {
+    setLocale(locale);
+    mockApi({
+      "GET /api/telegram": {
+        linked: true, connected: true, user_name: "Ana", group_linked: true, avisos: "failed",
+        avisos_detail: { code: 400, error: "BadRequest", message: "Chat not found" },
+      },
+    });
+    renderWithApp(<TelegramSection />);
+    expect(await screen.findByTestId("telegram-group-avisos")).toHaveTextContent(T("telegram.group.avisos.failed"));
+    expect(screen.getByTestId("telegram-avisos-detail")).toHaveTextContent("Chat not found");
+    expect(screen.getByTestId("telegram-avisos-detail")).toHaveTextContent("400");
+    expect(screen.getByRole("button", { name: T("telegram.avisos.retry") })).toBeInTheDocument();
+  });
+
+  it("shows the permission mode Telegram conversations run with (bug 1171)", async () => {
+    setLocale(locale);
+    mockApi({ "GET /api/telegram": { linked: true, connected: true, user_name: "Ana", permission_mode: "auto" } });
+    renderWithApp(<TelegramSection />);
+    expect(await screen.findByTestId("telegram-mode")).toHaveTextContent(T("telegram.mode.auto_hint"));
+  });
+
   it("a link without a live bot says there is no connection and Reconnect brings it back (bug 1126)", async () => {
     setLocale(locale);
     const calls = server({ linked: true, connected: false, user_name: "Ana", connect_error: "ConnectError" }, {

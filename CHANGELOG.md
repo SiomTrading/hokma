@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.37
+
+- Fix: Telegram says why the Avisos topic could not be created. Before, any refusal from Telegram (no right to manage topics, group not found) was shown as "could not reach Telegram", even with the bot answering. Now the screen shows Telegram's code and a message in your language, Hokma writes the real error in `logs/engine.log` and, if the group became a supergroup after it was linked, Hokma keeps its new id and creates the topic (bug 1170).
+- New: `/new Name` (or `/reset Name`) in a topic opens a conversation titled "Topic · Name" and the bot answers "New conversation started: Topic · Name." Without a name it works as before (task 3250).
+
 ## 0.0.36
 
 - Fix: the window never shows white. It opens only after the panel painted its first dark frame, it does not open early on a slow start, and Quit hides the window at the first click while Hokma shuts down in the background (bug 1122). This changes Hokma.exe: run the latest Hokma-Setup once.

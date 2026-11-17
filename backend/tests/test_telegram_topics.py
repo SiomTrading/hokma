@@ -59,7 +59,7 @@ async def test_each_topic_is_its_own_conversation_and_the_answer_goes_back_to_it
     sent = env.engine.handled
     assert sent[0]["conversation_id"] == sent[2]["conversation_id"] != sent[1]["conversation_id"]
     assert titles(env) == ["Daniel 2026-11-12", "Joel 2026-11-12"]
-    assert [m["message_thread_id"] for m in env.app.bot.sent] == [10, 11, 10]
+    assert [m["message_thread_id"] for m in env.app.bot.sent] == [10, 10, 11, 11, 10]   # each new conversation says its mode first, in its own topic
 
 
 @aio
@@ -90,7 +90,8 @@ async def test_idle_and_daily_close_the_session_but_a_running_turn_does_not(env)
     env.glue._now = lambda: later + timedelta(minutes=121)
     await say(env, "cuatro", 10)
     second = sessions(env.db)[0]["conversation_id"]
-    assert second != first and "two hours" in env.app.bot.sent[-2]["text"]            # notice, then the answer
+    assert second != first and "two hours" in env.app.bot.sent[-3]["text"]            # notice, mode, answer
+    assert env.app.bot.sent[-2]["text"].startswith("Permission mode:")
     env.glue._now = lambda: datetime(2026, 11, 13, 3, 0)                              # next night, idle again
     await say(env, "cinco", 10)
     env.glue._now = lambda: datetime(2026, 11, 13, 3, 59)
@@ -98,7 +99,7 @@ async def test_idle_and_daily_close_the_session_but_a_running_turn_does_not(env)
     third = sessions(env.db)[0]["conversation_id"]
     env.glue._now = lambda: datetime(2026, 11, 13, 4, 1)                              # 62 min later, but past 04:00
     await say(env, "siete", 10)
-    assert sessions(env.db)[0]["conversation_id"] not in (second, third) and "daily" in env.app.bot.sent[-2]["text"]
+    assert sessions(env.db)[0]["conversation_id"] not in (second, third) and "daily" in env.app.bot.sent[-3]["text"]
 
 
 @aio
@@ -205,10 +206,10 @@ async def test_the_group_routes_link_unlink_and_report_their_state(env):
         bad = call(client, "post", "/api/telegram/group/approve", json={"code": "WRONG123"})
         assert bad.status_code == 400 and bad.json()["detail"]["code"] == "invalid_code"
         assert call(client, "post", "/api/telegram/group/approve", json={"code": code}).json() == {
-            "group_linked": True, "avisos": "ok"}
+            "group_linked": True, "avisos": "ok", "avisos_detail": None}
         assert call(client, "get", "/api/telegram").json() == {
             "linked": True, "connected": True, "user_name": "Ana", "group_linked": True, "avisos": "ok",
-            "outbox": {"pending": 0, "last_error": None}, "connect_error": None}
+            "avisos_detail": None, "permission_mode": "ask", "outbox": {"pending": 0, "last_error": None}, "connect_error": None}
         assert call(client, "delete", "/api/telegram/group").json() == {"group_linked": False}
         state = call(client, "get", "/api/telegram").json()
         assert state["linked"] is True and state["group_linked"] is False and state["avisos"] is None

@@ -63,6 +63,14 @@ def _log_connect_error(exc: BaseException) -> None:
                scope="telegram")
 
 
+def _avisos_detail(g, record) -> dict | None:
+    """Bug 1170: why the Avisos topic is not ok, with Telegram's code and a translated message (None when it is ok)."""
+    if (record or {}).get("avisos") == "ok":
+        return None
+    info = getattr(g.link, "topic_error", None)
+    return {"code": info["code"], "error": info["error"], "message": info["message"]} if info else None
+
+
 def create_router() -> APIRouter:
     router = APIRouter(prefix="/api/telegram")
 
@@ -86,6 +94,8 @@ def create_router() -> APIRouter:
         return {"linked": record is not None, "connected": g.link.connected,
                 "user_name": (record or {}).get("user_name", ""),
                 "group_linked": grouped, "avisos": (record or {}).get("avisos") if grouped else None,
+                "avisos_detail": _avisos_detail(g, record) if grouped else None,
+                "permission_mode": g.permission_mode(),
                 "outbox": g.outbox_state(), "connect_error": g.connect_error}
 
     @router.post("/reconnect")
@@ -193,7 +203,8 @@ def create_router() -> APIRouter:
             raise _fail(409, "group_already_linked", t("telegram.err.group_already_linked")) from None
         if found is None:
             raise _fail(400, "invalid_code", t("telegram.err.invalid_group_code"))
-        return {"group_linked": True, "avisos": (g.store.load() or {}).get("avisos")}
+        record = g.store.load() or {}
+        return {"group_linked": True, "avisos": record.get("avisos"), "avisos_detail": _avisos_detail(g, record)}
 
     @router.post("/group/avisos")
     async def retry_avisos(request: Request, x_hokma_token: str = Header(default=""),
@@ -207,7 +218,8 @@ def create_router() -> APIRouter:
         if not g.link.connected:
             raise _fail(409, "not_connected", t("telegram.err.cannot_connect"))
         await g.link.ensure_avisos_topic(revalidate=True)
-        return {"avisos": (g.store.load() or {}).get("avisos")}
+        record = g.store.load() or {}
+        return {"avisos": record.get("avisos"), "avisos_detail": _avisos_detail(g, record)}
 
     @router.delete("/group")
     def unlink_group(request: Request, x_hokma_token: str = Header(default=""),
