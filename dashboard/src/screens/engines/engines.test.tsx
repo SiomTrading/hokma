@@ -117,3 +117,82 @@ describe("engines screens", () => {
     expect(screen.getByRole("button", { name: t("eng.connectAnother") })).toBeInTheDocument();
   });
 });
+
+describe("Claude is always listed in Settings > Engines (bug 1123)", () => {
+  function answer(claude: Record<string, unknown>, connections: unknown[], calls: string[] = []) {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method !== "GET") calls.push(`${method} ${url.replace(/^.*\/api/, "/api")}`);
+      if (url.endsWith("/api/claude")) return reply({ plan: null, login: { url: null, error: null }, ...claude });
+      if (url.endsWith("/api/claude/login")) return reply({ running: true, url: null });
+      if (url.endsWith("/api/engines") && method === "GET") return reply({ ...LISTING, connections });
+      if (url.endsWith("/api/engines/claude")) return reply({ id: 5, engine: "claude_code", label: "Claude", status: "connected", is_default: false });
+      return reply({}, 404);
+    }));
+    return calls;
+  }
+
+  it("with no saved connection and a working session it says Disconnected and connects with one button", async () => {
+    const calls = answer({ state: "connected", installed: true }, []);
+    renderWithApp(<EnginesSettings />);
+    expect(await screen.findByText(t("eng.claude.state.disconnected"))).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: t("eng.claude.connect") }));
+    await waitFor(() => expect(calls).toContain("POST /api/engines/claude"));
+  });
+
+  it("with an expired session and no saved connection it says so and offers the sign-in button", async () => {
+    const calls = answer({ state: "no_session", installed: true }, []);
+    renderWithApp(<EnginesSettings />);
+    expect(await screen.findByText(t("eng.claude.state.expired"))).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: t("firstrun.claude.login") }));
+    await waitFor(() => expect(calls).toContain("POST /api/claude/login"));
+  });
+
+  it("when a check finds the session working the pill changes and Claude becomes a saved connection", async () => {
+    const calls: string[] = [];
+    let signedIn = false;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method !== "GET") calls.push(`${method} ${url.replace(/^.*\/api/, "/api")}`);
+      if (url.endsWith("/api/claude")) return reply({ state: signedIn ? "connected" : "no_session", installed: true, plan: null, login: { url: null, error: null } });
+      if (url.endsWith("/api/engines") && method === "GET") return reply({ ...LISTING, connections: [] });
+      if (url.endsWith("/api/engines/claude")) return reply({ id: 5, engine: "claude_code", label: "Claude", status: "connected", is_default: false });
+      return reply({}, 404);
+    }));
+    renderWithApp(<EnginesSettings />);
+    expect(await screen.findByText(t("eng.claude.state.expired"))).toBeInTheDocument();
+    signedIn = true;
+    await userEvent.click(await screen.findByRole("button", { name: t("firstrun.claude.recheck") }));
+    await waitFor(() => expect(calls).toContain("POST /api/engines/claude"));
+    await waitFor(() => expect(screen.queryByText(t("eng.claude.state.expired"))).not.toBeInTheDocument());
+  });
+
+  it("when Claude Code is not installed it still lists Claude with that status", async () => {
+    answer({ state: "no_cli", installed: false }, []);
+    renderWithApp(<EnginesSettings />);
+    expect(await screen.findByText(t("eng.claude.state.notInstalled"))).toBeInTheDocument();
+    expect(screen.getByTestId("claude-card")).toBeInTheDocument();
+  });
+
+  it("a connected Claude shows its status with the plan and the Test and Disconnect buttons", async () => {
+    answer({ state: "connected", installed: true, plan: "Max" }, [
+      { id: 1, engine: "claude_code", label: "Claude", auth_kind: "subscription", status: "connected", status_detail: null, is_default: true },
+    ]);
+    renderWithApp(<EnginesSettings />);
+    expect(await screen.findByText(t("firstrun.claude.connectedPlan", { plan: "Max" }))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("eng.test") })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("eng.disconnect") })).toBeInTheDocument();
+  });
+
+  it("the texts exist in both languages", () => {
+    for (const lang of ["es", "en"] as const) {
+      setLocale(lang);
+      for (const key of ["connected", "disconnected", "expired", "notInstalled"]) {
+        expect(t(`eng.claude.state.${key}`)).not.toBe(`eng.claude.state.${key}`);
+      }
+      expect(t("eng.claude.connect")).not.toBe("eng.claude.connect");
+    }
+  });
+});

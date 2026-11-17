@@ -21,7 +21,11 @@ use tauri::{AppHandle, Emitter, Manager, Url};
 
 pub const SLOW_AFTER: Duration = Duration::from_secs(15);
 pub const GIVE_UP_AFTER: Duration = Duration::from_secs(60);
-pub const POLL: Duration = Duration::from_millis(500);
+/// How often the start asks /health. The call is local and answers "refused" at once while the engine is not up, so a
+/// short wait costs nothing and the panel appears as soon as the engine answers (0.0.35: it was 500 ms).
+pub const POLL: Duration = Duration::from_millis(150);
+/// The window stays hidden until the panel has loaded; if that page never reports, it is shown after this long.
+pub const REVEAL_FALLBACK: Duration = Duration::from_secs(6);
 pub const STOP_WAIT: Duration = Duration::from_secs(30);
 pub const UPDATE_CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 const TAIL_LINES: usize = 50;
@@ -47,7 +51,13 @@ pub struct Inner {
     pub ready: bool,
     pub closing: bool,
     pub exiting: bool,
+    /// The address the start screen was really loaded from (learned from the first page load, never guessed).
     pub splash: Option<Url>,
+    /// The window is showing the engine's panel (so going back to the start screen needs a navigation).
+    pub panel_shown: bool,
+    /// The window has been shown once. Before that it stays hidden so a white or empty window never flashes; after
+    /// that showing and hiding it is the student's (the close button hides, the tray icon shows).
+    pub revealed: bool,
     pub offered_version: Option<String>,
     pub errors: VecDeque<String>,
 }
@@ -66,16 +76,75 @@ pub fn set_status(app: &AppHandle, state: &str, message: String, line: &str) {
     let status = Status { state: state.to_string(), message, line: line.to_string() };
     shared(app).0.lock().unwrap().status = status.clone();
     let _ = app.emit("hokma://status", status);
+    match state {
+        "starting" => tray_tooltip(app, &t("tray_opening", &[])),
+        "closing" => {}
+        "ready" => tray_tooltip(app, "Hokma"),
+        // The engine could not open (or is slow, or stopped): the window shows why, even though it was still hidden.
+        _ => {
+            tray_tooltip(app, "Hokma");
+            reveal(app);
+        }
+    }
 }
 
-/// Back to the start screen (from the panel), to show a state there.
-pub fn show_splash(app: &AppHandle) {
-    let splash = shared(app).0.lock().unwrap().splash.clone();
-    if let (Some(window), Some(url)) = (app.get_webview_window("main"), splash) {
-        let on_splash = window.url().map(|u| u.origin() == url.origin()).unwrap_or(false);
-        if !on_splash {
-            let _ = window.navigate(url);
+fn tray_tooltip(app: &AppHandle, text: &str) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(text));
+    }
+}
+
+/// Show the window, bring it to the front. The first time it also takes its maximized size (a window made hidden
+/// does not always keep it).
+pub fn reveal(app: &AppHandle) {
+    let first = {
+        let mut inner = shared(app).0.lock().unwrap();
+        let first = !inner.revealed;
+        inner.revealed = true;
+        first
+    };
+    if let Some(window) = app.get_webview_window("main") {
+        if first {
+            let _ = window.maximize();
         }
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Show the window only if it was never shown (the panel loaded, or the fallback timer ran out).
+pub fn reveal_once(app: &AppHandle) {
+    let first = !shared(app).0.lock().unwrap().revealed;
+    if first {
+        reveal(app);
+    }
+}
+
+/// Back to the start screen (from the panel), to show a state there. Only when the window is on the panel: the window
+/// starts on the start screen, so there is nothing to navigate to while it still is there. The address comes from
+/// the page load that really happened (`remember_splash`), never from `window.url()`, which can answer "about:blank"
+/// while the window is still opening (that left the window blank, bug 1122).
+pub fn show_splash(app: &AppHandle) {
+    let (splash, on_panel) = {
+        let inner = shared(app).0.lock().unwrap();
+        (inner.splash.clone(), inner.panel_shown)
+    };
+    if !on_panel {
+        return;
+    }
+    if let (Some(window), Some(url)) = (app.get_webview_window("main"), splash) {
+        if window.navigate(url).is_ok() {
+            shared(app).0.lock().unwrap().panel_shown = false;
+        }
+    }
+}
+
+/// The start screen loaded from this address: keep it, to come back to it later.
+pub fn remember_splash(app: &AppHandle, url: &Url) {
+    let mut inner = shared(app).0.lock().unwrap();
+    if inner.splash.is_none() {
+        inner.splash = Some(url.clone());
     }
 }
 
@@ -316,9 +385,16 @@ fn ready(app: &AppHandle, port: u16, token: String, url: Url, version: &str) {
         inner.port = Some(port);
         inner.token = Some(token);
         inner.ready = true;
+        inner.panel_shown = true;
     }
     set_status(app, "ready", String::new(), "");
     let _ = window.navigate(crate::cache::versioned(&url, version));
+    // The window opens when the panel reports it loaded (main.rs, on_page_load). If it never does, it opens anyway.
+    let late = app.clone();
+    thread::spawn(move || {
+        thread::sleep(REVEAL_FALLBACK);
+        reveal_once(&late);
+    });
 }
 
 /// An update of the detached updater is running or ended a moment ago (update-status.json was written recently).

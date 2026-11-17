@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.35
+
+- Fix: Hokma opens faster and the window no longer shows a white screen. The window stays hidden, with Hokma's dark background, until Hokma has loaded; the icon in the tray shows that it is opening. If something goes wrong the window opens and says what (bug 1122).
+- Fix: opening Hokma no longer reads every file of the app twice to check it; it checks the code that runs, once, which is faster where an antivirus scans each file (bug 1122).
+- Fix: shutting Hokma down from the app shows "Hokma was shut down" with an "Open again" button instead of a blank window (task 3165).
+- Fix: Settings > Engines always lists Claude with its state (Connected, Session expired, Not installed or Disconnected) and a button to sign in or connect it again (bug 1123).
+
 ## 0.0.34
 
 - Fix: the chat no longer stops when an antivirus blocks an installer file; the runtime no longer carries `Instalar-Hokma.cmd`, which no longer uses `Invoke-Expression` or a hidden window (bug 1113).

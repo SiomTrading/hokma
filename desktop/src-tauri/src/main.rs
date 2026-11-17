@@ -1,11 +1,12 @@
 //! Hokma desktop window (Tauri 2). SPEC-001 addendum 0.0.13, section 11, task 3138.
 //!
-//! One window, one engine: opening the window starts the engine hidden and shows the start screen until /health
-//! answers. Closing the window only hides it (the engine keeps running, so routines fire at their hour); the tray
-//! icon reopens it, and "Quit" stops the engine and exits (asking first when an agent is working). A second launch
-//! only brings the open window to the front. The panel itself is served by the engine (http://127.0.0.1:<port>), so
-//! every engine version brings its own panel; the window only adds the start screen, the Update menu and the
-//! link rules (external links open in the system browser).
+//! One window, one engine: opening the app starts the engine hidden. The window itself stays hidden (with Hokma's dark
+//! background, so it can never flash white) until the panel has loaded, or until there is something to say (an error,
+//! a slow start); the tray icon is there from the first moment and says "opening". Closing the window only hides it
+//! (the engine keeps running, so routines fire at their hour); the tray icon reopens it, and "Quit" stops the engine
+//! and exits (asking first when an agent is working). A second launch only brings the window to the front. The panel
+//! itself is served by the engine (http://127.0.0.1:<port>), so every engine version brings its own panel; the window
+//! only adds the start screen, the Update menu and the link rules (external links open in the system browser).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -24,6 +25,8 @@ use serde::Serialize;
 use std::thread;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::webview::PageLoadEvent;
+use tauri::window::Color;
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
@@ -61,6 +64,22 @@ fn stays_in_window(url: &Url) -> bool {
             .unwrap_or(false),
         _ => false,
     }
+}
+
+/// The engine's panel itself finished loading (what the window waits for before it opens). Not the start screen, and
+/// not the start link on 127.0.0.1 that only hands the session over to the engine's own host a moment later.
+fn is_panel_page(url: &Url) -> bool {
+    if !matches!(url.scheme(), "http" | "https") || !stays_in_window(url) || url.host_str() == Some("tauri.localhost") {
+        return false;
+    }
+    let start_link = url.host_str() == Some("127.0.0.1")
+        && url.fragment().map_or(false, |f| f.split('&').any(|part| part.starts_with("t=")));
+    !start_link
+}
+
+/// The page of the app itself (the start screen), as the webview loaded it.
+fn is_start_screen(url: &Url) -> bool {
+    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
 }
 
 /// Links that leave the window and may go to the system: web pages and an email address (task 3150). Any other
@@ -152,11 +171,7 @@ fn quit_needs_confirmation(busy: bool) -> bool {
 }
 
 fn show_main(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    engine::reveal(app);
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -164,7 +179,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "tray_quit", t("menu_quit", &[]), true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
     let mut builder = TrayIconBuilder::with_id("main")
-        .tooltip("Hokma")
+        .tooltip(t("tray_opening", &[]))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -248,15 +263,30 @@ fn main() {
             }
             // Before the webview opens its cache: drop it when the engine version changed.
             cache::prune_if_version_changed();
+            // The icon first: while the window is still hidden it is the sign that Hokma is opening.
+            build_tray(&handle)?;
+            let page_handle = handle.clone();
             #[allow(unused_mut)]
             let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Hokma")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(960.0, 600.0)
                 .maximized(true)
+                // Hidden and dark until the panel has loaded: the webview paints white before its first page.
+                .visible(false)
+                .background_color(Color(16, 21, 22, 255))
                 // The panel receives dropped files itself, as in a browser.
                 .disable_drag_drop_handler()
                 .initialization_script(LINKS_SCRIPT)
+                .on_page_load(move |_window, payload| {
+                    if let PageLoadEvent::Finished = payload.event() {
+                        if is_panel_page(payload.url()) {
+                            engine::reveal_once(&page_handle);
+                        }
+                    } else if is_start_screen(payload.url()) {
+                        engine::remember_splash(&page_handle, payload.url());
+                    }
+                })
                 .on_navigation(|url| {
                     if stays_in_window(url) {
                         return true;
@@ -271,11 +301,7 @@ fn main() {
                 // Cache and storage of the window live apart from the student's browser.
                 builder = builder.data_directory(paths::webview_data_dir());
             }
-            let window = builder.build()?;
-            if let Ok(url) = window.url() {
-                shared(&handle).0.lock().unwrap().splash = Some(url);
-            }
-            build_tray(&handle)?;
+            builder.build()?;
             engine::start(handle.clone());
             engine::monitor(handle);
             Ok(())
@@ -330,6 +356,35 @@ mod tests {
         ] {
             assert!(stays_in_window(&Url::parse(url).unwrap()), "{url}");
         }
+    }
+
+    #[test]
+    fn the_window_opens_for_the_panel_and_not_for_the_start_link_or_the_start_screen() {
+        for url in [
+            "http://hokma.localhost:8765/",
+            "http://127.0.0.1:8765/",
+            "http://localhost:8766/#c=abc",
+            "http://127.0.0.1:8765/#next=chat",
+        ] {
+            assert!(is_panel_page(&Url::parse(url).unwrap()), "{url}");
+        }
+        for url in [
+            "http://127.0.0.1:8765/#t=abc&o=xyz",
+            "http://tauri.localhost/index.html",
+            "tauri://localhost/index.html",
+            "https://github.com/SiomTrading/hokma",
+            "about:blank",
+        ] {
+            assert!(!is_panel_page(&Url::parse(url).unwrap()), "{url}");
+        }
+    }
+
+    #[test]
+    fn the_start_screen_is_known_by_its_own_address() {
+        assert!(is_start_screen(&Url::parse("http://tauri.localhost/index.html").unwrap()));
+        assert!(is_start_screen(&Url::parse("tauri://localhost/index.html").unwrap()));
+        assert!(!is_start_screen(&Url::parse("about:blank").unwrap()));
+        assert!(!is_start_screen(&Url::parse("http://127.0.0.1:8765/").unwrap()));
     }
 
     #[test]

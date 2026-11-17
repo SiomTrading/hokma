@@ -113,13 +113,17 @@ def test_when_the_hand_over_is_not_possible_it_keeps_running(tmp_path):
     assert h.sup.run() == 0 and len(h.launched) == 1 and not h.sup.handed_over
 
 
-def test_engine_command_points_at_the_current_slot(env):  # noqa: F811
+def test_engine_command_points_at_the_slot_the_supervisor_runs_from(env, monkeypatch):  # noqa: F811
+    from hokma.core import config
+
     data = env / "data"
     (data / "runtime" / "b" / "venv" / "bin").mkdir(parents=True)
-    (data / "current").write_text("b\n")
+    (data / "runtime" / "a" / "venv" / "bin").mkdir(parents=True)
+    (data / "current").write_text("a\n")                                  # `current` moved on; the hand over comes first
+    monkeypatch.setattr(config, "running_slot", lambda: "b")
     argv = engine_argv(8765)
     assert argv[0].endswith("runtime/b/venv/bin/hokma") and argv[1:] == ["engine", "--port", "8765"]
-    (data / "current").unlink()                                           # a dev checkout: no slots
+    monkeypatch.setattr(config, "running_slot", lambda: None)             # a dev checkout: no slots
     assert engine_argv(8765)[:3] == [sys.executable, "-m", "hokma_cli.main"]
 
 

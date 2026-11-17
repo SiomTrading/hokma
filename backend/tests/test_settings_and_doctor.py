@@ -9,7 +9,7 @@ import pytest
 from hokma.doctor import checks
 from hokma.i18n import t
 from hokma.kit import guard, integrity
-from hokma.kit.launch import IntegrityError, check_integrity, prepare_claude_launch
+from hokma.kit.launch import CODE_FOLDERS, IntegrityError, check_integrity, prepare_claude_launch
 from hokma.kit.settings import build_settings, guard_command, protected_paths, write_settings
 
 
@@ -133,16 +133,16 @@ def test_hook_command_blocks_when_interpreter_is_missing(env):
 
 def test_manifest_detects_tampering(tmp_path, monkeypatch):
     app = tmp_path / "data" / "runtime" / "a" / "app"
-    (app / "backend").mkdir(parents=True)
-    (app / "backend" / "a.py").write_text("print(1)")
+    (app / "backend" / "hokma").mkdir(parents=True)
+    (app / "backend" / "hokma" / "a.py").write_text("print(1)")
     monkeypatch.setenv("HOKMA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(integrity, "app_root", lambda: app)
     integrity.write_manifest()
     assert integrity.verify() == []
-    (app / "backend" / "a.py").write_text("print(2)")
-    assert integrity.verify() == [t("integrity.modified", file="backend/a.py")]
-    (app / "backend" / "b.py").write_text("x")
-    assert t("integrity.new", file="backend/b.py") in integrity.verify()
+    (app / "backend" / "hokma" / "a.py").write_text("print(2)")
+    assert integrity.verify() == [t("integrity.modified", file="backend/hokma/a.py")]
+    (app / "backend" / "hokma" / "b.py").write_text("x")
+    assert t("integrity.new", file="backend/hokma/b.py") in integrity.verify()
     with pytest.raises(IntegrityError):
         check_integrity()
     assert checks.check_integrity().status == checks.FAIL
@@ -151,9 +151,9 @@ def test_manifest_detects_tampering(tmp_path, monkeypatch):
 def test_a_file_the_system_will_not_let_us_read_is_a_named_problem(tmp_path, monkeypatch):
     """Bug 1113: an antivirus blocks a file; compute/verify name it instead of raising OSError. Only code blocks the chat."""
     app = tmp_path / "data" / "runtime" / "a" / "app"
-    (app / "backend").mkdir(parents=True)
+    (app / "backend" / "hokma").mkdir(parents=True)
     (app / "installer").mkdir()
-    (app / "backend" / "a.py").write_text("print(1)")
+    (app / "backend" / "hokma" / "a.py").write_text("print(1)")
     (app / "installer" / "x.cmd").write_text("rem")
     monkeypatch.setenv("HOKMA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(integrity, "app_root", lambda: app)
@@ -170,8 +170,56 @@ def test_a_file_the_system_will_not_let_us_read_is_a_named_problem(tmp_path, mon
     assert integrity.verify() == [t("integrity.unreadable", file="installer/x.cmd")]
     check_integrity()                                    # not code Claude runs: the chat still starts
     blocked.names = {"a.py"}
-    assert integrity.verify() == [t("integrity.unreadable", file="backend/a.py")]
+    assert integrity.verify() == [t("integrity.unreadable", file="backend/hokma/a.py")]
     with pytest.raises(IntegrityError):
         check_integrity()
     with pytest.raises(OSError):                         # a manifest is never written over a blocked file
         integrity.write_manifest()
+
+
+def test_the_start_reads_only_the_code_folders_but_the_doctor_reads_everything(tmp_path, monkeypatch):
+    """Bug 1122 (0.0.35): on Windows an antivirus scans every file that is read, so the start (the supervisor and the
+    engine it starts, each one) hashes only backend/hokma/, cli/hokma_cli/ and kit/. A changed dashboard or installer
+    file does not block the start, `hokma doctor` still reports it, and a changed, new or missing code file blocks."""
+    from hokma_cli.main import NO_INTEGRITY_GATE
+
+    assert "start" not in NO_INTEGRITY_GATE and "engine" not in NO_INTEGRITY_GATE   # both run the (cheap) check
+    app = tmp_path / "data" / "runtime" / "a" / "app"
+    folders = ("backend/hokma", "backend/tests", "cli/hokma_cli", "kit", "dashboard", "installer")
+    for folder in folders:
+        (app / folder).mkdir(parents=True)
+        (app / folder / "f.py").write_text(folder)
+    monkeypatch.setenv("HOKMA_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(integrity, "app_root", lambda: app)
+    integrity.write_manifest()
+    assert sorted(integrity.compute(app, CODE_FOLDERS)) == ["backend/hokma/f.py", "cli/hokma_cli/f.py", "kit/f.py"]
+
+    read: list[str] = []
+    real = Path.read_bytes
+
+    def spy(self):
+        read.append(self.parent.name)
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", spy)
+    check_integrity()
+    assert sorted(read) == ["hokma", "hokma_cli", "kit"]            # tests, dashboard and installer were not opened
+    monkeypatch.setattr(Path, "read_bytes", real)
+    for folder in ("dashboard", "installer", "backend/tests"):
+        (app / folder / "f.py").write_text("changed")
+        check_integrity()                                           # not code Claude runs: the start goes on
+        assert integrity.verify() == [t("integrity.modified", file=f"{folder}/f.py")]   # the doctor still says so
+        assert checks.check_integrity().status == checks.FAIL
+        (app / folder / "f.py").write_text(folder)
+    for folder in ("backend/hokma", "cli/hokma_cli", "kit"):
+        (app / folder / "f.py").write_text("changed")
+        with pytest.raises(IntegrityError):
+            check_integrity()
+        (app / folder / "f.py").write_text(folder)
+    (app / "backend" / "hokma" / "loose.py").write_text("x")
+    with pytest.raises(IntegrityError):                             # a new file in a code folder blocks
+        check_integrity()
+    (app / "backend" / "hokma" / "loose.py").unlink()
+    (app / "kit" / "f.py").unlink()
+    with pytest.raises(IntegrityError):                             # a missing code file blocks
+        check_integrity()

@@ -77,8 +77,10 @@ class EngineLog:
 
 
 def engine_argv(port: int) -> list[str]:
-    """How to start one engine: the `hokma` of the current slot, or this interpreter in a dev checkout."""
-    slot = config.current_slot()
+    """How to start one engine: the `hokma` of the slot this supervisor runs from (the engine is always the same code
+    the supervisor just checked; a newer `current` slot is reached by the hand over), or this interpreter in a dev
+    checkout."""
+    slot = config.running_slot()
     if slot is not None:
         return [str(config.slot_exe(slot)), "engine", "--port", str(port)]
     return [sys.executable, "-m", "hokma_cli.main", "engine", "--port", str(port)]

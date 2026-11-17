@@ -18,7 +18,22 @@ function safeLink(url: string | null): string | null {
   }
 }
 
-export function ClaudeStep({ pollMs = 3000 }: { pollMs?: number }) {
+/**
+ * The Claude sign-in. `compact` drops the title, the lead text and the status pills (Settings > Engines already shows the
+ * status in its own card). `onState` is called whenever a check finds a state other than the last one it reported
+ * (`known` is the one the caller already shows), so the caller can refresh its own status.
+ */
+export function ClaudeStep({
+  pollMs = 3000,
+  compact = false,
+  known,
+  onState,
+}: {
+  pollMs?: number;
+  compact?: boolean;
+  known?: ClaudeDto["state"];
+  onState?: (state: ClaudeDto["state"]) => void;
+}) {
   const { t } = useI18n();
   const [claude, setClaude] = useState<ClaudeDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +41,7 @@ export function ClaudeStep({ pollMs = 3000 }: { pollMs?: number }) {
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const alive = useRef(true);
+  const reported = useRef<ClaudeDto["state"] | undefined>(known);
 
   const check = useCallback(async () => {
     try {
@@ -34,10 +50,14 @@ export function ClaudeStep({ pollMs = 3000 }: { pollMs?: number }) {
       setClaude(next);
       setError(null);
       if (next.state === "connected") setWaiting(false);
+      if (next.state !== reported.current) {
+        reported.current = next.state;
+        onState?.(next.state);
+      }
     } catch (cause) {
       if (alive.current) setError(cause instanceof ApiError ? cause.message : String(cause));
     }
-  }, []);
+  }, [onState]);
 
   useEffect(() => {
     alive.current = true;
@@ -81,12 +101,12 @@ export function ClaudeStep({ pollMs = 3000 }: { pollMs?: number }) {
 
   return (
     <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <h2 className="h1">{t("firstrun.claude.title")}</h2>
-      <p className="p">{t("firstrun.claude.body")}</p>
+      {compact ? null : <h2 className="h1">{t("firstrun.claude.title")}</h2>}
+      {compact ? null : <p className="p">{t("firstrun.claude.body")}</p>}
 
       {claude === null && !error ? <Loading inline label={t("firstrun.claude.checking")} /> : null}
 
-      {claude?.state === "connected" ? (
+      {claude?.state === "connected" && !compact ? (
         <Pill tone="ok" style={{ alignSelf: "flex-start" }} role="status">
           <Dot live />
           {claude.plan ? t("firstrun.claude.connectedPlan", { plan: claude.plan }) : t("firstrun.claude.connected")}
@@ -95,9 +115,11 @@ export function ClaudeStep({ pollMs = 3000 }: { pollMs?: number }) {
 
       {claude?.state === "no_session" ? (
         <>
-          <Pill tone="warn" style={{ alignSelf: "flex-start" }} role="status">
-            {t("firstrun.claude.noSession")}
-          </Pill>
+          {compact ? null : (
+            <Pill tone="warn" style={{ alignSelf: "flex-start" }} role="status">
+              {t("firstrun.claude.noSession")}
+            </Pill>
+          )}
           <Button style={{ alignSelf: "flex-start" }} variant="primary" onClick={() => void login()}>
             {t("firstrun.claude.login")}
           </Button>
@@ -126,9 +148,11 @@ export function ClaudeStep({ pollMs = 3000 }: { pollMs?: number }) {
 
       {claude?.state === "no_cli" ? (
         <>
-          <Pill tone="warn" style={{ alignSelf: "flex-start" }} role="status">
-            {t("firstrun.claude.noCli")}
-          </Pill>
+          {compact ? null : (
+            <Pill tone="warn" style={{ alignSelf: "flex-start" }} role="status">
+              {t("firstrun.claude.noCli")}
+            </Pill>
+          )}
           <p className="h2">{t("firstrun.claude.installTitle")}</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span className="lbl">{t("firstrun.claude.installMac")}</span>

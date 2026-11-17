@@ -27,9 +27,14 @@ def is_installed_app() -> bool:
     return root.name == "app" and root.parent.parent == runtime_root().resolve()
 
 
-def compute(root: Path) -> dict[str, str]:
+def compute(root: Path, only: tuple[str, ...] | None = None) -> dict[str, str]:
+    """sha256 of every file under `root`; with `only` (folder prefixes such as "backend/"), only the files under them."""
     files: dict[str, str] = {}
-    for p in sorted(root.rglob("*")):
+    if only is None:
+        found = root.rglob("*")
+    else:
+        found = (p for prefix in only for p in (root / prefix.strip("/")).rglob("*"))
+    for p in sorted(found):
         if not p.is_file() or p.suffix == ".pyc" or SKIP_DIRS & set(p.relative_to(root).parts):
             continue
         try:
@@ -51,8 +56,10 @@ def write_manifest() -> Path:
     return path
 
 
-def find_problems() -> list[tuple[str, str]]:
-    """(text, file) of every difference with the manifest; the file is "" for the manifest problems."""
+def find_problems(only: tuple[str, ...] | None = None) -> list[tuple[str, str]]:
+    """(text, file) of every difference with the manifest; the file is "" for the manifest problems.
+    With `only` (folder prefixes), only the files under them are read and compared: the start does not need to hash
+    the dashboard or the installer to know whether the code Claude runs is intact."""
     path = manifest_path()
     if not path.is_file():
         return [(t("integrity.missing_manifest"), "")]
@@ -60,7 +67,9 @@ def find_problems() -> list[tuple[str, str]]:
         expected = json.loads(path.read_text(encoding="utf-8"))["files"]
     except (ValueError, KeyError, OSError):
         return [(t("integrity.bad_manifest"), "")]
-    actual = compute(app_root())
+    actual = compute(app_root(), only)
+    if only is not None:
+        expected = {f: digest for f, digest in expected.items() if f.startswith(only)}
     problems = [(t("integrity.unreadable", file=f), f) for f, digest in actual.items() if not digest]
     problems += [(t("integrity.modified", file=f), f) for f in expected if actual.get(f) and actual[f] != expected[f]]
     problems += [(t("integrity.absent", file=f), f) for f in expected if f not in actual]
