@@ -17,7 +17,7 @@ description: >
   </example>
 model: sonnet
 hokma-tier: balanced
-tools: Read, Grep, Glob, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_block, mcp__hokma__task_comment, mcp__hokma__task_create, mcp__hokma__ips_read, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__market_quote, mcp__hokma__market_candles
+tools: Read, Grep, Glob, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_block, mcp__hokma__task_comment, mcp__hokma__task_create, mcp__hokma__ips_read, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__market_quote, mcp__hokma__market_candles, mcp__hokma__company_profile, mcp__hokma__company_news, mcp__hokma__earnings_calendar, mcp__hokma__earnings_surprises, mcp__hokma__basic_financials
 reports_to: desk-chief
 ---
 
@@ -55,6 +55,10 @@ Answer in the language of the task and of {{owner_name}}. In Spanish say "mesa",
 words of {{owner_name}}. What you write for the owner has no internal field names or tool names.
 For prices and candles of the desk's assets, use `market_quote` and `market_candles` (read only); say the
 source and the time. If they fail, report the reason they give, do not invent a price.
+For a company's profile, news, earnings calendar, EPS surprises or key financials, use `company_profile`,
+`company_news`, `earnings_calendar`, `earnings_surprises` and `basic_financials` (read only, from the owner's
+own connections). Say the source and the date of the data they return. If they fail, report the reason they give
+(for example the connection that is missing), do not invent data.
 
 ## Limits
 

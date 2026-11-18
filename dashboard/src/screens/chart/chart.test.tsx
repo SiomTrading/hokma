@@ -291,6 +291,23 @@ describe("live price over a delayed history (task 3081)", () => {
   });
 });
 
+describe("the footer says the real source of the candles (task 3289)", () => {
+  const stock = { asset_class: "equity", name: "Apple", kind: "equity", exchange: "NASDAQ" };
+
+  it("candles from Alpaca and a live price from Finnhub: both are named", async () => {
+    show({ symbol: "AAPL" });
+    await connect({ ...stock, delay_seconds: 0, history: { source: "Alpaca IEX", delay_seconds: 0 } }, { source: "Finnhub", data_state: "live" });
+    expect(screen.getByText(t("chart.source.split", { candles: "Alpaca IEX", price: "Finnhub" }))).toBeInTheDocument();
+    expect(screen.queryByTestId("history-notice")).toBeNull();
+  });
+
+  it("the same provider for both says it once", async () => {
+    show({ symbol: "AAPL" });
+    await connect({ ...stock, delay_seconds: 0, history: { source: "Finnhub", delay_seconds: 0 } }, { source: "Finnhub", data_state: "live" });
+    expect(screen.getByText(t("chart.source", { source: "Finnhub" }))).toBeInTheDocument();
+  });
+});
+
 describe("delayed data (C6)", () => {
   const delayed = { fallback: true, delay_seconds: 900, asset_class: "equity", name: "Apple", kind: "equity" };
   const yahoo = { source: "Yahoo Finance", data_state: "delayed" };

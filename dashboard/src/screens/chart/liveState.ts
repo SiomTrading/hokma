@@ -278,6 +278,17 @@ export function historyDelayMinutes(state: LiveState): number | null {
   return Math.max(1, Math.round(h.delaySeconds / 60));
 }
 
+/**
+ * The footer of the chart: where the candles really come from and, when the live price comes from another provider,
+ * that one too. Empty until the engine says the source.
+ */
+export function sourceLine(state: LiveState, t: Translate = translate): string {
+  if (!state.source) return "";
+  const candles = state.history?.source;
+  if (candles && candles !== state.source) return t("chart.source.split", { candles, price: state.source });
+  return t("chart.source", { source: state.source });
+}
+
 /** What the bar says. A reconnection or a closed market wins; otherwise `delayed` anywhere means delayed, never live. */
 export function barMode(state: LiveState): BarMode {
   if (!state.link || state.status === "reconnecting") return "reconnecting";

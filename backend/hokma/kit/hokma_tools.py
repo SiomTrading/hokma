@@ -223,8 +223,15 @@ def journal_write(u, c: Caller, a: dict) -> str:
 def journal_search(u, c: Caller, a: dict) -> str:
     rows = u.journal.list(kind=a.get("kind"), agent_slug=a.get("agent"), task_id=a.get("task_id"),
                           project_id=a.get("project_id"), search=a.get("query"), limit=min(int(a.get("limit") or 20), 100))
+    names = {r.project_id: u.projects.find(r.project_id, include_archived=True) for r in rows if r.project_id}      # archived ones too
+
+    def where(r) -> dict:
+        project = names.get(r.project_id)
+        return {} if project is None else {"project": project.name, "project_deleted": bool(project.archived_at)}
+
     return _dump([{"id": r.id, "kind": r.kind, "title": r.title, "outcome": r.outcome, "agent": r.agent_slug,
-                   "task_id": r.task_id, "created_at": r.created_at, "body": (r.body or "")[:500]} for r in rows])
+                   "task_id": r.task_id, "created_at": r.created_at, "body": (r.body or "")[:500], **where(r)}
+                  for r in rows])
 
 
 def ips_read(u, c: Caller, a: dict) -> str:
@@ -457,20 +464,51 @@ def desk_show(u, c: Caller, a: dict) -> str:
     from hokma.kit import market_tools
 
     out = _desk_out(_desk_call(service.get_desk, desk_id))
-    out["assets"] = market_tools.desk_prices(out["assets"])      # each asset with its last price, or why it has none
+    out["assets"] = market_tools.desk_prices(out["assets"], desk_id)      # each asset with its last price, or why it has none
     return _dump(out)
 
 
 def market_quote(u, c: Caller, a: dict) -> str:
     from hokma.kit import market_tools
 
-    return _dump(market_tools.quote(a["symbol"]))
+    return _dump(market_tools.quote(a["symbol"], _own_desk_id(c)))
 
 
 def market_candles(u, c: Caller, a: dict) -> str:
     from hokma.kit import market_tools
 
-    return _dump(market_tools.candles(a["symbol"], a.get("interval"), a.get("limit")))
+    return _dump(market_tools.candles(a["symbol"], a.get("interval"), a.get("limit"), _own_desk_id(c)))
+
+
+def company_profile(u, c: Caller, a: dict) -> str:
+    from hokma.kit import company_tools
+
+    return _dump(company_tools.company_profile(a["symbol"], _own_desk_id(c)))
+
+
+def company_news(u, c: Caller, a: dict) -> str:
+    from hokma.kit import company_tools
+
+    return _dump(company_tools.company_news(a["symbol"], a.get("desde"), a.get("hasta"), a.get("limite"),
+                                            _own_desk_id(c)))
+
+
+def earnings_calendar(u, c: Caller, a: dict) -> str:
+    from hokma.kit import company_tools
+
+    return _dump(company_tools.earnings_calendar(a.get("desde"), a.get("hasta"), a.get("symbol"), _own_desk_id(c)))
+
+
+def earnings_surprises(u, c: Caller, a: dict) -> str:
+    from hokma.kit import company_tools
+
+    return _dump(company_tools.earnings_surprises(a["symbol"], a.get("limite"), _own_desk_id(c)))
+
+
+def basic_financials(u, c: Caller, a: dict) -> str:
+    from hokma.kit import company_tools
+
+    return _dump(company_tools.basic_financials(a["symbol"], _own_desk_id(c)))
 
 
 DESK_TEMPLATES = ["minimal", "standard", "debate"]
@@ -687,7 +725,8 @@ def bug_list(u, c: Caller, a: dict) -> str:
 Handler = Callable[[Any, Caller, dict], str]
 # these open their own database units
 NO_UNIT = {"project_create", "agent_save", "skill_save", "skill_install", "desk_list", "desk_show",
-         "desk_create", "desk_configure", "market_quote", "market_candles"}
+         "desk_create", "desk_configure", "market_quote", "market_candles", "company_profile", "company_news",
+         "earnings_calendar", "earnings_surprises", "basic_financials"}
 TASK_ID = {"task_id": _i("Task id.")}
 
 TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
@@ -740,6 +779,32 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
         "symbol": _s("Market symbol, e.g. NQ=F, AAPL, BTC-USD."),
         "interval": _s("1m, 5m (default), 15m, 1h or 1D.", enum=["1m", "5m", "15m", "1h", "1D"]),
         "limit": _i("How many of the newest bars, 1 to 300 (default 60).")}, ["symbol"], market_candles, False),
+    "company_profile": ("Company profile of one stock, read only: name, exchange, country, industry, market cap, "
+                        "shares and website. Uses the key the student saved in Connections (Finnhub); the answer "
+                        "says the source and the date of the data. Fails with a clear reason, in the student's "
+                        "language, when no connection has it.",
+                        {"symbol": _s("Stock symbol, e.g. AAPL.")}, ["symbol"], company_profile, False),
+    "company_news": ("Recent news of one stock, read only, newest first (Finnhub, else Alpaca news). Each item has "
+                     "time, headline, summary, source and url. The answer says the source and the date of the data.",
+                     {"symbol": _s("Stock symbol, e.g. AAPL."),
+                      "desde": _s("First day, YYYY-MM-DD (default: 7 days before hasta; at most 90 days range)."),
+                      "hasta": _s("Last day, YYYY-MM-DD (default: today)."),
+                      "limite": _i("How many items, 1 to 20 (default 10).")}, ["symbol"], company_news, False),
+    "earnings_calendar": ("Earnings reports between two days, read only: date, before or after the market (hour), "
+                          "quarter, EPS and revenue estimate and, once reported, the actual. Without symbol it "
+                          "lists every company (up to 100). The answer says the source and the date of the data.",
+                          {"desde": _s("First day, YYYY-MM-DD (default: today; at most 92 days range)."),
+                           "hasta": _s("Last day, YYYY-MM-DD (default: 7 days after desde)."),
+                           "symbol": _s("Only this stock, e.g. AAPL.")}, [], earnings_calendar, False),
+    "earnings_surprises": ("Earnings surprises of one stock, read only, newest first: estimated EPS, actual EPS, "
+                           "surprise and surprise percent per quarter. The answer says the source and the date of "
+                           "the data.", {"symbol": _s("Stock symbol, e.g. AAPL."),
+                                         "limite": _i("How many quarters, 1 to 12 (default 4).")},
+                           ["symbol"], earnings_surprises, False),
+    "basic_financials": ("Key financial metrics of one stock, read only: 52 week range, valuation (P/E, P/S, P/B), "
+                         "EPS and revenue growth, margins, returns, debt, beta, dividend yield and average volume. "
+                         "The answer says the source and the date of the data.",
+                         {"symbol": _s("Stock symbol, e.g. AAPL.")}, ["symbol"], basic_financials, False),
     "desk_create": ("Create a money desk (simulation only) with the same logic as the app's Create desk. The owner is "
                     "asked for permission first and sees these values: propose them in the chat before you call. "
                     "template: minimal, standard (default) or debate. capital is the simulated capital. assets is a "

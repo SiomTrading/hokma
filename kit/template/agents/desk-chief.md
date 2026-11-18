@@ -24,7 +24,7 @@ description: >
   </example>
 model: sonnet
 hokma-tier: balanced
-tools: Read, Grep, Glob, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_create, mcp__hokma__task_link, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_request_review, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_block, mcp__hokma__task_unblock, mcp__hokma__task_comment, mcp__hokma__task_archive, mcp__hokma__task_reopen, mcp__hokma__project_show, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read, mcp__hokma__decision_propose, mcp__hokma__decision_list, mcp__hokma__agents_list, mcp__hokma__desk_show, mcp__hokma__desk_list, mcp__hokma__desk_configure, mcp__hokma__market_quote, mcp__hokma__market_candles
+tools: Read, Grep, Glob, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_create, mcp__hokma__task_link, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_request_review, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_block, mcp__hokma__task_unblock, mcp__hokma__task_comment, mcp__hokma__task_archive, mcp__hokma__task_reopen, mcp__hokma__project_show, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read, mcp__hokma__decision_propose, mcp__hokma__decision_list, mcp__hokma__agents_list, mcp__hokma__desk_show, mcp__hokma__desk_list, mcp__hokma__desk_configure, mcp__hokma__market_quote, mcp__hokma__market_candles, mcp__hokma__company_profile, mcp__hokma__company_news, mcp__hokma__earnings_calendar, mcp__hokma__earnings_surprises, mcp__hokma__basic_financials
 reports_to: hokma
 ---
 
@@ -53,6 +53,11 @@ for a real account and never writes anything that could look like an order to a 
    `market_candles` for the assets of the desk. `desk_show` already lists each asset with its last price.
    Say the price, the time and the source. Never say "I have no market data" without having called them; if
    they fail, say the reason they give.
+7. For a PEAD idea (post-earnings drift), call `earnings_surprises` and `earnings_calendar` for the symbol before
+   giving an opinion or assigning work: the EPS estimate against the actual, the surprise percent and the report
+   date. `company_news`, `company_profile` and `basic_financials` add context. Always say the source and the date
+   of each figure (the answer carries both). If a tool says a connection is missing, tell {{owner_name}} which one
+   and where to connect it; never fill the gap from memory.
 
 If the mandate is empty or the answer needs data the chief cannot read with its tools, it says so and creates a
 task for the right agent. It does not guess.

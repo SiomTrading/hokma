@@ -25,6 +25,8 @@ export interface LiveClientOptions {
   /** Canonical interval sent as `tf`: time (`7m`, `15s`, `1D`) or range (`r:10t`, `r:2.5p`). */
   timeframe: Timeframe;
   onState: (state: LiveState) => void;
+  /** The desk that owns the chart: its candles come only from the connections that desk uses. */
+  deskId?: number;
   createSocket?: (url: string) => SocketLike;
 }
 
@@ -164,7 +166,8 @@ export class LiveChartClient {
     this.subNumber += 1;
     this.sub = "c" + this.subNumber;
     this.lastSeq = 0;
-    this.send({ op: "subscribe", sub: this.sub, symbol: this.options.symbol, tf: this.options.timeframe });
+    const { symbol, timeframe, deskId } = this.options;
+    this.send({ op: "subscribe", sub: this.sub, symbol, tf: timeframe, ...(deskId !== undefined ? { desk: deskId } : {}) });
   }
 
   /** Ask for a fresh snapshot: leave the current subscription and open a new one. */

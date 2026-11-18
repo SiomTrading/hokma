@@ -19,21 +19,21 @@ export interface LiveChart {
  * interval opens a new subscription and drops the old data at once, so candles of one chart never show under the
  * title of another.
  */
-export function useLiveChart(symbol: string, timeframe: Timeframe, createSocket?: LiveClientOptions["createSocket"]): LiveChart {
+export function useLiveChart(symbol: string, timeframe: Timeframe, createSocket?: LiveClientOptions["createSocket"], deskId?: number): LiveChart {
   const tf = canonicalInterval(timeframe) ?? timeframe; // an invalid one reaches the engine, which answers market.bad_request
   const [live, setLive] = useState<LiveState>(() => initialState(symbol, tf));
   const client = useRef<LiveChartClient | null>(null);
 
   useEffect(() => {
     setLive(initialState(symbol, tf));
-    const next = new LiveChartClient({ symbol, timeframe: tf, onState: setLive, createSocket });
+    const next = new LiveChartClient({ symbol, timeframe: tf, onState: setLive, createSocket, deskId });
     client.current = next;
     next.start();
     return () => {
       next.stop();
       if (client.current === next) client.current = null;
     };
-  }, [symbol, tf, createSocket]);
+  }, [symbol, tf, createSocket, deskId]);
 
   const retry = useCallback(() => client.current?.retry(), []);
   // Right after a change the old state is still there for one render: never show it under the new title.

@@ -42,6 +42,8 @@ export const deskConfigApi = {
   update: (id: number, patch: DeskPatch) => api.patch<unknown>(base(id), patch),
   /** Replaces the whole list; the server checks each symbol against the market catalog and answers 4xx with its reason. */
   setAssets: (id: number, assets: string[]) => api.put<unknown>(`${base(id)}/assets`, { assets }),
+  /** Saves the order of the assets the desk already has; the server keeps their notes and refuses a different set. */
+  reorderAssets: (id: number, assets: string[]) => api.put<unknown>(`${base(id)}/assets/order`, { assets }),
   connections: async (id: number): Promise<DeskConnection[]> => {
     const body = await api.get<RawConnection[] | { connections: RawConnection[] }>(`${base(id)}/connections`);
     return (Array.isArray(body) ? body : (body.connections ?? [])).map(readConnection);

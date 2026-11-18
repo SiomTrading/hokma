@@ -54,6 +54,14 @@ describe("live chart client: subscription", () => {
     expect(state.ready).toBe(false);
   });
 
+  it("a chart that belongs to a desk subscribes with the desk id, and one that does not sends none", () => {
+    client = new LiveChartClient({ symbol: "BTC-USD", timeframe: "5m", deskId: 7, onState: () => undefined, createSocket: (url) => new FakeSocket(url) });
+    client.start();
+    const socket = FakeSocket.last();
+    socket.serverOpen();
+    expect(socket.ops("subscribe")).toEqual([{ op: "subscribe", sub: "c1", symbol: "BTC-USD", tf: "5m", desk: 7 }]);
+  });
+
   it("paints the snapshot, then bars and prices, and never asks the HTTP API for candles", async () => {
     const socket = begin();
     socket.serverSend(snapshot("c1", 1));

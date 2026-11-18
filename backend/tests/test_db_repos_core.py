@@ -176,18 +176,22 @@ def test_project_defaults_flow_into_new_tasks(db):
         assert (o.requires_review, o.requires_approval) == (False, False)
 
 
-def test_project_with_journal_cannot_be_deleted_but_tasks_are_kept(db):
+def test_project_with_journal_is_archived_not_refused_and_tasks_are_kept(db):
     with db.write() as u:
         p = u.projects.create("P", "/p")
         t = u.tasks.create("t", actor=HUMAN, project_id=p.id)
         u.journal.add("note", "n", actor=HUMAN, project_id=p.id)
-    with pytest.raises(IntegrityViolation):
-        with db.write() as u:
-            u.projects.delete(p.id)
+    with db.write() as u:
+        assert u.projects.delete(p.id) is True                       # archived: the journal is append-only
+    with db.read() as u:
+        assert u.projects.find(p.id) is None and [x.id for x in u.projects.list()] == []
+        assert u.projects.find(p.id, include_archived=True).name == "P"
+        assert [e.title for e in u.journal.list(project_id=p.id)] == ["n"]
+        assert u.tasks.get(t.id).project_id is None
     with db.write() as u:
         q = u.projects.create("Q", "/q")
         c = u.conversations.create(engine="claude_code", project_id=q.id)
-        u.projects.delete(q.id)
+        assert u.projects.delete(q.id) is False                      # no journal: the row really goes
         assert u.conversations.get(c.id).project_id is None             # the chat survives, unlinked
 
 

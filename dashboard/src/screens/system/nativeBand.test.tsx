@@ -12,7 +12,7 @@ function fakeEngine(native: unknown, retry: () => Response = () => json({ restar
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://x");
     calls.push(`${init?.method ?? "GET"} ${url.pathname}${url.search}`);
-    if (url.pathname === "/health") return json({ status: "ok", version: "1.0.3", busy: false, native });
+    if (url.pathname === "/health") return json({ status: "ok", version: "1.0.4", busy: false, native });
     if (url.pathname === "/api/native/retry") return retry();
     return json({}, 404);
   });

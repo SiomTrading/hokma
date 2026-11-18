@@ -117,6 +117,23 @@ export function TerminalTab({ desk }: TabProps) {
     }
   };
 
+  /** Saves the new order. The list moves at once; if the server refuses, it goes back and says so. */
+  const reorderAssets = async (next: string[]) => {
+    if (busy) return;
+    const before = assets;
+    setLoad({ state: "ready", assets: next });
+    setBusy(true);
+    setAddError(null);
+    try {
+      await deskConfigApi.reorderAssets(desk.id, next);
+    } catch (cause) {
+      setLoad({ state: "ready", assets: before });
+      setAddError(failText(cause, t("desks.terminal.reorder.error")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const resize = (width: number, final: boolean) => {
     setChatWidth(width);
     if (final) saveChatWidth(desk.id, width);
@@ -144,9 +161,10 @@ export function TerminalTab({ desk }: TabProps) {
         }}
         onAdd={(symbol) => void addAsset(symbol)}
         onRemove={(symbol) => void removeAsset(symbol)}
+        onReorder={(next) => void reorderAssets(next)}
       />
       {current ? (
-        <DeskChart symbol={current} />
+        <DeskChart symbol={current} deskId={desk.id} />
       ) : (
         <Pane className="dterm-chart" aria-label={t("desks.terminal.chartEmpty")}>
           <div className="dterm-center">

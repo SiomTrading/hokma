@@ -58,13 +58,23 @@ def now() -> float:
     return _clock()
 
 
+def _connected(yahoo: YahooSource) -> MarketDataSource:
+    """Candles from the connected providers in the order of Connections, Yahoo as the last fallback (`history.py`)."""
+    from hokma.connections import runtime
+    from hokma.market.history import ConnectedSource
+
+    service = runtime.get_service()
+    return ConnectedSource(yahoo, service, service.catalog, hokma_data_dir() / "market-cache")
+
+
 def get_source() -> MarketDataSource:
     global _source
     with _source_lock:
         if _source is None:
             replay = os.environ.get("HOKMA_MARKET_REPLAY_DIR")
             extra = {"fetch": ReplayFetcher(Path(replay))} if replay else {}
-            _source = YahooSource(hokma_data_dir() / "market-cache", **extra)
+            yahoo = YahooSource(hokma_data_dir() / "market-cache", **extra)
+            _source = yahoo if extra else _connected(yahoo)
         return _source
 
 

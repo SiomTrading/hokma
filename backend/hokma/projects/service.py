@@ -255,7 +255,8 @@ def rename_project(project_id: int, name: str, db: Database | None = None) -> di
 # ---- delete ---------------------------------------------------------------------------------
 
 def delete_project(project_id: int, db: Database | None = None) -> dict[str, Any]:
-    """Delete a project: its folder goes to the Trash (restorable) and its row goes. Conversations stay in the history
+    """Delete a project: its folder goes to the Trash (restorable) and its row goes (a project with a journal is archived,
+    hidden, so the history keeps its name; see ProjectsRepo.delete). Conversations stay in the history
     (their project becomes none). "General" (the working folder) and the folder of a desk are refused: a desk is deleted
     from the desk. When the active project goes, the app goes back to General. The folder moves first; if the database
     step fails the folder is put back."""
@@ -268,14 +269,10 @@ def delete_project(project_id: int, db: Database | None = None) -> dict[str, Any
         folder = Path(project.path)
         with database.read() as u:
             is_desk = u.desks.by_project(project_id) is not None
-            has_history = bool(u.projects.s.query(
-                "SELECT 1 FROM journal_entries WHERE project_id = :p LIMIT 1", {"p": project_id}))
         if os.path.normpath(str(folder)) == os.path.normpath(str(workdir(database))):
             raise ProjectError("delete_general", 400)
         if is_desk:
             raise ProjectError("delete_desk", 409)
-        if has_history:
-            raise ProjectError("delete_has_journal", 409)
         root = projects_root(database)
         item_id: int | None = None
         if os.path.lexists(folder):

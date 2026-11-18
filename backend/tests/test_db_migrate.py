@@ -33,7 +33,7 @@ def raw(path=None):
 
 def test_fresh_database_has_the_22_tables_plus_onboarding_and_is_healthy(env):
     result = migrate()
-    assert result.created and result.applied == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] and result.version == 15 and result.backup is None
+    assert result.created and result.applied == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] and result.version == 16 and result.backup is None
     con = raw()
     names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
     assert names - FTS_SHADOW == TABLES and len(TABLES) == 41
@@ -64,7 +64,7 @@ def test_migrating_twice_changes_nothing(env):
     dump = list(con.iterdump())
     con.close()
     second = migrate()
-    assert second.applied == [] and not second.created and second.backup is None and second.version == 15
+    assert second.applied == [] and not second.created and second.backup is None and second.version == 16
     con = raw()
     assert list(con.iterdump()) == dump
 
@@ -72,7 +72,7 @@ def test_migrating_twice_changes_nothing(env):
 def test_current_version(env):
     assert current_version() == 0
     migrate()
-    assert current_version() == 15
+    assert current_version() == 16
 
 
 def make_dir(tmp_path, files: dict[str, str]) -> Path:
@@ -87,12 +87,12 @@ def make_dir(tmp_path, files: dict[str, str]) -> Path:
 
 def test_a_new_migration_runs_after_a_backup_of_the_existing_database(env):
     migrate()
-    directory = make_dir(env, {"0016_extra.sql": "CREATE TABLE extra ({PK_ID});".replace("{PK_ID}", "id {PK}")})
+    directory = make_dir(env, {"0017_extra.sql": "CREATE TABLE extra ({PK_ID});".replace("{PK_ID}", "id {PK}")})
     result = migrate(migrations_dir=directory)
-    assert result.applied == [16] and result.version == 16
+    assert result.applied == [17] and result.version == 17
     assert result.backup is not None and result.backup.parent == db_path().parent / "backups"
     backup = sqlite3.connect(str(result.backup))
-    assert backup.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 15
+    assert backup.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 16
     assert backup.execute("SELECT count(*) FROM sqlite_master WHERE name = 'extra'").fetchone()[0] == 0
     assert raw().execute("SELECT count(*) FROM sqlite_master WHERE name = 'extra'").fetchone()[0] == 1
 
@@ -103,15 +103,15 @@ def test_a_broken_migration_rolls_back_leaves_the_copy_and_reports(env):
     before = list(con.iterdump())
     con.close()
     bad = "CREATE TABLE half (id {PK});\nINSERT INTO half (id) VALUES (1);\nCREATE TABLE half (id {PK});"
-    directory = make_dir(env, {"0016_bad.sql": bad})
+    directory = make_dir(env, {"0017_bad.sql": bad})
     with pytest.raises(MigrationError) as info:
         migrate(migrations_dir=directory)
-    assert info.value.version == 16
-    assert str(info.value) == t("db.migrate.failed", file="0016_bad.sql", error=str(info.value.__cause__.args[0]))
+    assert info.value.version == 17
+    assert str(info.value) == t("db.migrate.failed", file="0017_bad.sql", error=str(info.value.__cause__.args[0]))
     con = raw()
     assert list(con.iterdump()) == before                           # the whole file was rolled back
-    assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 15
-    backups = list((db_path().parent / "backups").glob("hokma-v15-*.db"))
+    assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 16
+    backups = list((db_path().parent / "backups").glob("hokma-v16-*.db"))
     assert len(backups) == 1
 
 
@@ -125,11 +125,11 @@ def test_a_broken_first_migration_leaves_no_schema_version(env):
 
 
 def test_a_database_newer_than_the_code_is_refused(env):
-    directory = make_dir(env, {"0016_extra.sql": "CREATE TABLE extra (id {PK});"})
+    directory = make_dir(env, {"0017_extra.sql": "CREATE TABLE extra (id {PK});"})
     migrate(migrations_dir=directory)
     with pytest.raises(MigrationError) as info:
-        migrate()                                                   # the code only knows version 15
-    assert str(info.value) == t("db.migrate.newer", found=16, known=15)
+        migrate()                                                   # the code only knows version 16
+    assert str(info.value) == t("db.migrate.newer", found=17, known=16)
 
 
 def test_a_file_that_is_not_a_database_is_reported(env):
@@ -141,8 +141,8 @@ def test_a_file_that_is_not_a_database_is_reported(env):
 
 def test_old_backups_are_pruned(env):
     migrate()
-    for n in range(16, 29):
-        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(16, n + 1)})
+    for n in range(17, 30):
+        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(17, n + 1)})
         migrate(migrations_dir=directory)
     assert len(list((db_path().parent / "backups").glob("hokma-v*.db"))) == 10
 
@@ -180,7 +180,7 @@ def test_two_processes_migrating_at_once_apply_it_once(env):
     [th.start() for th in threads]
     [th.join() for th in threads]
     assert not errors
-    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == 15
+    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == 16
 
 
 # ------------------------------------------------------------------------------------------------ seeds
@@ -317,9 +317,10 @@ def test_the_desk_migration_leaves_every_existing_row_untouched(env):
     before = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in watched}
     con.close()
     result = migrate()
-    assert result.applied == [15] and result.version == 15
+    assert result.applied == [15, 16] and result.version == 16
     con = raw()
     after = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in watched}
+    after["projects"] = [row[:-1] for row in after["projects"]]       # 0016 adds archived_at at the end, empty
     assert after == before and len(before["projects"]) == 3 and {"mine", "yours"} <= {r[0] for r in before["agents"]} and len(before["conversations"]) == 1
     assert all(con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] == 0 for t in DESK_TABLES)
     assert migrate().applied == []                                  # second application is a no-op

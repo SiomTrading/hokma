@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4
+
+- New: Desk agents read company data from your connections: profile, news, earnings calendar, EPS surprises and key financials.
+- Changed: Charts and agents use your connected data providers for candles, in the order you set in Connections; Yahoo is only the last fallback, and the chart shows the real source.
+- Fixed: Deleting a project or a desk keeps its journal archived instead of failing.
+- New: Reorder the desk watchlist by dragging (or Alt+arrows); the order is saved.
+
 ## 1.0.3
 
 - Fixed: Hokma checks updates and connects to GitHub, Telegram and web pages with your computer's certificate store, so antivirus or company networks that inspect secure connections no longer break updates.

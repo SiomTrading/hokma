@@ -137,6 +137,7 @@ class Project(Record):
     default_requires_approval: bool
     created_at: str
     updated_at: str
+    archived_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

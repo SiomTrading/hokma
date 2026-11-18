@@ -2,7 +2,8 @@
 whole app covers it; the session token is checked here before the socket is accepted.
 
 Panel to engine (JSON text):
-    {"op":"subscribe","sub":"c1","symbol":"NQ=F","tf":"5m"}      {"op":"unsubscribe","sub":"c1"}      {"op":"ping"}
+    {"op":"subscribe","sub":"c1","symbol":"NQ=F","tf":"5m","desk":3}      {"op":"unsubscribe","sub":"c1"}      {"op":"ping"}
+`desk` (optional) is the id of the desk that owns the chart: its candles come only from the connections that desk uses.
 `tf` is any interval of `intervals.py` (`30s`, `7m`, `3h`, `2D`, `1W`, or a range `r:10t` / `r:2.5p`); the snapshot
 answers with the canonical text in `tf` and the parsed form in `interval`.
 
@@ -86,9 +87,13 @@ def _dispatch(hub: MarketHub, client: PanelClient, operations: asyncio.Queue, ra
         except IntervalError as error:
             client.push(hub.refusal(error.code, sub))
             return
-        operations.put_nowait(("subscribe", sub, symbol, interval.canonical))
+        desk = message.get("desk")
+        if desk is not None and (isinstance(desk, bool) or not isinstance(desk, int) or desk < 1):
+            client.push(hub.error_message("market.bad_request", sub))
+            return
+        operations.put_nowait(("subscribe", sub, symbol, interval.canonical, desk))
     elif op == "unsubscribe" and isinstance(sub, str):
-        operations.put_nowait(("unsubscribe", sub, None, None))
+        operations.put_nowait(("unsubscribe", sub, None, None, None))
     else:
         client.push(hub.error_message("market.bad_request"))
 
@@ -97,10 +102,10 @@ async def _operations(hub: MarketHub, client: PanelClient, operations: asyncio.Q
     """Subscribe and unsubscribe run in the order they arrived, off the receive loop, so a slow history load never
     delays a ping."""
     while True:
-        op, sub, symbol, tf = await operations.get()
+        op, sub, symbol, tf, desk = await operations.get()
         try:
             if op == "subscribe":
-                await hub.subscribe(client, sub, symbol, tf)
+                await hub.subscribe(client, sub, symbol, tf, desk)
             else:
                 await hub.unsubscribe(client, sub)
         except Exception:                                      # one bad request must not end the socket

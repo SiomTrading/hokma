@@ -128,6 +128,11 @@ def set_assets(desk_id: int, body: Assets) -> dict:
     return {"assets": service.set_assets(desk_id, body.assets)}
 
 
+@router.put("/api/desks/{desk_id}/assets/order")
+def reorder_assets(desk_id: int, body: Assets) -> dict:
+    return {"assets": service.reorder_assets(desk_id, body.assets)}
+
+
 @router.get("/api/desks/{desk_id}/connections")
 def list_connections(desk_id: int) -> dict:
     return {"connections": service.list_connections(desk_id)}

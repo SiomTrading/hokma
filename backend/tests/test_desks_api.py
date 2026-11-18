@@ -367,3 +367,16 @@ def test_messages_follow_the_language(client, desks_db):
     assert res.status_code == 404 and res.json()["detail"]["message"] != "That desk does not exist."
     with use_language("en"):
         assert client.get("/api/desks/99").json()["detail"]["message"] == "That desk does not exist."
+
+
+def test_assets_order_route_saves_the_order(client):
+    made = client.post("/api/desks", json={"name": "Orden", "capital": 10000, "template": "minimal",
+                                           "assets": ["NQ", "ES"]})
+    assert made.status_code == 201, made.text
+    did = made.json()["id"]
+    res = client.put(f"/api/desks/{did}/assets/order", json={"assets": ["ES", "NQ"]})
+    assert res.status_code == 200, res.text
+    assert [a["symbol"] for a in res.json()["assets"]] == ["ES", "NQ"]
+    assert [a["symbol"] for a in client.get(f"/api/desks/{did}").json()["assets"]] == ["ES", "NQ"]
+    assert client.put(f"/api/desks/{did}/assets/order", json={"assets": ["ES"]}).status_code == 409
+    assert client.put(f"/api/desks/{did}/assets/order", json={"assets": "ES"}).status_code == 400

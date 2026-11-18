@@ -429,6 +429,20 @@ def set_assets(desk_id: int, symbols: Any, db: Database | None = None) -> list[d
     return [{"symbol": a.symbol, "note": a.note} for a in rows]
 
 
+def reorder_assets(desk_id: int, symbols: Any, db: Database | None = None) -> list[dict[str, Any]]:
+    """Put the assets of the desk in the given order (task 3289). The list must hold exactly the symbols the desk has
+    now, each once: moving never adds, drops or renames an asset, and the notes stay."""
+    wanted = [a[0] for a in _assets(symbols)]
+    with _db(db).write() as u:
+        _desk(u, desk_id)
+        current = u.desks.list_assets(desk_id)
+        if sorted(wanted) != sorted(a.symbol for a in current):
+            raise DeskError("bad_assets", 409)
+        notes = {a.symbol: a.note for a in current}
+        rows = u.desks.replace_assets(desk_id, [(symbol, notes[symbol]) for symbol in wanted])
+    return [{"symbol": a.symbol, "note": a.note} for a in rows]
+
+
 # ---- team ------------------------------------------------------------------------------------
 
 def _default_role(agent_slug: str) -> str:

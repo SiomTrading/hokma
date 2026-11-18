@@ -228,7 +228,7 @@ def test_the_migration_applies_over_a_0013_database(tmp_path, monkeypatch):
     with db.write() as u:
         u.session.execute("INSERT INTO telegram_link (id, chat_id, user_name) VALUES (1, '111', 'Ana')")
         u.session.insert("telegram_outbox", {"text": "pending"})
-    assert migrate().applied == [14, 15]
+    assert migrate().applied == [14, 15, 16]
     with db.read() as u:
         link = u.session.one("SELECT chat_id, group_id, avisos_thread_id, avisos FROM telegram_link")
         assert link == {"chat_id": "111", "group_id": None, "avisos_thread_id": None, "avisos": None}

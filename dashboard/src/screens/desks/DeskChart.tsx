@@ -3,7 +3,7 @@ import { Button, EmptyState, Loading, Pane } from "@/design";
 import { useI18n } from "@/i18n";
 import { IntervalBar } from "../chart/IntervalBar";
 import { PriceChart } from "../chart/PriceChart";
-import { errorText, secondsDisabledReason, ticksDisabledReason } from "../chart/liveState";
+import { errorText, secondsDisabledReason, sourceLine, ticksDisabledReason } from "../chart/liveState";
 import { chartTitle } from "../chart/intervals";
 import { loadInterval } from "../chart/favorites";
 import type { Timeframe } from "../chart/types";
@@ -11,7 +11,7 @@ import { useLiveChart } from "../chart/useLiveChart";
 import { loadAssetInterval, saveAssetInterval } from "./terminalPrefs";
 
 /** The chart of the asset in focus: the same live chart of the Chart screen, with its own interval box. */
-export function DeskChart({ symbol }: { symbol: string }) {
+export function DeskChart({ symbol, deskId }: { symbol: string; deskId?: number }) {
   const { t } = useI18n();
   const [chosen, setChosen] = useState<{ symbol: string; timeframe: Timeframe } | null>(null);
   const [boxOpen, setBoxOpen] = useState(false);
@@ -21,7 +21,7 @@ export function DeskChart({ symbol }: { symbol: string }) {
     saveAssetInterval(symbol, next);
     setChosen({ symbol, timeframe: next });
   };
-  const { live, data, retry } = useLiveChart(symbol, timeframe);
+  const { live, data, retry } = useLiveChart(symbol, timeframe, undefined, deskId);
   const error = live.error;
   const ready = !!data && data.candles.length > 0;
 
@@ -81,7 +81,7 @@ export function DeskChart({ symbol }: { symbol: string }) {
         </span>
       </div>
       <div className="dterm-chart-body">{body}</div>
-      {live.source ? <div className="dterm-foot hint">{t("chart.source", { source: live.source })}</div> : null}
+      {live.source ? <div className="dterm-foot hint">{sourceLine(live, t)}</div> : null}
     </Pane>
   );
 }

@@ -360,6 +360,87 @@ describe("terminal of the desk", () => {
     expect(within(list).getByRole("button", { name: "NQ=F" })).toBeInTheDocument();
   });
 
+  /** A server that keeps the order the student saves, so a reopened terminal reads it back. */
+  function stubOrder(server: Server, fail = false) {
+    const saved: string[][] = [];
+    const base = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url) === "/api/desks/7/assets/order" && init?.method === "PUT") {
+          if (fail) return json({ detail: { code: "bad_assets", message: "No se pudo guardar" } }, 409);
+          const body = JSON.parse(String(init.body)) as { assets: string[] };
+          saved.push(body.assets);
+          server.assets = body.assets;
+          return json({ assets: body.assets.map((symbol) => ({ symbol, note: null })) });
+        }
+        return base(url, init);
+      }),
+    );
+    return saved;
+  }
+
+  const order = (list: HTMLElement) => Array.from(list.querySelectorAll("button.dterm-asset")).map((b) => b.textContent);
+
+  it("moves an asset by dragging it onto another one, saves the order and keeps it after reloading", async () => {
+    const server = stubServer({ assets: ["NQ=F", "ES=F", "CL=F"] });
+    const saved = stubOrder(server);
+    const view = open();
+    await connect("NQ=F");
+    const list = screen.getByLabelText(t("desks.terminal.list"));
+    expect(order(list)).toEqual(["NQ=F", "ES=F", "CL=F"]);
+    const rows = () => Array.from(list.querySelectorAll<HTMLElement>("tbody tr[data-symbol]"));
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+    fireEvent.dragStart(rows()[2]!, { dataTransfer });
+    fireEvent.dragOver(rows()[0]!, { dataTransfer });
+    fireEvent.drop(rows()[0]!, { dataTransfer });
+    await waitFor(() => expect(saved).toEqual([["CL=F", "NQ=F", "ES=F"]]));
+    expect(order(list)).toEqual(["CL=F", "NQ=F", "ES=F"]);
+    // dropping an asset on itself changes nothing
+    fireEvent.dragStart(rows()[1]!, { dataTransfer });
+    fireEvent.drop(rows()[1]!, { dataTransfer });
+    expect(saved).toHaveLength(1);
+    // reload: the new terminal reads the order from the server, not from the browser
+    view.unmount();
+    localStorage.clear();
+    installFakeSockets();
+    open();
+    await connect("CL=F");
+    expect(order(screen.getByLabelText(t("desks.terminal.list")))).toEqual(["CL=F", "NQ=F", "ES=F"]);
+  });
+
+  it("moves the focused asset with Alt + arrow up or down and keeps the focus on it", async () => {
+    const server = stubServer({ assets: ["NQ=F", "ES=F", "CL=F"] });
+    const saved = stubOrder(server);
+    open();
+    const user = userEvent.setup();
+    await connect("NQ=F");
+    const list = screen.getByLabelText(t("desks.terminal.list"));
+    within(list).getByRole("button", { name: "NQ=F" }).focus();
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    await waitFor(() => expect(saved).toEqual([["ES=F", "NQ=F", "CL=F"]]));
+    await waitFor(() => expect(within(list).getByRole("button", { name: "NQ=F" })).toHaveFocus());
+    await user.keyboard("{Alt>}{ArrowUp}{ArrowUp}{/Alt}"); // the second one has nowhere to go
+    await waitFor(() => expect(saved).toEqual([["ES=F", "NQ=F", "CL=F"], ["NQ=F", "ES=F", "CL=F"]]));
+    expect(order(list)).toEqual(["NQ=F", "ES=F", "CL=F"]);
+    await user.keyboard("{ArrowDown}"); // without Alt the arrows still only move the focus
+    expect(saved).toHaveLength(2);
+    expect(order(list)).toEqual(["NQ=F", "ES=F", "CL=F"]);
+  });
+
+  it("puts the list back and says so when the order could not be saved", async () => {
+    const server = stubServer({ assets: ["NQ=F", "ES=F"] });
+    stubOrder(server, true);
+    open();
+    const user = userEvent.setup();
+    await connect("NQ=F");
+    const list = screen.getByLabelText(t("desks.terminal.list"));
+    within(list).getByRole("button", { name: "NQ=F" }).focus();
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    expect(await within(list).findByRole("alert")).toBeInTheDocument();
+    expect(order(list)).toEqual(["NQ=F", "ES=F"]);
+  });
+
   it("resizes the chat with the splitter, within 300 px and half the screen, and remembers it per desk", async () => {
     stubServer();
     vi.stubGlobal("innerWidth", 1200);

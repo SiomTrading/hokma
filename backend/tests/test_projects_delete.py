@@ -1,5 +1,6 @@
 """Delete a project (task 3288): the folder goes to the Trash and can be restored; the conversations stay; General and
 the folder of a desk are refused; the active project going sends the app back to General; another project is intact."""
+import json
 import os
 from pathlib import Path
 
@@ -139,13 +140,43 @@ def test_a_missing_folder_still_deletes_the_row(client, db):
     assert res.status_code == 200 and res.json()["trash_id"] is None
 
 
-def test_a_project_with_journal_entries_is_refused_and_left_whole(client, db):
+def test_a_project_with_a_journal_is_deleted_and_the_journal_stays_archived(client, db):
+    p = make(client, "Alpha")
+    folder = Path(p["path"])
+    with db.write() as u:
+        conv = u.conversations.create(engine="claude", project_id=p["id"], title="chat de alpha")
+        u.agents.upsert_kit("hugo", "Hugo", "hugo agent", "balanced", "agents/hugo.md")
+        u.journal.add("note", "hi", actor=SYSTEM, outcome="info", project_id=p["id"])
+        task = u.tasks.create("tarea de alpha", actor=SYSTEM, project_id=p["id"])
+        decision = u.decisions.propose("Tema", "propuesta", proposed_by="hugo", project_id=p["id"])
+        u.approvals.record("decision", decision.id, "approved", decided_by="Ana")
+    res = client.delete(f"/api/projects/{p['id']}", headers=H)
+    assert res.status_code == 200, res.text
+    assert not folder.exists()
+    assert p["id"] not in [x["id"] for x in client.get("/api/projects", headers=H).json()["projects"]]
+    assert client.delete(f"/api/projects/{p['id']}", headers=H).status_code == 404
+    with db.read() as u:
+        assert u.projects.find(p["id"]) is None                          # hidden everywhere...
+        row = u.projects.find(p["id"], include_archived=True)            # ...but kept, with its name and the date
+        assert row.name == "Alpha" and row.archived_at
+        entries = u.journal.list(project_id=p["id"])
+        assert [e.title for e in entries] == ["hi"]                      # the journal is whole and still points at it
+        assert u.decisions.get(decision.id).project_id == p["id"]
+        assert u.approvals.list_for("decision", decision.id)
+        assert u.tasks.get(task.id).project_id is None and u.conversations.get(conv.id).project_id is None
+    again = make(client, "Alpha")                                        # the name and the folder can be used again
+    assert again["id"] != p["id"] and again["slug"] == p["slug"]
+
+
+def test_the_journal_tool_names_the_deleted_project(client, db):
+    from hokma.kit import hokma_tools
     p = make(client, "Alpha")
     with db.write() as u:
         u.journal.add("note", "hi", actor=SYSTEM, outcome="info", project_id=p["id"])
-    res = client.delete(f"/api/projects/{p['id']}", headers=H)
-    assert res.status_code == 409 and res.json()["detail"]["code"] == "delete_has_journal"
-    assert Path(p["path"]).is_dir()
+    client.delete(f"/api/projects/{p['id']}", headers=H)
+    with db.read() as u:
+        out = json.loads(hokma_tools.journal_search(u, None, {"query": "hi"}))
+    assert out[0]["project"] == "Alpha" and out[0]["project_deleted"] is True
 
 
 def test_requires_token(client):

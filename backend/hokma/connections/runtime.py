@@ -20,6 +20,16 @@ def get_service() -> ConnectionService:
         return _service
 
 
+def _desk_providers(desk_id: int) -> set[str] | None:
+    """Ids of the providers a desk uses (its connections that are on). None when the desk does not exist."""
+    from hokma.desks import service as desks
+
+    try:
+        return {c["provider_id"] for c in desks.list_connections(desk_id) if c["enabled"]}
+    except Exception:                                   # noqa: BLE001  (a desk that cannot be read: the whole chain)
+        return None
+
+
 def get_hub() -> MarketHub:
     global _hub
     service = get_service()
@@ -27,7 +37,7 @@ def get_hub() -> MarketHub:
         if _hub is None:
             from hokma.market.api import get_source, now
 
-            _hub = MarketHub(service.catalog, service, get_source, clock=now)
+            _hub = MarketHub(service.catalog, service, get_source, clock=now, desk_providers=_desk_providers)
         return _hub
 
 

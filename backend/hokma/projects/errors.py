@@ -60,7 +60,6 @@ _MESSAGES: dict[str, Callable[..., str]] = {
     "link_scheme": lambda **p: t("docs.link.scheme", **p),
     "delete_general": lambda **p: t("projects.err.delete_general", **p),
     "delete_desk": lambda **p: t("projects.err.delete_desk", **p),
-    "delete_has_journal": lambda **p: t("projects.err.delete_has_journal", **p),
     "delete_failed": lambda **p: t("projects.err.delete_failed", **p),
     "model_not_failed": lambda **p: t("library.err.model_not_failed", **p),
 }

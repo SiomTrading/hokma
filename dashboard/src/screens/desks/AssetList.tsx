@@ -65,12 +65,23 @@ interface Props {
   onAdd: (symbol: string) => void;
   /** Takes the asset off the desk, after the student confirmed. */
   onRemove: (symbol: string) => void;
+  /** The student moved an asset: the whole list in its new order. */
+  onReorder: (symbols: string[]) => void;
+}
+
+/** The list with `symbol` taken out and put at `index` (an index of the list without it). */
+export function moved(symbols: string[], symbol: string, index: number): string[] {
+  const rest = symbols.filter((item) => item !== symbol);
+  rest.splice(Math.max(0, Math.min(index, rest.length)), 0, symbol);
+  return rest;
 }
 
 /** The narrow list on the left of the terminal: the assets of the desk with last price and change. */
-export function AssetList({ symbols, focus, onFocus, adding, busy, error, onToggleAdd, onAdd, onRemove }: Props) {
+export function AssetList({ symbols, focus, onFocus, adding, busy, error, onToggleAdd, onAdd, onRemove, onReorder }: Props) {
   const { t, locale } = useI18n();
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
   const rows = useRef<HTMLDivElement>(null);
   const quotes = useQuotes(symbols);
   const focused = focus ? quotes[focus] : undefined;
@@ -81,10 +92,26 @@ export function AssetList({ symbols, focus, onFocus, adding, busy, error, onTogg
     const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
     if (step === 0) return;
     event.preventDefault();
+    if (event.altKey) {
+      // Alt + arrow moves the asset itself one place; the focus stays on it.
+      const at = symbols.indexOf(symbol);
+      if (busy || at + step < 0 || at + step >= symbols.length) return;
+      onReorder(moved(symbols, symbol, at + step));
+      requestAnimationFrame(() => rows.current?.querySelectorAll<HTMLButtonElement>("button.dterm-asset")[at + step]?.focus());
+      return;
+    }
     const next = symbols[symbols.indexOf(symbol) + step];
     if (!next) return;
     onFocus(next);
     rows.current?.querySelectorAll<HTMLButtonElement>("button.dterm-asset")[symbols.indexOf(next)]?.focus();
+  };
+
+  const drop = (target: string) => {
+    const from = dragging;
+    setDragging(null);
+    setOver(null);
+    if (!from || from === target || busy) return;
+    onReorder(moved(symbols, from, symbols.indexOf(target)));
   };
 
   return (
@@ -158,9 +185,32 @@ export function AssetList({ symbols, focus, onFocus, adding, busy, error, onTogg
               );
             }
             return (
-              <tr key={symbol} className={symbol === focus ? "on" : undefined}>
+              <tr
+                key={symbol}
+                className={[symbol === focus ? "on" : "", symbol === dragging ? "drag" : "", symbol === over && symbol !== dragging ? "over" : ""].filter(Boolean).join(" ") || undefined}
+                draggable={!busy}
+                data-symbol={symbol}
+                onDragStart={(event) => {
+                  setDragging(symbol);
+                  event.dataTransfer?.setData("text/plain", symbol);
+                  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(event) => {
+                  if (!dragging) return;
+                  event.preventDefault();
+                  if (over !== symbol) setOver(symbol);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  drop(symbol);
+                }}
+                onDragEnd={() => {
+                  setDragging(null);
+                  setOver(null);
+                }}
+              >
                 <td>
-                  <button type="button" className="dterm-asset" aria-pressed={symbol === focus} onClick={() => onFocus(symbol)} onKeyDown={(event) => onKeyDown(event, symbol)}>
+                  <button type="button" className="dterm-asset" aria-pressed={symbol === focus} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title={t("desks.terminal.reorder")} onClick={() => onFocus(symbol)} onKeyDown={(event) => onKeyDown(event, symbol)}>
                     {symbol}
                   </button>
                 </td>

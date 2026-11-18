@@ -20,7 +20,7 @@ All data connections are configured in one place: the Connections screen (`#/con
 `backend/hokma/market/providers.json` lists the providers, their asset classes, limits, hosts and the `data_state`
 each declares. It is editable without code: Finnhub is `live` there: its trade WebSocket is real time on the free plan for US stocks (the `/quote` REST call of the
 same account answered seconds old, 6-nov). If `scripts/measure_providers.py` ever shows minutes of lag, set it back to `delayed`.
-The history (bars before the first live trade) always comes from Yahoo and carries its own delay: the snapshot says it in `history`. The host of the SiomTrading futures stream is the `url`
+The history (bars before the first live trade) comes from the providers the owner connected, in the order of Connections (`market/history.py`: Alpaca bars for stocks and crypto, Coinbase candles for crypto, Finnhub candles only if the plan has them, Databento for futures and stocks), and from Yahoo as the last fallback. A provider that fails, has no access (403) or is rate limited is skipped. A desk chart only uses the connections of its desk (`desk` in the subscribe message). The snapshot says the real source and its delay in `history`. SiomTrading Futures and Massive have no bars endpoint yet: they serve the live price only. The host of the SiomTrading futures stream is the `url`
 of `siomtrading_futures`.
 
 A new provider is an adapter (`backend/hokma/market/adapters/`) registered with `register_adapter(id, factory)` plus an

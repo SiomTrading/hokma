@@ -24,10 +24,17 @@ _WHY = {
 }
 
 
-def _source():
+def _source(desk_id: int | None = None):
+    """The same chain as the chart: the connected providers in the order of Connections, Yahoo last. A desk agent
+    only gets the connections its desk uses."""
     from hokma.market import api
 
-    return api.get_source(), api.now
+    source = api.get_source()
+    if desk_id is not None and hasattr(source, "for_desk"):
+        from hokma.connections.runtime import _desk_providers
+
+        source = source.for_desk(_desk_providers(desk_id))
+    return source, api.now
 
 
 def _symbol(value: Any) -> str:
@@ -37,8 +44,8 @@ def _symbol(value: Any) -> str:
     return symbol
 
 
-def _chart(symbol: str, interval: str, keep: int | None = None):
-    source, now = _source()
+def _chart(symbol: str, interval: str, keep: int | None = None, desk_id: int | None = None):
+    source, now = _source(desk_id)
     try:
         return build_chart(source, symbol, interval, now, keep=keep)
     except MarketError as exc:
@@ -46,16 +53,16 @@ def _chart(symbol: str, interval: str, keep: int | None = None):
         raise LookupError(f"no market data for {symbol} ({interval}): {why} [{exc.code}]") from exc
 
 
-def quote(symbol: Any) -> dict[str, Any]:
+def quote(symbol: Any, desk_id: int | None = None) -> dict[str, Any]:
     """Last price, change, the day's high and low, volume, time and source of one symbol."""
     symbol = _symbol(symbol)
-    chart = _chart(symbol, "5m", keep=300)
+    chart = _chart(symbol, "5m", keep=300, desk_id=desk_id)
     if chart.last_price is None:
         raise LookupError(f"no market data for {symbol}: the source returned no bars")
     high = low = volume = None
     span = "1D"
     try:
-        day = _chart(symbol, "1D", keep=1).candles
+        day = _chart(symbol, "1D", keep=1, desk_id=desk_id).candles
     except LookupError:
         day = []
     if day:
@@ -71,7 +78,8 @@ def quote(symbol: Any) -> dict[str, Any]:
             "source": chart.source}
 
 
-def candles(symbol: Any, interval: Any = "5m", limit: Any = DEFAULT_CANDLES) -> dict[str, Any]:
+def candles(symbol: Any, interval: Any = "5m", limit: Any = DEFAULT_CANDLES,
+            desk_id: int | None = None) -> dict[str, Any]:
     """The newest `limit` bars the chart would draw, oldest first. `t` is the start of the bar in epoch seconds UTC."""
     symbol = _symbol(symbol)
     interval = "5m" if interval is None else interval
@@ -80,7 +88,7 @@ def candles(symbol: Any, interval: Any = "5m", limit: Any = DEFAULT_CANDLES) -> 
     limit = DEFAULT_CANDLES if limit is None else limit
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_CANDLES:
         raise ValueError(f"limit must be a whole number from 1 to {MAX_CANDLES}")
-    chart = _chart(symbol, interval, keep=limit)
+    chart = _chart(symbol, interval, keep=limit, desk_id=desk_id)
     bars = [{"t": c.t, "o": c.o, "h": c.h, "l": c.l, "c": c.c, "v": c.v} for c in chart.candles[-limit:]]
     if not bars:
         raise LookupError(f"no market data for {symbol} ({interval}): the source returned no bars")
@@ -88,12 +96,12 @@ def candles(symbol: Any, interval: Any = "5m", limit: Any = DEFAULT_CANDLES) -> 
             "source": chart.source, "stale": chart.stale, "candles": bars}
 
 
-def desk_prices(symbols: list[str]) -> list[dict[str, Any]]:
+def desk_prices(symbols: list[str], desk_id: int | None = None) -> list[dict[str, Any]]:
     """The assets of a desk with their last price; an asset the source cannot serve says why and the rest stay."""
     out: list[dict[str, Any]] = []
     for symbol in symbols:
         try:
-            q = quote(symbol)
+            q = quote(symbol, desk_id)
             out.append({"symbol": symbol, "last": q["last"], "change_pct": q["change_pct"], "time": q["time"],
                         "source": q["source"]})
         except (LookupError, ValueError) as exc:

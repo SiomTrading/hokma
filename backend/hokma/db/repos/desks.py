@@ -191,9 +191,9 @@ class DesksRepo(Repo):
         return self.get_agent(desk_id, agent_slug)
 
     def delete(self, id: int) -> None:
-        """The desk row; its team, assets and connections go with it (ON DELETE CASCADE). Agents are never touched."""
-        desk = self.get(id)
-        self.s.execute("UPDATE journal_entries SET project_id = NULL WHERE project_id = :p", {"p": desk.project_id})
+        """The desk row; its team, assets and connections go with it (ON DELETE CASCADE). Agents are never touched.
+        The journal is not touched: it is append-only and stays with the archived project (see ProjectsRepo.delete)."""
+        self.get(id)
         self.s.execute("DELETE FROM desks WHERE id = :id", {"id": id})
 
     def remove_agent(self, desk_id: int, agent_slug: str) -> None:

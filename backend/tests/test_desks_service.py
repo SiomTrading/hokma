@@ -375,3 +375,25 @@ def test_a_desk_agent_that_was_turned_off_later_is_turned_on_when_the_desk_works
     with desks_db.write() as u:
         u.agents.set_status("risk", "off")
     assert service.ensure_agents_on(desk["project_id"], db=desks_db) == []     # a desk-off agent stays off
+
+
+def test_reorder_assets_is_saved_keeps_notes_and_is_returned(db):
+    from hokma.desks import service
+    from hokma.kit import hokma_tools
+    desk = service.create_desk("Orden", 10000, template="minimal", db=db,
+                               assets=[{"symbol": "NQ", "note": "indice"}, "ES", "CL"])
+    out = service.reorder_assets(desk["id"], ["CL", "NQ", "ES"], db=db)
+    assert [a["symbol"] for a in out] == ["CL", "NQ", "ES"] and out[1]["note"] == "indice"
+    assert [a["symbol"] for a in service.get_desk(desk["id"], db=db)["assets"]] == ["CL", "NQ", "ES"]
+    shown = hokma_tools._desk_out(service.get_desk(desk["id"], db=db))          # what desk_show gives the agents
+    assert shown["assets"] == ["CL", "NQ", "ES"]
+
+
+def test_reorder_assets_refuses_a_different_set(db):
+    import pytest
+    from hokma.desks import service
+    desk = service.create_desk("Orden", 10000, template="minimal", db=db, assets=["NQ", "ES"])
+    for bad in (["NQ"], ["NQ", "ES", "CL"], ["NQ", "NQ"], ["NQ", "XX"], "NQ"):
+        with pytest.raises(service.DeskError):
+            service.reorder_assets(desk["id"], bad, db=db)
+    assert [a["symbol"] for a in service.get_desk(desk["id"], db=db)["assets"]] == ["NQ", "ES"]

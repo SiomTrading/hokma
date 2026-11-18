@@ -5,7 +5,7 @@ import re
 import unicodedata
 from typing import Any
 
-from hokma.db.errors import ValidationError
+from hokma.db.errors import NotFound, ValidationError
 from hokma.db.models import Project
 from hokma.db.repos.base import UNSET, Repo, flag, given, require_in
 from hokma.db.timeutil import utcnow
@@ -18,6 +18,14 @@ def slugify(text: str) -> str:
     plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     slug = re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")
     return slug[:60] or "project"
+
+
+# (table, column) that a plain delete sets to NULL (ON DELETE SET NULL); decisions and the journal keep the link
+DETACH = (
+    ("tasks", "project_id"), ("bugs", "project_id"), ("conversations", "project_id"),
+    ("attachments", "project_id"), ("trash_items", "project_id"), ("documents", "origin_project_id"),
+    ("profile", "active_project_id"),
+)
 
 
 class ProjectsRepo(Repo):
@@ -48,17 +56,24 @@ class ProjectsRepo(Repo):
             "created_at": utcnow(), "updated_at": utcnow()})
         return self.get(new_id)
 
-    def get(self, id: int) -> Project:
-        return self._get("projects", "id", id, Project)
+    def get(self, id: int, *, include_archived: bool = False) -> Project:
+        project = self._get("projects", "id", id, Project)
+        if project.archived_at and not include_archived:
+            raise NotFound(f"project {id} not found")
+        return project
 
-    def find(self, id: int) -> Project | None:
-        return self._find("projects", "id", id, Project)
+    def find(self, id: int, *, include_archived: bool = False) -> Project | None:
+        project = self._find("projects", "id", id, Project)
+        return None if project is not None and project.archived_at and not include_archived else project
 
     def get_by_slug(self, slug: str) -> Project | None:
         return self._find("projects", "slug", slug, Project)
 
-    def list(self, *, status: str | None = None, kind: str | None = None) -> list[Project]:
+    def list(self, *, status: str | None = None, kind: str | None = None,
+             include_archived: bool = False) -> list[Project]:
         sql, params = "SELECT * FROM projects WHERE 1 = 1", {}
+        if not include_archived:
+            sql += " AND archived_at IS NULL"
         if status:
             sql += " AND status = :status"
             params["status"] = status
@@ -93,6 +108,20 @@ class ProjectsRepo(Repo):
             self.s.update("projects", {"id": id}, {**values, "updated_at": utcnow()})
         return self.get(id)
 
-    def delete(self, id: int) -> None:
-        self.get(id)
-        self.s.execute("DELETE FROM projects WHERE id = :id", {"id": id})
+    def delete(self, id: int) -> bool:
+        """Remove a project. One with entries in the journal (append-only, and it points at the project) is archived
+        instead: its row stays, hidden, with its name and the date, so the history keeps showing where each entry came
+        from. Returns True when it was archived. Everything a plain delete would have detached is detached either way."""
+        project = self.get(id)
+        archive = self.s.scalar("SELECT 1 FROM journal_entries WHERE project_id = :p LIMIT 1", {"p": id}) is not None
+        if not archive:
+            self.s.execute("DELETE FROM projects WHERE id = :id", {"id": id})
+            return False
+        params = {"p": id}
+        for table, column in DETACH:
+            self.s.execute(f"UPDATE {table} SET {column} = NULL WHERE {column} = :p", params)
+        self.s.execute("DELETE FROM project_folders WHERE project_id = :p", params)
+        self.s.execute("DELETE FROM libraries WHERE project_id = :p", params)
+        self.s.update("projects", {"id": id}, {"archived_at": utcnow(), "slug": f"{project.slug}~archived-{id}",
+                                               "updated_at": utcnow()})
+        return True

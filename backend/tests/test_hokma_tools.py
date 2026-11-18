@@ -36,7 +36,8 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "schedule_list", "extension_request", "agents_list", "agent_save", "skill_save", "skill_install", "bug_report",
                 "bug_update", "bug_list", "docs_search", "docs_list", "notify_owner",
                 "desk_list", "desk_show", "desk_create", "desk_configure", "trash_move", "market_quote",
-                "market_candles"}
+                "market_candles", "company_profile", "company_news", "earnings_calendar", "earnings_surprises",
+                "basic_financials"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]
     assert all(t["inputSchema"]["additionalProperties"] is False for t in listed)

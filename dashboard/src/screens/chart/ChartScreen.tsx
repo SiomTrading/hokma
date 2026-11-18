@@ -18,7 +18,7 @@ import { intervalLabel } from "./intervals";
 import { PriceChart } from "./PriceChart";
 import type { PriceChartHandle } from "./PriceChart";
 import "./live.css";
-import { barMode, delayMinutes, errorText, historyDelayMinutes, roundedRange, secondsDisabledReason, ticksDisabledReason } from "./liveState";
+import { barMode, delayMinutes, errorText, historyDelayMinutes, roundedRange, secondsDisabledReason, sourceLine, ticksDisabledReason } from "./liveState";
 import type { ChartNotice } from "./liveState";
 import type { ChartData, Timeframe } from "./types";
 import { useChartShortcuts } from "./useChartShortcuts";
@@ -343,7 +343,7 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
 
         <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border)", flexWrap: "wrap", alignItems: "center" }}>
           <span className="p" style={{ fontSize: 12 }}>
-            {live.source ? t("chart.source", { source: live.source }) : ""}
+            {sourceLine(live, t)}
           </span>
           <Button size="sm" variant="primary" style={{ marginLeft: "auto" }} disabled={!ready || asking || error !== null} onClick={() => data && void ask(data)}>
             {asking ? t("chart.ask.sending") : t("chart.ask")}

@@ -5,6 +5,9 @@
 - Routing: the asset class of the symbol and the priority set in Connections pick the provider, among those that are
   switched on, have their key and are not in error. With none, the symbol is served by the delayed fallback
   (`PollingLiveSource` over the history source) and the panel is told so.
+- The bars before the first live trade come from the providers the owner connected, in the order of Connections
+  (`history.py`; only the connections of the desk for a desk chart), and from Yahoo as the last fallback. The snapshot
+  says the real source in `history`.
 - `BarAggregator` (`aggregator.py`) builds the bar in progress of each interval with a subscription (at most 12 per
   symbol, ranges included) from ticks or 1m bars.
 - A feed whose provider gives ticks keeps them in a `TickTape` (`tape.py`). Seconds bars and range bars are built from
@@ -121,6 +124,7 @@ class Sub:
     last_ts_ms: int = 0
     timer: asyncio.TimerHandle | None = None
     closed: bool = False
+    desk_id: int | None = None                           # the desk that owns the chart: its connections pick the candles
 
 
 @dataclass
@@ -167,8 +171,10 @@ class ProviderRuntime:
 
 class MarketHub:
     def __init__(self, catalog: ProviderCatalog, config: ConnectionConfig, history: Callable[[], MarketDataSource],
-                 clock: Callable[[], float] = time.time, epoch: str | None = None) -> None:
+                 clock: Callable[[], float] = time.time, epoch: str | None = None,
+                 desk_providers: Callable[[int], set[str] | None] | None = None) -> None:
         self.catalog, self.config, self._history, self._clock = catalog, config, history, clock
+        self._desk_providers = desk_providers                # desk id -> ids of the providers the desk uses
         self.epoch = epoch or uuid.uuid4().hex[:12]
         self._clients: set[PanelClient] = set()
         self._feeds: dict[str, SymbolFeed] = {}
@@ -218,7 +224,7 @@ class MarketHub:
 
     # ------------------------------------------------------------------ subscribe / unsubscribe
 
-    async def subscribe(self, client: PanelClient, sub_id: str, symbol: str, tf: str) -> None:
+    async def subscribe(self, client: PanelClient, sub_id: str, symbol: str, tf: str, desk_id: int | None = None) -> None:
         self._bind()
         if sub_id in client.subs or len(client.subs) >= MAX_SUBS_PER_CLIENT:
             client.push(self.error_message("market.limit" if sub_id not in client.subs else "market.bad_request", sub_id))
@@ -228,7 +234,7 @@ class MarketHub:
         except IntervalError as error:
             client.push(self.refusal(error.code, sub_id))
             return
-        sub = Sub(client, sub_id, symbol, interval.canonical, interval=interval)
+        sub = Sub(client, sub_id, symbol, interval.canonical, interval=interval, desk_id=desk_id)
         client.subs[sub_id] = sub
         try:
             self._check_interval_limit(symbol, sub.tf)
@@ -393,7 +399,7 @@ class MarketHub:
         (all of them, for the approximate range bars and the opening line) and everything else comes from the ticks."""
         own = self._builds_own_bars(sub)
         try:
-            return await asyncio.to_thread(build_chart, self._history(), sub.symbol, "1m" if own else sub.tf,
+            return await asyncio.to_thread(build_chart, await self._source_of(sub), sub.symbol, "1m" if own else sub.tf,
                                            self._clock, MINUTES_KEEP if own else None)
         except MarketError as error:
             if error.code == UNKNOWN_SYMBOL:
@@ -403,6 +409,15 @@ class MarketHub:
             if error.code == SECONDS_NEED_TICKS:
                 raise HubError("market.seconds_need_ticks") from None
             raise HubError("market.down") from None
+
+    async def _source_of(self, sub: Sub) -> MarketDataSource:
+        """The candle source of a subscription: the chain of connected providers, restricted to the connections of
+        the desk when the chart belongs to one."""
+        source = self._history()
+        if sub.desk_id is None or self._desk_providers is None or not hasattr(source, "for_desk"):
+            return source
+        allowed = await asyncio.to_thread(self._desk_providers, sub.desk_id)
+        return source.for_desk(allowed)
 
     @staticmethod
     def _builds_own_bars(sub: Sub) -> bool:
@@ -477,7 +492,9 @@ class MarketHub:
         if runtime.source is not None:
             return
         if runtime is self._fallback:
-            source: LiveSource = PollingLiveSource(self._history, self.catalog.polling)
+            # The delayed price is Yahoo's own: the connected providers' candles never pose as the delayed price.
+            source: LiveSource = PollingLiveSource(lambda: getattr(self._history(), "fallback", self._history()),
+                                                   self.catalog.polling)
         else:
             spec = runtime.spec
             assert spec is not None
@@ -813,11 +830,14 @@ class MarketHub:
             return self.catalog.polling.delay_seconds.get(asset or "index", 900)
         return runtime.spec.delay_seconds if runtime.spec else None
 
-    def _history_info(self, runtime: ProviderRuntime, asset: str | None) -> dict:
-        """Where the bars before the first live trade come from. They always come from the polling source (Yahoo), even
-        when the price runs live from another provider, so the panel can say so instead of calling the whole chart live."""
+    def _history_info(self, runtime: ProviderRuntime, asset: str | None, source: str) -> dict:
+        """Where the bars before the first live trade really come from (`source`, the name the candle source
+        reported) and how late they are: a provider connected by the owner has none, Yahoo has the delay of its class."""
+        connected = next((spec for spec in self.catalog.providers.values() if spec.name == source), None)
+        if connected is not None:
+            return {"source": source, "delay_seconds": 0 if connected.data_state == "live" else connected.delay_seconds or 0}
         delay = 0 if runtime is self._fallback else self.catalog.polling.delay_seconds.get(asset or "index", 900)
-        return {"source": self.catalog.polling.name, "delay_seconds": delay}
+        return {"source": source or self.catalog.polling.name, "delay_seconds": delay}
 
     def _send_snapshot(self, sub: Sub, chart: ChartData) -> None:
         feed = sub.feed
@@ -870,7 +890,7 @@ class MarketHub:
             sub, "snapshot", symbol=sub.symbol, tf=sub.tf, interval=protocol,
             exact_from=exact_from, approx_until=approx_until, tick_size=sub.tick_size, name=chart.name, kind=chart.kind,
             exchange=chart.exchange, currency=chart.currency, timezone=chart.timezone, asset_class=feed.asset_class,
-            fallback=runtime is self._fallback, history=self._history_info(runtime, feed.asset_class),
+            fallback=runtime is self._fallback, history=self._history_info(runtime, feed.asset_class, chart.source),
             bars=[self._wire(c) for c in shown],
             last=price["price"], previous_close=chart.previous_close, change=price["change"],
             change_pct=price["change_pct"], opening_range=asdict(sub.opening) if sub.opening else None,

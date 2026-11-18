@@ -111,3 +111,47 @@ def test_missing_folder_still_deletes(client, desks_db):
     shutil.rmtree(folder_of(desks_db, desk))
     res = client.delete(f"/api/desks/{desk['id']}")
     assert res.status_code == 200 and res.json()["trash_id"] is None
+
+
+def test_a_desk_that_already_worked_is_deleted_and_its_history_stays_archived(client, desks_db):
+    """A real, used desk: a chat with the chief, a task, a budget warning, a decision and its approval."""
+    from hokma.db.models import Actor
+    from hokma.desks.budget import SYSTEM
+
+    desk = make(desks_db, "Futuros NQ")
+    folder = folder_of(desks_db, desk)
+    pid = desk["project_id"]
+    with desks_db.write() as u:
+        conv = u.conversations.create(engine="claude", project_id=pid, title="chat with the chief")
+        task = u.tasks.create("review the NQ", actor=SYSTEM, project_id=pid, assigned_agent="hugo")
+        u.journal.add("alert", "Budget at 80%", actor=SYSTEM, outcome="info", project_id=pid)
+        u.journal.add("action", "Hugo closed the task", actor=Actor.agent("hugo"), outcome="success", project_id=pid,
+                      task_id=task.id)
+        decision = u.decisions.propose("Raise the size", "x2", proposed_by="hugo", project_id=pid)
+        u.approvals.record("decision", decision.id, "approved", decided_by="Ana")
+        u.approvals.record("task", task.id, "approved", decided_by="Ana")
+    res = client.delete(f"/api/desks/{desk['id']}")
+    assert res.status_code == 200, res.text
+    assert not folder.exists()
+    with desks_db.read() as u:
+        assert u.desks.find(desk["id"]) is None and u.projects.find(pid) is None
+        project = u.projects.find(pid, include_archived=True)
+        assert project.name == "Futuros NQ" and project.archived_at
+        assert [e.title for e in u.journal.list(project_id=pid)] == ["Hugo closed the task", "Budget at 80%"]
+        assert u.decisions.get(decision.id).project_id == pid
+        assert len(u.approvals.list_for("decision", decision.id)) == 1 and len(u.approvals.list_for("task", task.id)) == 1
+        assert u.conversations.get(conv.id).project_id is None and u.tasks.get(task.id).project_id is None
+        assert u.journal.count(task_id=task.id) == 1
+    assert client.get(f"/api/desks/{desk['id']}").status_code == 404
+    # the student can open a new desk with the same name afterwards
+    assert make(desks_db, "Futuros NQ")["id"] != desk["id"]
+
+
+def test_the_message_never_names_the_journal(client, desks_db):
+    desk = make(desks_db, "Futuros NQ")
+    from hokma.desks.budget import SYSTEM
+    with desks_db.write() as u:
+        u.journal.add("alert", "Budget at 100%", actor=SYSTEM, project_id=desk["project_id"])
+    res = client.delete(f"/api/desks/{desk['id']}")
+    assert res.status_code == 200
+    assert "diario" not in res.text.lower() and "journal" not in res.text.lower()
