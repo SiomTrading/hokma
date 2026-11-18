@@ -52,12 +52,12 @@ def test_english_guide_is_english():
     assert not NON_ENGLISH.search(_read("docs", "learn", "en", "11-desks.md"))
 
 
-def test_claude_section_does_not_promise_creation_and_names_only_real_slugs():
+def test_claude_section_creates_with_permission_and_names_only_real_slugs():
     section = _read("CLAUDE.md").split("## Money desks", 1)[1]
-    assert "do not create anything" in section and "From a template" in section
+    assert "do not create anything" not in section and "never answer that you cannot" in section
     for slug in ("desk-chief", "hugo", "risk", "iris", "signals", "axel", "vera", "bull-case", "bear-case", "judge"):
         assert f"`{slug}`" in section
-    assert "desk_create" not in section and "desk_configure" not in section
+    assert "`desk_create`" in section and "`desk_configure`" in section
 
 
 def test_hokma_table_lists_the_six_desk_agents_once_each():

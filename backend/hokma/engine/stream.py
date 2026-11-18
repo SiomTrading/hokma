@@ -3,6 +3,7 @@ import json
 from typing import Any
 
 MAX_TARGET = 500
+MAX_DESK_TARGET = 6000          # a desk request is shown whole: what the owner approves is what runs (mandate up to 4000)
 MAX_RESULT_TEXT = 4000
 
 _KINDS = {"Write": "write_file", "Edit": "edit_file", "MultiEdit": "edit_file", "NotebookEdit": "edit_file",
@@ -19,8 +20,31 @@ def parse_line(line: bytes | str) -> dict[str, Any] | None:
     return msg if isinstance(msg, dict) and isinstance(msg.get("type"), str) else None
 
 
+def _desk_target(name: str, tool_input: Any) -> str:
+    """What a desk tool is about to create or change, in neutral `key=value` terms, so the owner sees it in the
+    permission request (the panel shows it as the target). Empty for any other tool."""
+    short = name.rsplit("__", 1)[-1]
+    if short not in ("desk_create", "desk_configure") or not isinstance(tool_input, dict):
+        return ""
+    parts = []
+    if short == "desk_configure":
+        parts.append(f"desk {tool_input.get('desk_id')}")
+    for key in ("name", "template", "capital", "assets", "mandate", "token_budget", "agent", "model"):
+        value = tool_input.get(key)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            value = ", ".join(str(v) for v in value)
+        text = " ".join(str(value).split())
+        parts.append(f"{key}={text}")
+    return " | ".join(parts)
+
+
 def summarize_tool(name: str, tool_input: Any) -> dict[str, str]:
     """`{kind, target}`: the action in neutral terms; the panel writes the sentence in the user's language."""
+    desk = _desk_target(name, tool_input)
+    if desk:
+        return {"kind": "other", "target": desk[:MAX_DESK_TARGET]}
     target = ""
     if isinstance(tool_input, dict):
         for key in _TARGET_KEYS:

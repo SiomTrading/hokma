@@ -189,3 +189,10 @@
   .dterm { grid-template-columns: minmax(0, 1fr); grid-template-rows: 200px 340px 260px 170px; overflow-y: auto; }
   .dterm-list, .dterm-chart, .dterm-chat, .dterm-positions { grid-column: 1; grid-row: auto; }
 }
+
+.desk-card-wrap { position: relative; display: flex; flex-direction: column; }
+.desk-card-wrap > .desk-card { flex: 1; }
+.desk-card-more { position: absolute; right: 8px; bottom: 8px; width: 28px; height: 24px; border: 0; border-radius: 7px; background: var(--glass-strong); color: var(--t2); cursor: pointer; font: 600 12px Montserrat, sans-serif; line-height: 1; }
+.desk-card-more:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.desk-card-menu { top: auto; bottom: 36px; right: 8px; left: auto; width: 180px; }
+.desk-danger { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--down); display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }

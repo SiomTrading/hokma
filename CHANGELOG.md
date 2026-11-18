@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- New: Delete a money desk: its folder goes to the Trash and can be restored; your agents and conversations stay.
+- New: Ask Hokma in the chat to create or change a desk; it asks for your permission first.
+
 ## 1.0.0 Money desks
 
 - New: Money desks. The side menu has a "Money desks" entry with one row per desk (name, capital, today's result). The Fund view shows the simulated capital, the tokens of the week and one card per desk (focus, status, capital, today, drawdown, agents working). Everything is simulation: real money stays blocked.

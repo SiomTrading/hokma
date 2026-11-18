@@ -32,4 +32,6 @@ export const desksApi = {
   },
   /** Creates the desk. The answer carries at least the new `id`. */
   create: (payload: CreateDeskPayload) => api.post<{ id: number }>("/api/desks", payload),
+  /** Deletes the desk: its folder goes to the Trash and can be restored. Agents and conversations stay. */
+  remove: (id: number) => api.delete<{ id: number; trash_id: number | null }>(`/api/desks/${id}`),
 };

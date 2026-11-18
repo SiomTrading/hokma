@@ -51,8 +51,8 @@ session.
 ### Create it with Hokma
 
 This way opens the Hokma chat with a first message that asks for the desk. Hokma talks it over with you and proposes the
-values as text. **In this version it does not create anything.** When you agree on the values, create the desk with
-"From a template".
+values. When you agree, Hokma asks for your permission in the chat, showing what it will create, and creates the desk
+only after you approve. You can also ask it later to change a desk, and it asks for permission again. If you work in the "Do everything without asking" mode, Hokma creates or changes desks from the chat without asking for permission.
 
 ## Inside a desk
 

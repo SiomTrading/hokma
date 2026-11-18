@@ -326,6 +326,8 @@
   "desks.err.bad_token": "Invalid session token.",
   "desks.err.bad_symbol": "One of the symbols is not valid.",
   "desks.err.bad_connection": "That connection does not exist.",
+  "desks.err.delete_failed": "The desk could not be deleted. Its files are where they were.",
+  "desks.trash_reason": "Deleted desk: {name}",
   "desks.err.desk_archived": "That desk is archived.",
   "desks.err.desk_budget_exhausted": "This desk used its weekly token budget. Raise the budget or wait for the next week.",
   "desks.budget.warn": "Desk {name} reached {pct}% of its weekly token budget ({used} of {budget}).",

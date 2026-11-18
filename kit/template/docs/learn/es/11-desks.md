@@ -54,7 +54,8 @@ dentro de la sesión.
 ### Créala con Hokma
 
 Este camino abre el chat de Hokma con un primer mensaje que pide la mesa. Hokma lo conversa contigo y propone los
-valores en texto. **En esta versión no crea nada.** Cuando acuerden los valores, crea la mesa con "Desde una plantilla".
+valores. Cuando acuerden, Hokma te pide permiso en el chat, mostrando lo que va a crear, y crea la mesa solo si lo
+apruebas. Después también puedes pedirle que cambie una mesa y te pedirá permiso otra vez. Si trabajas en el modo "Hacer todo sin preguntar", Hokma crea o cambia mesas desde el chat sin pedir permiso.
 
 ## Dentro de una mesa
 

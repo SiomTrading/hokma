@@ -326,6 +326,8 @@
   "desks.err.bad_token": "Token de sesión no válido.",
   "desks.err.bad_symbol": "Uno de los símbolos no es válido.",
   "desks.err.bad_connection": "Esa conexión no existe.",
+  "desks.err.delete_failed": "No se pudo eliminar la mesa. Sus archivos siguen donde estaban.",
+  "desks.trash_reason": "Mesa eliminada: {name}",
   "desks.err.desk_archived": "Esa mesa está archivada.",
   "desks.err.desk_budget_exhausted": "Esta mesa gastó su presupuesto semanal de tokens. Sube el presupuesto o espera a la próxima semana.",
   "desks.budget.warn": "La mesa {name} llegó al {pct}% de su presupuesto semanal de tokens ({used} de {budget}).",

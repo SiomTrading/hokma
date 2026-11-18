@@ -413,6 +413,16 @@ def desk_list(u, c: Caller, a: dict) -> str:
     return _dump([{"id": r["id"], "name": r["name"], "status": r["status"]} for r in rows])
 
 
+def _desk_out(desk: dict) -> dict:
+    """What the desk tools return: the desk, its assets as symbols, its team and the state of the weekly budget."""
+    budget = desk["budget"]
+    out = {k: desk[k] for k in DESK_KEYS if k in desk}
+    out["assets"] = [x["symbol"] for x in desk["assets"]]
+    out["agents"] = [{k: x[k] for k in ("agent_slug", "name", "role", "model", "active")} for x in desk["agents"]]
+    out["budget"] = {k: budget[k] for k in ("starts_at", "ends_at", "token_budget", "used", "pct", "state")}
+    return out
+
+
 def desk_show(u, c: Caller, a: dict) -> str:
     """One desk: mandate, capital, assets, team with the model of the desk and the state of the weekly budget.
 
@@ -427,13 +437,80 @@ def desk_show(u, c: Caller, a: dict) -> str:
             raise ValueError("the active project is not a desk; pass desk_id (see desk_list)")
     elif own is not None and desk_id != own:
         raise LookupError(f"desk {desk_id} is not the desk of this project; only desk {own} can be read here")
-    desk = _desk_call(service.get_desk, desk_id)
-    budget = desk["budget"]
-    out = {k: desk[k] for k in DESK_KEYS if k in desk}
-    out["assets"] = [x["symbol"] for x in desk["assets"]]
-    out["agents"] = [{k: x[k] for k in ("agent_slug", "name", "role", "model", "active")} for x in desk["agents"]]
-    out["budget"] = {k: budget[k] for k in ("starts_at", "ends_at", "token_budget", "used", "pct", "state")}
-    return _dump(out)
+    return _dump(_desk_out(_desk_call(service.get_desk, desk_id)))
+
+
+DESK_TEMPLATES = ["minimal", "standard", "debate"]
+DESK_CHIEF = "desk-chief"
+
+
+def _name_taken(name: str, except_id: int | None = None) -> None:
+    """A desk name is unique among the desks that are not archived (the app does not check it; the chat does, so a
+    request repeated by mistake does not leave two desks with one name)."""
+    from hokma.desks import service
+
+    wanted = " ".join(name.split()).casefold()
+    for row in _desk_call(service.list_desks):
+        if row["id"] != except_id and " ".join(row["name"].split()).casefold() == wanted:
+            raise ValueError(f"a desk named '{row['name']}' already exists (id {row['id']}); choose another name")
+
+
+def desk_create(u, c: Caller, a: dict) -> str:
+    """Create a desk with the same service as POST /api/desks. The owner has already approved the request in the
+    chat (the permission prompt shows these arguments); nothing runs before that answer."""
+    from hokma.desks import service
+
+    if c.agent == DESK_CHIEF:
+        raise LookupError("a desk chief cannot create desks")
+    name = a["name"]
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("name must be a non-empty text")
+    _desk_call(service.check_symbols, a.get("assets"))
+    _name_taken(name)
+    desk = _desk_call(lambda: service.create_desk(
+        name, a["capital"], template=a.get("template", "standard"), mandate=a.get("mandate"),
+        assets=a.get("assets"), token_budget=a.get("token_budget")))
+    return _dump(_desk_out(desk))
+
+
+def desk_configure(u, c: Caller, a: dict) -> str:
+    """Change one desk with the same service as the app: name, capital, assets, mandate, weekly token budget and the
+    model of one agent of its team. Only the fields given change. A desk chief (or any caller working inside a desk)
+    can change only its own desk. Everything is checked before the first change, so a bad field changes nothing."""
+    from hokma.db.repos import desks as repo
+    from hokma.desks import service
+    from hokma.desks.errors import DeskError
+
+    desk_id = a["desk_id"]
+    own = _own_desk_id(c)
+    if c.agent == DESK_CHIEF and own is None:
+        raise LookupError("a desk chief changes only the desk of its project, and this task has none")
+    if own is not None and desk_id != own:
+        raise LookupError(f"desk {desk_id} is not the desk of this project; only desk {own} can be changed here")
+    if ("agent" in a) != ("model" in a):
+        raise ValueError("agent and model go together: give both to change the model of an agent")
+    changes = {k: a[k] for k in ("name", "capital", "mandate", "token_budget") if k in a}
+    if not changes and "assets" not in a and "agent" not in a:
+        raise ValueError("nothing to change: give name, capital, assets, mandate, token_budget or agent with model")
+    current = _desk_call(service.get_desk, desk_id)
+    if "name" in changes:
+        if not isinstance(changes["name"], str) or not changes["name"].strip():
+            raise ValueError("name must be a non-empty text")
+        _name_taken(changes["name"], except_id=desk_id)
+    if "assets" in a:
+        _desk_call(service.validate_assets, a["assets"])
+    if "agent" in a:
+        if a["agent"] not in {x["agent_slug"] for x in current["agents"]}:
+            raise LookupError(DeskError("agent_not_in_desk", 404).message)
+        if a["model"] not in repo.MODELS:
+            raise LookupError(DeskError("bad_model", 400).message)
+    if changes:
+        _desk_call(service.update_desk, desk_id, changes)
+    if "assets" in a:
+        _desk_call(service.set_assets, desk_id, a["assets"])
+    if "agent" in a:
+        _desk_call(lambda: service.set_agent(desk_id, a["agent"], model=a["model"]))
+    return _dump(_desk_out(_desk_call(service.get_desk, desk_id)))
 
 
 # -------------------------------------------------------------------------------------------- documents
@@ -576,7 +653,8 @@ def bug_list(u, c: Caller, a: dict) -> str:
 
 Handler = Callable[[Any, Caller, dict], str]
 # these open their own database units
-NO_UNIT = {"project_create", "agent_save", "skill_save", "skill_install", "desk_list", "desk_show"}
+NO_UNIT = {"project_create", "agent_save", "skill_save", "skill_install", "desk_list", "desk_show",
+         "desk_create", "desk_configure"}
 TASK_ID = {"task_id": _i("Task id.")}
 
 TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
@@ -616,8 +694,29 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
                   False),
     "desk_show": ("Show one money desk: mandate, simulated capital, assets, team with the model of this desk and the "
                   "state of the weekly token budget. Without desk_id it is the desk of the active project. Read only: "
-                  "no tool changes a desk.", {"desk_id": _i("Desk id; default: the desk of the active project.")}, [],
+                  "desk_create and desk_configure change desks.", {"desk_id": _i("Desk id; default: the desk of the active project.")}, [],
                   desk_show, False),
+    "desk_create": ("Create a money desk (simulation only) with the same logic as the app's Create desk. The owner is "
+                    "asked for permission first and sees these values: propose them in the chat before you call. "
+                    "template: minimal, standard (default) or debate. capital is the simulated capital. assets is a "
+                    "list of market symbols (NQ, ES...). token_budget is the optional weekly token cap; without it "
+                    "the desk has no cap of its own. Returns the desk with its team.", {
+        "name": _s("Desk name, 1 to 80 characters, not used by another desk."),
+        "capital": _i("Simulated capital, a whole number."),
+        "template": _s("minimal, standard (default) or debate.", enum=DESK_TEMPLATES),
+        "assets": {"type": "array", "items": {"type": "string"}, "description": "Market symbols of the desk."},
+        "mandate": _s("What the desk is for and its rules, up to 4000 characters."),
+        "token_budget": _i("Weekly token budget, optional.")}, ["name", "capital"], desk_create, True),
+    "desk_configure": ("Change a money desk: only the fields you give change. The owner is asked for permission first "
+                       "and sees the change. To change the model of one agent of the desk give agent (its slug) and "
+                       "model together. A desk chief can change only its own desk.", {
+        "desk_id": _i("Desk id (see desk_list)."), "name": _s("New name, not used by another desk."),
+        "capital": _i("New simulated capital."),
+        "assets": {"type": "array", "items": {"type": "string"}, "description": "The new list of symbols (replaces it)."},
+        "mandate": _s("New mandate."), "token_budget": _i("New weekly token budget."),
+        "agent": _s("Slug of an agent of the desk, with model."),
+        "model": _s("haiku, sonnet or opus; with agent.", enum=["haiku", "sonnet", "opus"])}, ["desk_id"],
+                       desk_configure, True),
     "journal_write": ("Write an entry in the journal.", {
         "kind": _s("For example action, note, alert."), "title": _s(), "outcome": _s("info, success, failure..."),
         "body": _s(), "task_id": _i(), "project_id": _i()}, ["kind", "title"], journal_write, True),

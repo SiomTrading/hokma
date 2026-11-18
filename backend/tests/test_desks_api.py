@@ -53,7 +53,7 @@ ROUTES = [("get", "/api/desks"), ("post", "/api/desks"), ("get", "/api/desks/tem
           ("put", "/api/desks/1/connections/coinbase"), ("get", "/api/desks/1/agents"),
           ("post", "/api/desks/1/agents"), ("put", "/api/desks/1/agents/hugo"),
           ("delete", "/api/desks/1/agents/hugo"), ("get", "/api/desks/1/usage"),
-          ("post", "/api/desks/1/conversation")]
+          ("post", "/api/desks/1/conversation"), ("delete", "/api/desks/1")]
 
 
 @pytest.mark.parametrize("method,path", ROUTES)
@@ -154,7 +154,8 @@ def test_patch_errors_and_archive(client):
     assert client.patch(f"/api/desks/{desk_id}", json={"status": "archived"}).json()["status"] == "archived"
     assert client.get("/api/desks").json()["desks"] == []
     assert len(client.get("/api/desks?include_archived=true").json()["desks"]) == 1
-    assert client.delete(f"/api/desks/{desk_id}").status_code == 405                  # desks are never deleted
+    assert client.delete(f"/api/desks/{desk_id}").status_code == 200                  # archived or not, it can be deleted
+    assert client.get(f"/api/desks/{desk_id}").status_code == 404
 
 
 def test_assets_are_replaced_validated_and_capped_at_twenty(client):

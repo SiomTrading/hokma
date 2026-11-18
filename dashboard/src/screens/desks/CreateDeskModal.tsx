@@ -11,8 +11,8 @@ type Shell = ReturnType<typeof useShell>;
 type Translate = ReturnType<typeof useI18n>["t"];
 
 /**
- * "Create it with Hokma": opens a new chat with a first message that asks for the desk, and says so. In this version
- * Hokma talks and proposes in text, it does not create anything, so the notice points to the template path.
+ * "Create it with Hokma": opens a new chat with a first message that asks for the desk, and says so. Hokma
+ * proposes the values in the chat and creates the desk once the owner approves its permission request.
  */
 export function askHokmaForDesk(shell: Shell, t: Translate): void {
   const draft = newDraftId();

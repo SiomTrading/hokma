@@ -218,7 +218,7 @@ describe("creating a desk", () => {
       const boxes = screen.getAllByPlaceholderText(t("chat.composer.placeholder")) as HTMLTextAreaElement[];
       expect(boxes.some((box) => box.value.includes("mesa de dinero"))).toBe(true);
     });
-    expect(await screen.findByText(/no crea la mesa/)).toBeInTheDocument();
+    expect(await screen.findByText(t("desks.hokma.toast"))).toBeInTheDocument();
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

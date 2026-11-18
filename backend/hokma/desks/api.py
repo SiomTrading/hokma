@@ -15,7 +15,6 @@ from hokma.db import DbError
 from hokma.desks import budget, service
 from hokma.desks.errors import DeskError
 from hokma.i18n import t
-from hokma.market.yahoo import valid_symbol
 from hokma.rpc.ws import SESSION_TOKEN
 
 
@@ -86,16 +85,6 @@ class ConnectionChoice(BaseModel):
     enabled: Any
 
 
-def _check_symbols(values: Any) -> None:
-    """Each symbol must have the shape the market routes accept. A list that is not a list is the service's error."""
-    if not isinstance(values, (list, tuple)):
-        return
-    for item in values:
-        symbol = item.get("symbol") if isinstance(item, dict) else item
-        if not isinstance(symbol, str) or not valid_symbol(symbol.strip()):
-            raise DeskError("bad_symbol", 400)
-
-
 # ---- fund -----------------------------------------------------------------------------------
 
 @router.get("/api/desks")
@@ -105,7 +94,7 @@ def list_desks(include_archived: bool = Query(default=False)) -> dict:
 
 @router.post("/api/desks", status_code=201)
 def create_desk(body: NewDesk) -> dict:
-    _check_symbols(body.assets)
+    service.check_symbols(body.assets)
     return service.create_desk(body.name, body.capital, focus=body.focus, template=body.template,
                                objective_pct=body.objective_pct, mandate=body.mandate, assets=body.assets,
                                token_budget=body.token_budget)
@@ -128,9 +117,14 @@ def update_desk(desk_id: int, body: DeskChanges) -> dict:
     return service.update_desk(desk_id, body.model_dump(exclude_unset=True))
 
 
+@router.delete("/api/desks/{desk_id}")
+def delete_desk(desk_id: int) -> dict:
+    return service.delete_desk(desk_id)
+
+
 @router.put("/api/desks/{desk_id}/assets")
 def set_assets(desk_id: int, body: Assets) -> dict:
-    _check_symbols(body.assets)
+    service.check_symbols(body.assets)
     return {"assets": service.set_assets(desk_id, body.assets)}
 
 

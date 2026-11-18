@@ -190,6 +190,12 @@ class DesksRepo(Repo):
             self.s.update("desk_agents", {"desk_id": desk_id, "agent_slug": agent_slug}, values)
         return self.get_agent(desk_id, agent_slug)
 
+    def delete(self, id: int) -> None:
+        """The desk row; its team, assets and connections go with it (ON DELETE CASCADE). Agents are never touched."""
+        desk = self.get(id)
+        self.s.execute("UPDATE journal_entries SET project_id = NULL WHERE project_id = :p", {"p": desk.project_id})
+        self.s.execute("DELETE FROM desks WHERE id = :id", {"id": id})
+
     def remove_agent(self, desk_id: int, agent_slug: str) -> None:
         self.get_agent(desk_id, agent_slug)
         self.s.execute("DELETE FROM desk_agents WHERE desk_id = :d AND agent_slug = :a",

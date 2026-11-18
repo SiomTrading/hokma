@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cx, ErrorState, Loading, Pill } from "@/design";
+import { Button, cx, ErrorState, Loading, Pill } from "@/design";
 import { useI18n } from "@/i18n";
 import { deskConfigApi, failText } from "../configApi";
 import { CONFIG_SECTIONS } from "../configTypes";
 import type { ConfigSection, DeskDetail } from "../configTypes";
+import { DeleteDeskModal } from "../DeleteDeskModal";
 import { DeskEmptyState } from "../EmptyState";
 import { AssetsSection } from "./config/AssetsSection";
 import { ConnectionsSection } from "./config/ConnectionsSection";
@@ -19,6 +20,7 @@ export function ConfigTab({ desk }: TabProps) {
   const [section, setSection] = useState<ConfigSection>("objective");
   const [detail, setDetail] = useState<DeskDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const ticket = useRef(0);
 
   const load = useCallback(() => {
@@ -73,7 +75,15 @@ export function ConfigTab({ desk }: TabProps) {
         {section === "accounts" ? (
           <DeskEmptyState icon="shield" title={t("desks.cfg.accounts.title")} text={t("desks.cfg.accounts.text")} when={t("desks.cfg.accounts.when")} />
         ) : null}
+        <section className="desk-danger" aria-label={t("desks.delete.zone")}>
+          <h3 className="lbl">{t("desks.delete.zone")}</h3>
+          <p className="p">{t("desks.delete.zoneText")}</p>
+          <Button variant="danger" onClick={() => setDeleting(true)}>
+            {t("desks.delete.button")}
+          </Button>
+        </section>
       </div>
+      {deleting ? <DeleteDeskModal desk={desk} onClose={() => setDeleting(false)} /> : null}
     </div>
   );
 }

@@ -35,7 +35,7 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "journal_write", "journal_search", "ips_read", "decision_propose", "decision_list", "schedule_create",
                 "schedule_list", "extension_request", "agents_list", "agent_save", "skill_save", "skill_install", "bug_report",
                 "bug_update", "bug_list", "docs_search", "docs_list", "notify_owner",
-                "desk_list", "desk_show", "trash_move"}
+                "desk_list", "desk_show", "desk_create", "desk_configure", "trash_move"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]
     assert all(t["inputSchema"]["additionalProperties"] is False for t in listed)
@@ -606,13 +606,14 @@ def call(name, args, caller):
     return (json.loads(text) if not is_error else text), is_error
 
 
-def test_desk_tools_are_declared_read_only_with_strict_schemas():
+def test_desk_tools_are_declared_with_strict_schemas():
     for name in ("desk_list", "desk_show"):
         assert hokma_tools.TOOLS[name][4] is False
     listed = {d["name"]: d for d in hokma_tools.definitions()}
     assert listed["desk_list"]["inputSchema"]["properties"] == {}
     assert listed["desk_show"]["inputSchema"]["required"] == []
-    assert not [n for n in hokma_tools.TOOLS if n.startswith("desk_") and hokma_tools.TOOLS[n][4]]
+    assert {n for n in hokma_tools.TOOLS if n.startswith("desk_") and hokma_tools.TOOLS[n][4]} == {
+        "desk_create", "desk_configure"}
 
 
 def test_desk_list_gives_id_name_and_status_and_leaves_archived_out(two_desks, db):

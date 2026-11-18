@@ -23,7 +23,7 @@ DESK_AGENTS = {
 CHIEF_FORBIDDEN = {"Agent", "Bash", "Write", "Edit", "mcp__hokma__agent_save", "mcp__hokma__skill_save",
                    "mcp__hokma__skill_install", "mcp__hokma__extension_request", "mcp__hokma__schedule_create",
                    "mcp__hokma__schedule_list", "mcp__hokma__bug_report", "mcp__hokma__bug_update",
-                   "mcp__hokma__bug_list", "mcp__hokma__trash_move", "mcp__hokma__project_create"}
+                   "mcp__hokma__bug_list", "mcp__hokma__trash_move", "mcp__hokma__project_create", "mcp__hokma__desk_create"}
 DESK_FILES = [AGENTS / f"{slug}.md" for slug in DESK_AGENTS] + [TEMPLATE / "desks" / "CLAUDE.desk.md"]
 
 

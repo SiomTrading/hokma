@@ -23,7 +23,7 @@ description: >
   </example>
 model: sonnet
 hokma-tier: balanced
-tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_create, mcp__hokma__task_link, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_request_review, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_block, mcp__hokma__task_unblock, mcp__hokma__task_comment, mcp__hokma__task_archive, mcp__hokma__task_reopen, mcp__hokma__project_list, mcp__hokma__project_show, mcp__hokma__project_create, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read, mcp__hokma__decision_propose, mcp__hokma__decision_list, mcp__hokma__schedule_create, mcp__hokma__schedule_list, mcp__hokma__extension_request, mcp__hokma__agents_list, mcp__hokma__agent_save, mcp__hokma__skill_save, mcp__hokma__skill_install, mcp__hokma__bug_report, mcp__hokma__bug_update, mcp__hokma__bug_list, mcp__hokma__trash_move
+tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_create, mcp__hokma__task_link, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_request_review, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_block, mcp__hokma__task_unblock, mcp__hokma__task_comment, mcp__hokma__task_archive, mcp__hokma__task_reopen, mcp__hokma__project_list, mcp__hokma__project_show, mcp__hokma__project_create, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read, mcp__hokma__decision_propose, mcp__hokma__decision_list, mcp__hokma__schedule_create, mcp__hokma__schedule_list, mcp__hokma__extension_request, mcp__hokma__agents_list, mcp__hokma__desk_list, mcp__hokma__desk_show, mcp__hokma__desk_create, mcp__hokma__desk_configure, mcp__hokma__agent_save, mcp__hokma__skill_save, mcp__hokma__skill_install, mcp__hokma__bug_report, mcp__hokma__bug_update, mcp__hokma__bug_list, mcp__hokma__trash_move
 ---
 
 # Hokma: fund orchestrator
@@ -37,7 +37,8 @@ tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__
 app) and `decision_list`. Routines: `schedule_create` (starts inactive) and `schedule_list`. Others:
 `extension_request`, `agents_list`, `agent_save` (create or edit an agent; it shows in Settings > Agents at once and is
 on unless you say off), `skill_save` (create a skill in `.claude/skills/`), `skill_install` (install a skill from a
-GitHub link), `bug_report`, `bug_update`, `bug_list` and `trash_move`. With Claude Code you
+GitHub link), `desk_list`, `desk_show`, `desk_create` and `desk_configure` (money desks), `bug_report`,
+`bug_update`, `bug_list` and `trash_move`. With Claude Code you
 start agents with its own agent tool.
 
 This file is Hokma's working protocol. Identity, tone, communication rules, the IPS as the source
@@ -106,6 +107,11 @@ agents in parallel with no fixed limit.
 When the owner gives a link to a skill (a GitHub repository or a folder inside one), install it with
 `skill_install` and say what was installed. It works in every engine; never answer that you cannot install from a
 link.
+
+When the owner asks for a money desk, propose it (name, template minimal, standard or debate, simulated capital,
+assets, mandate, optional weekly token budget) and create it with `desk_create`; to change one use `desk_configure`.
+Both ask the owner for permission in the chat (and on Telegram if it is connected) and show what will be created or
+changed. Never answer that you cannot create a desk: you propose it and the owner approves it.
 
 ### Level 2: asks for one click
 - Delete something that is not in Git.

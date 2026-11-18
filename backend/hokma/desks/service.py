@@ -24,6 +24,7 @@ from hokma.docs import diskfolders
 from hokma.i18n import t
 from hokma.kit import safefs
 from hokma.kit.integrity import app_root
+from hokma.market.yahoo import valid_symbol
 from hokma.projects import gitops
 from hokma.projects import service as projects
 from hokma.projects.errors import ProjectError
@@ -120,6 +121,23 @@ def _assets(values: Any) -> list[tuple[str, str | None]]:
         seen.add(symbol.strip())
         out.append((symbol.strip(), note))
     return out
+
+
+def check_symbols(values: Any) -> None:
+    """Each symbol must have the shape the market routes accept. A list that is not a list is `_assets`' error.
+    Shared by the desks API and the chat tools, so both refuse the same symbols."""
+    if not isinstance(values, (list, tuple)):
+        return
+    for item in values:
+        symbol = item.get("symbol") if isinstance(item, dict) else item
+        if not isinstance(symbol, str) or not valid_symbol(symbol.strip()):
+            raise DeskError("bad_symbol", 400)
+
+
+def validate_assets(values: Any) -> None:
+    """Everything `set_assets` checks, without writing: lets a caller refuse a bad list before it changes anything else."""
+    check_symbols(values)
+    _assets(values)
 
 
 # ---- views -----------------------------------------------------------------------------------
@@ -305,11 +323,51 @@ def _turn_on_desk_agents(chosen: template_data.DeskTemplate, database: Database)
             log.warning("desk agent %s could not be turned on: %s", slug, exc)
 
 
+# ---- delete ----------------------------------------------------------------------------------
+
+def delete_desk(desk_id: int, db: Database | None = None) -> dict[str, Any]:
+    """Delete a desk: its folder goes to the Trash (restorable); the desk row, its team assignments, assets and
+    connections and its project row are removed. Conversations stay in the history (their project becomes none) and
+    the student's agents are not touched. The folder moves first: if the database step fails the folder is put back."""
+    from hokma.kit.settings import protected_paths
+    from hokma.permissions import trash
+
+    database = _db(db)
+    with projects._LOCK:
+        with database.read() as u:
+            desk = _desk(u, desk_id)
+            project = u.projects.get(desk.project_id)
+            name = desk.name
+        root = projects.projects_root(database)
+        folder = Path(project.path)
+        item_id: int | None = None
+        if os.path.lexists(folder):
+            try:
+                moved = trash.move([str(folder)], t("desks.trash_reason", name=name), db=database,
+                                   roots=[str(root)], protect=[str(p) for p in protected_paths()], cwd=str(root),
+                                   project_id=None)
+            except trash.TrashError as exc:
+                raise DeskError("delete_failed", 500) from exc
+            item_id = moved[0]["id"]
+        try:
+            with database.write() as u:
+                u.desks.delete(desk_id)
+                u.projects.delete(project.id)
+        except DbError as exc:
+            if item_id is not None:
+                try:
+                    trash.restore(database, item_id, protect=[str(p) for p in protected_paths()])
+                except trash.TrashError as back:
+                    log.warning("desk folder could not be put back: %s", back.message)
+            raise DeskError("db_failed", 500) from exc
+    return {"id": desk_id, "name": name, "trash_id": item_id}
+
+
 # ---- update ----------------------------------------------------------------------------------
 
 def update_desk(desk_id: int, changes: dict[str, Any], db: Database | None = None) -> dict[str, Any]:
     """`changes` holds only the fields to change: name, focus, capital, objective_pct, mandate, token_budget,
-    status. Archiving is `status='archived'`; nothing is ever deleted."""
+    status. Archiving is `status='archived'`; deleting is `delete_desk`."""
     database = _db(db)
     values: dict[str, Any] = {}
     if "name" in changes:
