@@ -52,8 +52,10 @@ class Harness:
         self.clock = now or (lambda: 0.0)
         self.stderr = io.StringIO()
         self.log = EngineLog(tmp_path / "logs" / "engine.log", (TOKEN,))
+        self.safe: list[bool] = []                   # what the supervisor asked to remember (never the real data folder)
         self.sup = Supervisor(port=1234, token=TOKEN, argv=lambda: ["engine"], log=self.log, stderr=self.stderr,
                               popen=self.popen, clock=self.clock, sleep=self.sleeps.append,
+                              safe_mode=lambda: bool(self.safe), enter_safe_mode=lambda: self.safe.append(True),
                               needs_handover=needs_handover, handover=handover, owner_secret_hash=owner_secret_hash)
 
     def popen(self, argv, **kwargs):
@@ -72,14 +74,31 @@ def test_restart_code_relaunches_at_once_with_the_same_token(tmp_path, monkeypat
     assert t("supervisor.restarting") in h.stderr.getvalue()
 
 
-def test_crashes_wait_1_2_4_seconds_and_the_fourth_stops(tmp_path):
+def test_crashes_wait_1_2_4_seconds_and_the_fourth_starts_safe_mode(tmp_path):
     h = Harness(tmp_path, [1, 1, 1, 1, 0])
-    assert h.sup.run() == 1
-    assert len(h.launched) == MAX_CRASHES and h.sleeps == list(BACKOFF_SECONDS)
+    assert h.sup.run() == 0                                               # the fifth engine (safe mode) stayed up
+    assert len(h.launched) == MAX_CRASHES + 1 and h.sleeps == list(BACKOFF_SECONDS)
+    assert h.safe == [True]
     log = h.log.path.read_text()
-    assert log.count("engine crashed") == 4 and f"stopping: {MAX_CRASHES} crashes in 60 s" in log
+    assert "safe mode: 4 crashes in 60 s" in log and "stopping" not in log
+    assert t("supervisor.safe_mode") in h.stderr.getvalue()
+
+
+def test_four_more_crashes_in_safe_mode_stop_the_supervisor(tmp_path):
+    h = Harness(tmp_path, [1] * 8 + [0])
+    assert h.sup.run() == 1
+    assert len(h.launched) == 2 * MAX_CRASHES and h.safe == [True]       # safe mode is entered once
+    log = h.log.path.read_text()
+    assert log.count("engine crashed") == 8 and f"stopping: {MAX_CRASHES} crashes in 60 s" in log
+    assert "already in safe mode" in log and "Start Hokma again" not in log
     assert "Traceback boom" in log and TOKEN not in log                  # the reason, never the token
     assert t("supervisor.gave_up", path=h.log.path) in h.stderr.getvalue()
+
+
+def test_a_native_crash_code_is_written_in_hex(tmp_path):
+    h = Harness(tmp_path, [3221225477] * 4 + [0])
+    assert h.sup.run() == 0
+    assert "(last code 0xC0000005)" in h.log.path.read_text()
 
 
 def test_crashes_more_than_a_minute_apart_do_not_add_up(tmp_path):

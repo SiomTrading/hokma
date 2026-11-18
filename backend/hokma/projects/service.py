@@ -1,5 +1,6 @@
 """Project logic: folders on disk, rows in the database (`projects`, `attachments`) and the project's own Git."""
 import hashlib
+import logging
 import os
 import threading
 import wave
@@ -25,6 +26,7 @@ TREE_MAX_ENTRIES = 2000
 PREVIEW_TEXT_BYTES = 200 * 1024
 HIDDEN = {".git", ".gitkeep"}
 _LOCK = threading.RLock()
+log = logging.getLogger("hokma.projects")
 
 
 def _db(db: Database | None) -> Database:
@@ -248,6 +250,56 @@ def rename_project(project_id: int, name: str, db: Database | None = None) -> di
     with database.write() as u:
         row = u.projects.update(project_id, name=name)
     return _public(row, active_id(database))
+
+
+# ---- delete ---------------------------------------------------------------------------------
+
+def delete_project(project_id: int, db: Database | None = None) -> dict[str, Any]:
+    """Delete a project: its folder goes to the Trash (restorable) and its row goes. Conversations stay in the history
+    (their project becomes none). "General" (the working folder) and the folder of a desk are refused: a desk is deleted
+    from the desk. When the active project goes, the app goes back to General. The folder moves first; if the database
+    step fails the folder is put back."""
+    from hokma.kit.settings import protected_paths
+    from hokma.permissions import trash
+
+    database = _db(db)
+    with _LOCK:
+        project = _row(database, project_id)
+        folder = Path(project.path)
+        with database.read() as u:
+            is_desk = u.desks.by_project(project_id) is not None
+            has_history = bool(u.projects.s.query(
+                "SELECT 1 FROM journal_entries WHERE project_id = :p LIMIT 1", {"p": project_id}))
+        if os.path.normpath(str(folder)) == os.path.normpath(str(workdir(database))):
+            raise ProjectError("delete_general", 400)
+        if is_desk:
+            raise ProjectError("delete_desk", 409)
+        if has_history:
+            raise ProjectError("delete_has_journal", 409)
+        root = projects_root(database)
+        item_id: int | None = None
+        if os.path.lexists(folder):
+            try:
+                moved = trash.move([str(folder)], t("projects.trash_reason", name=project.name), db=database,
+                                   roots=[str(root)], protect=[str(p) for p in protected_paths()], cwd=str(root),
+                                   project_id=None)
+            except trash.TrashError as exc:
+                raise ProjectError("delete_failed", 500) from exc
+            item_id = moved[0]["id"]
+        was_active = active_id(database) == project_id
+        try:
+            with database.write() as u:
+                if was_active:
+                    u.profile.set_no_active_project()
+                u.projects.delete(project_id)
+        except DbError as exc:
+            if item_id is not None:
+                try:
+                    trash.restore(database, item_id, protect=[str(p) for p in protected_paths()])
+                except trash.TrashError as back:
+                    log.warning("project folder could not be put back: %s", back.message)
+            raise ProjectError("db_failed", 500) from exc
+    return {"id": project_id, "name": project.name, "trash_id": item_id, "was_active": was_active}
 
 
 # ---- tree and files -------------------------------------------------------------------------

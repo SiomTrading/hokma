@@ -160,11 +160,12 @@
 }
 
 /* Terminal: list on the left, chart in the center, chief chat on the right (full height), positions under list and chart */
-.dterm { flex: 1; min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr) var(--chat-w, 380px); grid-template-rows: minmax(0, 1fr) 170px; gap: 10px; }
-.dterm.folded { grid-template-rows: minmax(0, 1fr) 46px; }
+.dterm { flex: 1; min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr) var(--chat-w, 380px); grid-template-rows: minmax(260px, 1fr) 170px; gap: 10px; overflow-y: auto; }
+.dterm.folded { grid-template-rows: minmax(260px, 1fr) 46px; }
 .dterm-whole { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
 .dterm-list, .dterm-chart, .dterm-chat, .dterm-positions { display: flex; flex-direction: column; }
-.dterm-list { grid-column: 1; grid-row: 1; }
+.dterm-list { grid-column: 1; grid-row: 1; min-height: 0; overflow: hidden; }
+.dterm-rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .dterm-chart { grid-column: 2; grid-row: 1; }
 .dterm-split { grid-column: 3; grid-row: 1 / span 2; justify-self: start; width: 10px; margin-left: -10px; cursor: col-resize; touch-action: none; position: relative; z-index: 1; }
 .dterm-split::after { content: ""; position: absolute; left: 4px; width: 2px; top: 0; bottom: 0; border-radius: 2px; background: transparent; transition: background 150ms ease; }
@@ -196,7 +197,7 @@
 .dterm-asset:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
 .dterm-add { padding: 6px 8px; border-bottom: 1px solid var(--border); max-height: 280px; overflow-y: auto; flex-shrink: 0; }
 .dterm-add-error { padding: 6px 10px; font-size: 12px; }
-.dterm-quote { margin-top: auto; padding: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.dterm-quote { flex: none; margin-top: auto; padding: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
 .dterm-quote-px { font-size: 22px; color: var(--t1); }
 .dterm-chart-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .dterm-center { flex: 1; display: flex; align-items: center; justify-content: center; }

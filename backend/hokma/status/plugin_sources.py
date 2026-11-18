@@ -9,6 +9,7 @@ import json
 import urllib.error
 import urllib.request
 
+from hokma.core import tls
 from hokma.i18n import t
 from hokma.kit import extensions
 from hokma.status import catalog
@@ -31,7 +32,7 @@ def fetch_json(url: str) -> object | None:
     """The JSON at `url`, or None when the file does not exist (404). Raises SourceError for anything else."""
     request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "hokma"})
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with tls.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             data = response.read(MAX_BYTES + 1)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:

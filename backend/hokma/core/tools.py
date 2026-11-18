@@ -29,6 +29,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
+from hokma.core import tls
 from hokma.core.config import hokma_data_dir
 from hokma.core.pyhome import is_link
 
@@ -162,7 +163,7 @@ def download(url: str, dest: Path) -> str:
     for _ in range(RETRIES):
         digest = hashlib.sha256()
         try:
-            with urllib.request.urlopen(url, timeout=TIMEOUT) as response, open(dest, "wb") as out:   # noqa: S310
+            with tls.urlopen(url, timeout=TIMEOUT) as response, open(dest, "wb") as out:   # noqa: S310
                 while True:
                     block = response.read(CHUNK)
                     if not block:

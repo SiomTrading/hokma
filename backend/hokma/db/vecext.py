@@ -10,9 +10,12 @@ import sqlite3
 import struct
 from dataclasses import dataclass
 
+from hokma.core import nativeprobe
+
 NO_LOAD_EXTENSION = "no_load_extension"      # this Python cannot load SQLite extensions at all: no fix by retrying
 MODULE_MISSING = "module_missing"            # the `sqlite_vec` package is not installed: no fix by retrying
 LOAD_FAILED = "load_failed"                  # the library exists but did not load (blocked file, wrong build): retry
+NATIVE_OFF = "native_off"                    # its probe child died or hung on this computer (or safe mode): off until an update
 
 
 @dataclass(frozen=True)
@@ -35,7 +38,7 @@ def _load(conn: sqlite3.Connection) -> None:
 
 def load_into(conn: sqlite3.Connection) -> bool:
     """Load the extension into `conn`; False (never an exception) when it is not available."""
-    if not hasattr(conn, "enable_load_extension"):
+    if not hasattr(conn, "enable_load_extension") or not nativeprobe.allowed(nativeprobe.SQLITE_VEC):
         return False
     try:
         _load(conn)
@@ -45,7 +48,15 @@ def load_into(conn: sqlite3.Connection) -> bool:
 
 
 def check_support() -> VecSupport:
-    """Whether this Python can load `sqlite-vec` and run a nearest-vector query with it."""
+    """Whether this Python can load `sqlite-vec` and run a nearest-vector query with it. The first real load happens in a
+    child process (see `hokma.core.nativeprobe`): when that child dies, the extension stays off and nothing loads here."""
+    if not nativeprobe.allowed(nativeprobe.SQLITE_VEC):
+        return VecSupport(False, NATIVE_OFF, "the probe of sqlite-vec failed on this computer")
+    return smoke()
+
+
+def smoke() -> VecSupport:
+    """The smoke test itself, with no probe in front (it is what the probe child runs)."""
     if not hasattr(sqlite3.Connection, "enable_load_extension"):
         return VecSupport(False, NO_LOAD_EXTENSION, "sqlite3.Connection has no enable_load_extension")
     try:

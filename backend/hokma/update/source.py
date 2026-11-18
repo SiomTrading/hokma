@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from hokma.core import tls
 from hokma.i18n import t
 
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
@@ -82,7 +83,7 @@ class ManifestSource:
     def fetch(self) -> VersionManifest:
         try:
             if self.ref.startswith("https://"):
-                with urllib.request.urlopen(self.ref, timeout=30) as r:
+                with tls.urlopen(self.ref, timeout=30) as r:
                     data = r.read(MAX_MANIFEST_BYTES + 1)
             elif self.ref.startswith("http://"):
                 raise UpdateError(t("update.source_https_or_local"))

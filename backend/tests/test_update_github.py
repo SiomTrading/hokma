@@ -344,7 +344,7 @@ def test_package_that_does_not_match_the_sha_asset_is_not_extracted(monkeypatch,
     with_login(monkeypatch)
     monkeypatch.setattr(github, "_open", Net(good_routes(sha_line=f"{'0' * 64}  hokma-0.2.0.tar.gz\n")))
     seen = {}
-    monkeypatch.setattr(archive.urllib.request, "urlopen", lambda req, timeout: seen.setdefault("req", req) and Resp(PACKAGE_BYTES))
+    monkeypatch.setattr(archive.urllib.request, "urlopen", lambda req, timeout, context=None: seen.setdefault("req", req) and Resp(PACKAGE_BYTES))
     extracted = []
     monkeypatch.setattr(runner, "extract", lambda *a: extracted.append(a))
     with pytest.raises(UpdateError, match=t("update.package_sha_mismatch")):
@@ -370,7 +370,7 @@ def test_token_is_not_in_errors_repr_json_or_files(monkeypatch, tmp_path, capsys
     installed(monkeypatch, tmp_path)
     with_login(monkeypatch)
     monkeypatch.setattr(github, "_open", Net(good_routes(sha_line=f"{'0' * 64}  hokma-0.2.0.tar.gz\n")))
-    monkeypatch.setattr(archive.urllib.request, "urlopen", lambda req, timeout: Resp(PACKAGE_BYTES))
+    monkeypatch.setattr(archive.urllib.request, "urlopen", lambda req, timeout, context=None: Resp(PACKAGE_BYTES))
     manifest = github.GitHubReleaseSource().fetch()
     assert TOKEN not in repr(manifest) and TOKEN not in str(manifest)
     with pytest.raises(UpdateError) as exc:

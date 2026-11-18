@@ -12,6 +12,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from hokma.core import tls
 from hokma.market.cache import DiskCache, RateLimiter
 from hokma.market.errors import BAD_RESPONSE, NETWORK, RATE_LIMITED, UNKNOWN_SYMBOL, UPSTREAM, MarketError
 from hokma.market.models import Candle, Series, SessionPeriod, SymbolHit
@@ -46,7 +47,7 @@ def http_fetch(url: str) -> tuple[int, str]:
     """GET `url`. Returns (status, body). Raises MarketError(network) when nothing came back."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with tls.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             return response.status, response.read(MAX_BODY_BYTES).decode("utf-8", "replace")
     except urllib.error.HTTPError as error:
         try:

@@ -13,7 +13,6 @@ import http.client
 import ipaddress
 import re
 import socket
-import ssl
 import threading
 import time
 from dataclasses import dataclass
@@ -22,6 +21,7 @@ from typing import Callable
 from urllib.parse import unquote, urldefrag, urljoin, urlsplit
 
 from hokma import __version__
+from hokma.core.tls import outbound_context
 from hokma.docs import ingest
 from hokma.docs.readers import detect_format
 from hokma.projects.errors import ProjectError
@@ -74,7 +74,7 @@ class _PinnedHTTPS(http.client.HTTPSConnection):
     """TLS to the checked address, certificate verified against the original host name."""
 
     def __init__(self, host: str, address: str, port: int) -> None:
-        super().__init__(host, port, timeout=TIMEOUT_SECONDS, context=ssl.create_default_context())
+        super().__init__(host, port, timeout=TIMEOUT_SECONDS, context=outbound_context())
         self._address = address
 
     def connect(self) -> None:

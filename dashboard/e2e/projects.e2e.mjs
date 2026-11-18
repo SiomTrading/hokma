@@ -35,8 +35,8 @@ await runSuite("projects", { script: "serve.py" }, async ({ page, server, root, 
 
   // 1. the real list: the default project named after the fund and the one the server created
   await list.waitFor();
-  await list.getByRole("button", { name: /E2E Fund/ }).waitFor();
-  await list.getByRole("button", { name: /Strategy/ }).waitFor();
+  await list.getByRole("button", { name: /^E2E Fund/ }).waitFor();
+  await list.getByRole("button", { name: /^Strategy/ }).waitFor();
   assert.equal((await projects()).length, 2);
   await panel.getByText(msg("projects.workdir"), { exact: true }).waitFor();
   // long paths are shortened in the middle; the full path is the tooltip
@@ -58,7 +58,7 @@ await runSuite("projects", { script: "serve.py" }, async ({ page, server, root, 
   assert.equal(created.kind, "research");
   assert.ok(fs.existsSync(created.path), "the project folder exists on disk");
   assert.ok(fs.existsSync(path.join(created.path, ".git")), "the project has its own Git repository");
-  await list.getByRole("button", { name: /Research Notes/ }).waitFor();
+  await list.getByRole("button", { name: /^Research Notes/ }).waitFor();
 
   // 3. upload a file with the picker: saved in the folder, committed, and listed in the tree
   const note = path.join(root, "note.md");
@@ -102,22 +102,42 @@ await runSuite("projects", { script: "serve.py" }, async ({ page, server, root, 
   await rename.getByRole("button", { name: msg("projects.save"), exact: true }).click();
   await rename.waitFor({ state: "detached" });
   await toast(msg("projects.toast.renamed"));
-  await list.getByRole("button", { name: /Research Desk/ }).waitFor();
+  await list.getByRole("button", { name: /^Research Desk/ }).waitFor();
   assert.ok((await projects()).some((p) => p.name === "Research Desk"));
 
   // 7. switch the active project: the tree follows
-  await list.getByRole("button", { name: /Strategy/ }).click();
+  await list.getByRole("button", { name: /^Strategy/ }).click();
   await toast(msg("projects.toast.active", { name: "Strategy" }));
   await panel.getByRole("tree", { name: msg("projects.contents") }).getByRole("treeitem", { name: msg("projects.open", { name: "note.md" }) }).waitFor({ state: "detached" });
   assert.equal((await projects()).find((p) => p.active).name, "Strategy");
 
   // 8. reload: everything is still there, with Strategy active and the uploaded file in the renamed project
   await reloadWithHandoff(page);
-  await list.getByRole("button", { name: /Research Desk/ }).waitFor();
-  await list.getByRole("button", { name: /Strategy/ }).and(page.locator('[aria-current]')).waitFor();
+  await list.getByRole("button", { name: /^Research Desk/ }).waitFor();
+  await list.getByRole("button", { name: /^Strategy/ }).and(page.locator('[aria-current]')).waitFor();
   assert.equal((await projects()).find((p) => p.active).name, "Strategy");
   await panel.getByRole("tree", { name: msg("projects.contents") }).getByRole("treeitem", { name: msg("projects.open", { name: "note.md" }) }).waitFor({ state: "detached" });
-  await list.getByRole("button", { name: /Research Desk/ }).click();
+  await list.getByRole("button", { name: /^Research Desk/ }).click();
   await tree.getByRole("treeitem", { name: msg("projects.open", { name: "note.md" }) }).waitFor();
+
+  // 9. delete a project: the exact name is typed, the folder goes to the Trash (restoring it is covered by the backend tests), Strategy is untouched
+  const research = (await projects()).find((p) => p.name === "Research Desk");
+  const strategy = (await projects()).find((p) => p.name === "Strategy");
+  await list.getByRole("button", { name: msg("projects.options", { name: "Research Desk" }) }).click();
+  await page.getByRole("menuitem", { name: msg("projects.delete.button") }).click();
+  const remove = page.getByRole("alertdialog", { name: msg("projects.delete.title") });
+  const confirm = remove.getByRole("button", { name: msg("projects.delete.confirm"), exact: true });
+  await remove.getByLabel(msg("projects.delete.type", { name: "Research Desk" })).fill("research desk");
+  assert.ok(await confirm.isDisabled(), "a name that is not exact does not confirm");
+  await remove.getByLabel(msg("projects.delete.type", { name: "Research Desk" })).fill("Research Desk");
+  await confirm.click();
+  await remove.waitFor({ state: "detached" });
+  await toast(msg("projects.toast.deleted", { name: "Research Desk" }));
+  await list.getByRole("button", { name: /^Research Desk/ }).waitFor({ state: "detached" });
+  assert.ok(!fs.existsSync(research.path), "the folder left the projects folder");
+  assert.ok(!(await projects()).some((p) => p.name === "Research Desk"));
+  assert.ok(fs.existsSync(strategy.path) && (await projects()).some((p) => p.name === "Strategy"), "the other project is intact");
+  const trashed = (await server.api("/api/trash")).items?.find((i) => i.original_path === research.path);
+  assert.ok(trashed && trashed.present && trashed.is_dir, "the folder is in the Trash");
   void M;
 });

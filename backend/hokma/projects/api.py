@@ -92,6 +92,11 @@ def rename_project(project_id: int, body: Rename) -> dict:
     return service.rename_project(project_id, body.name)
 
 
+@router.delete("/api/projects/{project_id}")
+def delete_project(project_id: int) -> dict:
+    return service.delete_project(project_id)
+
+
 @router.post("/api/projects/deactivate")
 def deactivate_project() -> dict:
     """General: no active project (the working folder)."""

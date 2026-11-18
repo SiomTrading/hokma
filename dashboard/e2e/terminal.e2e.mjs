@@ -28,7 +28,7 @@ await runSuite("terminal", { script: "serve.py" }, async ({ page, server, msg })
   await until(async () => (await text(1)).includes(`here=${server.home}/projects/principal`), "the active project folder as current directory of the FIRST terminal");
 
   // 2. switch the active project and open another terminal: it starts inside the newly active project
-  await page.getByRole("complementary", { name: msg("rightPanel.title") }).getByRole("list", { name: msg("projects.list") }).getByRole("button", { name: /Strategy/ }).click();
+  await page.getByRole("complementary", { name: msg("rightPanel.title") }).getByRole("list", { name: msg("projects.list") }).getByRole("button", { name: /^Strategy/ }).click();
   await page.getByText(msg("projects.toast.active", { name: "Strategy" })).first().waitFor();
   await dock.getByRole("button", { name: msg("terminal.new") }).click();
   const tabs = dock.getByRole("tablist", { name: msg("term.tabs") });

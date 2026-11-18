@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { ApiError } from "@/api";
 import { Button, Field, Input, Modal, Select, Toggle } from "@/design";
 import { useI18n } from "@/i18n";
 import * as client from "./api";
@@ -148,6 +149,52 @@ export function LinkDialog({ project, onClose, onAdded }: { project: ProjectInfo
           <span className="hint">{t("projects.field.downloadHint")}</span>
         </div>
         <Actions busy={busy} busyLabel={t("projects.adding")} onCancel={onClose} saveLabel={t("projects.addLink")} />
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * Confirmation to delete a project: the exact name must be typed. The folder goes to the Trash and the conversations
+ * stay. A refusal of the engine (General, the folder of a desk) is shown here with its own message.
+ */
+export function DeleteProjectDialog({ project, onClose, onDeleted }: { project: ProjectInfo; onClose: () => void; onDeleted: (wasActive: boolean) => void }) {
+  const { t } = useI18n();
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const matches = typed === project.name;
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!matches || busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const done = await client.deleteProject(project.id);
+      onDeleted(done.was_active);
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : t("projects.delete.error"));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal label={t("projects.delete.title")} role="alertdialog" onClose={onClose} style={{ width: "min(460px, 100%)" }}>
+      <form onSubmit={submit} style={form}>
+        <h2 className="h2">{t("projects.delete.title")}</h2>
+        <p className="p">{t("projects.delete.body", { name: project.name })}</p>
+        <Field label={t("projects.delete.type", { name: project.name })} error={error}>
+          {(control) => <Input {...control} value={typed} autoComplete="off" autoFocus disabled={busy} onChange={(e) => setTyped(e.target.value)} />}
+        </Field>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={busy}>
+            {t("projects.delete.cancel")}
+          </Button>
+          <Button type="submit" variant="danger" size="sm" disabled={!matches || busy}>
+            {t("projects.delete.confirm")}
+          </Button>
+        </div>
       </form>
     </Modal>
   );

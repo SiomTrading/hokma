@@ -36,5 +36,9 @@
   "update_later": "Más tarde",
   "up_to_date": "Ya tienes la última versión de Hokma ({version}).",
   "update_failed": "No pudimos actualizar Hokma: {error}",
-  "update_not_ready": "Hokma todavía no terminó de abrir. Intenta de nuevo en unos segundos."
+  "update_not_ready": "Hokma todavía no terminó de abrir. Intenta de nuevo en unos segundos.",
+  "crash_start": "Hokma se cerró al arrancar (código {code}). Pulsa Reintentar; si se repite, abre «Ver detalle» y envíanoslo.",
+  "crash_safe": "Hokma se cerró al arrancar (código {code}), también en modo seguro. Pulsa Reintentar; si se repite, abre «Ver detalle» y envíanoslo.",
+  "safe_starting": "Hokma se cerró al arrancar (código {code}). Arrancamos en modo seguro, sin las piezas opcionales; la Biblioteca busca solo por palabras...",
+  "closed_at_start": "Hokma se cerró al arrancar. Pulsa Reintentar; si se repite, abre «Ver detalle»."
 }

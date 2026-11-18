@@ -8,10 +8,11 @@ from hokma import __version__
 from hokma.agents.api import current_scheduler, router as agents_router
 from hokma.connections.api import router as connections_router
 from hokma.connections.runtime import shutdown as connections_shutdown
-from hokma.core import identity
+from hokma.core import identity, nativeprobe
 from hokma.core.config import browser_host, dashboard_dist
 from hokma.core.dashboard_static import DashboardFiles
 from hokma.core.lifecycle import Lifecycle, WebSocketTracker
+from hokma.core.native_api import router as native_router
 from hokma.core.shutdown_api import router as shutdown_router, turns_running
 from hokma.core.origin import TEST_HOSTS, LocalOnlyMiddleware, hosts_for_port
 from hokma.db import vectors
@@ -64,6 +65,10 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if auto_update_check:
+            # Task 3288: optional native code (sqlite-vec, the certificate store) is tried in a short child process first;
+            # a child that dies leaves that part off and the start goes on. Later starts read the remembered answer.
+            await asyncio.to_thread(nativeprobe.probe_startup)
         async with database_lifespan(app):
             from hokma.github_connect import flow as github_flow
 
@@ -102,7 +107,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     @app.get("/health")
     def health() -> dict:
         """`busy` tells the desktop window to ask before closing: a chat turn or a scheduled job is running."""
-        return {"status": "ok", "version": __version__, "busy": agent_working()}
+        return {"status": "ok", "version": __version__, "busy": agent_working(), "native": nativeprobe.summary()}
 
     @app.get(identity.ROUTE)
     def engine_proof(request: Request, nonce: str = Query(default="")) -> dict:
@@ -116,6 +121,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     app.include_router(rpc_router)
     app.include_router(update_router)
     app.include_router(shutdown_router)
+    app.include_router(native_router)
     app.include_router(database_router)
     app.include_router(voice_router)
     app.include_router(engine_router)

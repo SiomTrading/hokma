@@ -57,7 +57,8 @@ class SiomTradingFuturesSource(WebSocketSource):
         code: int | None = None
         try:
             async with connect(self._url(), open_timeout=OPEN_TIMEOUT, max_size=MAX_MESSAGE_BYTES,
-                               close_timeout=2, ping_interval=20, ping_timeout=20) as ws:
+                               close_timeout=2, ping_interval=20, ping_timeout=20,
+                               ssl=self._ssl()) as ws:
                 self._ws = ws
                 try:
                     await self._handshake(ws)

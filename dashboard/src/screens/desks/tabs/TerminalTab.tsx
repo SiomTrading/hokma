@@ -8,7 +8,7 @@ import { DeskChat } from "../DeskChat";
 import { DeskChart } from "../DeskChart";
 import { ChatSplitter } from "../ChatSplitter";
 import { PositionsEmpty } from "../PositionsEmpty";
-import { loadChatWidth, loadFolded, saveChatWidth, saveFolded } from "../terminalPrefs";
+import { loadChatWidth, loadFocusAsset, loadFolded, saveChatWidth, saveFocusAsset, saveFolded } from "../terminalPrefs";
 import { DESK_LIMITS } from "../types";
 import type { TabProps } from "./types";
 
@@ -22,7 +22,7 @@ type Load = { state: "loading" } | { state: "error"; message: string } | { state
 export function TerminalTab({ desk }: TabProps) {
   const { t } = useI18n();
   const [load, setLoad] = useState<Load>({ state: "loading" });
-  const [focus, setFocus] = useState<string | null>(null);
+  const [focus, setFocusState] = useState<string | null>(() => loadFocusAsset(desk.id));
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -32,7 +32,14 @@ export function TerminalTab({ desk }: TabProps) {
   useEffect(() => {
     setChatWidth(loadChatWidth(desk.id));
     setFolded(loadFolded(desk.id));
+    setFocusState(loadFocusAsset(desk.id));
   }, [desk.id]);
+
+  /** The asset in focus is the desk's: it is remembered here and the next visit opens on it. */
+  const setFocus = (symbol: string) => {
+    setFocusState(symbol);
+    saveFocusAsset(desk.id, symbol);
+  };
 
   const read = useCallback(() => {
     setLoad({ state: "loading" });

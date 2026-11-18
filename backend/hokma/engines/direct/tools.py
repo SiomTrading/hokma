@@ -16,6 +16,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+from hokma.core import tls
 from hokma.engines.envfilter import filtered_env
 
 MAX_OUTPUT = 30_000
@@ -195,7 +196,7 @@ def web_fetch(cwd: str, a: dict[str, Any]) -> str:
     if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
         raise ValueError("only http and https URLs")
     _public_host(parsed.hostname)
-    opener = urllib.request.build_opener(_NoRedirect)
+    opener = tls.opener(_NoRedirect)
     req = urllib.request.Request(url, headers={"User-Agent": "Hokma"})
     with opener.open(req, timeout=30) as resp:                                              # noqa: S310
         return resp.read(FETCH_LIMIT).decode("utf-8", "replace")

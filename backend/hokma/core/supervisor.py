@@ -4,8 +4,9 @@
   an argument, never in the environment and never in a file, and a relaunched engine gets the same one.
 - Exit code 75 means "I updated myself, start me again": the engine is relaunched at once from the slot that
   `current` names, on the same port and with the same token.
-- Any other end is a crash: relaunch after 1, 2 and 4 seconds; the fourth crash inside 60 seconds stops the
-  supervisor and writes the reason to `<data>/logs/engine.log`.
+- Any other end is a crash: relaunch after 1, 2 and 4 seconds. The fourth crash inside 60 seconds starts SAFE MODE
+  (task 3288): the engine runs again with every optional native part off (see `hokma.core.nativeprobe`) and the app
+  says so. Four more crashes in safe mode stop the supervisor and write the reason to `<data>/logs/engine.log`.
 - The engine dies with the supervisor: on Windows through a job object (`KILL_ON_JOB_CLOSE`), elsewhere because
   the engine watches its standard input, which closes when the supervisor ends.
 - The supervisor runs from the slot that was current when it started. An update builds the OTHER slot, so after
@@ -37,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TextIO
 
-from hokma.core import config, control, enginelock
+from hokma.core import config, control, enginelock, nativeprobe
 from hokma.core.proc import spawn_kwargs
 from hokma.core.session import OWNER_MARKER, new_channel_key, new_owner_secret, new_token, parse_owner_note, secret_hash
 from hokma.i18n import t
@@ -240,8 +241,11 @@ class Supervisor:
                  handover: Callable[[int, str, str, str], bool] = hand_over,
                  needs_handover: Callable[[], bool] = slot_changed,
                  job: object | None = None, owner_hash: str = "", owner_secret_hash: str = "",
-                 kill_group: Callable[[], None] | None = None, before_force: Callable[[], None] | None = None) -> None:
+                 kill_group: Callable[[], None] | None = None, before_force: Callable[[], None] | None = None,
+                 safe_mode: Callable[[], bool] = nativeprobe.safe_mode,
+                 enter_safe_mode: Callable[[], None] = nativeprobe.set_safe_mode) -> None:
         self.port, self.token = port, token
+        self._safe_mode, self._enter_safe_mode = safe_mode, enter_safe_mode
         self.owner_hash = owner_hash          # SHA-256 of the owner confirmation the tab registered; memory only
         self.owner_secret_hash = owner_secret_hash    # SHA-256 of the one-time secret; dropped when it is consumed
         self._argv = argv or (lambda: engine_argv(port))
@@ -459,6 +463,7 @@ class Supervisor:
                 return 0
             if code == EXIT_RESTART:
                 self.log.write("engine asked for a restart after an update; starting it again")
+                nativeprobe.reload()                      # the engine may have cleared native-probe.json ("Try again")
                 print(t("supervisor.restarting"), file=self.stderr, flush=True)
                 continue
             if code in EXIT_NOT_RETRIED:
@@ -468,9 +473,20 @@ class Supervisor:
             crashes = [moment for moment in crashes if now - moment < CRASH_WINDOW_SECONDS] + [now]
             self.log.write(f"engine crashed (code {code}); crash {len(crashes)} in the last "
                            f"{int(CRASH_WINDOW_SECONDS)} s\n" + "\n".join(tail))
+            if len(crashes) >= MAX_CRASHES and not self._safe_mode():
+                self.log.write(f"safe mode: {MAX_CRASHES} crashes in {int(CRASH_WINDOW_SECONDS)} s (last code "
+                               f"{nativeprobe.format_code(code)}); starting the engine again without its optional native "
+                               "parts")
+                try:
+                    self._enter_safe_mode()
+                except Exception as exc:                  # noqa: BLE001  (not remembering it must not stop the start)
+                    self.log.write(f"safe mode could not be saved: {exc}")
+                print(t("supervisor.safe_mode"), file=self.stderr, flush=True)
+                crashes = []
+                continue
             if len(crashes) >= MAX_CRASHES:
-                self.log.write(f"stopping: {MAX_CRASHES} crashes in {int(CRASH_WINDOW_SECONDS)} s. "
-                               "Start Hokma again with: hokma start")
+                self.log.write(f"stopping: {MAX_CRASHES} crashes in {int(CRASH_WINDOW_SECONDS)} s "
+                               f"(last code {nativeprobe.format_code(code)})" + (", already in safe mode" if self._safe_mode() else ""))
                 print(t("supervisor.gave_up", path=self.log.path), file=self.stderr, flush=True)
                 return 1
             wait = BACKOFF_SECONDS[min(len(crashes), len(BACKOFF_SECONDS)) - 1]

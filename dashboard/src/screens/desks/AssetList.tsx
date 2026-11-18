@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import type { KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/api";
 import { Button, Pane } from "@/design";
 import { useI18n } from "@/i18n";
@@ -70,9 +71,21 @@ interface Props {
 export function AssetList({ symbols, focus, onFocus, adding, busy, error, onToggleAdd, onAdd, onRemove }: Props) {
   const { t, locale } = useI18n();
   const [confirming, setConfirming] = useState<string | null>(null);
+  const rows = useRef<HTMLDivElement>(null);
   const quotes = useQuotes(symbols);
   const focused = focus ? quotes[focus] : undefined;
   const focusQuote = focused && focused !== "failed" ? focused : null;
+
+  /** Arrow up and down move the focus to the asset above or below, and the keyboard follows it. */
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, symbol: string) => {
+    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const next = symbols[symbols.indexOf(symbol) + step];
+    if (!next) return;
+    onFocus(next);
+    rows.current?.querySelectorAll<HTMLButtonElement>("button.dterm-asset")[symbols.indexOf(next)]?.focus();
+  };
 
   return (
     <Pane className="dterm-list" aria-label={t("desks.terminal.list")}>
@@ -96,6 +109,7 @@ export function AssetList({ symbols, focus, onFocus, adding, busy, error, onTogg
         </p>
       ) : null}
       {symbols.length > 0 ? (
+      <div className="dterm-rows" ref={rows}>
       <table className="dterm-table">
         <thead>
           <tr>
@@ -146,7 +160,7 @@ export function AssetList({ symbols, focus, onFocus, adding, busy, error, onTogg
             return (
               <tr key={symbol} className={symbol === focus ? "on" : undefined}>
                 <td>
-                  <button type="button" className="dterm-asset" aria-pressed={symbol === focus} onClick={() => onFocus(symbol)}>
+                  <button type="button" className="dterm-asset" aria-pressed={symbol === focus} onClick={() => onFocus(symbol)} onKeyDown={(event) => onKeyDown(event, symbol)}>
                     {symbol}
                   </button>
                 </td>
@@ -162,6 +176,7 @@ export function AssetList({ symbols, focus, onFocus, adding, busy, error, onTogg
           })}
         </tbody>
       </table>
+      </div>
       ) : null}
       {focus ? (
       <div className="dterm-quote">

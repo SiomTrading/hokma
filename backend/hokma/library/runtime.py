@@ -8,6 +8,7 @@ name with the right size has been verified already.
 import threading
 from pathlib import Path
 
+from hokma.core import nativeprobe
 from hokma.library.model_download import load_manifest, models_dir
 
 _lock = threading.Lock()
@@ -25,7 +26,9 @@ def model_directory() -> Path:
 
 
 def model_ready() -> bool:
-    """True when every model file is in place at its final name with the expected size."""
+    """True when every model file is in place at its final name with the expected size AND the model can run on this
+    computer: it is tried once in a child process first (a crash of onnxruntime would end the engine), and when that
+    child dies the Library searches by words only."""
     directory = model_directory()
     for entry in load_manifest()["files"]:
         try:
@@ -33,7 +36,7 @@ def model_ready() -> bool:
                 return False
         except OSError:
             return False
-    return True
+    return nativeprobe.allowed(nativeprobe.EMBEDDER)
 
 
 def _session():

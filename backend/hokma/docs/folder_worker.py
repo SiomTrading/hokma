@@ -11,6 +11,7 @@ import time
 from collections import deque
 from typing import Callable
 
+from hokma.core import nativeprobe
 from hokma.db import Database, DbError, get_database
 
 log = logging.getLogger("hokma.library")
@@ -212,4 +213,4 @@ def status(db: Database | None = None) -> dict:
     return {"worker": state["running"], "files_to_read": reading, "queued_folders": state["queued_folders"],
             "passages": passages, "passages_to_vectorize": waiting, "max_passages": folder_scan.MAX_PASSAGES,
             "active_folder": active, "last_pass_at": state["last_pass_at"],
-            "vectors": vectors.current_status(database).public()}
+            "vectors": vectors.current_status(database).public(), "native": nativeprobe.summary()}

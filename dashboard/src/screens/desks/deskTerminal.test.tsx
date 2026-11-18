@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -133,6 +135,53 @@ describe("terminal of the desk", () => {
     expect(subscribed().at(-1)).toMatchObject({ symbol: "ES=F", tf: "5m" });
     expect(await screen.findByRole("img", { name: t("chart.aria", { symbol: "ES=F", tf: "5m" }) })).toBeInTheDocument();
     expect(screen.getByText(t("desks.terminal.quote", { symbol: "ES=F" }))).toBeInTheDocument();
+  });
+
+  it("picks an asset with the keyboard: arrows move the focus, Enter picks it, the row is highlighted", async () => {
+    stubServer();
+    open();
+    const user = userEvent.setup();
+    await connect("NQ=F");
+    const nq = screen.getByRole("button", { name: "NQ=F" });
+    const es = screen.getByRole("button", { name: "ES=F" });
+    nq.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(es).toHaveFocus();
+    expect(es).toHaveAttribute("aria-pressed", "true");
+    expect(es.closest("tr")).toHaveClass("on");
+    expect(nq.closest("tr")).not.toHaveClass("on");
+    expect(screen.getByText("ES=F · 5m")).toBeInTheDocument();
+    await user.keyboard("{ArrowDown}"); // past the last one: stays
+    expect(es).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(nq).toHaveFocus();
+    expect(nq).toHaveAttribute("aria-pressed", "true");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByText("ES=F · 5m")).toBeInTheDocument();
+    expect(screen.getByText(t("desks.terminal.quote", { symbol: "ES=F" }))).toBeInTheDocument();
+  });
+
+  it("remembers the asset in focus for the desk", async () => {
+    stubServer();
+    const first = open();
+    const user = userEvent.setup();
+    await connect("NQ=F");
+    await user.click(screen.getByRole("button", { name: "ES=F" }));
+    first.unmount();
+    FakeSocket.instances.length = 0;
+    open();
+    await screen.findByRole("button", { name: "ES=F" });
+    expect(screen.getByRole("button", { name: "ES=F" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByText("ES=F · 5m")).toBeInTheDocument();
+  });
+
+  it("keeps the watchlist inside its own cell so the positions panel never covers an asset", () => {
+    // jsdom has no layout: this guards the rule that made the second asset unclickable on a short window.
+    const css = readFileSync(resolve(__dirname, "desks.css"), "utf8");
+    const rule = (selector: string) => css.split("\n").find((line) => line.startsWith(selector + " {")) ?? "";
+    expect(rule(".dterm-list")).toMatch(/min-height:\s*0/);
+    expect(rule(".dterm-list")).toMatch(/overflow:\s*hidden/);
+    expect(rule(".dterm-rows")).toMatch(/overflow-y:\s*auto/);
   });
 
   it("changes the interval of the chart without touching the list", async () => {

@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
+from hokma.core import tls
 from hokma.core.config import hokma_data_dir
 
 MANIFEST_PATH = Path(__file__).with_name("models.json")
@@ -57,7 +58,7 @@ def file_ok(path: Path, size: int, sha256: str) -> bool:
 
 class ModelDownloader:
     def __init__(self, manifest: dict | None = None, directory: Path | None = None,
-                 waits: tuple[int, ...] = RETRY_WAITS, opener: Callable = urllib.request.urlopen) -> None:
+                 waits: tuple[int, ...] = RETRY_WAITS, opener: Callable = tls.urlopen) -> None:
         self.manifest = manifest if manifest is not None else load_manifest()
         self.directory = directory if directory is not None else models_dir() / self.manifest["id"]
         self.waits = waits

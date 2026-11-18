@@ -173,6 +173,8 @@ class ModelManager:
         from huggingface_hub import snapshot_download
         from tqdm.auto import tqdm
 
+        _use_system_certificates()
+
         class Progress(tqdm):
             """Reports instead of drawing: the bar is disabled, so the counters are kept here."""
             counter = 0
@@ -193,3 +195,27 @@ class ModelManager:
                 return super().update(n)
 
         snapshot_download(repo, local_dir=str(target), allow_patterns=ALLOW_PATTERNS, tqdm_class=Progress)
+
+
+def _use_system_certificates() -> None:
+    """The download client verifies with `hokma.core.tls.outbound_context` (the system store, bug 1202), never with less.
+    If this huggingface_hub has no client factory, it keeps its own verification and the error message stays clear."""
+    try:
+        import huggingface_hub
+        from hokma.core.tls import outbound_context
+
+        try:
+            import httpx2 as httpx
+        except ImportError:
+            import httpx
+
+        from huggingface_hub.utils._http import hf_request_event_hook      # offline switch, request id: as the default
+
+        hooks = {"request": [hf_request_event_hook]}
+
+        def factory():
+            return httpx.Client(event_hooks=hooks, follow_redirects=True, timeout=None, verify=outbound_context())
+
+        huggingface_hub.set_client_factory(factory)
+    except Exception:                       # noqa: BLE001  (an old huggingface_hub: its own verification, same error text)
+        pass

@@ -80,6 +80,7 @@ class VectorStatus:
             vecext.NO_LOAD_EXTENSION: lambda: t("library.vectors.no_load_extension"),
             vecext.MODULE_MISSING: lambda: t("library.vectors.module_missing"),
             vecext.LOAD_FAILED: lambda: t("library.vectors.load_failed"),
+            vecext.NATIVE_OFF: lambda: t("library.vectors.native_off"),
             NOT_PREPARED: lambda: t("library.vectors.not_prepared"),
         }.get(self.code or "", lambda: t("library.vectors.schema_failed"))()
 

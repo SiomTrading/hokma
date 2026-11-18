@@ -847,10 +847,11 @@ wheels = [
 
 [[package]]
 name = "hokma"
-version = "1.0.2"
+version = "1.0.3"
 source = { editable = "." }
 dependencies = [
     { name = "av" },
+    { name = "certifi" },
     { name = "cryptography" },
     { name = "databento" },
     { name = "fastapi" },
@@ -864,6 +865,7 @@ dependencies = [
     { name = "python-telegram-bot" },
     { name = "pywinpty", marker = "sys_platform == 'win32'" },
     { name = "sqlite-vec" },
+    { name = "truststore" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "xlrd" },
 ]
@@ -877,6 +879,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "av", specifier = "==15.1.0" },
+    { name = "certifi", specifier = "==2026.10.23" },
     { name = "cryptography", specifier = ">=48.0.1,<49" },
     { name = "databento", specifier = "==0.90.0" },
     { name = "fastapi", specifier = "==0.115.6" },
@@ -890,6 +893,7 @@ requires-dist = [
     { name = "python-telegram-bot", specifier = "==22.8" },
     { name = "pywinpty", marker = "sys_platform == 'win32'", specifier = "==3.0.3" },
     { name = "sqlite-vec", specifier = "==0.1.9" },
+    { name = "truststore", specifier = "==0.10.5" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.34.0" },
     { name = "xlrd", specifier = "==2.0.2" },
 ]

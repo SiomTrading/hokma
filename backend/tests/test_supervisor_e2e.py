@@ -138,18 +138,28 @@ def test_u5_one_crash_is_relaunched_with_the_same_port_and_token(running):
     assert running.api("/api/update/state")["phase"] == "idle"          # same token, same port, serving again
 
 
-def test_u5_four_crashes_in_a_minute_stop_and_say_why(running):
-    seen = set()
-    for _ in range(4):
+def kill_engines(running, seen, count):
+    for _ in range(count):
         engine = wait_until(lambda: (find_engine(running.sid) not in (None, *seen)) and find_engine(running.sid), 40)
         assert engine, "the supervisor did not relaunch the engine"
         seen.add(engine)
         os.kill(engine, signal.SIGKILL)
+
+
+def test_u5_four_crashes_in_a_minute_start_safe_mode_and_four_more_stop(running):
+    seen = set()
+    kill_engines(running, seen, 4)
+    assert wait_until(lambda: (find_engine(running.sid) not in (None, *seen)) and health(running.port), 40)
+    log = (running.install.data / "logs" / "engine.log").read_text()
+    assert "safe mode: 4 crashes in 60 s" in log and "stopping" not in log        # Hokma kept running, without the parts
+    assert json.loads((running.install.data / "native-probe.json").read_text())["safe_mode"] is True
+    assert health(running.port)["native"]["safe_mode"] is True
+    kill_engines(running, seen, 4)
     assert running.proc.wait(timeout=30) == 1
     assert health(running.port) is None
     log = (running.install.data / "logs" / "engine.log").read_text()
-    assert "stopping: 4 crashes in 60 s" in log and log.count("engine crashed") == 4
-    assert running.token not in log
+    assert "stopping: 4 crashes in 60 s" in log and "already in safe mode" in log and log.count("engine crashed") == 8
+    assert "Start Hokma again" not in log and running.token not in log
     assert session_pids(running.sid) == []
 
 

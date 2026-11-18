@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from hokma.core import tls
 from hokma.backup.bundle import BackupError
 from hokma.i18n import t
 from hokma.update import github
@@ -34,7 +35,7 @@ class NotFound(BackupError):
 
 def _open(request: urllib.request.Request):
     """The only place that talks to the network."""
-    return urllib.request.urlopen(request, timeout=IO_TIMEOUT_SECONDS)
+    return tls.urlopen(request, timeout=IO_TIMEOUT_SECONDS)
 
 
 class _Slice:

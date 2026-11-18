@@ -9,6 +9,7 @@ import unicodedata
 import urllib.error
 import urllib.request
 
+from hokma.core import tls
 from hokma.i18n import t
 from hokma.kit import extensions
 
@@ -55,7 +56,7 @@ def fetch() -> list[dict]:
     """The list from GitHub. Tests replace this function."""
     request = urllib.request.Request(URL, headers={"Accept": "application/json", "User-Agent": "hokma"})
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with tls.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             data = response.read(MAX_BYTES + 1)
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         raise CatalogError(t("status.market.unreachable")) from exc

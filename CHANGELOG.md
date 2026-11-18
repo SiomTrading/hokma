@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3
+
+- Fixed: Hokma checks updates and connects to GitHub, Telegram and web pages with your computer's certificate store, so antivirus or company networks that inspect secure connections no longer break updates.
+- Fixed: If an optional part of Hokma crashes on your computer at start, Hokma starts without it, tells you which one, and never stops at a black screen.
+- Fixed: Click an asset of the desk watchlist to see its chart (also with the keyboard).
+- New: Delete a project: its folder goes to the Trash and can be restored; its conversations stay.
+
 ## 1.0.2
 
 - Fixed: The desk Terminal always shows the desk chief chat; add assets from the Terminal and see their chart; desk agent names in Spanish.

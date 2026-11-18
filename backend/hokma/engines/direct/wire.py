@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any, Iterator
+from hokma.core import tls
 
 MAX_JSON_BYTES = 8 * 1024 * 1024        # a provider's model list; more than this is not a list (Vera B2, 0.0.39)
 MAX_ERROR_BYTES = 64 * 1024
@@ -38,7 +39,7 @@ class Stream:
                                      headers={"Content-Type": "application/json", "Accept": "text/event-stream",
                                               "User-Agent": "Hokma", **self.headers})
         try:
-            self._resp = urllib.request.urlopen(req, timeout=self.timeout)          # noqa: S310
+            self._resp = tls.urlopen(req, timeout=self.timeout)          # noqa: S310
         except urllib.error.HTTPError as exc:
             raise WireError(exc.code, exc.read().decode("utf-8", "replace")) from exc
         except urllib.error.URLError as exc:
@@ -91,7 +92,7 @@ def get_json(url: str, headers: dict[str, str], timeout: float = 20.0) -> Any:
     req = urllib.request.Request(url, headers={"User-Agent": "Hokma", **headers})
     deadline = time.monotonic() + timeout
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:                  # noqa: S310
+        with tls.urlopen(req, timeout=timeout) as resp:                  # noqa: S310
             return json.loads(_read_capped(resp, MAX_JSON_BYTES, deadline).decode("utf-8", "replace"))
     except urllib.error.HTTPError as exc:
         try:

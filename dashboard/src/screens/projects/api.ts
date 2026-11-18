@@ -12,6 +12,10 @@ export const createProject = (name: string, kind: ProjectKind): Promise<ProjectI
 
 export const renameProject = (id: number, name: string): Promise<ProjectInfo> => api.patch<ProjectInfo>(base(id), { name });
 
+/** Moves the folder of the project to the Trash and removes the project; `was_active` tells the app went back to General. */
+export const deleteProject = (id: number): Promise<{ id: number; name: string; trash_id: number | null; was_active: boolean }> =>
+  api.delete<{ id: number; name: string; trash_id: number | null; was_active: boolean }>(base(id));
+
 export const deactivateProject = (): Promise<ProjectList> => api.post<ProjectList>("/api/projects/deactivate");
 
 export const activateProject = (id: number): Promise<ProjectList> => api.post<ProjectList>(`${base(id)}/activate`);

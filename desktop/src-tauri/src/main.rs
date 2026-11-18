@@ -12,6 +12,7 @@
 
 mod cache;
 mod engine;
+mod failure;
 mod http;
 mod i18n;
 #[cfg(target_os = "macos")]

@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from hokma.connections.store import KeyStore
 from hokma.core.config import hokma_data_dir
+from hokma.core.tls import outbound_context
 from hokma.db import Database
 from hokma.engine.protocols import DEFAULT_MODEL
 from hokma.i18n import t
@@ -36,7 +37,7 @@ PROMPT_LIMIT = 3800                    # characters the approval message can sho
 
 def tls12_context() -> ssl.SSLContext:
     # Bug 1114: some networks cut the OpenSSL TLS 1.3 ClientHello towards Telegram; Telegram serves TLS 1.2.
-    ctx = ssl.create_default_context()
+    ctx = outbound_context()
     ctx.maximum_version = ssl.TLSVersion.TLSv1_2
     return ctx
 

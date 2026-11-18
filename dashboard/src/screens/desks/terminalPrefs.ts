@@ -5,6 +5,7 @@ export const CHAT_WIDTH_MIN = 300;
 export const CHAT_WIDTH_DEFAULT = 380;
 
 const widthKey = (deskId: number) => `hokma.desk.${deskId}.chatWidth`;
+const focusKey = (deskId: number) => `hokma.desk.${deskId}.focusAsset`;
 const foldedKey = (deskId: number) => `hokma.desk.${deskId}.positionsFolded`;
 
 function read(key: string): string | null {
@@ -83,4 +84,13 @@ export function loadFolded(deskId: number): boolean {
 
 export function saveFolded(deskId: number, folded: boolean): void {
   write(foldedKey(deskId), folded ? "1" : "0");
+}
+
+/** The asset this desk had in focus last time, or null. The Terminal falls back to the first asset when it is gone. */
+export function loadFocusAsset(deskId: number): string | null {
+  return read(focusKey(deskId)) || null;
+}
+
+export function saveFocusAsset(deskId: number, symbol: string): void {
+  write(focusKey(deskId), symbol);
 }

@@ -1,6 +1,6 @@
 [project]
 name = "hokma"
-version = "1.0.2"
+version = "1.0.3"
 description = "Hokma: installable harness by SiomTrading"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,6 +28,10 @@ dependencies = [
     # AES-256-GCM for the encrypted cloud backup (task 3215, SPEC-011 P10). Binary wheels for the five platforms.
     # Pinned below 49: macOS Intel wheels end at 48.x.
     "cryptography>=48.0.1,<49",
+    # Outbound HTTPS trusts the operating system certificate store first, then certifi (bug 1202, hokma.core.tls). Both were
+    # already in the lock through httpx and huggingface_hub; naming them here keeps them there on every platform.
+    "truststore==0.10.5",
+    "certifi==2026.10.23",
 ]
 
 [project.scripts]

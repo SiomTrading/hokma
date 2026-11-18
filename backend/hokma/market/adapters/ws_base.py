@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
+from hokma.core import tls
 from hokma.market.providers import ProviderSpec
 from hokma.market.stream import LiveSource, SourceCapabilities, TerminalError
 
@@ -70,10 +71,15 @@ class WebSocketSource(LiveSource):
 
     # ---- plumbing ----
 
+    def _ssl(self):
+        """The TLS context for a `wss` address (the system store, bug 1202); None for a local `ws` one."""
+        return tls.outbound_context() if self._url().startswith("wss://") else None
+
     async def _session(self) -> None:
         try:
             async with connect(self._url(), open_timeout=OPEN_TIMEOUT, max_size=MAX_MESSAGE_BYTES,
-                               close_timeout=2, ping_interval=20, ping_timeout=20) as ws:
+                               close_timeout=2, ping_interval=20, ping_timeout=20,
+                               ssl=self._ssl()) as ws:
                 self._ws = ws
                 try:
                     await self._handshake(ws)

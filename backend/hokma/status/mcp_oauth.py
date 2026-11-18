@@ -35,6 +35,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
+from hokma.core import tls
 from hokma import __version__
 from hokma.core.config import hokma_data_dir
 
@@ -91,7 +92,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_opener = urllib.request.build_opener(_NoRedirect)
+_opener = tls.opener(_NoRedirect)
 
 
 def http(method: str, url: str, *, headers: dict[str, str] | None = None, data: bytes | None = None,

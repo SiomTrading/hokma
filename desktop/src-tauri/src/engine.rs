@@ -5,6 +5,7 @@
 //! Nothing else learns the secrets: no file, no argument, no environment variable. Updates keep the same session
 //! (the detached updater of 0.0.14 hands it over), so the open panel reconnects by itself.
 
+use crate::failure::{self, Failure};
 use crate::http;
 use crate::i18n::t;
 use crate::paths;
@@ -266,6 +267,8 @@ fn run_start(app: AppHandle) {
         inner.errors.clear();
         inner.attempt
     };
+    let log_from = engine_log_len();
+    let mut safe_shown = false;
     show_splash(&app);
     set_status(&app, "starting", t("starting", &[]), "");
 
@@ -361,18 +364,29 @@ fn run_start(app: AppHandle) {
             if code.code() == Some(0) && running_port().is_some() {
                 set_status(&app, "port_busy", t("port_busy", &[]), "");
             } else {
-                let first = first_error(&app);
-                set_status(&app, "failed", t("failed", &[("error", &first)]), "");
+                let why = failure_text(&app, log_from);
+                set_status(&app, "failed", why, "");
             }
             return;
         }
         let waited = began.elapsed();
         if waited > GIVE_UP_AFTER {
-            let why = t("timeout", &[]);
-            set_status(&app, "failed", t("failed", &[("error", &why)]), "");
+            let crashed = matches!(failure::classify(&engine_log_since(log_from)), Some(Failure::Crash { .. }));
+            let text = if crashed {
+                failure_text(&app, log_from)
+            } else {
+                t("failed", &[("error", &t("timeout", &[]))])
+            };
+            set_status(&app, "failed", text, "");
             return;
         }
-        if waited > SLOW_AFTER && !slow_shown {
+        if !safe_shown {
+            if let Some(line) = safe_mode_line(log_from) {
+                safe_shown = true;
+                set_status(&app, "starting", line, "");
+            }
+        }
+        if waited > SLOW_AFTER && !slow_shown && !safe_shown {
             slow_shown = true;
             set_status(&app, "slow", t("slow", &[]), "");
         }
@@ -391,15 +405,40 @@ fn watch_output(app: AppHandle, rx: mpsc::Receiver<Output>) {
     });
 }
 
-fn first_error(app: &AppHandle) -> String {
-    let inner = shared(app).0.lock().unwrap();
-    inner
-        .errors
-        .iter()
-        .map(|l| l.trim())
-        .find(|l| !l.is_empty())
-        .map(|l| l.trim_end_matches('.').to_string())
-        .unwrap_or_else(|| t("no_detail", &[]))
+/// The engine.log lines written since `offset` (the size of the file when this start began), so an old run never
+/// explains this one. A log that was rotated meanwhile (smaller than the offset) is read from its start.
+fn engine_log_since(offset: u64) -> Vec<String> {
+    let path = paths::data_dir().join("logs").join("engine.log");
+    let Ok(bytes) = std::fs::read(&path) else { return Vec::new() };
+    let from = if (bytes.len() as u64) < offset { 0 } else { offset as usize };
+    String::from_utf8_lossy(&bytes[from..]).lines().map(|l| l.to_string()).collect()
+}
+
+fn engine_log_len() -> u64 {
+    std::fs::metadata(paths::data_dir().join("logs").join("engine.log")).map(|m| m.len()).unwrap_or(0)
+}
+
+/// What the student reads when the engine did not start: the last real failure of this start, in plain words. Never an
+/// INFO line and never the old "Start Hokma again with: hokma start" hint (the Retry button does that).
+fn failure_text(app: &AppHandle, log_from: u64) -> String {
+    let mut lines = engine_log_since(log_from);
+    let captured: Vec<String> = shared(app).0.lock().unwrap().errors.iter().cloned().collect();
+    lines.extend(captured);
+    match failure::classify(&lines) {
+        Some(Failure::Crash { code, safe: false }) => t("crash_start", &[("code", &failure::show_code(&code))]),
+        Some(Failure::Crash { code, safe: true }) => t("crash_safe", &[("code", &failure::show_code(&code))]),
+        Some(Failure::Error(line)) => t("failed", &[("error", &line)]),
+        None => match failure::last_useful(&lines) {
+            Some(line) => t("failed", &[("error", &line)]),
+            None => t("closed_at_start", &[]),
+        },
+    }
+}
+
+/// The supervisor started safe mode while the window waits: say so on the start screen.
+fn safe_mode_line(log_from: u64) -> Option<String> {
+    let code = failure::safe_mode_started(&engine_log_since(log_from))?;
+    Some(t("safe_starting", &[("code", &failure::show_code(&code))]))
 }
 
 /// The engine answered: show the panel. The address carries the version (see cache.rs), so a cached page of
@@ -568,7 +607,8 @@ pub fn detail(app: &AppHandle) -> String {
             lines.push(format!("== {}", file.display()));
             let all: Vec<&str> = text.lines().collect();
             let from = all.len().saturating_sub(TAIL_LINES);
-            lines.extend(all[from..].iter().map(|l| l.to_string()));
+            // The old hint "Start Hokma again with: hokma start" is for a terminal; here the Retry button does it.
+            lines.extend(all[from..].iter().map(|l| l.replace(" Start Hokma again with: hokma start", "")));
         }
     }
     let captured: Vec<String> = shared(app).0.lock().unwrap().errors.iter().cloned().collect();

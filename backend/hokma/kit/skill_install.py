@@ -32,6 +32,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from hokma.core import tls
 from hokma.i18n import t
 from hokma.kit import mirror, safefs
 
@@ -112,7 +113,7 @@ def download(owner: str, repo: str, ref: str = "") -> bytes:
     """The repository as a zip. No sign-in is ever asked: a private or missing repository fails at once."""
     name = urllib.parse.quote(ref or "HEAD", safe="")
     url = f"https://github.com/{owner}/{repo}/archive/{name}.zip"
-    opener = urllib.request.build_opener(_GitHubOnly)
+    opener = tls.opener(_GitHubOnly)
     request = urllib.request.Request(url, headers={"User-Agent": "Hokma"})
     try:
         with opener.open(request, timeout=TIMEOUT) as resp:                     # noqa: S310

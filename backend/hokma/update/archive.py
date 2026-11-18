@@ -7,6 +7,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from hokma.core import tls
 from hokma.i18n import t
 from hokma.update.source import UpdateError
 
@@ -28,7 +29,7 @@ def fetch_archive(url: str, dest: Path, expected_sha256: str, headers: dict[str,
             request = urllib.request.Request(url)
             for name, value in (headers or {}).items():
                 request.add_unredirected_header(name, value)
-            src = urllib.request.urlopen(request, timeout=60)
+            src = tls.urlopen(request, timeout=60)
         else:
             src = open(url, "rb")
         with src, open(dest, "wb") as out:
@@ -41,6 +42,9 @@ def fetch_archive(url: str, dest: Path, expected_sha256: str, headers: dict[str,
     except UpdateError:
         raise
     except OSError as exc:
+        if tls.is_certificate_error(exc):
+            from hokma.update.github import RELEASES_URL
+            raise UpdateError(t("update.github.certificate", url=RELEASES_URL)) from exc
         raise UpdateError(t("update.package_fetch_failed", url=url, error=exc)) from exc
     if h.hexdigest() != expected_sha256:
         dest.unlink(missing_ok=True)

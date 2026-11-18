@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from hokma.core import nativeprobe
 from hokma.voice.model import APPROX_DOWNLOAD_MB, ModelManager
 
 LANGUAGE_CHOICES = ("auto", "es_en", "es", "en")
@@ -39,7 +40,9 @@ class FasterWhisperTranscriber:
     def available(self) -> bool:
         # onnxruntime is what faster-whisper runs its voice detector on; it has no build for every platform
         # (task 3173), so both must be there. Without them Hokma starts and only the voice says it is unavailable.
-        return all(importlib.util.find_spec(m) is not None for m in ("faster_whisper", "onnxruntime"))
+        # The first load of that native code happens in a child process (task 3288): if it dies, the voice stays off.
+        return (all(importlib.util.find_spec(m) is not None for m in ("faster_whisper", "onnxruntime"))
+                and nativeprobe.allowed(nativeprobe.VOICE))
 
     def status(self) -> dict[str, Any]:
         out = self.manager.snapshot()

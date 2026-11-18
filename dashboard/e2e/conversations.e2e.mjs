@@ -47,7 +47,8 @@ await runSuite("conversations", { script: "serve.py" }, async ({ page: A, server
     await idle(page);
   };
   const panel = A.getByRole("complementary", { name: msg("rightPanel.title") });
-  const projectButton = (name) => panel.getByRole("list", { name: msg("projects.list") }).getByRole("button", { name });
+  // the name starts the label of the project button; its options button ("Options for the project X") is another one
+  const projectButton = (name) => panel.getByRole("list", { name: msg("projects.list") }).getByRole("button", { name: new RegExp("^(?:" + (name instanceof RegExp ? name.source : name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) + ")") });
   const general = () => panel.getByTestId("project-general");
   const secondPage = async (action) => {
     const [page] = await Promise.all([ctx.waitForEvent("page"), action()]);

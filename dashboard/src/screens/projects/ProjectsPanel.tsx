@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { DragEvent } from "react";
-import { Button, Dot, EmptyState, ErrorState, Icon, IconButton, Loading, Segmented } from "@/design";
+import { Button, Dot, EmptyState, ErrorState, Icon, IconButton, Loading, Menu, MenuItem, Segmented } from "@/design";
 import { useI18n } from "@/i18n";
 import { useShellEvent } from "@/shell/store";
 import { useShell } from "@/shell/useShell";
 import { FoldersSection } from "./FoldersSection";
-import { CreateProjectDialog, LinkDialog, RenameProjectDialog } from "./Dialogs";
+import { CreateProjectDialog, DeleteProjectDialog, LinkDialog, RenameProjectDialog } from "./Dialogs";
 import { PreviewDialog } from "./Preview";
 import * as client from "./api";
 import { entryMeta, iconFor, KIND_COLOR } from "./format";
@@ -87,6 +87,46 @@ function TreeRows({ entries, onOpen }: { entries: TreeEntry[]; onOpen: (entry: T
   );
 }
 
+/** One project of the list: pick it, or open its menu (Delete project). */
+function ProjectRow({ project, onPick, onDelete }: { project: ProjectInfo; onPick: () => void; onDelete: () => void }) {
+  const { t } = useI18n();
+  const [menu, setMenu] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  return (
+    <div role="listitem" style={{ position: "relative" }}>
+      <button type="button" aria-current={project.active || undefined} className={project.active ? "proj on" : "proj"} style={{ paddingRight: 40 }} onClick={onPick}>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Dot color={KIND_COLOR[project.kind]} />
+          <span className="h2" style={{ fontSize: 13 }}>{project.name}</span>
+        </span>
+        <span className="p" style={{ fontSize: 11 }}>{metaText(t, project)}</span>
+      </button>
+      <button
+        ref={trigger}
+        type="button"
+        className="ib"
+        style={{ position: "absolute", right: 8, top: 10, width: 24, height: 24 }}
+        aria-label={t("projects.options", { name: project.name })}
+        aria-haspopup="menu"
+        aria-expanded={menu}
+        onClick={() => setMenu((value) => !value)}
+      >
+        ···
+      </button>
+      <Menu open={menu} onClose={() => setMenu(false)} label={t("projects.options", { name: project.name })} triggerRef={trigger} style={{ top: 36, bottom: "auto", right: 8, width: 190 }}>
+        <MenuItem
+          onClick={() => {
+            setMenu(false);
+            onDelete();
+          }}
+        >
+          {t("projects.delete.button")}
+        </MenuItem>
+      </Menu>
+    </div>
+  );
+}
+
 export function ProjectsPanel() {
   const { t } = useI18n();
   const shell = useShell();
@@ -94,6 +134,7 @@ export function ProjectsPanel() {
   const [dragging, setDragging] = useState(false);
   const [busyName, setBusyName] = useState<string | null>(null);
   const [tab, setTab] = useState<"files" | "folders">("files");
+  const [deleting, setDeleting] = useState<ProjectInfo | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const announced = useRef<number | null>(null);
 
@@ -203,15 +244,7 @@ export function ProjectsPanel() {
             </button>
           </div>
           {list?.projects.map((p) => (
-            <div key={p.id} role="listitem">
-              <button type="button" aria-current={p.active || undefined} className={p.active ? "proj on" : "proj"} onClick={() => void choose(p)}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Dot color={KIND_COLOR[p.kind]} />
-                  <span className="h2" style={{ fontSize: 13 }}>{p.name}</span>
-                </span>
-                <span className="p" style={{ fontSize: 11 }}>{metaText(t, p)}</span>
-              </button>
-            </div>
+            <ProjectRow key={p.id} project={p} onPick={() => void choose(p)} onDelete={() => setDeleting(p)} />
           ))}
         </div>
       )}
@@ -224,6 +257,9 @@ export function ProjectsPanel() {
               <span className="lbl">{t("projects.contents")}</span>
               <Button size="sm" variant="ghost" style={{ marginLeft: "auto", minHeight: 24, padding: "0 8px" }} onClick={() => openDialog("rename")}>
                 {t("projects.rename")}
+              </Button>
+              <Button size="sm" variant="ghost" style={{ minHeight: 24, padding: "0 8px" }} onClick={() => setDeleting(active)}>
+                {t("projects.delete.button")}
               </Button>
             </div>
             <span className="mono" title={active.path} style={{ fontSize: 10, color: "var(--t3)", whiteSpace: "nowrap" }}>{middleEllipsis(active.path)}</span>
@@ -327,6 +363,19 @@ export function ProjectsPanel() {
             announced.current = null;
             await refresh();
             shell.toast({ tone: "ok", text: t("projects.toast.renamed") });
+          }}
+        />
+      ) : null}
+      {deleting ? (
+        <DeleteProjectDialog
+          project={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={async (wasActive) => {
+            const name = deleting.name;
+            setDeleting(null);
+            announced.current = null;
+            await refresh();
+            shell.toast({ tone: "ok", text: t(wasActive ? "projects.toast.deletedGeneral" : "projects.toast.deleted", { name }) });
           }}
         />
       ) : null}

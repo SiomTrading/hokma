@@ -36,5 +36,9 @@
   "update_later": "Later",
   "up_to_date": "You already have the latest version of Hokma ({version}).",
   "update_failed": "We could not update Hokma: {error}",
-  "update_not_ready": "Hokma has not finished opening yet. Try again in a few seconds."
+  "update_not_ready": "Hokma has not finished opening yet. Try again in a few seconds.",
+  "crash_start": "Hokma closed while starting (code {code}). Press Retry; if it happens again, open \"Show detail\" and send it to us.",
+  "crash_safe": "Hokma closed while starting (code {code}), also in safe mode. Press Retry; if it happens again, open \"Show detail\" and send it to us.",
+  "safe_starting": "Hokma closed while starting (code {code}). We are starting it in safe mode, without the optional parts; the Library searches by words only...",
+  "closed_at_start": "Hokma closed while starting. Press Retry; if it happens again, open \"Show detail\"."
 }

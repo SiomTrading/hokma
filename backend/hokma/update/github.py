@@ -20,12 +20,14 @@ import re
 import urllib.error
 import urllib.request
 
+from hokma.core import tls
 from hokma.i18n import t
 from hokma.update.safe_exec import run_isolated
 from hokma.update.source import SHA_RE, UpdateError, VersionManifest, parse_version
 
 RELEASE_REPO = "SiomTrading/hokma"
 API_BASE = "https://api.github.com"
+RELEASES_URL = f"https://github.com/{RELEASE_REPO}/releases"
 API_TIMEOUT_SECONDS = 30
 CREDENTIAL_TIMEOUT_SECONDS = 15
 MAX_API_BYTES = 1024 * 1024
@@ -48,7 +50,7 @@ class _Status(Exception):
 
 def _open(request: urllib.request.Request):
     """The only place that talks to the network. Returns a response usable as a context manager."""
-    return urllib.request.urlopen(request, timeout=API_TIMEOUT_SECONDS)
+    return tls.urlopen(request, timeout=API_TIMEOUT_SECONDS)
 
 
 def _token_from_git() -> str | None:
@@ -95,7 +97,9 @@ def _get(url: str, token: str | None, accept: str, limit: int) -> bytes:
     except urllib.error.HTTPError as exc:
         remaining = exc.headers.get("X-RateLimit-Remaining") if exc.headers else None
         raise _Status(exc.code, rate_limited=exc.code == 403 and remaining == "0") from None
-    except (urllib.error.URLError, OSError) as exc:      # DNS, refused, timeout
+    except (urllib.error.URLError, OSError) as exc:      # DNS, refused, timeout, certificate
+        if tls.is_certificate_error(exc):
+            raise UpdateError(t("update.github.certificate", url=RELEASES_URL)) from None
         reason = getattr(exc, "reason", None) or exc
         raise UpdateError(t("update.github.unreachable", error=reason)) from None
     if len(data) > limit:

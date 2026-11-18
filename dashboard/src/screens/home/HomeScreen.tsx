@@ -1,6 +1,7 @@
 import { useApiQuery } from "@/api";
 import { Button, EmptyState, ErrorState, Loading, Meter, Pane, Pill } from "@/design";
 import { useI18n } from "@/i18n";
+import { NativeBand } from "@/screens/system/NativeBand";
 import { CommandsCard, FirstDayCard, ShortcutsCard } from "@/screens/learn/cards";
 import type { ScreenProps } from "@/shell/registry";
 import { useShell } from "@/shell/useShell";
@@ -42,6 +43,7 @@ export function HomeScreen(_props: ScreenProps) {
 
   return (
     <section className="stagger" style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+      <NativeBand />
       <Pane as="section" style={{ flex: "none", padding: 22, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <h1 className="disp">{greeting}</h1>
