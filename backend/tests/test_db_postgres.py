@@ -237,7 +237,7 @@ def test_sqlite_to_postgres_and_back_keeps_every_row(seeded, pg_url, env):
 
     target = PostgresBackend(pg_url)
     result = transfer(source, target)
-    assert result.counts == {k: v for k, v in sizes.items()} and result.schema_version == 14
+    assert result.counts == {k: v for k, v in sizes.items()} and result.schema_version == 15
     assert sample_counts(target) == sizes
     assert snapshot(target) == before                         # same values, same ids, same timestamps
     # the destination says it is Postgres; the origin was not touched
@@ -368,7 +368,7 @@ def test_endpoints_need_the_session_token(env):
 def test_status_of_the_default_database(env):
     migrate()
     body = TestClient(create_app(), headers=HEADERS).get("/api/database").json()
-    assert body["engine"] == "sqlite" and body["reachable"] and body["schema_version"] == 14
+    assert body["engine"] == "sqlite" and body["reachable"] and body["schema_version"] == 15
     assert body["location"].endswith("hokma.db") and body["saved_url"] is None
 
 
@@ -449,7 +449,7 @@ def test_full_switch_over_http_and_back(seeded, pg_password_url, env, caplog):
         assert SECRET_ENCODED in database_config_path().read_text(encoding="utf-8")      # only here
 
         status = client.get("/api/database").json()
-        assert status["engine"] == "postgres" and status["reachable"] and status["schema_version"] == 14
+        assert status["engine"] == "postgres" and status["reachable"] and status["schema_version"] == 15
         assert SECRET not in json.dumps(status) and SECRET_ENCODED not in json.dumps(status)
         assert SECRET not in json.dumps(tested) and SECRET_ENCODED not in json.dumps(tested)
 
@@ -488,3 +488,37 @@ def test_lifespan_opens_and_migrates_the_database(env):
         assert app.state.db.engine == "sqlite" and db_path().is_file()
         with app.state.db.read() as u:
             assert u.profile.get_or_default().exists is False
+
+
+# ------------------------------------------------------------------------------------ desks (0015)
+
+def test_the_desk_tables_exist_in_postgres_with_their_locks(pg_url_migrated):
+    desk_tables = {"desks", "desk_agents", "desk_assets", "desk_connections"}
+    with psycopg.connect(pg_url_migrated, autocommit=True) as con:
+        found = {r[0] for r in con.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()")}
+        assert desk_tables <= found
+        con.execute("INSERT INTO projects (slug, name, path, kind) VALUES ('nq', 'NQ', '/p/nq', 'strategy')")
+        project = con.execute("SELECT id FROM projects WHERE slug = 'nq'").fetchone()[0]
+        with pytest.raises(psycopg.errors.CheckViolation):
+            con.execute("INSERT INTO desks (project_id, name, capital, mode) VALUES (%s, 'NQ', 10000, 'real')", (project,))
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            con.execute("INSERT INTO desks (project_id, name, capital) VALUES (999, 'NQ', 10000)")
+        con.execute("INSERT INTO desks (project_id, name, capital) VALUES (%s, 'NQ', 10000)", (project,))
+        desk = con.execute("SELECT id FROM desks").fetchone()[0]
+        con.execute("INSERT INTO agents (slug, display_name) VALUES ('boss', 'Boss'), ('other', 'Other')")
+        add = "INSERT INTO desk_agents (desk_id, agent_slug, role, model) VALUES (%s, %s, %s, %s)"
+        con.execute(add, (desk, "boss", "chief", "sonnet"))
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            con.execute(add, (desk, "other", "chief", "sonnet"))
+    result = migrate(backend=PostgresBackend(pg_url_migrated), seed=False)
+    assert result.applied == [] and result.version == 15            # applying again is a no-op
+
+
+def test_the_agent_role_cannot_write_desks(seeded, pg_url, env):
+    result = transfer(SqliteBackend(db_path()), PostgresBackend(pg_url))
+    assert result.roles in ("created", "exists")
+    with psycopg.connect(pg_url, autocommit=True) as admin:
+        rows = admin.execute("SELECT t, has_table_privilege('hokma_agent', t, 'INSERT'), has_table_privilege('hokma_agent', t, 'UPDATE'), "
+                             "has_table_privilege('hokma_agent', t, 'DELETE'), has_table_privilege('hokma_agent', t, 'SELECT') "
+                             "FROM unnest(ARRAY['desks','desk_agents','desk_assets','desk_connections']) AS t").fetchall()
+    assert len(rows) == 4 and all(r[1:] == (False, False, False, True) for r in rows)

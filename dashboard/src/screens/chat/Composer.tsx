@@ -19,6 +19,17 @@ import { voice } from "./voiceTypes";
 export interface ComposerHandle {
   addFiles: (files: File[]) => void;
   focus: () => void;
+  /** Puts text in the message box without sending it. */
+  setText: (value: string) => void;
+}
+
+/** What a host screen can change of the box without copying it (the money desks chat uses it). */
+export interface ComposerHost {
+  /** Text of the empty box and its accessible label; default: the chat ones. */
+  placeholder?: string;
+  label?: string;
+  /** The three model tiers are listed as they are and picking one only calls `onModel`: no engine is switched or made the default. */
+  tierMenuOnly?: boolean;
 }
 
 interface ComposerProps {
@@ -36,6 +47,7 @@ interface ComposerProps {
   onModel: (model: ModelId) => void;
   onSend: (text: string, attachments: AttachmentChip[]) => boolean;
   onStop: () => void;
+  host?: ComposerHost;
 }
 
 /** The reason the server gave for refusing a file, as the catalog key suffix. */
@@ -49,7 +61,7 @@ function uploadReason(cause: unknown): AttachmentChip["reason"] {
 const TIER_OF: Record<ModelId, "fast" | "balanced" | "deep"> = { haiku: "fast", sonnet: "balanced", opus: "deep" };
 const MODEL_DOT: Record<ModelId, string> = { haiku: "var(--ok)", sonnet: "var(--acc)", opus: "var(--org)" };
 
-export function Composer({ ref, model, running, stopping, options, modelMenuRequest, usagePct = null, conversationId = null, onModel, onSend, onStop }: ComposerProps) {
+export function Composer({ ref, model, running, stopping, options, modelMenuRequest, usagePct = null, conversationId = null, onModel, onSend, onStop, host }: ComposerProps) {
   const { t } = useI18n();
   const shell = useShell();
   const [text, setText] = useState("");
@@ -57,7 +69,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
   const engines = useEngines(conversationId);
   const tiers = engines.active !== null && engines.active.engine !== "claude_code";
   const groups: ModelGroup[] = engines.data?.models ?? [];
-  const listed = engines.data?.models !== undefined;          // an old server sends no list: the menu then keeps its three Claude models
+  const listed = host?.tierMenuOnly !== true && engines.data?.models !== undefined;          // an old server sends no list: the menu then keeps its three Claude models
   const activeId = (engines.data?.active?.id ?? null) as number | null;
   // The group of the engine that answers, or none: the button never shows another engine's name (bug 1104).
   const activeGroup = groups.find((g) => g.connection_id === activeId) ?? null;
@@ -144,7 +156,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
     [patchChip, shell, t],
   );
 
-  useImperativeHandle(ref, () => ({ addFiles, focus: () => input.current?.focus() }), [addFiles]);
+  useImperativeHandle(ref, () => ({ addFiles, focus: () => input.current?.focus(), setText }), [addFiles]);
 
   const removeChip = (key: string) => {
     const gone = chipsRef.current.find((chip) => chip.key === key);
@@ -336,7 +348,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
           }}
         />
         <label htmlFor={inputId} className="sr-only">
-          {t("chat.composer.label")}
+          {host?.label ?? t("chat.composer.label")}
         </label>
         <textarea
           id={inputId}
@@ -344,7 +356,7 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
           className="in chat-input"
           rows={1}
           value={text}
-          placeholder={t("chat.composer.placeholder")}
+          placeholder={host?.placeholder ?? t("chat.composer.placeholder")}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}

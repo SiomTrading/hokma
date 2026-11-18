@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0 Money desks
+
+- New: Money desks. The side menu has a "Money desks" entry with one row per desk (name, capital, today's result). The Fund view shows the simulated capital, the tokens of the week and one card per desk (focus, status, capital, today, drawdown, agents working). Everything is simulation: real money stays blocked.
+- New: create a desk from a template (Minimal, Standard or With debate) in four steps: focus, agent team with the model of each one, rules (the weekly token cap) and assets. "Create it with Hokma" opens the chat with a first message that asks for the desk; Hokma proposes the values in text and the desk itself is created from the template.
+- New: each desk has its own agents: a desk chief, signals, risk, bull case, bear case and judge. The Agents tab groups the team as Working, Waiting and Off, and shows what each agent can and cannot do, its tokens of the week and its latest activity. You can bring an existing agent, create a new one or remove one from the desk.
+- New: the model of an agent is chosen per desk (Haiku, Sonnet or Opus, with a confirmation for Opus). Changing it in one desk changes nothing in another desk or in Settings.
+- New: the desk Terminal shows your assets with last price and change, the chart of the asset in focus, a Positions panel and the chat with the desk chief. Tokens of every turn count on that desk only.
+- New: weekly token budget per desk. At 80% a notice appears; at 100% the desk chat and the desk tasks stop and the screen says why. Raising the budget or a new week resumes the desk. Other desks and the general chat keep working.
+- New: the Settings tab of a desk edits its name, focus, simulated capital, monthly objective and mandate, its assets and the connections it uses. Operations and Rules show what arrives next. The rules of a desk are written by talking with the desk chief and arrive in the next version.
+- New: the learn guides have a new class, "Money desks" (English and Spanish), and the kit installs the six desk agents turned off until you bring them to a desk.
+- Check: a database from 0.0.39 with projects, agents and conversations upgrades without losing or changing a row.
+
 ## 0.0.39
 
 - New: Hokma keeps no model name of its own. When you connect a key (Google, OpenAI, Anthropic, DeepSeek, Kimi or any other provider), Hokma reads the models that key can use from the provider itself, keeps the list, and reads it again in the background at every start (without network it uses the last list). Fast, Balanced and Powerful are picked from that list: stable chat models only, the newest of each size. The connection test uses the same model the chat will use (bug 1173).

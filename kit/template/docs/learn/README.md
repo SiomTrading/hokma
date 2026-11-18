@@ -15,6 +15,7 @@ and never trades real money on its own.
 | Axel | Publishes, only with the approval of Vera |
 | Hugo | Data, backtest metrics and performance |
 | Iris | Market research and papers |
+| Desk team | Desk chief, Signals, Risk, Bull case, Bear case and Judge work on money desks (topic 11) |
 
 ## Names
 

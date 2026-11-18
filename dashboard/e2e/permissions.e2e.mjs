@@ -22,7 +22,7 @@ const starts = (log) =>
 
 await runSuite("permissions", { script: "permissions-serve.py" }, async ({ page, server, msg, M }) => {
   const project = path.join(server.home, "projects", "strategy");
-  const box = page.locator("#chat-message");
+  const box = page.locator("[id^=chat-message]");
   const pill = page.getByTestId("permission-pill");
   const idle = () => page.getByRole("button", { name: msg("chat.composer.send") }).waitFor({ timeout: 20000 });
   const turn = async (text) => {

@@ -12,6 +12,7 @@ import { isPanelCommand, parseCommand } from "./commands";
 import { Composer } from "./Composer";
 import type { ComposerHandle } from "./Composer";
 import { getHub } from "./hub";
+import { takeChatStart } from "./start";
 import type { HubClient } from "./hub";
 import { McpPanel } from "./McpPanel";
 import { MessageItem } from "./Messages";
@@ -169,6 +170,12 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
   useEffect(() => {
     if (active) composer.current?.focus();
   }, [active]);
+
+  // A message handed over by another screen (money desks): it waits in the box for the person to read and send.
+  useEffect(() => {
+    const start = takeChatStart(draft);
+    if (start) composer.current?.setText(start);
+  }, [draft]);
 
   useLayoutEffect(() => {
     const el = scroller.current;

@@ -199,7 +199,7 @@ async function scenario(locale) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `hokma-resume-e2e-${browserName}-${locale}-`));
   const server = await startServer({ script: "permissions-serve.py", root, dist });
   const profile = path.join(root, "browser-profile");
-  const inside = (page) => page.locator("#chat-message").waitFor({ timeout: 20000 });
+  const inside = (page) => page.locator("[id^=chat-message]").waitFor({ timeout: 20000 });
   const entry = (page) => page.getByTestId("no-token").waitFor({ timeout: 20000 });
   const ownerCall = (nonce, mode) =>
     fetch(`${server.base}api/profile/permission-mode`, {
@@ -379,7 +379,7 @@ async function logoutScenario(locale) {
   try {
     await page.goto(`${server.base}#t=${server.token}&o=${server.once}`);
     await page.waitForURL((url) => HOST_NAME.test(url.hostname), { timeout: 20000 });
-    await page.locator("#chat-message").waitFor({ timeout: 20000 });
+    await page.locator("[id^=chat-message]").waitFor({ timeout: 20000 });
     assert.equal((await deviceKeyInfo(page)).record, true, "the key is there before closing");
     await page.getByRole("button", { name: M["nav.settings"] }).click();
     const dialog = page.getByRole("dialog", { name: msg("settings.title") });
@@ -409,7 +409,7 @@ async function noStorageScenario(locale) {
   try {
     const seen = trackSession(page);
     await page.goto(`${server.base}#t=${server.token}&o=${server.once}`);
-    await page.locator("#chat-message").waitFor({ timeout: 20000 });
+    await page.locator("[id^=chat-message]").waitFor({ timeout: 20000 });
     await sleep(500);
     assert.equal(new URL(page.url()).hostname, "127.0.0.1", "the page stays on the start link page");
     assert.equal(seen.handoffs, 0, "it never asks for a handoff code");

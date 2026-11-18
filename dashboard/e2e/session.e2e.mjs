@@ -129,7 +129,7 @@ try {
   await page.route("**/health", (route) => (down ? route.abort() : route.continue()));
   await page.goto(`${server.base}#t=${server.token}&o=${server.once}`);
   await page.waitForURL((url) => HOST_NAME.test(url.hostname) && url.port === String(server.port), { timeout: 20000 });
-  await page.locator("#chat-message").waitFor();
+  await page.locator("[id^=chat-message]").waitFor();
   assert.equal(startRegistrations.length >= 1, true, "the start link page registers its confirmation by itself");
   assert.match(startRegistrations[0].nonce ?? "", /^[0-9a-f]{32}$/, "the start link page made a 128 bit confirmation");
   assert.equal(enters.length, 1, "the engine's own host entered once");
@@ -182,7 +182,7 @@ try {
   setTimeout(() => (down = false), 3500);
   for (const ws of sockets) ws.close({ code: 1012, reason: "restarting" });  // what the engine does when it goes down to restart
   await until(async () => (await page.evaluate(() => window.__beforeRestart ?? false)) === false, "the page restarted by itself", 40000);
-  await page.locator("#chat-message").waitFor();
+  await page.locator("[id^=chat-message]").waitFor();
   assert.equal(await page.evaluate(() => window.name), "", "emptied after the automatic restart too");
   assert.deepEqual(await otherSessionKeys(page), []);
   assert.ok(!(await storageOf(page)).includes(server.token));
@@ -198,7 +198,7 @@ try {
   const resumesBeforeF5 = resumes.length;
   const registrationsBeforeF5 = hostRegistrations.length;
   await reloadWithKeyboard(page);
-  await page.locator("#chat-message").waitFor();
+  await page.locator("[id^=chat-message]").waitFor();
   assert.equal(await page.evaluate(() => window.name), "", "nothing is left in window.name after F5");
   assert.deepEqual(await otherSessionKeys(page), []);
   await until(() => resumes.length > resumesBeforeF5, "the resume after F5", 20000);

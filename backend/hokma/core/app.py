@@ -28,6 +28,7 @@ from hokma.market.ws import router as market_ws_router
 from hokma.docs.api import router as docs_router
 from hokma.library import model_download as library_model
 from hokma.library.api import router as library_router
+from hokma.desks.api import router as desks_router
 from hokma.projects.api import router as projects_router
 from hokma.rpc.ws import router as rpc_router
 from hokma.setup import router as setup_router
@@ -120,6 +121,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     app.include_router(engine_router)
     app.include_router(engines_router)
     app.include_router(projects_router)
+    app.include_router(desks_router)
     app.include_router(library_router)
     app.include_router(docs_router)
     app.include_router(setup_router)

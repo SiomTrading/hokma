@@ -83,6 +83,12 @@ Dispatch rules:
 | Axel (`axel`) | Publishes to the fund repository and turns robots on in simulation, only with Vera's approval | fast | Later release |
 | Hugo (`hugo`) | Data, backtest metrics and performance | fast | Later release |
 | Iris (`iris`) | Market research, papers and strategies | balanced | Later release |
+| Desk Chief (`desk-chief`) | Runs one money desk: reads its mandate, sends work as tasks, keeps its journal | balanced | Money desks |
+| Signals (`signals`) | Proposes entries with a reason for a desk; sends no orders | balanced | Money desks |
+| Risk (`risk`) | Explains and audits the risk of a desk; proposes rule changes to the owner | fast | Money desks |
+| Bull Case (`bull-case`) | Argues the case in favor in a desk debate; does not decide | balanced | Money desks |
+| Bear Case (`bear-case`) | Argues the case against in a desk debate; does not decide | balanced | Money desks |
+| Judge (`judge`) | Reads only the debate and rules on it; does not see the full journal | balanced | Money desks |
 
 Tiers: `fast` uses little of the plan, `balanced` a medium amount, `deep` a lot.
 Each agent's tier is changed by {{owner_name}} on the Agents screen.

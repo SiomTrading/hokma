@@ -46,6 +46,7 @@ export function getScreen(id: string): ScreenRegistration | undefined {
 
 export type SlotName =
   | "sidebar.conversations"
+  | "sidebar.desks"
   | "brand.subtitle"
   | "addMenu.assets"
   | "rightPanel"

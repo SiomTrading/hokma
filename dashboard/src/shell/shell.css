@@ -20,11 +20,11 @@
 
 /* Low menu (small screen or Terminal open): sizes mirrored in sidebarDensity.ts. */
 .side[data-density="compact"], .side[data-density="tight"] { gap: 2px; padding-top: 8px; padding-bottom: 8px; }
-.side[data-density="compact"] .nav { min-height: 30px; }
+.side[data-density="compact"] .nav { min-height: 29px; }
 .side[data-density="compact"] .sep, .side[data-density="tight"] .sep { margin: 3px 4px; }
 .side[data-density="compact"] .brand { padding-bottom: 6px; }
 .side[data-density="tight"] { padding-top: 6px; padding-bottom: 6px; }
-.side[data-density="tight"] .nav { min-height: 27px; }
+.side[data-density="tight"] .nav { min-height: 24px; }
 .side[data-density="tight"] .brand { padding-bottom: 4px; }
 .side[data-density="tight"] .side-scroll, .side[data-density="tight"] .side-recents-sep { display: none; }
 /* Icons-only menu stacks the brand: when it is also tight, the logo gives its row to the buttons. */

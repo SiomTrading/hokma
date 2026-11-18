@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from dbsupport import db, env  # noqa: F401  (fixtures)
 
+from hokma.db import Actor
 from hokma.kit import hokma_tools
 from hokma.kit.hokma_tools import Caller
 from hokma.kit.trash_mcp import handle
@@ -34,7 +35,7 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "journal_write", "journal_search", "ips_read", "decision_propose", "decision_list", "schedule_create",
                 "schedule_list", "extension_request", "agents_list", "agent_save", "skill_save", "skill_install", "bug_report",
                 "bug_update", "bug_list", "docs_search", "docs_list", "notify_owner",
-                "trash_move"}
+                "desk_list", "desk_show", "trash_move"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]
     assert all(t["inputSchema"]["additionalProperties"] is False for t in listed)
@@ -570,3 +571,141 @@ def test_real_model_the_agent_finds_an_english_passage_with_a_spanish_question(p
         assert search({"query": "¿Cuál es la capital de Mongolia?"})["found"] is False
     finally:
         runtime.reset_for_tests()
+
+
+# ------------------------------------------------------------------------------------------ desks (SPEC-014 P6)
+
+DESK_AGENTS = ("desk-chief", "hugo", "risk", "iris", "signals", "axel", "vera")
+
+
+@pytest.fixture
+def two_desks(db):
+    from hokma.desks import service
+
+    with db.write() as u:
+        u.profile.save(owner_name="Ana", fund_name="Fondo Prueba")
+        for slug in DESK_AGENTS:
+            u.agents.upsert_kit(slug, slug.title(), f"{slug} agent", "balanced", f"agents/{slug}.md")
+            u.agents.set_status(slug, "active")
+    first = service.create_desk("Futuros NQ", 10000, template="standard", mandate="Trade the open only.",
+                                assets=["NQ=F"], token_budget=1000, db=db)
+    second = service.create_desk("Swing", 5000, template="minimal", db=db)
+    return first, second
+
+
+def as_desk(desk):
+    """A caller whose active project is the project of `desk`."""
+    from hokma.desks import service
+
+    opened = service.open_conversation(desk["id"])
+    return Caller({"HOKMA_AGENT": "desk-chief", "HOKMA_CONVERSATION_ID": str(opened["conversation_id"])})
+
+
+def call(name, args, caller):
+    text, is_error = hokma_tools.call(name, args, caller)
+    return (json.loads(text) if not is_error else text), is_error
+
+
+def test_desk_tools_are_declared_read_only_with_strict_schemas():
+    for name in ("desk_list", "desk_show"):
+        assert hokma_tools.TOOLS[name][4] is False
+    listed = {d["name"]: d for d in hokma_tools.definitions()}
+    assert listed["desk_list"]["inputSchema"]["properties"] == {}
+    assert listed["desk_show"]["inputSchema"]["required"] == []
+    assert not [n for n in hokma_tools.TOOLS if n.startswith("desk_") and hokma_tools.TOOLS[n][4]]
+
+
+def test_desk_list_gives_id_name_and_status_and_leaves_archived_out(two_desks, db):
+    from hokma.desks import service
+
+    first, second = two_desks
+    rows, err = run("desk_list", {})
+    assert not err and {r["id"] for r in rows} == {first["id"], second["id"]}
+    assert set(rows[0]) == {"id", "name", "status"} and {r["name"] for r in rows} == {"Futuros NQ", "Swing"}
+    service.archive_desk(second["id"], db=db)
+    assert [r["id"] for r in run("desk_list", {})[0]] == [first["id"]]
+
+
+def test_desk_show_has_mandate_capital_assets_team_models_and_budget(two_desks):
+    first, _ = two_desks
+    shown, err = run("desk_show", {"desk_id": first["id"]})
+    assert not err
+    assert shown["name"] == "Futuros NQ" and shown["capital"] == 10000 and shown["mode"] == "simulation"
+    assert shown["mandate"] == "Trade the open only." and shown["assets"] == ["NQ=F"]
+    assert len(shown["agents"]) == 7 and sum(1 for a in shown["agents"] if a["role"] == "chief") == 1
+    assert all(a["model"] in ("haiku", "sonnet", "opus") for a in shown["agents"])
+    assert shown["budget"]["token_budget"] == 1000 and shown["budget"]["used"] == 0
+    assert shown["budget"]["state"] == "ok"
+
+
+def test_the_desk_tools_write_nothing(two_desks, db):
+    first, _ = two_desks
+
+    def snapshot():
+        with db.read() as u:
+            return {t: u.session.scalar(f"SELECT count(*) FROM {t}") for t in
+                    ("projects", "desks", "desk_agents", "desk_assets", "journal_entries", "conversations", "tasks")}, \
+                u.session.scalar("SELECT max(updated_at) FROM desks")
+
+    before = snapshot()
+    run("desk_list", {})
+    run("desk_show", {"desk_id": first["id"]})
+    assert run("desk_show", {"desk_id": 9999})[1]
+    assert snapshot() == before
+
+
+def test_outside_a_desk_the_id_is_required_and_any_desk_can_be_read(two_desks):
+    first, second = two_desks
+    text, err = run("desk_show", {})
+    assert err and "desk_id" in text
+    assert run("desk_show", {"desk_id": second["id"]})[0]["name"] == "Swing"
+    assert run("desk_show", {"desk_id": first["id"]}, agent="hokma")[0]["name"] == "Futuros NQ"
+
+
+def test_inside_a_desk_the_default_is_its_own_and_another_desk_is_refused(two_desks):
+    first, second = two_desks
+    caller = as_desk(first)
+    own, err = call("desk_show", {}, caller)
+    assert not err and own["id"] == first["id"]
+    assert call("desk_show", {"desk_id": first["id"]}, caller)[0]["id"] == first["id"]
+    other, err = call("desk_show", {"desk_id": second["id"]}, caller)
+    assert err and "LookupError" in other and "Swing" not in other
+    assert [r["id"] for r in call("desk_list", {}, caller)[0]] == [first["id"]]
+    assert [r["id"] for r in call("desk_list", {}, as_desk(second))[0]] == [second["id"]]
+
+
+def test_a_running_task_of_the_desk_project_fixes_the_scope_too(two_desks, db):
+    first, second = two_desks
+    with db.write() as u:
+        task = u.tasks.create("Check the open", actor=Actor.system(), project_id=first["project_id"],
+                              assigned_agent="desk-chief")
+    caller = Caller({"HOKMA_AGENT": "desk-chief", "HOKMA_TASK_ID": str(task.id)})
+    assert call("desk_show", {}, caller)[0]["id"] == first["id"]
+    assert call("desk_show", {"desk_id": second["id"]}, caller)[1]
+
+
+def test_a_caller_in_an_ordinary_project_is_not_limited(two_desks, db):
+    first, second = two_desks
+    with db.write() as u:
+        project = u.projects.create("Plain", "plain", kind="other")
+        conversation = u.conversations.create(engine="claude_code", title="Chat", project_id=project.id, agent_slug="hokma", model="sonnet")
+    caller = Caller({"HOKMA_AGENT": "hokma", "HOKMA_CONVERSATION_ID": str(conversation.id)})
+    assert {r["id"] for r in call("desk_list", {}, caller)[0]} == {first["id"], second["id"]}
+    assert call("desk_show", {"desk_id": second["id"]}, caller)[0]["id"] == second["id"]
+    assert call("desk_show", {}, caller)[1]
+
+
+def test_bad_desk_arguments_are_errors_the_model_can_read(two_desks):
+    assert "unknown argument" in run("desk_show", {"id": 1})[0]
+    assert "desk_id must be integer" in run("desk_show", {"desk_id": "1"})[0]
+    assert "unknown argument" in run("desk_list", {"all": True})[0]
+    text, err = run("desk_show", {"desk_id": 424242})
+    assert err and "LookupError" in text
+
+
+def test_the_desk_tools_reach_the_agent_through_the_server_protocol(two_desks):
+    first, _ = two_desks
+    ask = {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+           "params": {"name": "desk_show", "arguments": {"desk_id": first["id"]}}}
+    result = handle(ask, "d", ["w"], ["d"])["result"]
+    assert not result.get("isError") and json.loads(result["content"][0]["text"])["id"] == first["id"]

@@ -42,7 +42,9 @@ V1 = "# Hokma: {{fund_name}}\nYou work for {{student_name}}. Hokma belongs to {{
 
 
 def rendered_files(work: Path):
-    return [p for p in sorted(work.rglob("*.md")) if ".hokma-new" not in p.name]
+    """Files the kit filled. `desks/` is the per-desk folder template: its own markers are filled when a desk is created."""
+    return [p for p in sorted(work.rglob("*.md"))
+            if ".hokma-new" not in p.name and (work / "desks") not in p.parents]
 
 
 # ---- the template itself ------------------------------------------------------------------

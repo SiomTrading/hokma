@@ -117,7 +117,11 @@ def task_link(u, c: Caller, a: dict) -> str:
 
 
 def task_claim(u, c: Caller, a: dict) -> str:
-    return _dump(_row(u.tasks.claim(a["task_id"], c.slug, actor=c.actor), *TASK_KEYS))
+    from hokma.desks import service as desks
+
+    # On a desk the run is recorded with the model of the desk, so its tokens and its model are the desk's.
+    model = desks.model_in(u, u.tasks.get(a["task_id"]).project_id, c.slug)
+    return _dump(_row(u.tasks.claim(a["task_id"], c.slug, actor=c.actor, run_model=model), *TASK_KEYS))
 
 
 def task_heartbeat(u, c: Caller, a: dict) -> str:
@@ -362,6 +366,76 @@ def get_db():
     return get_database()
 
 
+# ------------------------------------------------------------------------------------------------ desks
+
+DESK_KEYS = ("id", "project_id", "name", "focus", "status", "template", "mode", "capital", "currency",
+             "objective_pct", "mandate")
+
+
+def _active_project(u, c: Caller) -> int | None:
+    """The project the caller works in: the one of its running task, else the one of its conversation."""
+    if c.task_id is not None:
+        task = u.tasks.find(c.task_id)
+        if task is not None and task.project_id is not None:
+            return task.project_id
+    if c.conversation_id is not None:
+        conversation = u.conversations.find(c.conversation_id)
+        if conversation is not None and conversation.project_id is not None:
+            return conversation.project_id
+    return None
+
+
+def _own_desk_id(c: Caller) -> int | None:
+    """The id of the desk whose project is the caller's active project, or None when it works outside a desk."""
+    with get_db().read() as u:
+        project_id = _active_project(u, c)
+        desk = u.desks.by_project(project_id) if project_id is not None else None
+        return desk.id if desk is not None else None
+
+
+def _desk_call(fn, *args: Any):
+    from hokma.desks.errors import DeskError
+
+    try:
+        return fn(*args)
+    except DeskError as exc:
+        raise LookupError(exc.message) from exc
+
+
+def desk_list(u, c: Caller, a: dict) -> str:
+    """Desks that are not archived. An agent working inside a desk sees only its own."""
+    from hokma.desks import service
+
+    own = _own_desk_id(c)
+    rows = _desk_call(service.list_desks)
+    if own is not None:
+        rows = [r for r in rows if r["id"] == own]
+    return _dump([{"id": r["id"], "name": r["name"], "status": r["status"]} for r in rows])
+
+
+def desk_show(u, c: Caller, a: dict) -> str:
+    """One desk: mandate, capital, assets, team with the model of the desk and the state of the weekly budget.
+
+    Without `desk_id` it is the desk of the active project. A caller working inside a desk cannot read another."""
+    from hokma.desks import service
+
+    own = _own_desk_id(c)
+    desk_id = a.get("desk_id")
+    if desk_id is None:
+        desk_id = own
+        if desk_id is None:
+            raise ValueError("the active project is not a desk; pass desk_id (see desk_list)")
+    elif own is not None and desk_id != own:
+        raise LookupError(f"desk {desk_id} is not the desk of this project; only desk {own} can be read here")
+    desk = _desk_call(service.get_desk, desk_id)
+    budget = desk["budget"]
+    out = {k: desk[k] for k in DESK_KEYS if k in desk}
+    out["assets"] = [x["symbol"] for x in desk["assets"]]
+    out["agents"] = [{k: x[k] for k in ("agent_slug", "name", "role", "model", "active")} for x in desk["agents"]]
+    out["budget"] = {k: budget[k] for k in ("starts_at", "ends_at", "token_budget", "used", "pct", "state")}
+    return _dump(out)
+
+
 # -------------------------------------------------------------------------------------------- documents
 
 PREPARING = ("Search is being prepared and will be ready in a few minutes. Tell the user so; do not guess an answer.")
@@ -501,7 +575,8 @@ def bug_list(u, c: Caller, a: dict) -> str:
 # ---------------------------------------------------------------------------- table
 
 Handler = Callable[[Any, Caller, dict], str]
-NO_UNIT = {"project_create", "agent_save", "skill_save", "skill_install"}          # these open their own database units
+# these open their own database units
+NO_UNIT = {"project_create", "agent_save", "skill_save", "skill_install", "desk_list", "desk_show"}
 TASK_ID = {"task_id": _i("Task id.")}
 
 TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
@@ -537,6 +612,12 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
     "project_show": ("Show one project and its recent tasks.", {"project_id": _i()}, ["project_id"], project_show, False),
     "project_create": ("Create a project. Hokma makes its folder.", {"name": _s(), "kind": _s(
         enum=["ips", "wealth", "strategy", "research", "robot", "other"])}, ["name"], project_create, False),
+    "desk_list": ("List the money desks that are not archived (id, name, status). Read only.", {}, [], desk_list,
+                  False),
+    "desk_show": ("Show one money desk: mandate, simulated capital, assets, team with the model of this desk and the "
+                  "state of the weekly token budget. Without desk_id it is the desk of the active project. Read only: "
+                  "no tool changes a desk.", {"desk_id": _i("Desk id; default: the desk of the active project.")}, [],
+                  desk_show, False),
     "journal_write": ("Write an entry in the journal.", {
         "kind": _s("For example action, note, alert."), "title": _s(), "outcome": _s("info, success, failure..."),
         "body": _s(), "task_id": _i(), "project_id": _i()}, ["kind", "title"], journal_write, True),
@@ -639,6 +720,20 @@ def validate(name: str, args: Any) -> str | None:
     return None
 
 
+def _desk_gate(db, args: dict) -> None:
+    """A desk over its weekly token budget hands out no task: the claim fails and the task stays as it is. It runs
+    before the claim opens its unit, so the journal entry of the block is saved even though the claim fails."""
+    from hokma.desks import service as desks
+    from hokma.desks.errors import DeskError
+
+    with db.read() as u:
+        project_id = u.tasks.get(args["task_id"]).project_id
+    try:
+        desks.assert_can_run(project_id, db=db)
+    except DeskError as exc:
+        raise LookupError(f"{exc.code}: {exc.message}") from exc
+
+
 def call(name: str, args: dict, caller: Caller | None = None) -> tuple[str, bool]:
     """(text, is_error)."""
     from hokma.db import DbError, current_version, get_database
@@ -652,6 +747,8 @@ def call(name: str, args: dict, caller: Caller | None = None) -> tuple[str, bool
     handler, writes = TOOLS[name][3], TOOLS[name][4]
     db = get_database()
     try:
+        if name == "task_claim":
+            _desk_gate(db, args)
         if name in NO_UNIT:
             return handler(None, caller or Caller(), args), False
         with (db.write() if writes else db.read()) as unit:

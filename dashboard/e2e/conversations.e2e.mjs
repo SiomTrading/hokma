@@ -27,7 +27,7 @@ await runSuite("conversations", { script: "serve.py" }, async ({ page: A, server
   const hash = (page) => page.evaluate(() => window.location.hash);
   // chat screens stay mounted in the background (keepAlive): everything is read from the one in front
   const front = (page) => page.locator(".screen-host:not([hidden])");
-  const box = (page) => front(page).locator("#chat-message");
+  const box = (page) => front(page).locator("[id^=chat-message]");
   const head = (page) => front(page).locator(".chat-head");
   const users = (page) => front(page).getByTestId("user-message");
   const answers = (page) => front(page).getByTestId("assistant-message");

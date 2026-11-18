@@ -20,6 +20,7 @@ TABLES = {
     "guard_events", "bugs", "conversations", "messages", "attachments", "extensions", "extension_requests",
     "scheduled_jobs", "onboarding_progress", "trash_items", "checkpoint_points", "engine_connections",
     "libraries", "documents", "doc_chunks", "doc_chunks_fts", "project_folders", "library_folders", "doc_chunk_vectors", "cloud_backup_state", "telegram_link", "telegram_outbox", "telegram_session",
+    "desks", "desk_agents", "desk_assets", "desk_connections",
 }
 
 
@@ -32,10 +33,10 @@ def raw(path=None):
 
 def test_fresh_database_has_the_22_tables_plus_onboarding_and_is_healthy(env):
     result = migrate()
-    assert result.created and result.applied == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] and result.version == 14 and result.backup is None
+    assert result.created and result.applied == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] and result.version == 15 and result.backup is None
     con = raw()
     names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
-    assert names - FTS_SHADOW == TABLES and len(TABLES) == 37
+    assert names - FTS_SHADOW == TABLES and len(TABLES) == 41
     assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
     assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -63,7 +64,7 @@ def test_migrating_twice_changes_nothing(env):
     dump = list(con.iterdump())
     con.close()
     second = migrate()
-    assert second.applied == [] and not second.created and second.backup is None and second.version == 14
+    assert second.applied == [] and not second.created and second.backup is None and second.version == 15
     con = raw()
     assert list(con.iterdump()) == dump
 
@@ -71,7 +72,7 @@ def test_migrating_twice_changes_nothing(env):
 def test_current_version(env):
     assert current_version() == 0
     migrate()
-    assert current_version() == 14
+    assert current_version() == 15
 
 
 def make_dir(tmp_path, files: dict[str, str]) -> Path:
@@ -86,12 +87,12 @@ def make_dir(tmp_path, files: dict[str, str]) -> Path:
 
 def test_a_new_migration_runs_after_a_backup_of_the_existing_database(env):
     migrate()
-    directory = make_dir(env, {"0015_extra.sql": "CREATE TABLE extra ({PK_ID});".replace("{PK_ID}", "id {PK}")})
+    directory = make_dir(env, {"0016_extra.sql": "CREATE TABLE extra ({PK_ID});".replace("{PK_ID}", "id {PK}")})
     result = migrate(migrations_dir=directory)
-    assert result.applied == [15] and result.version == 15
+    assert result.applied == [16] and result.version == 16
     assert result.backup is not None and result.backup.parent == db_path().parent / "backups"
     backup = sqlite3.connect(str(result.backup))
-    assert backup.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 14
+    assert backup.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 15
     assert backup.execute("SELECT count(*) FROM sqlite_master WHERE name = 'extra'").fetchone()[0] == 0
     assert raw().execute("SELECT count(*) FROM sqlite_master WHERE name = 'extra'").fetchone()[0] == 1
 
@@ -102,15 +103,15 @@ def test_a_broken_migration_rolls_back_leaves_the_copy_and_reports(env):
     before = list(con.iterdump())
     con.close()
     bad = "CREATE TABLE half (id {PK});\nINSERT INTO half (id) VALUES (1);\nCREATE TABLE half (id {PK});"
-    directory = make_dir(env, {"0015_bad.sql": bad})
+    directory = make_dir(env, {"0016_bad.sql": bad})
     with pytest.raises(MigrationError) as info:
         migrate(migrations_dir=directory)
-    assert info.value.version == 15
-    assert str(info.value) == t("db.migrate.failed", file="0015_bad.sql", error=str(info.value.__cause__.args[0]))
+    assert info.value.version == 16
+    assert str(info.value) == t("db.migrate.failed", file="0016_bad.sql", error=str(info.value.__cause__.args[0]))
     con = raw()
     assert list(con.iterdump()) == before                           # the whole file was rolled back
-    assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 14
-    backups = list((db_path().parent / "backups").glob("hokma-v14-*.db"))
+    assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 15
+    backups = list((db_path().parent / "backups").glob("hokma-v15-*.db"))
     assert len(backups) == 1
 
 
@@ -124,11 +125,11 @@ def test_a_broken_first_migration_leaves_no_schema_version(env):
 
 
 def test_a_database_newer_than_the_code_is_refused(env):
-    directory = make_dir(env, {"0015_extra.sql": "CREATE TABLE extra (id {PK});"})
+    directory = make_dir(env, {"0016_extra.sql": "CREATE TABLE extra (id {PK});"})
     migrate(migrations_dir=directory)
     with pytest.raises(MigrationError) as info:
-        migrate()                                                   # the code only knows version 14
-    assert str(info.value) == t("db.migrate.newer", found=15, known=14)
+        migrate()                                                   # the code only knows version 15
+    assert str(info.value) == t("db.migrate.newer", found=16, known=15)
 
 
 def test_a_file_that_is_not_a_database_is_reported(env):
@@ -140,8 +141,8 @@ def test_a_file_that_is_not_a_database_is_reported(env):
 
 def test_old_backups_are_pruned(env):
     migrate()
-    for n in range(15, 28):
-        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(15, n + 1)})
+    for n in range(16, 29):
+        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(16, n + 1)})
         migrate(migrations_dir=directory)
     assert len(list((db_path().parent / "backups").glob("hokma-v*.db"))) == 10
 
@@ -179,7 +180,7 @@ def test_two_processes_migrating_at_once_apply_it_once(env):
     [th.start() for th in threads]
     [th.join() for th in threads]
     assert not errors
-    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == 14
+    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == 15
 
 
 # ------------------------------------------------------------------------------------------------ seeds
@@ -273,3 +274,112 @@ def test_a_name_derived_from_the_slug_keeps_acronyms_in_capitals():
     assert display_name_from_slug("vera-qa") == "Vera QA"
     assert display_name_from_slug("api-ui-helper") == "API UI Helper"
     assert display_name_from_slug("joel") == "Joel"
+
+
+# ------------------------------------------------------------------------------------------------ desks (0015)
+DESK_TABLES = ("desks", "desk_agents", "desk_assets", "desk_connections")
+
+
+def _desk_project(con, slug="nq"):
+    con.execute("INSERT INTO projects (slug, name, path, kind) VALUES (?, ?, ?, 'strategy')", (slug, slug, f"/p/{slug}"))
+    return con.execute("SELECT id FROM projects WHERE slug = ?", (slug,)).fetchone()[0]
+
+
+def _desk(con, project_id, **extra):
+    values = {"project_id": project_id, "name": "NQ", "capital": 10000, **extra}
+    con.execute(f"INSERT INTO desks ({', '.join(values)}) VALUES ({', '.join('?' * len(values))})", tuple(values.values()))
+    return con.execute("SELECT id FROM desks WHERE project_id = ?", (project_id,)).fetchone()[0]
+
+
+def test_the_desk_tables_exist_in_a_new_base_and_start_empty(env):
+    migrate()
+    con = raw()
+    names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert set(DESK_TABLES) <= names
+    assert all(con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] == 0 for t in DESK_TABLES)
+
+
+def test_the_desk_migration_leaves_every_existing_row_untouched(env):
+    old = env / "old14"
+    old.mkdir()
+    for f in MIGRATIONS_DIR.glob("00*.sql"):
+        if int(f.name[:4]) <= 14:
+            shutil.copy(f, old / f.name)
+    assert migrate(migrations_dir=old).version == 14
+    con = raw()
+    con.execute("INSERT INTO agents (slug, display_name, is_custom) VALUES ('mine', 'Mine', 1)")
+    con.execute("INSERT INTO agents (slug, display_name, is_custom) VALUES ('yours', 'Yours', 1)")
+    for slug in ("a", "b", "c"):
+        con.execute("INSERT INTO projects (slug, name, path, kind) VALUES (?, ?, ?, 'other')", (slug, slug.upper(), f"/p/{slug}"))
+    con.execute("INSERT INTO conversations (engine, title, project_id, agent_slug, model) VALUES ('claude', 'T', 1, 'mine', 'sonnet')")
+    con.commit()
+    watched = ("agents", "projects", "conversations", "tasks", "decisions", "journal_entries", "messages")
+    before = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in watched}
+    con.close()
+    result = migrate()
+    assert result.applied == [15] and result.version == 15
+    con = raw()
+    after = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in watched}
+    assert after == before and len(before["projects"]) == 3 and {"mine", "yours"} <= {r[0] for r in before["agents"]} and len(before["conversations"]) == 1
+    assert all(con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] == 0 for t in DESK_TABLES)
+    assert migrate().applied == []                                  # second application is a no-op
+
+
+def test_a_desk_can_never_be_real_money(env):
+    migrate()
+    con = raw()
+    project = _desk_project(con)
+    for bad in ("real", "live", ""):
+        with pytest.raises(sqlite3.IntegrityError):
+            _desk(con, project, mode=bad)
+    desk = _desk(con, project)
+    assert con.execute("SELECT mode, currency, status, template FROM desks WHERE id = ?", (desk,)).fetchone() == ("simulation", "USD", "active", "standard")
+    with pytest.raises(sqlite3.IntegrityError):
+        con.execute("UPDATE desks SET mode = 'real' WHERE id = ?", (desk,))
+
+
+def test_a_desk_needs_an_existing_project_and_each_project_has_one_desk(env):
+    migrate()
+    con = raw()
+    con.execute("PRAGMA foreign_keys = ON")
+    with pytest.raises(sqlite3.IntegrityError):
+        _desk(con, 999)
+    project = _desk_project(con)
+    _desk(con, project)
+    with pytest.raises(sqlite3.IntegrityError):
+        _desk(con, project, name="Again")
+    with pytest.raises(sqlite3.IntegrityError):                     # a project that has a desk cannot be deleted
+        con.execute("DELETE FROM projects WHERE id = ?", (project,))
+
+
+def test_desk_values_are_bounded(env):
+    migrate()
+    con = raw()
+    for n, bad in enumerate(({"capital": 99}, {"capital": 1000000001}, {"name": ""}, {"name": "x" * 81}, {"template": "x"},
+                             {"currency": "EUR"}, {"status": "deleted"}, {"objective_pct": 101}, {"token_budget": 0},
+                             {"budget_alert_level": 50}, {"focus": "x" * 121}, {"mandate": "x" * 4001})):
+        with pytest.raises(sqlite3.IntegrityError):
+            _desk(con, _desk_project(con, f"p{n}"), **bad)
+
+
+def test_desk_team_assets_and_connections_follow_their_rules(env):
+    migrate()
+    con = raw()
+    con.execute("PRAGMA foreign_keys = ON")
+    con.execute("INSERT INTO agents (slug, display_name) VALUES ('boss', 'Boss'), ('other', 'Other')")
+    desk = _desk(con, _desk_project(con))
+    add = "INSERT INTO desk_agents (desk_id, agent_slug, role, model) VALUES (?, ?, ?, ?)"
+    con.execute(add, (desk, "boss", "chief", "sonnet"))
+    with pytest.raises(sqlite3.IntegrityError):                     # one chief per desk
+        con.execute(add, (desk, "other", "chief", "sonnet"))
+    for slug, role, model in (("other", "wizard", "sonnet"), ("other", "risk", "gpt"), ("ghost", "risk", "haiku")):
+        with pytest.raises(sqlite3.IntegrityError):
+            con.execute(add, (desk, slug, role, model))
+    con.execute(add, (desk, "other", "risk", "haiku"))
+    with pytest.raises(sqlite3.IntegrityError):
+        con.execute("INSERT INTO desk_assets (desk_id, symbol) VALUES (?, '')", (desk,))
+    con.execute("INSERT INTO desk_assets (desk_id, symbol) VALUES (?, 'NQ')", (desk,))
+    con.execute("INSERT INTO desk_connections (desk_id, provider_id) VALUES (?, 'x')", (desk,))
+    con.execute("DELETE FROM desks WHERE id = ?", (desk,))          # children go with the desk; agents stay
+    assert all(con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] == 0 for t in DESK_TABLES[1:])
+    assert con.execute("SELECT count(*) FROM agents").fetchone()[0] >= 2

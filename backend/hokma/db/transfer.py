@@ -30,6 +30,7 @@ from hokma.db.timeutil import utcnow
 REFERENCE_TABLES = ("schema_version", "status_transitions")   # created and filled by the migrations themselves
 BATCH = 500
 APP_ROLE, AGENT_ROLE = "hokma_app", "hokma_agent"
+DESK_TABLES = ("desks", "desk_agents", "desk_assets", "desk_connections")
 _CREATE_TABLE = re.compile(r"^CREATE TABLE (\w+)\s*\(", re.IGNORECASE)
 _REFERENCE = re.compile(r"^\s*(\w+)\s+.*?REFERENCES\s+(\w+)\s*\(", re.IGNORECASE)
 _ALTER_REFERENCE = re.compile(r"^ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)\b.*?REFERENCES\s+(\w+)\s*\(",
@@ -393,6 +394,9 @@ def provision_roles(target: Backend) -> str:
                 session.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO {role}")
             session.execute(f"REVOKE INSERT, UPDATE, DELETE ON {schema}.status_transitions, {schema}.approvals "
                             f"FROM {AGENT_ROLE}")
+            for desk_table in DESK_TABLES:                      # the agents read desks through tools, they never write them
+                if session.table_exists(desk_table):
+                    session.execute(f"REVOKE INSERT, UPDATE, DELETE ON {schema}.{desk_table} FROM {AGENT_ROLE}")
             session.commit()
         except Exception:
             session.rollback()

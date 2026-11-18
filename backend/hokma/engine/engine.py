@@ -406,6 +406,9 @@ class ChatEngine:
         project = self._project_of(conv)
         if project is None:
             return await self._error(conn, "unknown_project", "no such project", conv.id)
+        refused, conv = self._desk_gate(conv, project)
+        if refused is not None:
+            return await self._error(conn, refused.code, refused.message, conv.id)
         built = self._build_content(text, ids, project, self._inline_images(conv))
         if isinstance(built, str):
             return await self._error(conn, "attachment_not_found", f"unknown attachment {built}", conv.id)
@@ -415,6 +418,27 @@ class ChatEngine:
             event["client_ref"] = self._ref(msg)
         await conn.send(event)
         session.start_turn(conv, project, blocks, text, meta)
+
+    def _desk_gate(self, conv: ConversationRecord, project: ProjectRecord):
+        """(error or None, conversation) for a turn about to start in a money desk (SPEC-014 P5): a desk over its
+        weekly token budget starts nothing new, and the agent of the turn runs with the model the desk gave it. A
+        store without a database (the fake of the tests) and a project that is not a desk pass untouched."""
+        db = getattr(self.store, "db", None)
+        if db is None or not str(project.id).isdigit():
+            return None, conv
+        from hokma.desks import service as desks
+        from hokma.desks.errors import DeskError
+
+        pid = int(project.id)
+        try:
+            desks.assert_can_run(pid, db=db)
+        except DeskError as exc:
+            return exc, conv
+        model = desks.model_for(pid, conv.agent, db=db)
+        if model and model != conv.model:
+            self.store.update_conversation(conv.id, model=model)
+            conv = self.store.get_conversation(conv.id)
+        return None, conv
 
     def _inline_images(self, conv: ConversationRecord) -> bool:
         """True when the engine of this conversation takes image blocks. An engine that does not (Codex, Gemini)

@@ -15,8 +15,8 @@ export type SidebarDensity = "normal" | "compact" | "tight";
 /** Pixel sizes of each level, mirrored from shell.css. */
 export const DENSITY_METRICS: Record<SidebarDensity, { row: number; gap: number; sep: number; brand: number; padding: number; recents: number }> = {
   normal: { row: 36, gap: 4, sep: 13, brand: 40, padding: 20, recents: 120 },
-  compact: { row: 30, gap: 2, sep: 7, brand: 36, padding: 16, recents: 96 },
-  tight: { row: 27, gap: 2, sep: 7, brand: 34, padding: 12, recents: 0 },
+  compact: { row: 29, gap: 2, sep: 7, brand: 36, padding: 16, recents: 96 },
+  tight: { row: 24, gap: 2, sep: 7, brand: 34, padding: 12, recents: 0 },
 };
 
 /** Rows of the menu: New conversation, the screens, and the footer (Learn, Settings, Shut down). */

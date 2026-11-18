@@ -9,8 +9,9 @@ from hokma.agents.service import AgentService
 from hokma.i18n import t
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths in assertions")
+DESK_KIT = {"desk-chief", "signals", "risk", "bull-case", "bear-case", "judge"}
 KIT = {"axel", "diego", "hokma", "hugo", "iris", "joel", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder",
-       "vera"}
+       "vera"} | DESK_KIT
 
 
 def by_slug(payload):
@@ -35,9 +36,9 @@ def test_kit_agents_are_listed_and_the_first_state_is_given_once(client, work):
     assert {s for s, a in by_slug(data).items() if a["active"]} == {
         "hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"}
     assert data["active"] == 7
-    assert client.get("/api/agents/summary").json() == {"active": 7, "total": 10}
+    assert client.get("/api/agents/summary").json() == {"active": 7, "total": 16}
     assert work.loaded() == {"hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"}
-    assert work.parked() == {"axel", "hugo", "iris"}
+    assert work.parked() == {"axel", "hugo", "iris"} | DESK_KIT   # the desk agents wait until a desk brings them in
 
 
 def test_the_owner_choice_survives_a_restart(client, work):
@@ -103,7 +104,7 @@ def test_create_my_first_agent(client, work, db):
         assert row.is_custom and row.status == "active" and row.file_path == "agents/analista-de-graficos.md"
     # it is what /agente completes from and accepts
     listed = client.get("/api/agents").json()
-    assert "analista-de-graficos" in by_slug(listed) and listed["total"] == 11
+    assert "analista-de-graficos" in by_slug(listed) and listed["total"] == 17
     assert client.post("/api/agents", json=body).json()["detail"]["code"] == "agent_exists"
     # a restart keeps it custom and on
     AgentService().reconcile()

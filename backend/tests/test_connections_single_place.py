@@ -45,6 +45,8 @@ def test_no_route_outside_connections_takes_a_key_or_a_provider():
         if CONNECTIONS_FOLDER in path.parents:
             continue
         for route, line in routes_in(path):
+            if route.startswith("/api/desks/{desk_id}/connections"):   # which already configured connections one desk
+                continue                                              # uses (SPEC-014); it takes no key, no provider setup
             if CONFIG_WORDS.search(route) and not route.startswith("/api/backup/key"):   # the recovery key, not a provider's
                 offenders.append(f"{path.relative_to(ROOT)}:{line}: {route}")
     assert offenders == [], "keys and providers are configured only under /api/connections"

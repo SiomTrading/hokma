@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { isFirefox, useSessionInfo } from "@/api";
 import { IconButton, Input, Isotype, NavItem, NavLink } from "@/design";
 import { useI18n } from "@/i18n";
@@ -54,7 +54,18 @@ export function Sidebar() {
       <div className="sep" />
       {SIDEBAR_SCREENS.map((id) => {
         const meta = BUILTIN_SCREENS[id]!;
-        return <NavItem key={id} icon={meta.icon} label={t(meta.navKey)} active={activeScreen === id} onClick={() => shell.openScreen(id)} />;
+        return (
+          <Fragment key={id}>
+            <NavItem
+              icon={meta.icon}
+              label={t(meta.navKey)}
+              active={activeScreen === id}
+              badge={id === "desks" ? t("nav.desksNew") : undefined}
+              onClick={() => shell.openScreen(id)}
+            />
+            {id === "desks" ? <Slot name="sidebar.desks" /> : null}
+          </Fragment>
+        );
       })}
       <div className="sep side-recents-sep" />
       <div className="hide-c side-scroll">

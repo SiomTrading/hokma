@@ -7,11 +7,12 @@ import { useShell } from "@/shell/useShell";
 import { agentsApi } from "./api";
 import { MODELS } from "./format";
 import { OpusConfirm } from "./OpusConfirm";
-import type { ModelAlias } from "./types";
+import type { AgentItem, ModelAlias } from "./types";
 
 interface Props {
   onClose: () => void;
-  onCreated: () => void;
+  /** Receives the agent that was created, so a caller can use it right away. */
+  onCreated: (agent: AgentItem) => void;
 }
 
 /** "Create my first agent": name, description, model and instructions. The backend writes the agent's file. */
@@ -38,7 +39,7 @@ export function CreateAgentModal({ onClose, onCreated }: Props) {
       const created = await agentsApi.create({ name, description, model, instructions });
       shell.toast({ tone: "ok", text: t("agents.create.done", { name: created.name, slug: created.slug }) });
       shell.emit("agents:changed");
-      onCreated();
+      onCreated(created);
       onClose();
     } catch (cause) {
       setError(cause instanceof ApiError || cause instanceof Error ? cause.message : t("api.error"));

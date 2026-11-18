@@ -142,7 +142,7 @@ async function scenario(chromium, locale, dist) {
 
     // chat screens stay mounted in the background (a second conversation tab): everything is read from the one in front
     const front = page.locator(".screen-host:not([hidden])");
-    const box = front.locator("#chat-message");
+    const box = front.locator("[id^=chat-message]");
     const users = front.getByTestId("user-message");
     const answers = front.getByTestId("assistant-message");
     const expectCount = async (loc, n, what) => until(async () => (await loc.count()) === n, `${what} = ${n}`);
@@ -215,7 +215,7 @@ async function scenario(chromium, locale, dist) {
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const data = new DataTransfer();
       data.items.add(new File([bytes], "pasted.png", { type: "image/png" }));
-      document.querySelector(".screen-host:not([hidden]) #chat-message").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+      document.querySelector(".screen-host:not([hidden]) [id^=chat-message]").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
     }, PNG.toString("base64"));
     await expectCount(pending, 1, "pasted attachment");
     await pending.first().getByRole("button", { name: msg("chat.composer.removeAttachment", { name: "pasted.png" }) }).click();

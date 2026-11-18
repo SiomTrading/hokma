@@ -159,8 +159,8 @@ async function scenario(chromium, locale, dist) {
 
     // 1. Settings > Agents: the real list and the real count
     let dialog = await openSettings("agents");
-    await dialog.getByText(msg("agents.count", { active: 7, total: 10 })).waitFor();
-    assert.deepEqual((await api("/api/agents")).total, 10);
+    await dialog.getByText(msg("agents.count", { active: 7, total: 16 })).waitFor();
+    assert.deepEqual((await api("/api/agents")).total, 16);
 
     // 1b. each agent has its own tint (from tokens), stable per agent, in dark and light
     const tints = () => dialog.locator(".ag .glyph").evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
@@ -190,10 +190,10 @@ async function scenario(chromium, locale, dist) {
     // 3. turn an agent on and off: the file moves and the count follows
     assert.ok(fs.existsSync(agentFile(".claude/agents.off", "axel")) && !fs.existsSync(agentFile(".claude/agents", "axel")));
     await dialog.getByRole("switch", { name: msg("agents.toggle", { name: "Axel" }) }).click();
-    await dialog.getByText(msg("agents.count", { active: 8, total: 10 })).waitFor();
+    await dialog.getByText(msg("agents.count", { active: 8, total: 16 })).waitFor();
     assert.ok(fs.existsSync(agentFile(".claude/agents", "axel")) && !fs.existsSync(agentFile(".claude/agents.off", "axel")));
     await dialog.getByRole("switch", { name: msg("agents.toggle", { name: "Axel" }) }).click();
-    await dialog.getByText(msg("agents.count", { active: 7, total: 10 })).waitFor();
+    await dialog.getByText(msg("agents.count", { active: 7, total: 16 })).waitFor();
     assert.ok(fs.existsSync(agentFile(".claude/agents.off", "axel")) && !fs.existsSync(agentFile(".claude/agents", "axel")));
 
     // 4. create my own agent
@@ -205,7 +205,7 @@ async function scenario(chromium, locale, dist) {
     await form.getByRole("button", { name: M["agents.model.haiku"] }).click();
     await form.getByRole("button", { name: M["agents.create.submit"] }).click();
     await dialog.getByText("Chart Reader", { exact: true }).waitFor();
-    await dialog.getByText(msg("agents.count", { active: 8, total: 11 })).waitFor();
+    await dialog.getByText(msg("agents.count", { active: 8, total: 17 })).waitFor();
     for (const file of [agentFile("agents", "chart-reader"), agentFile(".claude/agents", "chart-reader")]) {
       const text = fs.readFileSync(file, "utf8");
       assert.match(text, /^model: haiku$/m);
