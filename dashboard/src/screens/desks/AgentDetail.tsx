@@ -3,6 +3,7 @@ import { Button, Glyph, Meter, Pill, Segmented, Toggle } from "@/design";
 import { getCatalog, useI18n } from "@/i18n";
 import { agentTint, MODELS } from "../agents/format";
 import { OpusConfirm } from "../agents/OpusConfirm";
+import { useAgentName } from "./agentName";
 import type { DeskAgent } from "./agentsApi";
 import { formatTokens } from "./format";
 import type { DeskModel } from "./types";
@@ -21,6 +22,8 @@ interface Props {
 /** Detail of one agent of the desk: what it can and cannot do, its model on this desk, its use and its activity. */
 export function AgentDetail({ agent, maxTokens, busy, error, onModel, onActive, onRemove }: Props) {
   const { t, locale } = useI18n();
+  const nameOf = useAgentName();
+  const agentLabel = nameOf(agent.slug, agent.name);
   const [askOpus, setAskOpus] = useState(false);
   const [askRemove, setAskRemove] = useState(false);
   const catalog = getCatalog(locale);
@@ -38,9 +41,9 @@ export function AgentDetail({ agent, maxTokens, busy, error, onModel, onActive, 
   return (
     <div className="desk-agent-detail">
       <div className="desk-agent-head">
-        <Glyph initial={agent.name.slice(0, 2).toUpperCase()} color={agentTint(agent.slug)} />
+        <Glyph initial={agentLabel.slice(0, 2).toUpperCase()} color={agentTint(agent.slug)} />
         <div className="desk-agent-title">
-          <b>{agent.name}</b>
+          <b>{agentLabel}</b>
           <span className="hint">{roleName}</span>
         </div>
         <Pill tone={tone}>{t(`desks.agents.group.${agent.state}`)}</Pill>
@@ -102,7 +105,7 @@ export function AgentDetail({ agent, maxTokens, busy, error, onModel, onActive, 
         <div className="desk-agent-actions">
           {askRemove ? (
             <div className="desk-remove-ask" role="group" aria-label={t("desks.agents.remove")}>
-              <p>{t("desks.agents.remove.ask", { name: agent.name })}</p>
+              <p>{t("desks.agents.remove.ask", { name: agentLabel })}</p>
               <div className="desk-agent-actions">
                 <Button size="sm" variant="ghost" onClick={() => setAskRemove(false)}>
                   {t("desks.agents.remove.cancel")}

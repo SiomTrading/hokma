@@ -120,7 +120,7 @@ describe("desks texts", () => {
   it("every desks key exists in Spanish and English with the same placeholders, and no text has a long dash", () => {
     const es = getCatalog("es");
     const en = getCatalog("en");
-    const keys = Object.keys(es).filter((key) => key.startsWith("desks.") || key === "nav.desks" || key === "nav.desksNew" || key === "screen.desks");
+    const keys = Object.keys(es).filter((key) => key.startsWith("desks.") || key === "nav.desks" || key === "screen.desks");
     expect(keys.length).toBeGreaterThan(20);
     for (const key of keys) {
       expect(en[key], key).toBeTruthy();

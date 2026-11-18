@@ -1,16 +1,26 @@
 import { useState } from "react";
-import { Button, EmptyState, Loading, Pane, Segmented } from "@/design";
+import { Button, EmptyState, Loading, Pane } from "@/design";
 import { useI18n } from "@/i18n";
+import { IntervalBar } from "../chart/IntervalBar";
 import { PriceChart } from "../chart/PriceChart";
-import { errorText } from "../chart/liveState";
-import { DEFAULT_TIMEFRAME, TIMEFRAMES } from "../chart/types";
+import { errorText, secondsDisabledReason, ticksDisabledReason } from "../chart/liveState";
+import { chartTitle } from "../chart/intervals";
+import { loadInterval } from "../chart/favorites";
 import type { Timeframe } from "../chart/types";
 import { useLiveChart } from "../chart/useLiveChart";
+import { loadAssetInterval, saveAssetInterval } from "./terminalPrefs";
 
 /** The chart of the asset in focus: the same live chart of the Chart screen, with its own interval box. */
 export function DeskChart({ symbol }: { symbol: string }) {
   const { t } = useI18n();
-  const [timeframe, setTimeframe] = useState<Timeframe>(DEFAULT_TIMEFRAME);
+  const [chosen, setChosen] = useState<{ symbol: string; timeframe: Timeframe } | null>(null);
+  const [boxOpen, setBoxOpen] = useState(false);
+  // Each asset remembers its own interval; one that was never set opens with the chart default.
+  const timeframe = chosen?.symbol === symbol ? chosen.timeframe : (loadAssetInterval(symbol) ?? loadInterval());
+  const setTimeframe = (next: Timeframe) => {
+    saveAssetInterval(symbol, next);
+    setChosen({ symbol, timeframe: next });
+  };
   const { live, data, retry } = useLiveChart(symbol, timeframe);
   const error = live.error;
   const ready = !!data && data.candles.length > 0;
@@ -57,13 +67,16 @@ export function DeskChart({ symbol }: { symbol: string }) {
   return (
     <Pane className="dterm-chart" aria-label={t("desks.terminal.chart", { symbol })}>
       <div className="dterm-ph">
-        <span className="dterm-tab on">{`${symbol} · ${timeframe}`}</span>
+        <span className="dterm-tab on">{chartTitle(symbol, timeframe, t)}</span>
         <span className="dterm-ph-end">
-          <Segmented<Timeframe>
-            label={t("chart.timeframe")}
+          <IntervalBar
             value={timeframe}
             onChange={setTimeframe}
-            options={TIMEFRAMES.map((tf) => ({ value: tf, label: tf }))}
+            open={boxOpen}
+            onOpenChange={setBoxOpen}
+            secondsDisabledReason={secondsDisabledReason(live, t)}
+            ticksDisabledReason={ticksDisabledReason(live, t)}
+            boxStyle={{ top: "calc(100% + 4px)", right: 12 }}
           />
         </span>
       </div>

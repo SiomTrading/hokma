@@ -15,7 +15,7 @@ export function SidebarDesks() {
 
   if (desks.length === 0) return null;
   return (
-    <div className="hide-c desk-list" role="group" aria-label={t("desks.side.list")}>
+    <div className="desk-list" role="group" aria-label={t("desks.side.list")}>
       {desks.map((desk) => {
         const capital = formatCapital(desk.capital, locale);
         const today = formatResult(desk.today, locale);
@@ -25,9 +25,13 @@ export function SidebarDesks() {
             type="button"
             className={cx("nav", "desk-link", activeDesk === String(desk.id) && "on")}
             aria-label={t("desks.side.row", { name: desk.name, capital, today })}
+            title={desk.name}
             aria-current={activeDesk === String(desk.id) ? "page" : undefined}
             onClick={() => shell.openScreen("desks", { desk: String(desk.id) })}
           >
+            <span className="desk-initial" aria-hidden="true">
+              {desk.name.trim().slice(0, 2).toUpperCase()}
+            </span>
             <span className={cx("dot", desk.status === "paused" ? "desk-dot-paused" : "desk-dot-active")} aria-hidden="true" />
             <span className="desk-link-text">
               <span className="desk-link-name">{desk.name}</span>
@@ -38,7 +42,7 @@ export function SidebarDesks() {
           </button>
         );
       })}
-      <NavItem className="desk-new" icon="plus" iconSize={14} label={t("desks.side.new")} onClick={() => shell.openScreen("desks", { new: "1" })} />
+      <NavItem className="desk-new" icon="plus" iconSize={14} label={t("desks.side.new")} title={t("desks.side.new")} onClick={() => shell.openScreen("desks", { new: "1" })} />
     </div>
   );
 }

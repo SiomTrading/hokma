@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, cx, EmptyState, ErrorState, Loading, Pill } from "@/design";
+import { Button, cx, EmptyState, ErrorState, Loading } from "@/design";
 import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
 import { askHokmaForDesk, CreateDeskModal } from "./CreateDeskModal";
@@ -72,11 +72,10 @@ export function FundView({ openCreate = false }: Props) {
           <button type="button" role="tab" aria-selected="true" className="ext-tab">
             {t("desks.fund.tab")}
           </button>
-          <button type="button" role="tab" aria-selected="false" className="ext-tab" disabled title={t("desks.fund.lessons.soon")}>
+          <button type="button" role="tab" aria-selected="false" className="ext-tab" disabled>
             {t("desks.fund.lessons")}
           </button>
         </div>
-        <Pill>{t("desks.fund.lessons.soon")}</Pill>
         {desks.length > 0 ? (
           <>
             <div className="desk-stat">

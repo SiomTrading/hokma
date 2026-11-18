@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, useApiQuery } from "@/api";
 import { Button, Dot, EmptyState, ErrorState, Glyph, Loading, Pane, Pill, Toggle } from "@/design";
 import { useI18n } from "@/i18n";
+import { useAgentName } from "../desks/agentName";
 import { useShell } from "@/shell/useShell";
 import { agentsApi } from "./api";
 import { CreateAgentModal } from "./CreateAgentModal";
@@ -16,6 +17,8 @@ function errorText(cause: unknown, fallback: string): string {
 /** Settings > Agents: the orchestrator on top, the others below, each with its model pill and its on/off switch. */
 export function AgentsSettings() {
   const { t } = useI18n();
+  const nameOf = useAgentName();
+  const shown = (agent: AgentItem) => (agent.is_custom ? agent.name : nameOf(agent.slug, agent.name));
   const shell = useShell();
   const list = useApiQuery<AgentsData>("/api/agents");
   const [creating, setCreating] = useState(false);
@@ -118,10 +121,10 @@ export function AgentsSettings() {
       <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 21, borderLeft: "1px dashed var(--border)", marginLeft: 21 }}>
         {data.agents.map((agent) => (
           <div key={agent.slug} className={agent.active ? "ag on" : "ag"} style={{ marginLeft: -21 }}>
-            <Glyph initial={agent.name.slice(0, 1).toUpperCase()} color={agentTint(agent.slug)} />
+            <Glyph initial={shown(agent).slice(0, 1).toUpperCase()} color={agentTint(agent.slug)} />
             <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span className="h2">{agent.name}</span>
+                <span className="h2">{shown(agent)}</span>
                 {agent.active ? <Dot live color="var(--ok)" aria-hidden="true" /> : null}
                 {agent.is_custom ? <Pill tone="acc">{t("agents.custom")}</Pill> : null}
               </div>
@@ -140,7 +143,7 @@ export function AgentsSettings() {
               </Pill>
               <Toggle
                 checked={agent.active}
-                label={t("agents.toggle", { name: agent.name })}
+                label={t("agents.toggle", { name: shown(agent) })}
                 disabled={busy === agent.slug}
                 onChange={(on) => void toggle(agent, on)}
               />

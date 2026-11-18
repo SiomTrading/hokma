@@ -99,14 +99,14 @@ describe("desk bar", () => {
 });
 
 describe("Operations and Rules", () => {
-  it("say what arrives and when", async () => {
+  it("say what they hold, with no step or version label", async () => {
     stubServer();
     open("operations");
     expect(await screen.findByText(t("desks.operations.title"))).toBeInTheDocument();
-    expect(screen.getByText("Llega en el paso 4")).toBeInTheDocument();
+    expect(screen.queryByText(/paso \d|pr.xima versi.n/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Reglas" }));
     expect(screen.getByText(t("desks.rules.title"))).toBeInTheDocument();
-    expect(screen.getByText(t("desks.rules.when"))).toBeInTheDocument();
+    expect(screen.queryByText(/paso \d|pr.xima versi.n/i)).not.toBeInTheDocument();
   });
 });
 
@@ -181,45 +181,45 @@ describe("Settings: objective and capital", () => {
   });
 });
 
-describe("Settings: assets", () => {
-  it("lists the assets, adds one in capitals and sends the whole list", async () => {
-    const server = stubServer();
+describe("Settings: menu", () => {
+  const entries = ["objective", "connections", "memory", "accounts"] as const;
+
+  it("no longer has an Assets section: the Terminal owns the assets", async () => {
+    stubServer();
     open("config");
-    await userEvent.click(await screen.findByRole("button", { name: t("desks.cfg.section.assets") }));
-    const list = await screen.findByLabelText(t("desks.wizard.assetsList"));
-    expect(within(list).getByText("NQ=F")).toBeInTheDocument();
-    expect(within(list).getByText("ES=F")).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText(t("desks.field.asset")), "aapl{Enter}");
-    await waitFor(() => expect(within(list).getByText("AAPL")).toBeInTheDocument());
-    expect(sent(server, "PUT", "/api/desks/7/assets")[0]!.body).toEqual({ assets: ["NQ=F", "ES=F", "AAPL"] });
+    await screen.findByLabelText(t("desks.field.capital"));
+    const nav = screen.getByRole("navigation", { name: t("desks.cfg.nav") });
+    expect(within(nav).getAllByRole("button")).toHaveLength(4);
+    expect(within(nav).queryByRole("button", { name: /^Activos$/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(t("desks.wizard.assetsList"))).not.toBeInTheDocument();
   });
 
-  it("removes an asset and sends the list without it", async () => {
-    const server = stubServer();
+  it("shows the text of every entry whichever section is open, and never with the class that hides it", async () => {
+    stubServer();
     open("config");
-    await userEvent.click(await screen.findByRole("button", { name: t("desks.cfg.section.assets") }));
-    await userEvent.click(await screen.findByRole("button", { name: t("desks.field.asset.remove", { symbol: "NQ=F" }) }));
-    await waitFor(() => expect(sent(server, "PUT", "/api/desks/7/assets")).toHaveLength(1));
-    expect(sent(server, "PUT", "/api/desks/7/assets")[0]!.body).toEqual({ assets: ["ES=F"] });
-    expect(screen.queryByText("NQ=F")).not.toBeInTheDocument();
+    await screen.findByLabelText(t("desks.field.capital"));
+    for (const current of entries) {
+      await userEvent.click(within(screen.getByRole("navigation", { name: t("desks.cfg.nav") })).getByRole("button", { name: new RegExp(t(`desks.cfg.section.${current}`)) }));
+      const nav = screen.getByRole("navigation", { name: t("desks.cfg.nav") });
+      for (const id of entries) {
+        const label = within(nav).getByText(t(`desks.cfg.section.${id}`));
+        expect(label).toBeVisible();
+        expect(label.textContent).toBe(t(`desks.cfg.section.${id}`));
+        // `hide-c` is the class of the side menu when it is collapsed: it would blank the text here.
+        expect(label.closest(".hide-c")).toBeNull();
+      }
+      expect(within(nav).getByRole("button", { name: new RegExp(t(`desks.cfg.section.${current}`)) })).toHaveAttribute("aria-current", "page");
+    }
   });
 
-  it("a symbol the server refuses is not added and the reason is shown", async () => {
-    stubServer({ assetsStatus: 422 });
+  it("marks Trading accounts with a neutral Simulation pill, no date promised", async () => {
+    stubServer();
     open("config");
-    await userEvent.click(await screen.findByRole("button", { name: t("desks.cfg.section.assets") }));
-    await userEvent.type(await screen.findByLabelText(t("desks.field.asset")), "ZZZZ{Enter}");
-    expect(await screen.findByText("That symbol is not in the catalog.")).toBeInTheDocument();
-    expect(screen.queryByText("ZZZZ")).not.toBeInTheDocument();
-  });
-
-  it("a repeated symbol is refused without calling the server", async () => {
-    const server = stubServer();
-    open("config");
-    await userEvent.click(await screen.findByRole("button", { name: t("desks.cfg.section.assets") }));
-    await userEvent.type(await screen.findByLabelText(t("desks.field.asset")), "nq=f{Enter}");
-    expect(await screen.findByText(t("desks.cfg.assets.duplicate", { symbol: "NQ=F" }))).toBeInTheDocument();
-    expect(sent(server, "PUT", "/api/desks/7/assets")).toHaveLength(0);
+    await userEvent.click(await screen.findByRole("button", { name: /Cuentas de trading/ }));
+    const nav = screen.getByRole("navigation", { name: t("desks.cfg.nav") });
+    expect(within(nav).getByText(t("desks.cfg.sim"))).toBeInTheDocument();
+    expect(within(nav).queryByText(/^Despu/)).not.toBeInTheDocument();
+    expect(getCatalog("en")["desks.cfg.sim"]).toBe("Simulation");
   });
 });
 
@@ -239,13 +239,12 @@ describe("Settings: connections and empty sections", () => {
     expect(screen.getByText(t("desks.cfg.connections.note"))).toBeInTheDocument();
   });
 
-  it("memory and trading accounts are empty states with their 'when'", async () => {
+  it("memory and trading accounts are empty states with no step label", async () => {
     stubServer();
     open("config");
     await userEvent.click(await screen.findByRole("button", { name: /Memoria y mesas conectadas/ }));
-    expect(screen.getByText("Llega en el paso 6")).toBeInTheDocument();
+    expect(screen.queryByText(/paso \d/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Cuentas de trading/ }));
-    expect(screen.getByText(t("desks.cfg.accounts.when"))).toBeInTheDocument();
     expect(screen.getByText(/todo lo que toque dinero real sigue bloqueado/)).toBeInTheDocument();
   });
 });

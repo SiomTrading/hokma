@@ -199,3 +199,61 @@ def test_without_a_budget_the_desk_never_blocks(world):
     service.update_desk(desk["id"], {"token_budget": None}, db=db)
     service.assert_can_run(desk["project_id"], db=db)
     service.assert_can_run(None, db=db)
+
+
+# ------------------------------------------------------------------------- who turns desk agents on
+
+def _status(db, slugs=SLUGS):
+    with db.read() as u:
+        return {s: u.agents.get(s).status for s in slugs}
+
+
+def _all_off(db):
+    with db.write() as u:
+        for slug in SLUGS:
+            u.agents.set_status(slug, "off")
+
+
+def _outsider(db):
+    with db.write() as u:
+        u.agents.upsert_kit("iris", "Iris", "iris agent", "balanced", "agents/iris.md")
+        u.agents.set_status("iris", "active")
+
+
+def test_a_refused_claim_of_an_outside_agent_turns_nobody_on(world):
+    _, db, _ = world
+    desk = make_desk(db, "Mesa A")
+    task = new_task(db, desk["project_id"])
+    _outsider(db)
+    _all_off(db)
+    message, err = claim(task, agent="iris")
+    assert err and "only the assigned agent" in message
+    assert set(_status(db).values()) == {"off"}
+
+
+def test_a_hokma_task_create_in_a_desk_it_does_not_belong_to_turns_nobody_on(world):
+    _, db, _ = world
+    desk = make_desk(db, "Mesa A")
+    _all_off(db)
+    text, err = hokma_tools.call("task_create", {"title": "intruder", "project_id": desk["project_id"]},
+                                 Caller({"HOKMA_AGENT": "hokma"}))
+    assert not err, text
+    assert set(_status(db).values()) == {"off"}
+
+
+def test_a_member_creating_a_task_in_its_desk_turns_the_team_on(world):
+    _, db, _ = world
+    desk = make_desk(db, "Mesa A")
+    _all_off(db)
+    text, err = hokma_tools.call("task_create", {"title": "mine", "project_id": desk["project_id"]},
+                                 Caller({"HOKMA_AGENT": "desk-chief"}))
+    assert not err, text
+    assert set(_status(db).values()) == {"active"}
+
+
+def test_the_owner_opening_the_desk_turns_its_team_on(world):
+    _, db, _ = world
+    desk = make_desk(db, "Mesa A")
+    _all_off(db)
+    service.open_conversation(desk["id"], db=db)
+    assert set(_status(db).values()) == {"active"}

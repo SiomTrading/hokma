@@ -235,8 +235,6 @@ describe("texts of the chat", () => {
     const en = getCatalog("en");
     expect(es["desks.rules.text"]).toContain("conversando con el jefe de mesa");
     expect(es["desks.rules.text"]).not.toMatch(/opcion|desplegable|formulario/i);
-    expect(es["desks.rules.when"]).toBeTruthy();
     expect(en["desks.rules.text"]).toContain("written by talking with the desk chief");
-    expect(en["desks.rules.when"]).toBe("Arrives in the next version");
   });
 });

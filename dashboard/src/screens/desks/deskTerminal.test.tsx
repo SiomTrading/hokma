@@ -1,4 +1,4 @@
-import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setToken } from "@/api";
@@ -112,7 +112,7 @@ describe("terminal of the desk", () => {
     // positions panel
     const positions = screen.getByLabelText(t("desks.terminal.positions"), { selector: ".pane" });
     expect(within(positions).getByText(t("desks.terminal.positions.title"))).toBeInTheDocument();
-    expect(within(positions).getByText(t("desks.terminal.positions.when"))).toBeInTheDocument();
+    expect(within(positions).getByText("Sin posiciones abiertas")).toBeInTheDocument();
     // grid placement: the chief column and the positions panel are cells of the same grid
     expect(chat.className).toContain("dterm-chat");
     expect(positions.className).toContain("dterm-positions");
@@ -149,6 +149,48 @@ describe("terminal of the desk", () => {
     expect(candleCalls(server, "NQ=F")).toHaveLength(before);
   });
 
+  it("offers every timeframe of the Chart screen, takes typed ones, and remembers each asset's own", async () => {
+    stubServer();
+    open();
+    const user = userEvent.setup();
+    await connect("NQ=F");
+    const bar = screen.getByRole("group", { name: t("chart.timeframe") });
+    expect(within(bar).getAllByRole("button").map((b) => b.textContent)).toEqual(["1m", "5m", "15m", "1h", "1D", "1W"]);
+    await user.click(within(bar).getByRole("button", { name: "1W" }));
+    await connect("NQ=F", "1W");
+    expect(subscribed().at(-1)).toMatchObject({ symbol: "NQ=F", tf: "1W" });
+    expect(screen.getByText("NQ=F · 1W")).toBeInTheDocument();
+    for (const typed of ["3h", "1W"]) {
+      await user.click(screen.getByRole("button", { name: t("chart.interval.more") }));
+      await user.type(screen.getByRole("combobox", { name: t("chart.interval.label") }), `${typed}{Enter}`);
+      await connect("NQ=F", typed);
+      expect(subscribed().at(-1)).toMatchObject({ symbol: "NQ=F", tf: typed });
+      expect(screen.getByText(`NQ=F · ${typed}`)).toBeInTheDocument();
+    }
+    await user.click(screen.getByRole("button", { name: t("chart.interval.more") }));
+    await user.type(screen.getByRole("combobox", { name: t("chart.interval.label") }), "3h{Enter}");
+    await connect("NQ=F", "3h");
+    // ES=F has none of its own yet: the default; going back to NQ=F finds 3h
+    await user.click(screen.getByRole("button", { name: "ES=F" }));
+    await connect("ES=F");
+    expect(subscribed().at(-1)).toMatchObject({ symbol: "ES=F", tf: "5m" });
+    await user.click(screen.getByRole("button", { name: "NQ=F" }));
+    await connect("NQ=F", "3h");
+    expect(subscribed().at(-1)).toMatchObject({ symbol: "NQ=F", tf: "3h" });
+  });
+
+  it("refuses a bad interval in the Terminal chart with the same message as the Chart screen", async () => {
+    stubServer();
+    open();
+    const user = userEvent.setup();
+    await connect("NQ=F");
+    const before = subscribed().length;
+    await user.click(screen.getByRole("button", { name: t("chart.interval.more") }));
+    await user.type(screen.getByRole("combobox", { name: t("chart.interval.label") }), "abc{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent(t("chart.interval.invalid"));
+    expect(subscribed()).toHaveLength(before);
+  });
+
   it("reads the quotes again every 60 seconds", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const server = stubServer();
@@ -171,11 +213,194 @@ describe("terminal of the desk", () => {
     await waitFor(() => expect(within(row).getAllByText("-")).toHaveLength(2));
   });
 
-  it("says so when the desk has no assets", async () => {
+  it("with no assets still shows the list with its add button, the invitation and the chief chat", async () => {
     stubServer({ assets: [] });
     open();
     expect(await screen.findByText(t("desks.terminal.noAssets.title"))).toBeInTheDocument();
+    const list = screen.getByLabelText(t("desks.terminal.list"));
+    expect(within(list).getByRole("button", { name: t("desks.terminal.add") })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: t("desks.terminal.add") })).toHaveLength(2); // list and center
+    const chat = screen.getByLabelText(t("desks.terminal.chat"), { selector: ".pane" });
+    expect(await within(chat).findByRole("textbox", { name: t("desks.chat.input") })).toBeEnabled();
+    expect(screen.getByText("Sin posiciones abiertas")).toBeInTheDocument();
     expect(FakeSocket.instances).toHaveLength(0);
+  });
+
+  it("adds an asset from the Terminal: it is saved on the desk, listed and in focus", async () => {
+    const server = stubServer({ assets: [] });
+    const saved: string[][] = [];
+    const base = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (path === "/api/desks/7/assets" && init?.method === "PUT") {
+          const body = JSON.parse(String(init.body)) as { assets: string[] };
+          saved.push(body.assets);
+          server.assets = body.assets;
+          return json({ assets: body.assets });
+        }
+        if (path.startsWith("/api/market/symbols")) return json({ items: [{ symbol: "NQ=F", name: "Nasdaq 100 futures", exchange: "CME", kind: "future" }], suggested: true, live_classes: [] });
+        return base(path, init);
+      }),
+    );
+    open();
+    const user = userEvent.setup();
+    await screen.findByText(t("desks.terminal.noAssets.title"));
+    const center = screen.getByLabelText(t("desks.terminal.chartEmpty"));
+    await user.click(within(center).getByRole("button", { name: t("desks.terminal.add") }));
+    await user.click(await screen.findByText("Nasdaq 100 futures"));
+    await waitFor(() => expect(saved).toEqual([["NQ=F"]]));
+    const list = screen.getByLabelText(t("desks.terminal.list"));
+    const row = (await within(list).findByRole("button", { name: "NQ=F" })).closest("tr")!;
+    expect(row).toHaveClass("on");
+    await connect("NQ=F");
+    expect(await screen.findByText("NQ=F · 5m")).toBeInTheDocument();
+  });
+
+  it("shows the server's reason when the asset cannot be saved", async () => {
+    stubServer({ assets: [] });
+    const base = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (path === "/api/desks/7/assets" && init?.method === "PUT") return json({ detail: { code: "desks.asset", message: "Unknown symbol ZZZ" } }, 422);
+        if (path.startsWith("/api/market/symbols")) return json({ items: [{ symbol: "ZZZ", name: "Zed", exchange: "X", kind: "equity" }], suggested: true, live_classes: [] });
+        return base(path, init);
+      }),
+    );
+    open();
+    const user = userEvent.setup();
+    await screen.findByText(t("desks.terminal.noAssets.title"));
+    await user.click(within(screen.getByLabelText(t("desks.terminal.list"))).getByRole("button", { name: t("desks.terminal.add") }));
+    await user.click(await screen.findByText("Zed"));
+    expect(await screen.findByText("Unknown symbol ZZZ")).toBeInTheDocument();
+    expect(screen.getByText(t("desks.terminal.noAssets.title"))).toBeInTheDocument();
+  });
+
+  it("removes an asset from En seguimiento after a short confirmation", async () => {
+    const server = stubServer();
+    const saved: string[][] = [];
+    const base = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url) === "/api/desks/7/assets" && init?.method === "PUT") {
+          const body = JSON.parse(String(init.body)) as { assets: string[] };
+          saved.push(body.assets);
+          server.assets = body.assets;
+          return json({ assets: body.assets });
+        }
+        return base(url, init);
+      }),
+    );
+    open();
+    const user = userEvent.setup();
+    await connect("NQ=F");
+    const list = screen.getByLabelText(t("desks.terminal.list"));
+    await user.click(within(list).getByRole("button", { name: t("desks.field.asset.remove", { symbol: "ES=F" }) }));
+    await user.click(within(list).getByRole("button", { name: t("desks.terminal.remove.no") })); // cancel keeps it
+    expect(saved).toEqual([]);
+    expect(within(list).getByRole("button", { name: "ES=F" })).toBeInTheDocument();
+    await user.click(within(list).getByRole("button", { name: t("desks.field.asset.remove", { symbol: "ES=F" }) }));
+    expect(saved).toEqual([]); // asking is not removing
+    await user.click(within(list).getByRole("button", { name: t("desks.terminal.remove.yes") }));
+    await waitFor(() => expect(saved).toEqual([["NQ=F"]]));
+    await waitFor(() => expect(within(list).queryByRole("button", { name: "ES=F" })).not.toBeInTheDocument());
+    expect(within(list).getByRole("button", { name: "NQ=F" })).toBeInTheDocument();
+  });
+
+  it("resizes the chat with the splitter, within 300 px and half the screen, and remembers it per desk", async () => {
+    stubServer();
+    vi.stubGlobal("innerWidth", 1200);
+    vi.stubGlobal("PointerEvent", MouseEvent); // jsdom has no pointer events; a mouse event carries the same coordinates
+    const view = open();
+    await connect("NQ=F");
+    const grid = () => document.querySelector<HTMLElement>(".dterm")!;
+    const bar = screen.getByRole("separator", { name: t("desks.terminal.resize") });
+    expect(grid().style.getPropertyValue("--chat-w")).toBe("380px");
+    expect(bar).toHaveAttribute("aria-valuemin", "300");
+    expect(bar).toHaveAttribute("aria-valuemax", "600");
+    const drag = (from: number, to: number) => {
+      fireEvent.pointerDown(bar, { clientX: from });
+      fireEvent(window, new MouseEvent("pointermove", { clientX: to }));
+      fireEvent(window, new MouseEvent("pointerup", { clientX: to }));
+    };
+    drag(800, 700); // 100 px to the left: wider
+    expect(grid().style.getPropertyValue("--chat-w")).toBe("480px");
+    expect(localStorage.getItem("hokma.desk.7.chatWidth")).toBe("480");
+    drag(800, 0); // far too wide: stops at half of the screen
+    expect(grid().style.getPropertyValue("--chat-w")).toBe("600px");
+    drag(0, 900); // far too narrow: stops at 300
+    expect(grid().style.getPropertyValue("--chat-w")).toBe("300px");
+    fireEvent.keyDown(bar, { key: "ArrowLeft" });
+    expect(grid().style.getPropertyValue("--chat-w")).toBe("320px");
+    expect(localStorage.getItem("hokma.desk.7.chatWidth")).toBe("320");
+    view.unmount();
+    open(); // another visit to the same desk
+    await connect("NQ=F");
+    expect(document.querySelector<HTMLElement>(".dterm")!.style.getPropertyValue("--chat-w")).toBe("320px");
+  });
+
+  it("starts at 380 px and ignores a width that cannot be read or is out of range", async () => {
+    stubServer();
+    vi.stubGlobal("innerWidth", 1200);
+    localStorage.setItem("hokma.desk.7.chatWidth", "9999");
+    open();
+    await connect("NQ=F");
+    expect(document.querySelector<HTMLElement>(".dterm")!.style.getPropertyValue("--chat-w")).toBe("600px");
+  });
+
+  it("works even if the browser refuses to store the preferences", async () => {
+    stubServer();
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    open();
+    await connect("NQ=F");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: t("desks.terminal.positions.fold") }));
+    expect(document.querySelector(".dterm")).toHaveClass("folded");
+    vi.restoreAllMocks();
+  });
+
+  it("folds Positions down with its chevron and the desk remembers it", async () => {
+    stubServer();
+    const view = open();
+    const user = userEvent.setup();
+    await connect("NQ=F");
+    const positions = () => screen.getByLabelText(t("desks.terminal.positions"), { selector: ".pane" });
+    expect(within(positions()).getByText(t("desks.terminal.positions.title"))).toBeInTheDocument();
+    expect(document.querySelector(".dterm")).not.toHaveClass("folded");
+    await user.click(screen.getByRole("button", { name: t("desks.terminal.positions.fold") }));
+    expect(document.querySelector(".dterm")).toHaveClass("folded");
+    expect(within(positions()).queryByText(t("desks.terminal.positions.title"))).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("desks.terminal.positions.unfold") })).toHaveAttribute("aria-expanded", "false");
+    expect(localStorage.getItem("hokma.desk.7.positionsFolded")).toBe("1");
+    view.unmount();
+    open();
+    await connect("NQ=F");
+    expect(document.querySelector(".dterm")).toHaveClass("folded");
+    await user.click(screen.getByRole("button", { name: t("desks.terminal.positions.unfold") }));
+    expect(document.querySelector(".dterm")).not.toHaveClass("folded");
+    expect(localStorage.getItem("hokma.desk.7.positionsFolded")).toBe("0");
+  });
+
+  it("has no step labels nor next-version promises in the Terminal or Positions", async () => {
+    stubServer();
+    open();
+    await connect("NQ=F");
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/paso \d|pr.xima versi.n|step \d|next version/i);
+    for (const catalog of [getCatalog("es"), getCatalog("en")]) {
+      for (const [key, value] of Object.entries(catalog)) {
+        if (key.startsWith("desks.terminal.") || key.startsWith("desks.chat.")) expect(value, key).not.toMatch(/paso \d|pr.xima versi.n|step \d|next version/i);
+      }
+    }
   });
 
   it("offers a retry when the desk cannot be read", async () => {
@@ -222,6 +447,6 @@ describe("terminal of the desk", () => {
     stubServer();
     open();
     expect(await screen.findByText("Watching")).toBeInTheDocument();
-    expect(screen.getByText("No positions yet")).toBeInTheDocument();
+    expect(screen.getByText("No open positions")).toBeInTheDocument();
   });
 });

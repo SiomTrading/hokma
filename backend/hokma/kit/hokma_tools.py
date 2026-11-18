@@ -103,7 +103,19 @@ def task_list(u, c: Caller, a: dict) -> str:
     return _dump([_row(r, *TASK_KEYS) for r in rows])
 
 
+def _desk_member_check(u, project_id: int | None, agent: str | None, what: str) -> None:
+    """On a desk project, only an agent that is active on that desk's team may hold or take its tasks."""
+    desk = u.desks.by_project(project_id) if project_id is not None else None
+    if desk is None:
+        return
+    member = u.desks.find_agent(desk.id, agent) if agent else None
+    if member is None or not member.active:
+        raise LookupError(f"{what}: agent {agent or '(none)'!r} is not an active member of desk {desk.name!r}")
+
+
 def task_create(u, c: Caller, a: dict) -> str:
+    if a.get("assigned_agent"):
+        _desk_member_check(u, a.get("project_id"), a["assigned_agent"], "cannot assign this task")
     task = u.tasks.create(a["title"], actor=c.actor, body=a.get("body"), project_id=a.get("project_id"),
                           status=a.get("status", "ready"), priority=int(a.get("priority", 0)),
                           assigned_agent=a.get("assigned_agent"), parents=a.get("parents") or ())
@@ -119,8 +131,13 @@ def task_link(u, c: Caller, a: dict) -> str:
 def task_claim(u, c: Caller, a: dict) -> str:
     from hokma.desks import service as desks
 
+    task = u.tasks.get(a["task_id"])
+    on_desk = task.project_id is not None and u.desks.by_project(task.project_id) is not None
+    if task.assigned_agent != c.slug and (task.assigned_agent or on_desk):
+        raise LookupError(f"task {task.id} is assigned to {task.assigned_agent or 'nobody'}; only the assigned agent can claim it")
+    _desk_member_check(u, task.project_id, c.slug, f"task {task.id} cannot be claimed")
     # On a desk the run is recorded with the model of the desk, so its tokens and its model are the desk's.
-    model = desks.model_in(u, u.tasks.get(a["task_id"]).project_id, c.slug)
+    model = desks.model_in(u, task.project_id, c.slug)
     return _dump(_row(u.tasks.claim(a["task_id"], c.slug, actor=c.actor, run_model=model), *TASK_KEYS))
 
 
@@ -437,7 +454,23 @@ def desk_show(u, c: Caller, a: dict) -> str:
             raise ValueError("the active project is not a desk; pass desk_id (see desk_list)")
     elif own is not None and desk_id != own:
         raise LookupError(f"desk {desk_id} is not the desk of this project; only desk {own} can be read here")
-    return _dump(_desk_out(_desk_call(service.get_desk, desk_id)))
+    from hokma.kit import market_tools
+
+    out = _desk_out(_desk_call(service.get_desk, desk_id))
+    out["assets"] = market_tools.desk_prices(out["assets"])      # each asset with its last price, or why it has none
+    return _dump(out)
+
+
+def market_quote(u, c: Caller, a: dict) -> str:
+    from hokma.kit import market_tools
+
+    return _dump(market_tools.quote(a["symbol"]))
+
+
+def market_candles(u, c: Caller, a: dict) -> str:
+    from hokma.kit import market_tools
+
+    return _dump(market_tools.candles(a["symbol"], a.get("interval"), a.get("limit")))
 
 
 DESK_TEMPLATES = ["minimal", "standard", "debate"]
@@ -654,7 +687,7 @@ def bug_list(u, c: Caller, a: dict) -> str:
 Handler = Callable[[Any, Caller, dict], str]
 # these open their own database units
 NO_UNIT = {"project_create", "agent_save", "skill_save", "skill_install", "desk_list", "desk_show",
-         "desk_create", "desk_configure"}
+         "desk_create", "desk_configure", "market_quote", "market_candles"}
 TASK_ID = {"task_id": _i("Task id.")}
 
 TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
@@ -693,9 +726,20 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
     "desk_list": ("List the money desks that are not archived (id, name, status). Read only.", {}, [], desk_list,
                   False),
     "desk_show": ("Show one money desk: mandate, simulated capital, assets, team with the model of this desk and the "
-                  "state of the weekly token budget. Without desk_id it is the desk of the active project. Read only: "
+                  "state of the weekly token budget, and each asset with its last price. Without desk_id it is the desk of the "
+                  "active project. Read only: "
                   "desk_create and desk_configure change desks.", {"desk_id": _i("Desk id; default: the desk of the active project.")}, [],
                   desk_show, False),
+    "market_quote": ("Live price of one asset, read only: last price, change, high, low, volume, time and source. "
+                     "Same data as the chart. Fails with a clear reason when the market connection does not have the "
+                     "asset.", {"symbol": _s("Market symbol, e.g. NQ=F, AAPL, BTC-USD.")}, ["symbol"], market_quote,
+                     False),
+    "market_candles": ("Candles of one asset, read only, oldest first: the same bars the chart draws. t is the start "
+                       "of the bar (epoch seconds UTC). Fails with a clear reason when the market connection does not "
+                       "have the asset.", {
+        "symbol": _s("Market symbol, e.g. NQ=F, AAPL, BTC-USD."),
+        "interval": _s("1m, 5m (default), 15m, 1h or 1D.", enum=["1m", "5m", "15m", "1h", "1D"]),
+        "limit": _i("How many of the newest bars, 1 to 300 (default 60).")}, ["symbol"], market_candles, False),
     "desk_create": ("Create a money desk (simulation only) with the same logic as the app's Create desk. The owner is "
                     "asked for permission first and sees these values: propose them in the chat before you call. "
                     "template: minimal, standard (default) or debate. capital is the simulated capital. assets is a "
@@ -833,6 +877,33 @@ def _desk_gate(db, args: dict) -> None:
         raise LookupError(f"{exc.code}: {exc.message}") from exc
 
 
+def _desk_agents_on(db, name: str, args: dict, c: Caller) -> None:
+    """Agents assigned and active on a desk always work for it. Runs AFTER the tool succeeded, so a refused attempt
+    changes nothing, and only for who belongs there: an agent that is an active member of that desk (the owner, who
+    has no agent, counts for `agents_list`). Never blocks the call."""
+    if name not in ("task_create", "task_claim", "agents_list"):
+        return
+    from hokma.desks import service as desks
+
+    try:
+        with db.read() as u:
+            if name == "task_claim":
+                project_id = u.tasks.get(args["task_id"]).project_id
+            else:
+                project_id = args.get("project_id") if name == "task_create" else None
+                project_id = project_id or _active_project(u, c)
+            desk = u.desks.by_project(project_id) if project_id is not None else None
+            if desk is None:
+                return
+            member = u.desks.find_agent(desk.id, c.agent) if c.agent else None
+            is_member = member is not None and member.active
+            if not is_member and not (name == "agents_list" and c.agent is None):
+                return
+        desks.ensure_agents_on(project_id, db)
+    except Exception:                                   # the tool itself reports what is wrong with its arguments
+        pass
+
+
 def call(name: str, args: dict, caller: Caller | None = None) -> tuple[str, bool]:
     """(text, is_error)."""
     from hokma.db import DbError, current_version, get_database
@@ -849,8 +920,11 @@ def call(name: str, args: dict, caller: Caller | None = None) -> tuple[str, bool
         if name == "task_claim":
             _desk_gate(db, args)
         if name in NO_UNIT:
-            return handler(None, caller or Caller(), args), False
-        with (db.write() if writes else db.read()) as unit:
-            return handler(unit, caller or Caller(), args), False
+            text = handler(None, caller or Caller(), args)
+        else:
+            with (db.write() if writes else db.read()) as unit:
+                text = handler(unit, caller or Caller(), args)
+        _desk_agents_on(db, name, args, caller or Caller())
+        return text, False
     except (DbError, LookupError, ValueError, ProjectError) as exc:
         return f"{type(exc).__name__}: {exc}", True

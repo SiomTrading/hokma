@@ -318,6 +318,11 @@ async function scenario(chromium, locale, dist) {
     await reason.waitFor();
     assert.ok((await title.innerText()).includes(msg("chart.interval.rangeTitle", { size: "10t" })), "the chart stays on the range");
     await page.keyboard.press("Escape");
+    await writeInterval("3h");
+    await until(async () => (await title.innerText()).includes("3h"), "3h written in the box");
+    await writeInterval("1W");
+    await until(async () => (await title.innerText()).includes("1W"), "1W written in the box");
+    await page.getByRole("group", { name: msg("chart.timeframe") }).getByRole("button", { name: "1W", exact: true }).waitFor();
     await writeInterval("5m");
     await until(async () => (await title.innerText()).includes("5m"), "back on 5m");
     await until(async () => (await opening.count()) === 1, "NQ=F 5m opening line after range and seconds");

@@ -3,7 +3,7 @@
  * `TIMEFRAMES` are the default favorites; any other valid interval is accepted too.
  */
 export type Timeframe = string;
-export const TIMEFRAMES: readonly Timeframe[] = ["1m", "5m", "15m", "1h", "1D"];
+export const TIMEFRAMES: readonly Timeframe[] = ["1m", "5m", "15m", "1h", "1D", "1W"];
 export const DEFAULT_TIMEFRAME: Timeframe = "5m";
 
 /** `interval` of a snapshot: what the engine builds for the subscription. */

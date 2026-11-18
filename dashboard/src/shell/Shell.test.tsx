@@ -87,11 +87,31 @@ describe("top bar buttons change the grid like the design", () => {
 
   it("the button next to the logo and Ctrl+B change the menu, and the choice is remembered", async () => {
     const side = screen.getByRole("complementary", { name: t("nav.menu") });
-    await userEvent.click(within(side).getByRole("button", { name: t("sidebar.collapse") }));
+    await userEvent.click(within(side).getByRole("button", { name: t("sidebar.compress") }));
     expect(root()).toHaveClass("sbc");
     expect(JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}").sidebar).toBe(1);
     await userEvent.keyboard("{Control>}b{/Control}");
     expect(root()).toHaveClass("sbx");
+  });
+
+  it("the chevron in the menu compresses to icons and expands again, and the choice is remembered", async () => {
+    const side = screen.getByRole("complementary", { name: t("nav.menu") });
+    expect(root()).not.toHaveClass("sbc");
+    await userEvent.click(within(side).getByRole("button", { name: t("sidebar.compress") }));
+    expect(root()).toHaveClass("sbc");
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}").sidebar).toBe(1);
+    const open = within(side).getByRole("button", { name: t("sidebar.expand") });
+    expect(open).toHaveAttribute("aria-expanded", "false");
+    expect(within(side).getByRole("button", { name: t("nav.desks") })).toHaveAttribute("title", t("nav.desks"));
+    await userEvent.click(open);
+    expect(root()).not.toHaveClass("sbc", "sbx");
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}").sidebar).toBe(0);
+  });
+
+  it("the menu has no dot next to Money desks", () => {
+    const side = screen.getByRole("complementary", { name: t("nav.menu") });
+    expect(side.querySelector(".nav-badge")).toBeNull();
+    expect(within(side).getByRole("button", { name: t("nav.desks") })).toBeInTheDocument();
   });
 
   it("terminal toggles the dock", async () => {

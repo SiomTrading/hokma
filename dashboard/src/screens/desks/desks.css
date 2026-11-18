@@ -9,6 +9,12 @@
 .desk-link-sub .up { color: var(--up); }
 .desk-link-sub .down { color: var(--down); }
 .desk-new { color: var(--acc); }
+.desk-initial { display: none; font: 600 11px Montserrat, sans-serif; }
+/* Icons-only menu: each desk is its initials (name on hover), the list loses its indent and its dots. */
+.hk.sbc .desk-list { margin-left: 0; padding-left: 0; border-left: 0; }
+.hk.sbc .desk-link { align-items: center; justify-content: center; min-height: 36px; padding: 0; }
+.hk.sbc .desk-link .dot, .hk.sbc .desk-link-text { display: none; }
+.hk.sbc .desk-link .desk-initial { display: inline; }
 .desk-dot-active { color: var(--ok); }
 .desk-dot-paused { color: var(--warn); }
 
@@ -86,8 +92,10 @@
 .desk-palette { cursor: not-allowed; opacity: 0.55; }
 .desk-cfg { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 10px; }
 .desk-cfg-nav { padding: 10px; display: flex; flex-direction: column; gap: 2px; align-self: start; }
-.desk-cfg-nav .nav { justify-content: space-between; }
-.desk-cfg-later { color: var(--t3); }
+.desk-cfg-nav .nav { justify-content: space-between; padding: 0 10px; }
+.desk-cfg-nav .nav.nav > span.desk-cfg-label { flex: 1 1 auto; min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; text-align: left; }
+.desk-cfg-later { color: var(--t3); flex: none; overflow: visible; text-overflow: clip; }
+.desk-cfg-nav .nav.nav > span.desk-cfg-later { overflow: visible; text-overflow: clip; }
 .desk-cfg-body { padding: 18px; overflow-y: auto; min-height: 0; }
 .desk-cfg-form { display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
 .desk-cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -152,26 +160,42 @@
 }
 
 /* Terminal: list on the left, chart in the center, chief chat on the right (full height), positions under list and chart */
-.dterm { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr) 260px; grid-template-rows: minmax(0, 1fr) 170px; gap: 10px; }
+.dterm { flex: 1; min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr) var(--chat-w, 380px); grid-template-rows: minmax(0, 1fr) 170px; gap: 10px; }
+.dterm.folded { grid-template-rows: minmax(0, 1fr) 46px; }
 .dterm-whole { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
 .dterm-list, .dterm-chart, .dterm-chat, .dterm-positions { display: flex; flex-direction: column; }
 .dterm-list { grid-column: 1; grid-row: 1; }
 .dterm-chart { grid-column: 2; grid-row: 1; }
+.dterm-split { grid-column: 3; grid-row: 1 / span 2; justify-self: start; width: 10px; margin-left: -10px; cursor: col-resize; touch-action: none; position: relative; z-index: 1; }
+.dterm-split::after { content: ""; position: absolute; left: 4px; width: 2px; top: 0; bottom: 0; border-radius: 2px; background: transparent; transition: background 150ms ease; }
+.dterm-split:hover::after, .dterm-split:focus-visible::after { background: var(--acc); }
+.dterm-split:focus-visible { outline: none; }
 .dterm-chat { grid-column: 3; grid-row: 1 / span 2; }
 .dterm-positions { grid-column: 1 / span 2; grid-row: 2; }
-.dterm-ph { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.dterm-ph { position: relative; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .dterm-ph-end { margin-left: auto; }
-.dterm-tab { font: 600 12px Montserrat, sans-serif; color: var(--t3); }
+.dterm-tab { white-space: nowrap; font: 600 12px Montserrat, sans-serif; color: var(--t3); }
 .dterm-tab.on { color: var(--t1); }
 .dterm-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .dterm-table th { padding: 6px 10px; text-align: left; font: 600 10px Montserrat, sans-serif; color: var(--t3); letter-spacing: 0.08em; text-transform: uppercase; }
 .dterm-table td { padding: 6px 10px; border-top: 1px solid var(--grid); }
 .dterm-table .r { text-align: right; }
+.dterm-x { white-space: nowrap; width: 1%; padding-left: 2px; padding-right: 4px; }
+.dterm-remove { width: 22px; height: 22px; font-size: 11px; }
+.dterm-ask td { padding: 6px 10px; }
+.dterm-confirm { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.dterm-confirm-q { font: 600 12px Montserrat, sans-serif; color: var(--t1); min-width: 0; }
+.dterm-confirm-btns { display: inline-flex; gap: 4px; flex: none; }
+.dterm-yes, .dterm-no { border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--t2); font: 600 11px Montserrat, sans-serif; padding: 2px 6px; cursor: pointer; }
+.dterm-yes { color: var(--down); border-color: var(--down); }
+.dterm-fold { width: 26px; height: 26px; }
 .dterm-table .up { color: var(--up); }
 .dterm-table .down { color: var(--down); }
 .dterm-table tr.on td { background: var(--glass-strong); }
 .dterm-asset { background: transparent; border: 0; padding: 0; color: var(--t1); font: 700 12px Montserrat, sans-serif; cursor: pointer; }
 .dterm-asset:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
+.dterm-add { padding: 6px 8px; border-bottom: 1px solid var(--border); max-height: 280px; overflow-y: auto; flex-shrink: 0; }
+.dterm-add-error { padding: 6px 10px; font-size: 12px; }
 .dterm-quote { margin-top: auto; padding: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
 .dterm-quote-px { font-size: 22px; color: var(--t1); }
 .dterm-chart-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -183,10 +207,13 @@
 .dterm-chat .dterm-chat-scroll { padding: 12px; gap: 10px; }
 .dterm-chat .chat-composer { padding: 8px; }
 .dterm-chat .chat-bar { flex-wrap: wrap; }
+.dterm-chat textarea.chat-input { flex: 1 1 100%; min-width: 0; order: -1; }
 .dterm-positions-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow-y: auto; }
 .dterm-positions-body > .state { min-height: 0; padding: 8px 20px; }
 @media (max-width: 900px) {
   .dterm { grid-template-columns: minmax(0, 1fr); grid-template-rows: 200px 340px 260px 170px; overflow-y: auto; }
+  .dterm.folded { grid-template-rows: 200px 340px 260px 46px; }
+  .dterm-split { display: none; }
   .dterm-list, .dterm-chart, .dterm-chat, .dterm-positions { grid-column: 1; grid-row: auto; }
 }
 

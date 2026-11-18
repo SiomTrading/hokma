@@ -28,6 +28,7 @@ export const ICONS = {
   chevronUp: "M6 15l6-6 6 6",
   chevronDown: "M6 9l6 6 6-6",
   chevronRight: "M9 6l6 6-6 6",
+  chevronLeft: "M15 6l-6 6 6 6",
   send: "M12 19V5M5 12l7-7 7 7",
   mic: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3",
   image: "M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3zM7 9a2 2 0 1 0 4 0 2 2 0 0 0-4 0zM21 15l-5-5L5 21",

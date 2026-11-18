@@ -7,7 +7,7 @@ export const TIMEFRAME_KEY = "hokma.chart.timeframe";
 
 export const MAX_FAVORITES = 8;
 export const MAX_RECENT = 8;
-export const DEFAULT_FAVORITES: readonly string[] = ["1m", "5m", "15m", "1h", "1D"];
+export const DEFAULT_FAVORITES: readonly string[] = ["1m", "5m", "15m", "1h", "1D", "1W"];
 export const DEFAULT_INTERVAL = "5m";
 
 function read(key: string): string | null {

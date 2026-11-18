@@ -28,6 +28,6 @@ export interface DeskConnection {
   asset_classes: string[];
 }
 
-/** Sections of the Settings tab. The last two are empty states with their "when". */
-export const CONFIG_SECTIONS = ["objective", "assets", "connections", "memory", "accounts"] as const;
+/** Sections of the Settings tab. The last two are empty states. */
+export const CONFIG_SECTIONS = ["objective", "connections", "memory", "accounts"] as const;
 export type ConfigSection = (typeof CONFIG_SECTIONS)[number];

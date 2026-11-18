@@ -20,6 +20,7 @@ export function Sidebar() {
   const activeScreen = shell.tabs.find((tab) => tab.key === shell.activeKey)?.screen;
   const sideRef = useRef<HTMLElement>(null);
   const density = useSidebarDensity(sideRef);
+  const compact = shell.layout.sidebar === 1;
 
   return (
     <aside ref={sideRef} className="side" data-density={density} aria-label={t("nav.menu")}>
@@ -32,11 +33,12 @@ export function Sidebar() {
           </span>
         </div>
         <IconButton
-          icon="sidebar"
+          icon={compact ? "chevronRight" : "chevronLeft"}
           className="brand-toggle"
-          label={t("sidebar.collapse")}
-          title={`${t("sidebar.collapse")} (${formatShortcutCompact(getShortcut("sidebar"))})`}
-          onClick={shell.toggleSidebar}
+          label={t(compact ? "sidebar.expand" : "sidebar.compress")}
+          title={`${t(compact ? "sidebar.expand" : "sidebar.compress")} (${formatShortcutCompact(getShortcut("sidebar"))})`}
+          aria-expanded={!compact}
+          onClick={shell.toggleCompact}
         />
       </div>
       <NavLink
@@ -60,7 +62,7 @@ export function Sidebar() {
               icon={meta.icon}
               label={t(meta.navKey)}
               active={activeScreen === id}
-              badge={id === "desks" ? t("nav.desksNew") : undefined}
+              title={t(meta.navKey)}
               onClick={() => shell.openScreen(id)}
             />
             {id === "desks" ? <Slot name="sidebar.desks" /> : null}
@@ -83,8 +85,8 @@ export function Sidebar() {
         <Slot name="sidebar.conversations" query={shell.sidebarQuery} />
       </div>
       <div className="sep" />
-      <NavItem icon="learn" iconSize={16} label={t("nav.learn")} active={activeScreen === "learn"} onClick={() => shell.openScreen("learn")} />
-      <NavItem icon="settings" iconSize={16} label={t("nav.settings")} onClick={() => shell.openSettings()} />
+      <NavItem icon="learn" iconSize={16} label={t("nav.learn")} title={t("nav.learn")} active={activeScreen === "learn"} onClick={() => shell.openScreen("learn")} />
+      <NavItem icon="settings" iconSize={16} label={t("nav.settings")} title={t("nav.settings")} onClick={() => shell.openSettings()} />
       <NavItem icon="power" iconSize={16} label={t("nav.shutdown")} title={t("nav.shutdown")} onClick={() => setConfirmingShutdown(true)} />
       {confirmingShutdown ? (
         <ShutdownDialog

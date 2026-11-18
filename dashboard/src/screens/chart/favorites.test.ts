@@ -18,9 +18,9 @@ import {
 afterEach(() => vi.restoreAllMocks());
 
 describe("favorite intervals", () => {
-  it("starts with 1m 5m 15m 1h 1D", () => {
-    expect(loadFavorites()).toEqual(["1m", "5m", "15m", "1h", "1D"]);
-    expect(DEFAULT_FAVORITES).toEqual(["1m", "5m", "15m", "1h", "1D"]);
+  it("starts with 1m 5m 15m 1h 1D 1W", () => {
+    expect(loadFavorites()).toEqual(["1m", "5m", "15m", "1h", "1D", "1W"]);
+    expect(DEFAULT_FAVORITES).toEqual(["1m", "5m", "15m", "1h", "1D", "1W"]);
   });
 
   it("drops invalid values, normalizes, removes repeats and keeps at most 8", () => {
@@ -39,7 +39,7 @@ describe("favorite intervals", () => {
 
   it("pins and unpins, saving each change, and refuses a ninth", () => {
     let list = toggleFavorite(loadFavorites(), "7m");
-    expect(list).toEqual(["1m", "5m", "7m", "15m", "1h", "1D"]);
+    expect(list).toEqual(["1m", "5m", "7m", "15m", "1h", "1D", "1W"]);
     expect(JSON.parse(localStorage.getItem(INTERVALS_KEY)!)).toEqual(list);
     expect(isFavorite(list, "420s")).toBe(true);
     list = toggleFavorite(list, "7m");

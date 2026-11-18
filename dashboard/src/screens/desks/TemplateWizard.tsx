@@ -216,7 +216,6 @@ export function TemplateWizard({ onClose, onCreated }: Props) {
             <div className="pane desk-later">
               <b>{t("desks.rules.title")}</b>
               <span>{t("desks.rules.text")}</span>
-              <span>{t("desks.rules.when")}</span>
             </div>
           </div>
         ) : null}

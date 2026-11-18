@@ -101,16 +101,16 @@ def test_empty_mandate_gets_the_catalog_sentence(desks_db):
     assert "No mandate written yet" in open(os.path.join(folder, "CLAUDE.md"), encoding="utf-8").read()
 
 
-def test_creating_a_desk_turns_on_the_desk_agents_it_uses_and_leaves_the_others_as_they_were(desks_db):
-    """The kit installs the six desk agents off. A desk made from a template needs its chief to talk, so those the
-    template uses are turned on; hugo is an agent the student had and keeps its state."""
+def test_creating_a_desk_turns_on_every_agent_it_uses_and_leaves_the_others_as_they_were(desks_db):
+    """An agent assigned to a desk works for it, so those the template uses are turned on (hugo too: the desk chief
+    could not ask it otherwise); the ones the template does not use keep their state."""
     with desks_db.write() as u:
         for slug in ("desk-chief", "risk", "signals", "hugo"):
             u.agents.set_status(slug, "off")
     service.create_desk("Futuros", 10000, template="minimal", db=desks_db)
     with desks_db.read() as u:
         state = {slug: u.agents.get(slug).status for slug in ("desk-chief", "risk", "signals", "hugo")}
-    assert state == {"desk-chief": "active", "risk": "active", "signals": "off", "hugo": "off"}
+    assert state == {"desk-chief": "active", "risk": "active", "signals": "off", "hugo": "active"}
 
 
 def test_missing_agent_creates_nothing(desks_db):
@@ -359,3 +359,19 @@ def test_error_messages_come_from_the_catalog_in_both_languages(desks_db):
     from hokma.desks import errors
 
     assert set(errors._MESSAGES) >= {"not_found", "chief_required", "agent_off", "bad_assets", "db_failed"}
+
+
+def test_a_desk_agent_that_was_turned_off_later_is_turned_on_when_the_desk_works(desks_db):
+    desk = make(desks_db, template="minimal")
+    with desks_db.write() as u:
+        for slug in ("hugo", "risk"):
+            u.agents.set_status(slug, "off")
+        u.agents.set_status("iris", "off")                       # not on this desk
+    assert service.ensure_agents_on(None, db=desks_db) == []
+    assert sorted(service.ensure_agents_on(desk["project_id"], db=desks_db)) == ["hugo", "risk"]
+    with desks_db.read() as u:
+        assert (u.agents.get("hugo").status, u.agents.get("iris").status) == ("active", "off")
+    service.set_agent(desk["id"], "risk", active=False, db=desks_db)
+    with desks_db.write() as u:
+        u.agents.set_status("risk", "off")
+    assert service.ensure_agents_on(desk["project_id"], db=desks_db) == []     # a desk-off agent stays off

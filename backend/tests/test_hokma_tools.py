@@ -35,7 +35,8 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "journal_write", "journal_search", "ips_read", "decision_propose", "decision_list", "schedule_create",
                 "schedule_list", "extension_request", "agents_list", "agent_save", "skill_save", "skill_install", "bug_report",
                 "bug_update", "bug_list", "docs_search", "docs_list", "notify_owner",
-                "desk_list", "desk_show", "desk_create", "desk_configure", "trash_move"}
+                "desk_list", "desk_show", "desk_create", "desk_configure", "trash_move", "market_quote",
+                "market_candles"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]
     assert all(t["inputSchema"]["additionalProperties"] is False for t in listed)
@@ -48,6 +49,8 @@ def test_tasks_create_claim_once_complete_and_comment(db):
     claimed, err = run("task_claim", {"task_id": tid})
     assert not err and claimed["status"] == "running" and claimed["claimed_by"] == "joel"
     again, err = run("task_claim", {"task_id": tid}, agent="vera")
+    assert err and "only the assigned agent" in again                    # another agent cannot claim it
+    again, err = run("task_claim", {"task_id": tid}, agent="joel")
     assert err and "Conflict" in again                                   # a second claim fails
     assert not run("task_heartbeat", {"task_id": tid})[1]
     assert not run("task_comment", {"task_id": tid, "body": "working"})[1]
@@ -579,7 +582,23 @@ DESK_AGENTS = ("desk-chief", "hugo", "risk", "iris", "signals", "axel", "vera")
 
 
 @pytest.fixture
-def two_desks(db):
+def fake_market(tmp_path):
+    """The recorded market answers of the chart tests: no network."""
+    from hokma.market import api as market_api
+    from hokma.market.yahoo import YahooSource
+    from market_support import RECORDED_AT, FakeFetcher
+
+    fetcher = FakeFetcher()
+    market_api.set_source(YahooSource(tmp_path / "market-cache", fetch=fetcher, clock=lambda: RECORDED_AT))
+    market_api.set_clock(lambda: RECORDED_AT)
+    yield fetcher
+    market_api.set_source(None)
+    import time
+    market_api.set_clock(time.time)
+
+
+@pytest.fixture
+def two_desks(db, fake_market):
     from hokma.desks import service
 
     with db.write() as u:
@@ -632,7 +651,8 @@ def test_desk_show_has_mandate_capital_assets_team_models_and_budget(two_desks):
     shown, err = run("desk_show", {"desk_id": first["id"]})
     assert not err
     assert shown["name"] == "Futuros NQ" and shown["capital"] == 10000 and shown["mode"] == "simulation"
-    assert shown["mandate"] == "Trade the open only." and shown["assets"] == ["NQ=F"]
+    assert shown["mandate"] == "Trade the open only."
+    assert [a["symbol"] for a in shown["assets"]] == ["NQ=F"]
     assert len(shown["agents"]) == 7 and sum(1 for a in shown["agents"] if a["role"] == "chief") == 1
     assert all(a["model"] in ("haiku", "sonnet", "opus") for a in shown["agents"])
     assert shown["budget"]["token_budget"] == 1000 and shown["budget"]["used"] == 0
@@ -710,3 +730,122 @@ def test_the_desk_tools_reach_the_agent_through_the_server_protocol(two_desks):
            "params": {"name": "desk_show", "arguments": {"desk_id": first["id"]}}}
     result = handle(ask, "d", ["w"], ["d"])["result"]
     assert not result.get("isError") and json.loads(result["content"][0]["text"])["id"] == first["id"]
+
+
+def test_desk_show_gives_each_asset_with_its_last_price(two_desks):
+    first, _ = two_desks
+    shown, err = run("desk_show", {"desk_id": first["id"]})
+    asset = shown["assets"][0]
+    assert not err and asset["symbol"] == "NQ=F" and asset["last"] > 0 and asset["source"] and asset["time"]
+
+
+def test_desk_show_keeps_an_asset_the_source_does_not_have_and_says_why(two_desks, fake_market):
+    from hokma.desks import service
+
+    first, _ = two_desks
+    service.set_assets(first["id"], ["NQ=F", "ZZZZ"])
+    shown, err = run("desk_show", {"desk_id": first["id"]})
+    by = {a["symbol"]: a for a in shown["assets"]}
+    assert not err and by["NQ=F"]["last"] and by["ZZZZ"]["last"] is None and "does not have this asset" in by["ZZZZ"]["error"]
+
+
+def test_market_tools_are_read_only_and_listed():
+    assert hokma_tools.TOOLS["market_quote"][4] is False and hokma_tools.TOOLS["market_candles"][4] is False
+    listed = {d["name"]: d for d in hokma_tools.definitions()}
+    assert listed["market_candles"]["inputSchema"]["required"] == ["symbol"]
+
+
+def test_market_quote_gives_last_change_range_volume_time_and_source(db, fake_market):
+    q, err = run("market_quote", {"symbol": "nq=f"})
+    assert not err and q["symbol"] == "NQ=F" and q["last"] > 0 and q["time"] and q["source"]
+    assert q["high"] >= q["low"] and q["volume"] is not None and "change" in q and "change_pct" in q
+
+
+def test_market_candles_are_the_chart_bars_and_respect_the_limit(db, fake_market):
+    out, err = run("market_candles", {"symbol": "NQ=F", "interval": "5m", "limit": 5})
+    assert not err and out["interval"] == "5m" and out["count"] == 5 == len(out["candles"])
+    bar = out["candles"][-1]
+    assert set(bar) == {"t", "o", "h", "l", "c", "v"} and bar["h"] >= bar["l"]
+    assert [c["t"] for c in out["candles"]] == sorted(c["t"] for c in out["candles"])
+    default, _ = run("market_candles", {"symbol": "AAPL"})
+    assert default["interval"] == "5m" and 1 < default["count"] <= 60
+
+
+def test_market_tools_give_clear_errors(db, fake_market):
+    text, err = run("market_quote", {"symbol": "ZZZZ"})
+    assert err and "does not have this asset" in text and "ZZZZ" in text
+    assert run("market_quote", {"symbol": "bad symbol!!"})[1]
+    assert run("market_candles", {"symbol": "NQ=F", "interval": "2h"})[1]
+    for limit in (0, 301):
+        assert "limit must be" in run("market_candles", {"symbol": "NQ=F", "limit": limit})[0]
+    fake_market.fail = "network"
+    text, err = run("market_candles", {"symbol": "AAPL", "interval": "1D"})
+    assert err and "no connection" in text
+
+
+def test_a_desk_agent_that_is_off_in_settings_gets_and_takes_a_task_of_its_desk(two_desks, db):
+    first, _ = two_desks
+    with db.write() as u:
+        u.agents.set_status("hugo", "off")
+    caller = as_desk(first)
+    listed, err = call("agents_list", {}, caller)
+    assert not err and "hugo" in {a["slug"] for a in listed}
+    with db.write() as u:
+        u.agents.set_status("hugo", "off")
+    made, err = call("task_create", {"title": "Prices", "project_id": first["project_id"], "assigned_agent": "hugo"},
+                     caller)
+    assert not err
+    with db.read() as u:
+        assert u.agents.get("hugo").status == "active"
+        assert [t.id for t in u.tasks.list_ready(agents=["hugo"])] == [made["id"]]
+    with db.write() as u:
+        u.agents.set_status("hugo", "off")
+    taken, err = call("task_claim", {"task_id": made["id"]}, Caller({"HOKMA_AGENT": "hugo"}))
+    assert not err and taken["status"] == "running" and taken["claimed_by"] == "hugo"
+    with db.read() as u:
+        assert u.agents.get("hugo").status == "active"
+
+
+def _desk_task(db, desk, agent):
+    with db.write() as u:
+        return u.tasks.create("Check the open", actor=Actor.system(), project_id=desk["project_id"],
+                              assigned_agent=agent, status="ready").id
+
+
+def test_an_agent_outside_the_desk_cannot_claim_its_task(two_desks, db):
+    first, second = two_desks
+    with db.read() as u:
+        outsider = next(a.agent_slug for a in u.desks.list_agents(first["id"])
+                        if u.desks.find_agent(second["id"], a.agent_slug) is None)
+    tid = _desk_task(db, second, "desk-chief")
+    text, err = run("task_claim", {"task_id": tid}, agent=outsider)
+    assert err and "LookupError" in text
+    with db.read() as u:
+        assert u.tasks.get(tid).claimed_by is None and u.tasks.get(tid).status == "ready"
+
+
+def test_a_desk_agent_that_is_not_the_assignee_cannot_claim(two_desks, db):
+    first, _ = two_desks
+    tid = _desk_task(db, first, "desk-chief")
+    with db.read() as u:
+        other = next(a.agent_slug for a in u.desks.list_agents(first["id"]) if a.agent_slug != "desk-chief")
+    text, err = run("task_claim", {"task_id": tid}, agent=other)
+    assert err and "only the assigned agent" in text
+    with db.read() as u:
+        assert u.tasks.get(tid).claimed_by is None
+
+
+def test_the_assigned_desk_agent_claims_its_task(two_desks, db):
+    first, _ = two_desks
+    tid = _desk_task(db, first, "desk-chief")
+    taken, err = run("task_claim", {"task_id": tid}, agent="desk-chief")
+    assert not err and taken["claimed_by"] == "desk-chief" and taken["status"] == "running"
+
+
+def test_a_desk_task_cannot_be_assigned_to_an_agent_outside_the_desk(two_desks, db):
+    first, second = two_desks
+    with db.read() as u:
+        outsider = next(a.agent_slug for a in u.desks.list_agents(first["id"])
+                        if u.desks.find_agent(second["id"], a.agent_slug) is None)
+    text, err = run("task_create", {"title": "x", "project_id": second["project_id"], "assigned_agent": outsider})
+    assert err and "not an active member" in text

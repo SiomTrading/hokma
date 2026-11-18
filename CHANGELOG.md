@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2
+
+- Fixed: The desk Terminal always shows the desk chief chat; add assets from the Terminal and see their chart; desk agent names in Spanish.
+- Fixed: Resize the desk chief chat, fold Positions, and add or remove assets from the watchlist.
+- Fixed: Desk agents read live prices and candles of the desk assets, desk agents can always take the desk tasks, and the desk chief answers in your language.
+- Fixed: The left menu has a chevron to compress it to icons and expand it again (it remembers your choice), and the dot next to Money desks is gone.
+
 ## 1.0.1
 
 - New: Delete a money desk: its folder goes to the Trash and can be restored; your agents and conversations stay.

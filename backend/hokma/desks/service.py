@@ -308,19 +308,39 @@ def create_desk(name: str, capital: Any, *, focus: str | None = None, template: 
 def _turn_on_desk_agents(chosen: template_data.DeskTemplate, database: Database) -> None:
     """Turn on, the way Settings does (database and agent files), the desk-only agents this template uses. A failure
     leaves the desk created and that agent off: the Agents tab still offers to turn it on."""
+    _switch_on([m.agent_slug for m in chosen.members], database)
+
+
+def _switch_on(slugs: list[str], database: Database) -> list[str]:
+    """Turn on, the way Settings does, the agents among `slugs` that are off. Returns the ones turned on."""
     from hokma.agents.service import AgentService
 
-    wanted = [m.agent_slug for m in chosen.members if m.agent_slug in DESK_KIT_AGENTS]
-    if not wanted:
-        return
+    if not slugs:
+        return []
     with database.read() as u:
-        off = [slug for slug in wanted if (found := u.agents.find(slug)) is not None and found.status == "off"]
+        off = [slug for slug in slugs if (found := u.agents.find(slug)) is not None and found.status == "off"]
     service = AgentService(database)
+    done = []
     for slug in off:
         try:
             service.set_status(slug, "active")
+            done.append(slug)
         except Exception as exc:                                # one agent must not undo a desk that exists already
             log.warning("desk agent %s could not be turned on: %s", slug, exc)
+    return done
+
+
+def ensure_agents_on(project_id: int | None, db: Database | None = None) -> list[str]:
+    """An agent that is assigned and active on a desk always works for it: when the project is a desk, the agents of
+    its team that are off in Settings are turned on again (so the task runner and `agents_list` see them). Chosen over
+    letting the dispatch skip the global switch because the agent file is applied by the same switch."""
+    if project_id is None:
+        return []
+    database = _db(db)
+    with database.read() as u:
+        desk = u.desks.by_project(project_id)
+        slugs = [a.agent_slug for a in u.desks.list_agents(desk.id) if a.active] if desk is not None else []
+    return _switch_on(slugs, database)
 
 
 # ---- delete ----------------------------------------------------------------------------------
@@ -505,9 +525,11 @@ def open_conversation(desk_id: int, db: Database | None = None) -> dict[str, Any
                                           agent_slug=chief.agent_slug, project_mode="fixed")
             if default:
                 u.engine_connections.attach(conv.id, default.id)
-        return {"conversation_id": conv.id, "desk_id": desk.id, "project_id": desk.project_id,
-                "agent_slug": conv.agent_slug, "model": conv.model, "engine": conv.engine, "title": conv.title,
-                "created": created}
+        out = {"conversation_id": conv.id, "desk_id": desk.id, "project_id": desk.project_id,
+               "agent_slug": conv.agent_slug, "model": conv.model, "engine": conv.engine, "title": conv.title,
+               "created": created}
+    ensure_agents_on(out["project_id"], db)
+    return out
 
 
 def _market_service():

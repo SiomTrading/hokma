@@ -5,6 +5,7 @@ import { agentsApi } from "../agents/api";
 import { agentTint, MODELS, shortDescription } from "../agents/format";
 import { OpusConfirm } from "../agents/OpusConfirm";
 import type { AgentItem } from "../agents/types";
+import { useAgentName } from "./agentName";
 import { deskAgentsApi, errorCode } from "./agentsApi";
 import { failText } from "./configApi";
 import type { DeskModel } from "./types";
@@ -22,6 +23,7 @@ interface Props {
 /** Picks an agent that exists and brings it to the desk with the model chosen for it. The agent is not copied. */
 export function BringAgentModal({ deskId, deskName, taken, onClose, onBrought }: Props) {
   const { t } = useI18n();
+  const nameOf = useAgentName();
   const [items, setItems] = useState<AgentItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [slug, setSlug] = useState<string | null>(null);
@@ -78,9 +80,9 @@ export function BringAgentModal({ deskId, deskName, taken, onClose, onBrought }:
           <div role="radiogroup" aria-label={t("desks.agents.bring")} className="desk-bring-list">
             {free.map((item) => (
               <Option key={item.slug} selected={item.slug === slug} onSelect={() => pick(item)} className="desk-bring-row">
-                <Glyph initial={item.name.slice(0, 2).toUpperCase()} color={agentTint(item.slug)} size={34} />
+                <Glyph initial={nameOf(item.slug, item.name).slice(0, 2).toUpperCase()} color={agentTint(item.slug)} size={34} />
                 <span className="desk-bring-text">
-                  <b>{item.name}</b>
+                  <b>{nameOf(item.slug, item.name)}</b>
                   <span className="hint">{shortDescription(item.description)}</span>
                 </span>
                 <Pill tone={item.active ? "default" : "warn"}>{item.active ? t("desks.agents.bring.unassigned") : t("desks.agents.bring.off")}</Pill>

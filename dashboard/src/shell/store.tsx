@@ -59,6 +59,8 @@ export interface ShellApi {
 
   layout: Layout;
   toggleSidebar: () => void;
+  /** The chevron of the menu: icons only <-> full menu (and from hidden, the full menu). */
+  toggleCompact: () => void;
   toggleRightPanel: () => void;
   toggleTerminal: () => void;
   toggleFocus: () => void;
@@ -219,6 +221,10 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     setSidebar((s) => ((s + 1) % 3) as SidebarState);
     setFocus(false);
   }, []);
+  const toggleCompact = useCallback(() => {
+    setSidebar((s) => (s === 0 ? 1 : 0) as SidebarState);
+    setFocus(false);
+  }, []);
   const toggleRightPanel = useCallback(() => {
     setRightPanel((v) => !v);
     setFocus(false);
@@ -283,6 +289,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       setTabParams,
       layout: { sidebar, rightPanel, terminal, focus },
       toggleSidebar,
+      toggleCompact,
       toggleRightPanel,
       toggleTerminal,
       toggleFocus,
@@ -304,7 +311,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       on,
     }),
     [
-      tabs, activeKey, openScreen, closeTab, setTabTitle, bindConversation, setTabParams, sidebar, rightPanel, terminal, focus, toggleSidebar, toggleRightPanel,
+      tabs, activeKey, openScreen, closeTab, setTabTitle, bindConversation, setTabParams, sidebar, rightPanel, terminal, focus, toggleSidebar, toggleCompact, toggleRightPanel,
       toggleTerminal, toggleFocus, theme, setTheme, locale, setLocale, settings, openSettings, closeSettings, sidebarQuery,
       focusSearch, newConversation, toasts, toast, dismissToast, emit, on,
     ],

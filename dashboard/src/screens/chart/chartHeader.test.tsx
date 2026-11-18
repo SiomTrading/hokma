@@ -42,13 +42,13 @@ async function connect(fields: Record<string, unknown> = {}) {
 const subscribes = () => FakeSocket.of("/ws/market").flatMap((s) => s.ops("subscribe"));
 
 describe("chart header (3060 wiring)", () => {
-  it("shows the symbol as a button and the interval; the favorites are the old five", async () => {
+  it("shows the symbol as a button and the interval; the favorites are the five plus weekly", async () => {
     mountHost();
     await connect();
     expect(screen.getByTestId("chart-title")).toHaveTextContent("NQ=F · 5m");
     expect(screen.getByTestId("chart-symbol").tagName).toBe("BUTTON");
     const favorites = screen.getByRole("group", { name: t("chart.timeframe") });
-    expect(favorites.textContent).toBe("1m5m15m1h1D");
+    expect(favorites.textContent).toBe("1m5m15m1h1D1W");
   });
 
   it("writes any interval in the box and subscribes with it", async () => {

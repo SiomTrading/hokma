@@ -336,6 +336,34 @@ describe("languages", () => {
     }
   });
 
+  it("shows the kit agents with Spanish names in es and the English ones in en, whatever name the server sends", async () => {
+    const english = [
+      member("desk-chief", "Desk Chief", "chief", { state: "working" }),
+      member("bear-case", "Bear Case", "bear"),
+      member("bull-case", "Bull Case", "bull"),
+      member("judge", "Judge", "judge"),
+      member("risk", "Risk", "risk"),
+      member("signals", "Signals", "signals"),
+    ];
+    stubServer({ members: english });
+    open();
+    await screen.findByText(t("desks.agents.working"));
+    const list = () => screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? "");
+    for (const name of ["Jefe de mesa", "En contra", "A favor", "Juez", "Riesgo", t("desks.role.signals")]) {
+      expect(screen.getAllByText(name).length, name).toBeGreaterThan(0);
+    }
+    expect(list().join("|")).not.toMatch(/Bear Case|Bull Case|Desk Chief|Judge/);
+    for (const name of ["Bear Case", "Bull Case", "Desk Chief", "Judge", "Signals"]) expect(screen.queryByText(name)).not.toBeInTheDocument();
+    cleanup();
+    setLocale("en");
+    stubServer({ members: english });
+    open();
+    await screen.findByText("Working now");
+    for (const name of ["Desk Chief", "Bear Case", "Bull Case", "Judge", "Risk", "Signals"]) {
+      expect(screen.getAllByText(name).length, name).toBeGreaterThan(0);
+    }
+  });
+
   it("reads in English", async () => {
     stubServer();
     setLocale("en");

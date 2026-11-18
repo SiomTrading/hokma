@@ -5,6 +5,7 @@ import { useShell } from "@/shell/useShell";
 import { agentTint } from "../../agents/format";
 import { CreateAgentModal } from "../../agents/CreateAgentModal";
 import { AgentDetail } from "../AgentDetail";
+import { useAgentName } from "../agentName";
 import { deskAgentsApi, errorCode } from "../agentsApi";
 import type { AgentState, DeskAgent, DeskUsage } from "../agentsApi";
 import { BringAgentModal } from "../BringAgentModal";
@@ -26,6 +27,7 @@ const REFRESH_MS = 15_000;
  */
 export function AgentsTab({ desk }: TabProps) {
   const { t, locale } = useI18n();
+  const nameOf = useAgentName();
   const shell = useShell();
   const [agents, setAgents] = useState<DeskAgent[] | null>(null);
   const [usage, setUsage] = useState<DeskUsage | null>(null);
@@ -96,14 +98,14 @@ export function AgentsTab({ desk }: TabProps) {
   const remove = (agent: DeskAgent) =>
     void act(() => deskAgentsApi.remove(desk.id, agent.slug), t("desks.agents.error.remove"), () => {
       setSelected(null);
-      shell.toast({ tone: "ok", text: t("desks.agents.removed", { name: agent.name }) });
+      shell.toast({ tone: "ok", text: t("desks.agents.removed", { name: nameOf(agent.slug, agent.name) }) });
     });
 
   /** A new agent is created globally (existing flow) and then linked to this desk with the model it was created with. */
   const afterCreate = async (created: { slug: string; name: string; model: DeskModel }) => {
     try {
       await deskAgentsApi.add(desk.id, { agent_slug: created.slug, model: created.model, role: "custom" });
-      shell.toast({ tone: "ok", text: t("desks.agents.bring.done", { name: created.name }) });
+      shell.toast({ tone: "ok", text: t("desks.agents.bring.done", { name: nameOf(created.slug, created.name) }) });
       setSelected(created.slug);
     } catch {
       shell.toast({ tone: "warn", text: t("desks.agents.create.bringError") });
@@ -157,16 +159,16 @@ export function AgentsTab({ desk }: TabProps) {
                     key={item.slug}
                     type="button"
                     className={cx("desk-agent-row", item.slug === current?.slug && "on")}
-                    aria-label={t("desks.agents.select", { name: item.name })}
+                    aria-label={t("desks.agents.select", { name: nameOf(item.slug, item.name) })}
                     aria-current={item.slug === current?.slug ? "true" : undefined}
                     onClick={() => {
                       setSelected(item.slug);
                       setActionError(null);
                     }}
                   >
-                    <Glyph initial={item.name.slice(0, 2).toUpperCase()} color={agentTint(item.slug)} size={34} />
+                    <Glyph initial={nameOf(item.slug, item.name).slice(0, 2).toUpperCase()} color={agentTint(item.slug)} size={34} />
                     <span className="desk-agent-row-text">
-                      <b>{item.name}</b>
+                      <b>{nameOf(item.slug, item.name)}</b>
                       <span className="hint">{item.last_action ?? t("desks.agents.noAction")}</span>
                     </span>
                     <Pill>{t(`desks.model.${item.model}`)}</Pill>

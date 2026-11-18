@@ -59,7 +59,7 @@ await runSuite("desks", { script: "desks-serve.py", signedIn: true }, async ({ p
   const signalsBefore = (await agentsOf(desk.id)).find((a) => a.agent_slug === "signals");
   await page.getByRole("button", { name: msg("desks.card.open", { name: "Futuros NQ" }) }).click();
   await tab("agents").click();
-  const row = page.getByRole("button", { name: msg("desks.agents.select", { name: signalsBefore.name }) });
+  const row = page.getByRole("button", { name: msg("desks.agents.select", { name: msg("agents.kit.signals.name") }) });
   await row.click();
   const models = page.getByRole("group", { name: msg("desks.agents.model") });
   await models.getByRole("button", { name: msg("desks.model.opus"), exact: true }).click();
@@ -67,7 +67,7 @@ await runSuite("desks", { script: "desks-serve.py", signedIn: true }, async ({ p
   await until(async () => (await agentsOf(desk.id)).find((a) => a.agent_slug === "signals").model === "opus", "signals on Opus");
   await reloadWithHandoff(page);
   await tab("agents").click();
-  await page.getByRole("button", { name: msg("desks.agents.select", { name: signalsBefore.name }) }).click();
+  await page.getByRole("button", { name: msg("desks.agents.select", { name: msg("agents.kit.signals.name") }) }).click();
   assert.equal(await page.getByRole("group", { name: msg("desks.agents.model") }).getByRole("button", { name: msg("desks.model.opus"), exact: true }).getAttribute("aria-pressed"), "true");
   const otherTeam = await agentsOf(otherId);
   assert.ok(!otherTeam.some((a) => a.agent_slug === "signals" && a.model === "opus"), "the other desk is untouched");
@@ -77,6 +77,21 @@ await runSuite("desks", { script: "desks-serve.py", signedIn: true }, async ({ p
   await page.getByRole("region", { name: msg("desks.terminal.list") }).or(page.getByLabel(msg("desks.terminal.list"))).first().waitFor();
   await page.getByText("NQ=F").first().waitFor();
   await page.getByLabel(msg("desks.terminal.chart", { symbol: "NQ=F" })).first().waitFor();
+  // the chart has the same intervals as the Chart screen: weekly from the bar, then 3h and 1W written in the box
+  const chartTitle = page.locator(".dterm-chart .dterm-tab");
+  await page.getByRole("group", { name: msg("chart.timeframe") }).getByRole("button", { name: "1W", exact: true }).click();
+  await until(async () => (await chartTitle.innerText()).includes("1W"), "weekly in the Terminal chart");
+  for (const typed of ["3h", "1W"]) {
+    await page.getByRole("button", { name: msg("chart.interval.more") }).click();
+    await page.getByRole("combobox", { name: msg("chart.interval.label") }).fill(typed);
+    await page.keyboard.press("Enter");
+    await until(async () => (await chartTitle.innerText()).includes(typed), `${typed} typed in the Terminal chart`);
+  }
+  await page.getByRole("button", { name: msg("chart.interval.more") }).click();
+  await page.getByRole("combobox", { name: msg("chart.interval.label") }).fill("zzz");
+  await page.keyboard.press("Enter");
+  await page.getByRole("alert").filter({ hasText: msg("chart.interval.invalid") }).waitFor();
+  await page.keyboard.press("Escape");
   const input = page.getByLabel(msg("desks.chat.input"));
   await input.fill("Status of the desk?");
   await input.press("Enter");
@@ -117,4 +132,63 @@ await runSuite("desks", { script: "desks-serve.py", signedIn: true }, async ({ p
   await again.press("Enter");
   await until(async () => (await usageOf(desk.id)).used > used, "a second turn after raising the cap");
   assert.equal((await usageOf(otherId)).used, 0, "the other desk still spent nothing");
+
+  // 5. a desk with no assets still has a working Terminal: list with its add button, invitation, chief chat, no step labels
+  await page.getByLabel(msg("desks.bar.pick")).selectOption(String(otherId));
+  await tab("terminal").click();
+  await page.getByLabel(msg("desks.terminal.list")).getByRole("button", { name: msg("desks.terminal.add") }).waitFor();
+  await page.getByText(msg("desks.terminal.noAssets.title")).waitFor();
+  await until(async () => !(await page.getByLabel(msg("desks.chat.input")).isDisabled()), "the chat of the empty desk is ready");
+  assert.equal(await page.getByText(/paso \d|step \d/i).count(), 0, "no step labels on screen");
+
+  // 6. resizable chat, foldable Positions, assets in the watchlist only, and a Settings menu that always shows its text
+  await page.getByLabel(msg("desks.bar.pick")).selectOption(String(desk.id));
+  await tab("terminal").click();
+  const grid = page.locator(".dterm");
+  const chatWidth = async () => Math.round((await page.getByLabel(msg("desks.terminal.chat"), { exact: true }).first().boundingBox()).width);
+  await page.getByText("NQ=F").first().waitFor();
+  assert.equal(await chatWidth(), 380, "the chat starts at 380 px");
+  const bar = page.getByRole("separator", { name: msg("desks.terminal.resize") });
+  const box = await bar.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 80, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  assert.ok((await chatWidth()) > 440, "dragging the bar left widens the chat");
+  const wide = await chatWidth();
+  await page.reload();
+  await page.getByText("NQ=F").first().waitFor();
+  assert.equal(await chatWidth(), wide, "the desk remembers the width after a reload");
+  const fold = page.getByRole("button", { name: msg("desks.terminal.positions.fold") });
+  const chartBefore = (await page.getByLabel(msg("desks.terminal.chartEmpty")).or(page.locator(".dterm-chart")).first().boundingBox()).height;
+  await fold.click();
+  await page.getByText(msg("desks.terminal.positions.title")).waitFor({ state: "detached" });
+  assert.ok((await page.locator(".dterm-chart").first().boundingBox()).height > chartBefore + 100, "folded Positions gives its height to the chart");
+  await page.reload();
+  await page.getByRole("button", { name: msg("desks.terminal.positions.unfold") }).waitFor();
+  assert.ok(await grid.evaluate((el) => el.classList.contains("folded")), "the desk remembers Positions folded");
+  await page.getByRole("button", { name: msg("desks.terminal.positions.unfold") }).click();
+  await page.getByText(msg("desks.terminal.positions.title")).waitFor();
+  await tab("config").click();
+  const menu = page.getByRole("navigation", { name: msg("desks.cfg.nav") });
+  for (const id of ["objective", "connections", "memory", "accounts"]) {
+    await menu.getByRole("button", { name: new RegExp(msg(`desks.cfg.section.${id}`)) }).click();
+    for (const other of ["objective", "connections", "memory", "accounts"]) {
+      const label = menu.getByText(msg(`desks.cfg.section.${other}`), { exact: true });
+      const area = await label.boundingBox();
+      assert.ok(area && area.width > 20 && area.height > 8, `the menu text of ${other} is visible while ${id} is open`);
+    }
+  }
+  for (const el of await menu.getByRole("button").all()) {
+    const inside = await el.evaluate((b) => [...b.children].every((c) => c.getBoundingClientRect().right <= b.getBoundingClientRect().right + 1));
+    assert.ok(inside, "nothing in a menu entry spills out of it");
+  }
+  assert.equal(await menu.getByRole("button").count(), 4, "Settings has no Assets section");
+  await menu.getByText(msg("desks.cfg.sim"), { exact: true }).waitFor();
+  await tab("terminal").click();
+  const watch = page.getByLabel(msg("desks.terminal.list"));
+  await watch.getByRole("button", { name: msg("desks.field.asset.remove", { symbol: "NQ=F" }) }).click();
+  await watch.getByRole("button", { name: msg("desks.terminal.remove.yes") }).click();
+  await page.getByText(msg("desks.terminal.noAssets.title")).waitFor();
+  assert.deepEqual((await server.api(`/api/desks/${desk.id}`)).assets.map((a) => a.symbol ?? a), [], "the asset left the desk");
 });

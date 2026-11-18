@@ -97,13 +97,13 @@ describe("the Fund", () => {
     expect(screen.getByRole("region", { name: "Actividad de las mesas" })).toBeInTheDocument();
   });
 
-  it("keeps 'Lecciones del fondo' disabled and says when it arrives", async () => {
+  it("keeps 'Lecciones del fondo' disabled and shows no step label", async () => {
     stubApi([]);
     renderShell();
     await openFund();
     const lessons = await screen.findByRole("tab", { name: "Lecciones del fondo" });
     expect(lessons).toBeDisabled();
-    expect(screen.getAllByText("Llega en el paso 6").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/paso \d/i)).not.toBeInTheDocument();
   });
 
   it("opens a desk when its card is clicked", async () => {

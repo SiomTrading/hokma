@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { Button, Dot, EmptyState, Loading, Pane, Pill, Segmented } from "@/design";
+import { Button, Dot, EmptyState, Loading, Pane, Pill } from "@/design";
 import { useI18n } from "@/i18n";
 import { connectionsHref, requestFocus } from "@/screens/connections/focus";
 import type { ScreenProps } from "@/shell/registry";
@@ -10,10 +10,10 @@ import { AssetSearch, AssetSearchPopover } from "./AssetSearch";
 import { sendChartToChat } from "./askFund";
 import { renderChartPng } from "./exportPng";
 import { formatMoment, formatPercent, formatPrice, safeFileName } from "./format";
-import { loadFavorites, saveInterval, toggleFavorite } from "./favorites";
+import { saveInterval } from "./favorites";
 import { activateTab, cancelPending, defaultInterval, dropClosed, dropTab, flushPending, moveTab, queueView, readLast, readTab, saveTabInterval, seedTab } from "./chartState";
 import type { ChartViewState } from "./chartState";
-import { IntervalBox } from "./IntervalBox";
+import { IntervalBar } from "./IntervalBar";
 import { intervalLabel } from "./intervals";
 import { PriceChart } from "./PriceChart";
 import type { PriceChartHandle } from "./PriceChart";
@@ -130,7 +130,6 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
   frontRef.current = front;
   const timeframeRef = useRef(timeframe);
   timeframeRef.current = timeframe;
-  const [favorites, setFavorites] = useState<string[]>(loadFavorites);
   const [popup, setPopup] = useState<Popup>(null);
   const { live, data, retry } = useLiveChart(symbol, timeframe);
   const [asking, setAsking] = useState(false);
@@ -138,7 +137,6 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
   const chartRef = useRef<PriceChartHandle>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLButtonElement>(null);
-  const moreRef = useRef<HTMLButtonElement>(null);
   /** The focus goes back to the chart body (the element with the keyboard shortcuts) when a popover closes. */
   const focusRef = useMemo(
     () => ({ get current() { return bodyRef.current?.querySelector<HTMLElement>('[data-testid="chart-body"]') ?? null; } }) as RefObject<HTMLElement | null>,
@@ -282,25 +280,17 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
             ) : null}
           </div>
           <div style={{ marginLeft: "auto", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
-            <Segmented
-              label={t("chart.timeframe")}
+            <IntervalBar
               value={timeframe}
               onChange={changeTimeframe}
-              options={favorites.map((tf) => ({ value: tf, label: intervalLabel(tf, t) }))}
+              open={popup?.kind === "interval"}
+              initialText={popup?.kind === "interval" ? popup.initial : undefined}
+              onOpenChange={(open) => setPopup(open ? { kind: "interval", initial: "" } : null)}
+              secondsDisabledReason={secondsDisabledReason(live, t)}
+              ticksDisabledReason={ticksDisabledReason(live, t)}
+              returnFocusRef={focusRef}
+              boxStyle={{ top: "calc(100% + 4px)", right: 14 }}
             />
-            <button
-              ref={moreRef}
-              type="button"
-              className="ib"
-              data-testid="interval-more"
-              aria-haspopup="dialog"
-              aria-expanded={popup?.kind === "interval"}
-              aria-label={t("chart.interval.more")}
-              title={t("chart.interval.more")}
-              onClick={() => setPopup(popup?.kind === "interval" ? null : { kind: "interval", initial: "" })}
-            >
-              +
-            </button>
           </div>
           {popup?.kind === "search" ? (
             <AssetSearchPopover
@@ -310,21 +300,6 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
               returnFocusRef={focusRef}
               triggerRef={titleRef}
               style={{ top: "calc(100% + 4px)", left: 14 }}
-            />
-          ) : null}
-          {popup?.kind === "interval" ? (
-            <IntervalBox
-              value={timeframe}
-              favorites={favorites}
-              initialText={popup.initial}
-              onApply={changeTimeframe}
-              onToggleFavorite={(interval) => setFavorites((list) => toggleFavorite(list, interval))}
-              secondsDisabledReason={secondsDisabledReason(live, t)}
-              ticksDisabledReason={ticksDisabledReason(live, t)}
-              onClose={closePopup}
-              returnFocusRef={focusRef}
-              triggerRef={moreRef}
-              style={{ top: "calc(100% + 4px)", right: 14 }}
             />
           ) : null}
         </div>

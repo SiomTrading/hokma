@@ -58,7 +58,7 @@ describe("interval box", () => {
     expect(screen.getByRole("dialog", { name: "Interval" })).toBeInTheDocument();
     expect(field()).toHaveFocus();
     const list = screen.getByRole("listbox");
-    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["1m", "5m", "15m", "1h", "1D"]);
+    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["1m", "5m", "15m", "1h", "1D", "1W"]);
     await userEvent.keyboard("{ArrowDown}{ArrowDown}");
     expect(field()).toHaveAttribute("aria-activedescendant", within(list).getAllByRole("option")[1]!.id);
     await userEvent.keyboard("{Enter}");
