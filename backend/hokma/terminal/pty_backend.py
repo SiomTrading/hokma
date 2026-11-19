@@ -11,6 +11,7 @@ import sys
 import threading
 
 from hokma.core.proc import spawn_kwargs
+from hokma.core.proctree import is_protected_pid
 
 IS_WINDOWS = sys.platform == "win32"
 READ_SIZE = 65536
@@ -146,12 +147,17 @@ class PosixPty:
         return self.proc.poll()
 
     def _signal_group(self, sig: int) -> None:
-        try:
-            os.killpg(self.pid, sig)
-        except OSError:
-            pass
-        for member in self._session_members():       # background jobs of an interactive shell have their own group
+        if self.pid > 1:
             try:
+                os.killpg(self.pid, sig)
+            except OSError:
+                pass
+        for member in self._session_members():       # background jobs of an interactive shell have their own group
+            if is_protected_pid(member):
+                continue
+            try:
+                if os.getsid(member) != self.pid:    # revalidate right before the signal: the pid may be reused
+                    continue
                 os.kill(member, sig)
             except OSError:
                 pass
@@ -171,13 +177,17 @@ class PosixPty:
                         continue
                     if len(fields) > 3 and fields[3] == str(self.pid).encode():
                         found.append(int(entry))
-            else:                                    # macOS and others: same session token as the leader
-                out = subprocess.run(["ps", "-axo", "pid=,sess="], capture_output=True, text=True, timeout=3,
+            else:                                    # macOS and others: `ps` has no usable session column (sess is 0
+                out = subprocess.run(["ps", "-axo", "pid="], capture_output=True, text=True, timeout=3,   # on macOS)
                                      **spawn_kwargs()).stdout
-                rows = [line.split() for line in out.splitlines() if len(line.split()) == 2]
-                leader = next((sess for pid, sess in rows if pid == str(self.pid)), None)
-                if leader is not None:
-                    found = [int(pid) for pid, sess in rows if sess == leader and int(pid) != self.pid]
+                for token in out.split():
+                    if not token.isdigit() or is_protected_pid(int(token)) or int(token) == self.pid:
+                        continue
+                    try:
+                        if os.getsid(int(token)) == self.pid:
+                            found.append(int(token))
+                    except OSError:
+                        continue
         except Exception:
             pass
         return found

@@ -80,7 +80,7 @@ def test_auto_mode_accepts_by_itself_after_the_broker_and_config_never_drops_app
     events = asyncio.run(collect(adapter, ctx_for(box, bctx, "auto")))
     assert "decision=accept" in "".join(e.get("text", "") for e in events if e["type"] == "text")
     toml = (codex_home_dir() / "config.toml").read_text()
-    assert 'approval_policy = "untrusted"' in toml and 'approval_policy = "never"' not in toml and 'model_reasoning_effort = "high"' in toml
+    assert 'approval_policy' not in toml and 'on-request' not in toml and 'trust_level = "untrusted"' in toml and 'model_reasoning_effort = "high"' in toml
     assert (codex_home_dir() / "AGENTS.md").read_text() == "Persona text"
 
 
@@ -97,7 +97,7 @@ def test_config_is_rebuilt_on_every_start(setup, box):
     (codex_home_dir() / "config.toml").write_text('approval_policy = "never"\n')
     (codex_home_dir() / "AGENTS.md").write_text("tampered")
     asyncio.run(collect(adapter, ctx_for(box, bctx, "auto")))
-    assert 'approval_policy = "untrusted"' in (codex_home_dir() / "config.toml").read_text()
+    assert 'approval_policy = "never"' not in (codex_home_dir() / "config.toml").read_text()
     assert (codex_home_dir() / "AGENTS.md").read_text() == "Persona text"
 
 

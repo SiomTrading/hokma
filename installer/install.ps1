@@ -58,7 +58,11 @@ $IsServer = Test-WindowsServer
 Info "inst.windows_edition" (Get-WindowsEdition)
 if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -and -not $env:HOKMA_ALLOW_ADMIN) {
     # Windows Server: the usual user IS an Administrator. The install goes on (it is per user anyway); it is only logged.
-    if ($IsServer) { Warn "inst.server_admin" } else { Die "inst.no_admin" }
+    # UAC turned off: everything runs elevated and the student has no way out, so it goes on too (per user anyway).
+    if ($IsServer) { Warn "inst.server_admin" }
+    elseif (Test-UacDisabled) { Warn "inst.uac_off" }
+    elseif ($env:HOKMA_SETUP) { Die "inst.no_admin_setup" }
+    else { Die "inst.no_admin" }
 }
 
 $Src = Split-Path -Parent $PSScriptRoot

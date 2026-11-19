@@ -136,3 +136,49 @@ def test_setup_window_shows_the_last_line_on_both_pages():
     assert "ProgressPage.SetText(ProgressPage.Msg1Label.Caption, Copy(S, 6, MaxInt))" in block
     for lang in ("es", "en"):
         assert "{2}" in (INSTALLER / "messages" / f"{lang}.properties").read_text(encoding="utf-8").split("inst.download_failed=")[1].splitlines()[0]
+
+
+# ---- bugs 1207 and 1211 (task 3296) ------------------------------------------------------------------------------
+
+def _closing_stage(text: str) -> str:
+    start = text.index('Emit "STAGE:closing"')
+    return text[start:text.index("Expand-Archive", start)]
+
+
+def test_closing_stage_ends_hokma_exe_under_the_app_dir_and_waits_for_the_file():
+    text = HELPER.read_text(encoding="ascii")
+    func = text[text.index("function Stop-AppExe"):text.index("# An update.lock")]
+    assert "Win32_Process" in func and "Name = 'Hokma.exe'" in func and "ExecutablePath" in func
+    assert "$appRoot" in func and "Stop-Process" in func and "-Force" in func
+    assert "AddSeconds(10)" in func and '"ReadWrite", "None"' in func    # up to 10 s until the file can be replaced
+    closing = _closing_stage(text)
+    assert "Stop-Hokma" in closing and "Stop-AppExe" in closing
+    assert "RESULT:app_in_use=1" in closing                               # still locked: a clear message, not Retry/Ignore
+
+
+def test_setup_closes_applications_and_explains_a_locked_hokma():
+    iss = ISS.read_text(encoding="ascii")
+    assert "CloseApplications=force" in iss and "RestartApplications=no" in iss
+    assert "'app_in_use'" in iss and "CustomMessage('AppInUse')" in iss
+    es, en = _isl_keys("es")["AppInUse"], _isl_keys("en")["AppInUse"]
+    assert "bandeja" in es and "tray" in en
+
+
+def test_uac_off_goes_on_and_admin_from_setup_says_double_click():
+    install = (INSTALLER / "install.ps1").read_text(encoding="ascii")
+    assert 'elseif (Test-UacDisabled) { Warn "inst.uac_off" }' in install
+    assert 'elseif ($env:HOKMA_SETUP) { Die "inst.no_admin_setup" }' in install
+    native = (INSTALLER / "native.ps1").read_text(encoding="ascii")
+    assert "EnableLUA" in native and "Policies\\System" in native
+    assert '$env:HOKMA_SETUP = "1"' in HELPER.read_text(encoding="ascii")
+    es, en = _properties("es"), _properties("en")
+    assert "doble clic" in es["inst.no_admin_setup"] and "PowerShell" not in es["inst.no_admin_setup"]
+    assert "double click" in en["inst.no_admin_setup"] and "PowerShell" not in en["inst.no_admin_setup"]
+    assert {"inst.uac_off", "inst.no_admin_setup"} <= es.keys() & en.keys()
+
+
+def test_child_scripts_write_utf8_under_the_setup_so_accents_survive():
+    messages = (INSTALLER / "messages.ps1").read_text(encoding="ascii")
+    assert 'if ($env:HOKMA_SETUP) { try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)' in messages
+    for name in ("install.ps1", "native.ps1", "messages.ps1"):
+        (INSTALLER / name).read_text(encoding="ascii")

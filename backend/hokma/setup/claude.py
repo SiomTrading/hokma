@@ -71,7 +71,7 @@ def _hokma_tool_dirs() -> set[str]:
     try:
         from hokma.core import tools
 
-        dirs = [*tools.tool_dirs(), tools.tools_dir()]
+        dirs = [*tools.tool_dirs(), tools.uv_tools_bin_dir(), tools.tools_dir()]
     except Exception:          # noqa: BLE001  (a broken tools module must not stop the sign-in)
         dirs = [hokma_data_dir() / "bin", hokma_data_dir() / "tools"]
     return {os.path.normcase(os.path.normpath(str(d))) for d in dirs}

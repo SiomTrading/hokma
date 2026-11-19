@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.6
+
+- Fixed: On Mac, closing a Hokma terminal ends only its own processes; it no longer closes your browser or other apps.
+- Fixed: Codex works with Codex 0.170 and newer, the first sign-in works, and Codex errors show their reason and go to the log.
+- Fixed: Deleting a desk shows the name in quotes, accepts extra spaces and says what to close when something blocks it.
+- New: Skills that come with a Python package (like graphify) install with Hokma's own tools.
+- Fixed: The Windows installer closes a Hokma that is still open before replacing it, and installs where every program runs as administrator.
+
 ## 1.0.5
 
 - New: Fund is your home: total Capital across your desks, the Today card (watchlist of all desks, economic calendar, market news, premarket briefing) and every desk with its account and broker. Ask Hokma in the chat to change what Today shows.

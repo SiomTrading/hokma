@@ -85,6 +85,16 @@ function Get-WindowsEdition {
     catch { return ([Environment]::OSVersion.VersionString) }
 }
 
+# UAC off (EnableLUA=0): every process of the user runs elevated, so "run as administrator" cannot be avoided.
+function Test-UacDisabled {
+    try {
+        $k = "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+        $v = [Microsoft.Win32.Registry]::GetValue($k, "EnableLUA", $null)
+        return (($null -ne $v) -and ([int]$v -eq 0))
+    }
+    catch { return $false }
+}
+
 function Test-WindowsServer {
     try {
         $k = "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion"

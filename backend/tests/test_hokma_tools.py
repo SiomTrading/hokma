@@ -188,7 +188,7 @@ def test_codex_config_carries_the_hokma_server_with_an_explicit_environment(env,
     write_config(ctx, {"hokma": server_spec(ctx)})
     toml = (codex_home_dir() / "config.toml").read_text()
     assert "[mcp_servers.hokma]" in toml and 'HOKMA_AGENT = "vera"' in toml and 'HOKMA_TASK_ID = "8"' in toml
-    assert 'approval_policy = "untrusted"' in toml
+    assert 'approval_policy' not in toml and 'trust_level = "untrusted"' in toml
 
 
 def test_project_create_takes_no_path_and_makes_the_folder_itself(profiled, env):

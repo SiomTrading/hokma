@@ -3,6 +3,10 @@
 # The .properties files are UTF-8; this script itself is ASCII so Windows PowerShell 5.1 reads it correctly.
 # Language: -Lang, then HOKMA_LANG, then Spanish.
 
+# Under Hokma-Setup.exe the output is read as UTF-8 by the setup helper: without this a child console writes in the
+# OEM code page and every accent arrives broken.
+if ($env:HOKMA_SETUP) { try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { } }
+
 $script:MsgDir = Join-Path $PSScriptRoot "messages"
 $script:LangCode = if (@("es", "en") -contains $env:HOKMA_LANG) { $env:HOKMA_LANG } else { "es" }
 $script:MsgTables = @{}

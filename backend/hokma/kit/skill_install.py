@@ -24,7 +24,9 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,8 +49,32 @@ _PART = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 _SLUG = re.compile(r"[^A-Za-z0-9._-]+")
 
 
+PY_TIMEOUT = 600
+# The ONLY Python-package skills Hokma installs: repo -> exact PyPI package, pinned version and the setup step (exact
+# command, declared here, run on the installed package). Nothing a repository declares picks a package, a version or a
+# command; a repo that is not here with a pyproject.toml is refused (installing it would run its build code). Pinned
+# to the latest release verified on PyPI (2026-11-19: graphifyy 0.9.112, not yanked; sdist sha256
+# 67aad04f70aa3afc9ff6961f82d7cca5b04fb6b9446a3cddcb7b16483fbdb59b, wheel sha256
+# ad6a9152fb6d9c5d85a77ffcaf29e18c5634a7d5ca474edb218cbc68b062241d). `uv tool install` has no hash option, so the hashes
+# are documentation only; bump the version here after checking a new release.
+PYPI_ALLOW: dict[str, dict[str, Any]] = {
+    "safishamsi/graphify": {"package": "graphifyy", "version": "0.9.112",
+                            "setup": ["graphify", "install", "--platform", "claude"]},
+}
+# Commands a package may not leave in the uv-tools bin (checked on the real files after installing, whatever
+# declared them): they would shadow tools Hokma, the engines or the owner use.
+RESERVED_COMMANDS = {"ls", "cat", "rm", "cp", "mv", "gh", "git", "make", "docker", "cmd", "powershell", "pwsh", "where",
+                     "which", "open", "python", "python3", "pip", "pip3", "node", "npm", "npx", "uv", "uvx", "bun",
+                     "claude", "codex", "hokma", "bash", "sh", "zsh", "curl", "wget", "ssh", "sudo"}
+_EXE_SUFFIXES = (".exe", ".cmd", ".bat", ".ps1", ".com", ".py", ".sh")
+
+
 class SkillInstallError(ValueError):
     """The install failed; the message says why and what to do, in plain words."""
+
+
+class PythonInstallError(SkillInstallError):
+    """The Python-package route failed after the repository was recognised as one (uv missing, uv or its step failed)."""
 
 
 # ---------------------------------------------------------------- the link
@@ -223,6 +249,94 @@ def kind_of(folder: Path) -> str:
     return "folder"
 
 
+def python_package(folder: Path) -> dict[str, Any] | None:
+    """{"name", "scripts"} when `folder` has a pyproject.toml naming a Python package, else None. It only reads;
+    nothing from the repository runs here."""
+    try:
+        if _is_plain_file(folder / "pyproject.toml"):
+            project = tomllib.loads((folder / "pyproject.toml").read_text(encoding="utf-8")).get("project", {})
+            name = project.get("name")
+            if isinstance(name, str) and re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$", name):
+                return {"name": name, "scripts": sorted(project.get("scripts", {}))}
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def not_allowed_message(repo: str, name: str) -> str:
+    return (f"{repo} is a Python package ({name}), not a skill, and Hokma only installs Python packages from a short list "
+            "it trusts: installing any other would run the code of its build. Nothing was built or run. Follow its README "
+            "yourself if you trust it.")
+
+
+def installed_clashes(bin_dir: Path) -> list[str]:
+    """The reserved command names among the files really in `bin_dir` (a .exe/.cmd/.bat suffix does not hide one)."""
+    found: set[str] = set()
+    try:
+        entries = list(bin_dir.iterdir())
+    except OSError:
+        return []
+    for entry in entries:
+        low = entry.name.lower()
+        for suffix in _EXE_SUFFIXES:
+            if low.endswith(suffix):
+                low = low[: -len(suffix)]
+                break
+        if low in RESERVED_COMMANDS:
+            found.add(low)
+    return sorted(found)
+
+
+def _python_route(root: Path, start: Path, link: dict[str, str], package: dict[str, Any], runner=subprocess.run) -> dict[str, Any]:
+    """A skill that is a Python package (graphify): installed with Hokma's own uv as a `uv tool`, its environment and
+    command inside Hokma's data folder; then its setup step, if known, runs on that environment working on the
+    working folder (which holds the projects). Never pip on Hokma's Python or the system's."""
+    from hokma.core import tools
+    from hokma.core.config import claude_config_dir
+
+    repo, name = f"{link['owner']}/{link['repo']}", package["name"]
+    allowed = PYPI_ALLOW.get(repo.lower())
+    if not allowed:
+        raise PythonInstallError(not_allowed_message(repo, name))
+    uv = tools.uv_path()
+    if not uv.is_file():
+        raise PythonInstallError(f"{repo} is a Python package ({name}) and Hokma's uv is not installed ({uv}): "
+                                "run `hokma install-tools` or `hokma update` and try again")
+    tools.uv_tools_bin_dir().mkdir(parents=True, exist_ok=True)
+    env = tools.with_tools(dict(os.environ))
+    env.update({"UV_TOOL_DIR": str(tools.uv_tools_dir()), "UV_TOOL_BIN_DIR": str(tools.uv_tools_bin_dir()),
+                "CLAUDE_CONFIG_DIR": str(claude_config_dir())})
+    for var in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
+        env.pop(var, None)
+
+    def run(cmd: list[str], what: str) -> None:
+        try:
+            done = runner(cmd, env=env, cwd=str(root), capture_output=True, text=True, timeout=PY_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise PythonInstallError(f"{what} failed: {exc}") from None
+        if done.returncode != 0:
+            tail = " ".join((done.stderr or done.stdout or "").split())[-400:]
+            raise PythonInstallError(f"{what} failed ({done.returncode}): {tail}")
+
+    run([str(uv), "tool", "install", "--force", f"{allowed['package']}=={allowed['version']}"],
+        f"installing {name} with uv")
+    clash = installed_clashes(tools.uv_tools_bin_dir())
+    if clash:                                   # the real files that ended up in the bin, whatever declared them
+        try:
+            run([str(uv), "tool", "uninstall", allowed["package"]], f"removing {name}")
+        except PythonInstallError:
+            pass
+        raise PythonInstallError(f"{repo} left the command(s) {', '.join(clash)}, which would shadow a tool of the system "
+                                 "or Hokma: it was uninstalled and not installed")
+    step = allowed["setup"]
+    if step:
+        run([str(tools.uv_tools_bin_dir() / tools._exe(step[0])), *step[1:]], f"the setup step `{' '.join(step)}`")
+    notice = t("skill.notice.python_installed", package=name, repo=repo, folder=str(root))
+    return {"kind": "python-skill", "repository": repo, "package": name, "commands": package["scripts"],
+            "setup_step": " ".join(step) if step else None, "bin_dir": str(tools.uv_tools_bin_dir()),
+            "workdir": str(root), "notice": notice, "note": "SHOW THIS NOTICE TO THE OWNER in your answer: " + notice}
+
+
 def skill_name(folder: Path, fallback: str) -> str:
     """The `name:` of the frontmatter when it is a valid folder name, else the folder's own name."""
     try:
@@ -344,6 +458,11 @@ def install(link: str, replace: bool = False, workdir: Path | None = None, confi
         if kind in ("marketplace", "plugin") and not parsed["path"]:
             return _plugin_route(parsed, kind)
         folders = [start] if kind == "skill" else find_skills(start)
+        package = python_package(start) if not parsed["path"] else None
+        if package and f"{parsed['owner']}/{parsed['repo']}".lower() in PYPI_ALLOW:
+            return _python_route(root, start, parsed, package)
+        if package and not folders:
+            raise PythonInstallError(not_allowed_message(f"{parsed['owner']}/{parsed['repo']}", package["name"]))
         if not folders:
             raise SkillInstallError(f"there is no SKILL.md in {parsed['owner']}/{parsed['repo']}"
                                     + (f"/{parsed['path']}" if parsed["path"] else "") +

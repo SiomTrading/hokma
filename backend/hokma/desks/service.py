@@ -26,6 +26,7 @@ from hokma.i18n import t
 from hokma.kit import safefs
 from hokma.kit.integrity import app_root
 from hokma.market.yahoo import valid_symbol
+from hokma.permissions import trash
 from hokma.projects import gitops
 from hokma.projects import service as projects
 from hokma.projects.errors import ProjectError
@@ -347,12 +348,50 @@ def ensure_agents_on(project_id: int | None, db: Database | None = None) -> list
 
 # ---- delete ----------------------------------------------------------------------------------
 
+def _close_terminals_in(folder: Path) -> None:
+    """Bug 1208: an open integrated terminal with its folder inside the desk folder keeps it in use on Windows and
+    the move fails. Stop those shells first (synchronous kill, the same one the app uses on exit).
+    Known and accepted (Vera r1, C2): the terminals are closed BEFORE the move, so if the move then fails (folder in
+    use by something else) they stay closed; the owner just opens a new one. Closing after a failed move is not an
+    option: the open shell is what makes the move fail."""
+    from hokma.terminal.session import registry
+
+    try:
+        root = os.path.normcase(os.path.realpath(folder))
+        for session in list(registry.sessions):
+            cwd = os.path.normcase(os.path.realpath(session.cwd))
+            if cwd == root or cwd.startswith(root.rstrip(os.sep) + os.sep):
+                session.closed = True
+                session.pty.kill_now()
+                registry.discard(session)
+    except Exception as exc:       # noqa: BLE001  (closing terminals is best effort; the move reports the real cause)
+        log.warning("could not close terminals of the desk folder: %s", type(exc).__name__)
+
+
+def _log_delete_failure(exc: BaseException, desk_id: int) -> str:
+    """Write why the delete failed to engine.log (code and error kind, no paths) and return the DeskError code."""
+    from hokma.engine import errlog
+
+    code = getattr(exc, "code", None) or "db_failed"
+    cause = exc.__cause__ if isinstance(exc, trash.TrashError) else exc
+    detail = type(cause).__name__ if cause is not None else ""
+    if isinstance(cause, OSError):
+        detail += f" errno={cause.errno} winerror={getattr(cause, 'winerror', None)}"
+    in_use = code == "move_failed" and (isinstance(cause, PermissionError) or getattr(cause, "winerror", None) == 32)
+    message = detail if code == "move_failed" or not isinstance(exc, trash.TrashError) else exc.message
+    errlog.log(f"desk {desk_id} could not be deleted ({code}): {message}", scope="desks")
+    if in_use:
+        return "delete_in_use"
+    if isinstance(exc, trash.TrashError):
+        return "delete_move_failed" if code == "move_failed" else "delete_failed"
+    return "delete_db_failed"
+
+
 def delete_desk(desk_id: int, db: Database | None = None) -> dict[str, Any]:
     """Delete a desk: its folder goes to the Trash (restorable); the desk row, its team assignments, assets and
     connections and its project row are removed. Conversations stay in the history (their project becomes none) and
     the student's agents are not touched. The folder moves first: if the database step fails the folder is put back."""
     from hokma.kit.settings import protected_paths
-    from hokma.permissions import trash
 
     database = _db(db)
     with projects._LOCK:
@@ -364,12 +403,13 @@ def delete_desk(desk_id: int, db: Database | None = None) -> dict[str, Any]:
         folder = Path(project.path)
         item_id: int | None = None
         if os.path.lexists(folder):
+            _close_terminals_in(folder)
             try:
                 moved = trash.move([str(folder)], t("desks.trash_reason", name=name), db=database,
                                    roots=[str(root)], protect=[str(p) for p in protected_paths()], cwd=str(root),
                                    project_id=None)
             except trash.TrashError as exc:
-                raise DeskError("delete_failed", 500) from exc
+                raise DeskError(_log_delete_failure(exc, desk_id), 500) from exc
             item_id = moved[0]["id"]
         try:
             with database.write() as u:
@@ -381,7 +421,8 @@ def delete_desk(desk_id: int, db: Database | None = None) -> dict[str, Any]:
                     trash.restore(database, item_id, protect=[str(p) for p in protected_paths()])
                 except trash.TrashError as back:
                     log.warning("desk folder could not be put back: %s", back.message)
-            raise DeskError("db_failed", 500) from exc
+            _log_delete_failure(exc, desk_id)
+            raise DeskError("delete_db_failed", 500) from exc
     return {"id": desk_id, "name": name, "trash_id": item_id}
 
 

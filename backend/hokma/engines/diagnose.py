@@ -76,6 +76,8 @@ def classify_text(provider: str | None, text: str) -> str:
     return "engine_error"
 
 
+_CONFIG = ("error loading configuration", "error loading config", "no longer supported", "invalid type",
+           "unknown field", "config.toml", "invalid value", "unknown variant")
 _REFUSED = ("not enabled", "disabled", "not allowed", "not permitted", "is blocked", "restricted", "turned off",
             "not available for your", "does not have access", "doesn't have access", "no access")
 _WORKSPACE = ("workspace", "admin", "organization", "enterprise", "business", "your plan", "edu ")
@@ -89,6 +91,8 @@ def classify_codex(text: str) -> str:
     low = (text or "").lower()
     if catalog.region_blocked("openai", text or ""):
         return "region"
+    if any(w in low for w in _CONFIG):
+        return "config"
     refused = any(w in low for w in _REFUSED) or "403" in low or "forbidden" in low
     if "device" in low and refused:
         return "device_auth"

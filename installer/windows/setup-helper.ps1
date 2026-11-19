@@ -52,6 +52,8 @@ $Launcher = Join-Path $BinDir "hokma.cmd"
 $SetupHome = Join-Path $env:LOCALAPPDATA "Hokma-Setup"
 $Utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8
+# Tells install.ps1 and uninstall.ps1 they run under Hokma-Setup.exe (UTF-8 output, messages written for the setup).
+$env:HOKMA_SETUP = "1"
 # What "Reinstall from scratch" keeps from the data folder besides the working folder: the plugin list and the
 # fund's database (SQLite file, its WAL files, its backups, the Postgres choice) and the owner and fund names.
 # The runtime, Python, caches, update.lock and the Claude session are deleted.
@@ -192,6 +194,32 @@ function Stop-Hokma {
             Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
         }
         if ($left.Count -gt 0) { Start-Sleep -Milliseconds 800 }
+    }
+}
+
+# Hokma.exe (hidden in the tray when the window X is pressed) under the app folder: end it by name and path, then wait
+# up to 10 s until the file can be opened for writing, which is what Inno needs to replace it. $true when it is free.
+function Stop-AppExe {
+    if (-not $AppDir) { return $true }
+    $appRoot = [System.IO.Path]::GetFullPath($AppDir).TrimEnd("\") + "\"
+    $exePath = $appRoot + "Hokma.exe"
+    $deadline = (Get-Date).AddSeconds(10)
+    while ($true) {
+        $running = @(Get-CimInstance Win32_Process -Filter "Name = 'Hokma.exe'" -ErrorAction SilentlyContinue | Where-Object {
+            $_.ProcessId -ne $PID -and ("" + $_.ExecutablePath).StartsWith($appRoot, [System.StringComparison]::OrdinalIgnoreCase)
+        })
+        foreach ($proc in $running) {
+            Write-Log ("closing Hokma.exe " + $proc.ProcessId + " " + $proc.ExecutablePath)
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        $free = $true
+        if (Test-Path -LiteralPath $exePath) {
+            try { $stream = [System.IO.File]::Open($exePath, "Open", "ReadWrite", "None"); $stream.Dispose() }
+            catch { $free = $false }
+        }
+        if ($free) { return $true }
+        if ((Get-Date) -ge $deadline) { return $false }
+        Start-Sleep -Milliseconds 500
     }
 }
 
@@ -417,6 +445,10 @@ try {
     Emit ("LINE:Windows: " + (Get-WindowsEdition))
     Emit "STAGE:closing"
     Stop-Hokma
+    if (-not (Stop-AppExe)) {
+        Emit "RESULT:app_in_use=1"
+        Fail "Hokma.exe is still in use after 10 s; close Hokma from the tray icon and retry"
+    }
     if ($Mode -eq "update") { Remove-StaleLock }
 
     Expand-Archive -LiteralPath $Src -DestinationPath $SrcDir -Force

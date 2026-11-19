@@ -334,7 +334,7 @@ async def ping(connection_id: int, owner: Any = None) -> dict[str, Any]:
     elif code:
         status = "error"
         detail = code if code in ("region", "quota", "network", "model", "model_choice", "unavailable", "workspace",
-                                  "device_auth") \
+                                  "device_auth", "config") \
             else diagnose.classify_text(c.provider, message)
     else:
         status, detail = "connected", None

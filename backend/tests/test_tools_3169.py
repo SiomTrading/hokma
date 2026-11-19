@@ -176,7 +176,8 @@ def test_tool_folders_come_first_on_the_path(data):
     path = tools.path_with_tools(os.pathsep.join(["/usr/bin", str(data / "bin"), "/bin"]))
     parts = path.split(os.pathsep)
     assert parts[0] == str(data / "bin") and parts.count(str(data / "bin")) == 1
-    assert str(tools.bin_dir("node")) in parts[:3] and str(tools.bin_dir("bun")) in parts[:3]
+    assert str(tools.bin_dir("node")) in parts[:4] and str(tools.bin_dir("bun")) in parts[:4]
+    assert str(tools.uv_tools_bin_dir()) not in parts[:4] and parts.index(str(tools.uv_tools_bin_dir())) > parts.index("/bin")
     assert parts.index(str(tools.bin_dir("bun"))) < parts.index("/usr/bin") < parts.index("/bin")
     home = Path(os.environ["HOME"])
     assert str(home / ".bun" / "bin") in parts and str(home / ".local" / "bin") in parts      # where plugin installers put things

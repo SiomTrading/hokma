@@ -77,16 +77,23 @@ def _children_map() -> dict[int, list[int]]:
     return out
 
 
+def is_protected_pid(pid: int) -> bool:
+    """Never signal init/the kernel (pid <= 1), this engine, or its parent."""
+    return pid <= 1 or pid == os.getpid() or pid == os.getppid()
+
+
 def descendants(pid: int) -> list[int]:
     """Every process below `pid`, children first. POSIX only; [] on Windows (the job covers them there)."""
     if sys.platform == "win32":
+        return []
+    if pid <= 1:
         return []
     tree = _children_map()
     found: list[int] = []
     stack = list(tree.get(pid, []))
     while stack:
         child = stack.pop()
-        if child in found or child == pid:
+        if child in found or child == pid or is_protected_pid(child):
             continue
         found.append(child)
         stack.extend(tree.get(child, []))
@@ -212,13 +219,17 @@ class ProcessTree:
         self._signal_all(signal.SIGKILL)
 
     def _signal_all(self, sig: int) -> None:
-        try:                                           # a group id stays reserved while any member lives: no revalidation
-            os.killpg(self.pid, sig)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
+        if self.pid > 1 and self.pid != os.getpid():
+            try:                                       # a group id stays reserved while any member lives: no revalidation
+                os.killpg(self.pid, sig)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
         for inode in self._pipes:
             self._note(pipe_holders(inode))
         for pid, started in list(self._known.items()):
+            if is_protected_pid(pid):
+                self._known.pop(pid, None)
+                continue
             if not self._same(pid, started):
                 self._known.pop(pid, None)             # the number was reused by someone else: never touched
                 continue

@@ -188,3 +188,126 @@ def test_the_settings_button_route_installs_and_explains_failures(db, monkeypatc
     monkeypatch.setattr(skill_install, "install", boom)
     reply = client.post("/api/extensions/skills", json={"url": "https://github.com/a/b"})
     assert reply.status_code == 422 and "SKILL.md" in reply.json()["detail"]
+
+
+# ---- bugs 1209 1210: a skill that is a Python package goes in with Hokma's uv
+
+PYPROJECT = '[project]\nname = "graphifyy"\n[project.scripts]\ngraphify = "graphify.__main__:main"\n'
+
+
+@pytest.fixture
+def uvbox(box, tmp_path, monkeypatch):
+    import subprocess
+    from hokma.core import tools
+
+    data = tmp_path / "data"
+    (data / "bin").mkdir(parents=True)
+    (data / "bin" / "uv").write_text("")
+    monkeypatch.setenv("HOKMA_DATA_DIR", str(data))
+    runs = []
+
+    def fake_run(cmd, **kw):
+        runs.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    real = skill_install._python_route
+    monkeypatch.setattr(skill_install, "_python_route",
+                        lambda root, start, link, pkg, runner=fake_run: real(root, start, link, pkg, runner))
+    box.runs, box.data, box.tools = runs, data, tools
+    return box
+
+
+def test_a_python_package_skill_is_installed_with_hokmas_uv(uvbox):
+    uvbox.zip = make_zip({"pyproject.toml": PYPROJECT, "graphify/__init__.py": ""}, top="graphify-v1")
+    out = uvbox.install("https://github.com/safishamsi/graphify")
+    (uv, kw1), (step, kw2) = uvbox.runs
+    assert uv == [str(uvbox.data / "bin" / "uv"), "tool", "install", "--force", "graphifyy==0.9.112"]
+    assert step == [str(uvbox.data / "uv-tools" / "bin" / "graphify"), "install", "--platform", "claude"]
+    for kw in (kw1, kw2):
+        assert kw["env"]["UV_TOOL_DIR"] == str(uvbox.data / "uv-tools")
+        assert kw["env"]["UV_TOOL_BIN_DIR"] == str(uvbox.data / "uv-tools" / "bin")
+        assert kw["env"]["CLAUDE_CONFIG_DIR"] == str(uvbox.data / "claude-config")
+        assert kw["cwd"] == str(uvbox.work)
+    assert out["kind"] == "python-skill" and out["setup_step"] == "graphify install --platform claude"
+    assert "graphifyy" in out["notice"]
+    # the uv-tools bin goes at the END of the PATH, after the system folders (it cannot shadow a system command)
+    parts = uvbox.tools.path_with_tools("/usr/bin" + os.pathsep + "/bin").split(os.pathsep)
+    assert uvbox.data / "uv-tools" / "bin" not in uvbox.tools.tool_dirs()
+    assert parts.index(str(uvbox.data / "uv-tools" / "bin")) > parts.index("/bin")
+
+
+def test_a_missing_uv_is_explained(tmp_path, monkeypatch, box):
+    monkeypatch.setenv("HOKMA_DATA_DIR", str(tmp_path / "nodata"))
+    box.zip = make_zip({"pyproject.toml": PYPROJECT}, top="graphify-v1")
+    with pytest.raises(skill_install.SkillInstallError, match="uv is not installed"):
+        box.install("https://github.com/safishamsi/graphify")
+
+
+def test_a_failing_uv_step_reports_the_reason(tmp_path, monkeypatch):
+    import subprocess
+    data = tmp_path / "data"
+    (data / "bin").mkdir(parents=True)
+    (data / "bin" / "uv").write_text("")
+    monkeypatch.setenv("HOKMA_DATA_DIR", str(data))
+    link = {"owner": "safishamsi", "repo": "graphify"}
+    pkg = {"name": "graphifyy", "scripts": ["graphify"]}
+    with pytest.raises(skill_install.SkillInstallError, match="no network"):
+        skill_install._python_route(tmp_path, tmp_path, link, pkg,
+                                    lambda cmd, **kw: subprocess.CompletedProcess(cmd, 2, "", "no network"))
+
+
+def test_add_by_link_of_a_non_plugin_python_skill_uses_the_uv_route(monkeypatch):
+    from hokma.status import extensions_service as service, plugin_sources
+    from hokma.i18n import t
+
+    def neither(repo):
+        raise plugin_sources.SourceError(422, t("status.source.neither", repo=repo))
+
+    monkeypatch.setattr(plugin_sources, "inspect", neither)
+    monkeypatch.setattr(skill_install, "install", lambda link: {"kind": "python-skill", "notice": "ok"})
+    out = service.add_marketplace("safishamsi/graphify")
+    assert out["kind"] == "python-skill" and out["notice"] == "ok" and out["installed"] == []
+
+    def boom(link):
+        raise skill_install.SkillInstallError("no SKILL.md")
+
+    monkeypatch.setattr(skill_install, "install", boom)
+    with pytest.raises(service.ServiceError) as err:
+        service.add_marketplace("acme/none")
+    assert err.value.status == 422
+
+
+def test_a_repo_outside_the_allowlist_with_pyproject_is_refused_and_nothing_runs(uvbox):
+    # no SKILL.md: refused, with a clear reason, without building or running anything
+    uvbox.zip = make_zip({"pyproject.toml": '[project]\nname = "requests"\n'}, top="t-main")
+    with pytest.raises(skill_install.SkillInstallError, match="only installs Python packages from a short list"):
+        uvbox.install("https://github.com/evil/thing")
+    # a repo that declares a `graphify` script (or the name graphifyy) is not on the list either: no setup step runs
+    uvbox.zip = make_zip({"pyproject.toml": PYPROJECT}, top="t-main")
+    with pytest.raises(skill_install.SkillInstallError, match="short list"):
+        uvbox.install("https://github.com/evil/fake-graphify")
+    assert uvbox.runs == []
+
+
+def test_a_clash_among_the_real_files_in_the_bin_uninstalls_and_refuses(uvbox):
+    import subprocess
+
+    def fake_run(cmd, **kw):
+        uvbox.runs.append(cmd)
+        if "install" in cmd and "uninstall" not in cmd:
+            (uvbox.data / "uv-tools" / "bin").mkdir(parents=True, exist_ok=True)
+            (uvbox.data / "uv-tools" / "bin" / "graphify").write_text("")
+            (uvbox.data / "uv-tools" / "bin" / "GH.EXE").write_text("")     # a gui-script / dynamic entry point
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    link = {"owner": "safishamsi", "repo": "graphify"}
+    with pytest.raises(skill_install.SkillInstallError, match="shadow"):
+        skill_install._python_route(uvbox.work, uvbox.work, link, {"name": "graphifyy", "scripts": ["graphify"]}, fake_run)
+    assert [c for c in uvbox.runs if "uninstall" in c] and not any("install" in c and "--platform" in c for c in uvbox.runs)
+
+
+def test_reserved_commands_cover_the_common_tools():
+    for name in ("ls", "cat", "rm", "cp", "mv", "gh", "git", "make", "docker", "cmd", "powershell", "pwsh", "where", "which",
+                 "open", "python", "pip", "node", "npm", "npx", "uv", "uvx", "bun", "claude", "codex", "hokma", "bash", "sh",
+                 "curl", "wget"):
+        assert name in skill_install.RESERVED_COMMANDS

@@ -29,6 +29,9 @@ _MESSAGES: dict[str, Callable[[], str]] = {
     "bad_symbol": lambda: t("desks.err.bad_symbol"),
     "bad_connection": lambda: t("desks.err.bad_connection"),
     "delete_failed": lambda: t("desks.err.delete_failed"),
+    "delete_in_use": lambda: t("desks.err.delete_in_use"),
+    "delete_move_failed": lambda: t("desks.err.delete_move_failed"),
+    "delete_db_failed": lambda: t("desks.err.delete_db_failed"),
     "desk_archived": lambda: t("desks.err.desk_archived"),
     "desk_budget_exhausted": lambda: t("desks.err.desk_budget_exhausted"),
 }

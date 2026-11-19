@@ -6,7 +6,7 @@ answers by itself (after the broker). `config.toml` and `AGENTS.md` are regenera
 the agent cannot write.
 
 Verified against codex-cli 0.167.0 (generated app-server JSON schema): thread/start, thread/resume, turn/start,
-turn/interrupt, item/*/requestApproval, approvalPolicy untrusted, sandbox workspace-write. Login not exercised.
+turn/interrupt, item/*/requestApproval, approvalPolicy on-request (untrusted before 0.170), read-only sandbox. Login not exercised.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from hokma.core.proc import spawn_kwargs
 from hokma.core.config import codex_home_dir, hokma_data_dir, hokma_home
 from hokma.engine.process import ClaudeProcess
 from hokma.engines import catalog, diagnose, secrets
@@ -53,15 +54,34 @@ def command_request(command: Any) -> tuple[str, dict[str, Any]]:
 
 
 
+def scrub_home(text: str) -> str:
+    """The user's home folder (any slash style) replaced by "~" in text that goes to the chat or engine.log."""
+    home = str(Path.home())
+    flags = re.I if sys.platform == "win32" else 0
+    for variant in {home, home.replace("\\", "/"), home.replace("/", "\\"), json.dumps(home)[1:-1]}:
+        if len(variant) > 1:
+            text = re.sub(re.escape(variant), "~", text, flags=flags)
+    return text
+
+
 def _failure(raw: str) -> tuple[str, str]:
     """Bug 1175: Codex's refusal as a code the panel and the chat translate (a Business workspace without Codex,
     device code sign-in off, an expired session, the usage limit), with its real text in engine.log."""
+    raw = scrub_home(raw)
     message = raw[:500]
     code = diagnose.classify_codex(raw)
     from hokma.engine import errlog
 
     errlog.log(f"codex: {code}: {message}", scope="engines")
     return code, message
+
+def _failure_exit(stderr: str) -> tuple[str, str]:
+    """The app-server ended (a configuration it refused to load ends it): its stderr is logged and classified; with
+    nothing recognisable the code stays engine_exited."""
+    text = (stderr or "").strip()
+    code, message = _failure(text or "codex exited")
+    return ("engine_exited" if code == "engine_error" else code), f"codex exited: {message}".strip()
+
 
 class RpcProcess(ClaudeProcess):
     """A child process that speaks JSON lines with no `type` field (JSON-RPC)."""
@@ -90,12 +110,51 @@ def toml_key(k: str) -> str:
     return k if _BARE_KEY.fullmatch(k) else json.dumps(k)
 
 
-def write_config(ctx: EngineContext, mcp: dict[str, Any] | None = None) -> Path:
+# Codex 0.170 removed approval_policy "untrusted" (openai docs, agent-approvals-security: "Migrate from the retired
+# untrusted approval policy"). on-request lets every command the sandbox allows run WITHOUT asking, so it is not
+# equivalent. The documented way to keep the stricter rule is to OMIT approval_policy and mark the project
+# `trust_level = "untrusted"` in config.toml: commands then require approval (requestApproval, which Hokma's broker
+# answers) unless an execpolicy rule allows them (that is the old safe list). approval_policy "granular" only filters
+# which prompts surface, it does not make every command ask. The sandbox stays read-only as a second layer, so a
+# write or edit that escapes the untrusted rule still needs an escalation.
+LEGACY_BEFORE = (0, 170)
+
+
+def parse_version(text: str) -> tuple[int, ...] | None:
+    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", text or "")
+    return tuple(int(g) for g in m.groups() if g is not None) if m else None
+
+
+def policy_for(version: tuple[int, ...] | None) -> tuple[str | None, str]:
+    """(approval_policy, sandbox); approval_policy None = not written, the untrusted project decides. An unknown
+    version gets the current (strict) values."""
+    if version is not None and version[:2] < LEGACY_BEFORE:
+        return "untrusted", "workspace-write"
+    return None, "read-only"
+
+
+async def codex_version(binary: str) -> tuple[int, ...] | None:
+    """`codex --version`, or None when it cannot be read."""
+    try:
+        proc = await asyncio.create_subprocess_exec(binary, "--version", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                                                    stderr=asyncio.subprocess.STDOUT, **spawn_kwargs())
+        out, _ = await asyncio.wait_for(proc.communicate(), 10)
+    except (OSError, asyncio.TimeoutError):
+        return None
+    return parse_version(out.decode("utf-8", "replace"))
+
+
+def write_config(ctx: EngineContext, mcp: dict[str, Any] | None = None,
+                 version: tuple[int, ...] | None = None) -> Path:
     """Rebuild config.toml and AGENTS.md from the package template. Never a no-approvals policy."""
     home = codex_home_dir()
     home.mkdir(parents=True, exist_ok=True)
-    lines = ['approval_policy = "untrusted"', 'sandbox_mode = "workspace-write"',
-             f'model_reasoning_effort = "{EFFORT.get(ctx.tier, "medium")}"', ""]
+    approval, sandbox = policy_for(version)
+    lines = ([f'approval_policy = "{approval}"'] if approval else []) + [
+        f'sandbox_mode = "{sandbox}"', f'model_reasoning_effort = "{EFFORT.get(ctx.tier, "medium")}"', ""]
+    cwd = getattr(ctx, "cwd", None)
+    if not approval and cwd:            # every command asks (requestApproval) unless an execpolicy rule allows it
+        lines += [f"[projects.{toml_key(cwd)}]", 'trust_level = "untrusted"', ""]
     lines += ["[shell_environment_policy]", 'exclude = ["HOKMA_MCP_TOKEN_*"]', ""]   # remote MCP tokens stay in Codex
     for name, spec in (mcp or {}).items():
         lines.append(f"[mcp_servers.{toml_key(name)}]")
@@ -117,8 +176,10 @@ def write_config(ctx: EngineContext, mcp: dict[str, Any] | None = None) -> Path:
 
 
 class CodexSession:
-    def __init__(self, proc: RpcProcess, ctx: EngineContext, bctx: BrokerCtx) -> None:
+    def __init__(self, proc: RpcProcess, ctx: EngineContext, bctx: BrokerCtx,
+                 version: tuple[int, ...] | None = None) -> None:
         self._proc, self.ctx, self.bctx = proc, ctx, bctx
+        self._policy = policy_for(version)
         self.session_ref: str | None = ctx.session_ref
         self._next_id = 0
         self._ready = False
@@ -149,7 +210,7 @@ class CodexSession:
         while True:
             msg = await self._proc.read()
             if msg is None:
-                raise EngineError("engine_exited", f"codex exited: {self._proc.stderr_tail()}")
+                raise EngineError(*_failure_exit(self._proc.stderr_tail()))
             if msg.get("id") == rid and "method" not in msg:
                 if "error" in msg:
                     raise EngineError(*_failure(json.dumps(msg["error"])))
@@ -158,7 +219,9 @@ class CodexSession:
     async def _start(self) -> None:
         await self._call("initialize", {"clientInfo": CLIENT})
         await self._proc.write({"method": "initialized", "params": {}})
-        base = {"cwd": self.ctx.cwd, "approvalPolicy": "untrusted", "sandbox": "workspace-write"}
+        base = {"cwd": self.ctx.cwd, "sandbox": self._policy[1]}
+        if self._policy[0]:
+            base["approvalPolicy"] = self._policy[0]
         if self.ctx.model:
             base["model"] = self.ctx.model
         if self._thread and self.ctx.resume:
@@ -190,7 +253,7 @@ class CodexSession:
             yield {"type": "error", "code": exc.code, "message": exc.message}
             return
         except OSError as exc:
-            yield {"type": "error", "code": "engine_exited", "message": f"{type(exc).__name__}: {exc}"}
+            yield {"type": "error", "code": "engine_exited", "message": scrub_home(f"{type(exc).__name__}: {exc}")}
             return
         usage = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cost_usd": 0.0}
         text_seen = False
@@ -198,14 +261,14 @@ class CodexSession:
             try:
                 msg = await self._proc.read()
             except OSError as exc:
-                yield {"type": "error", "code": "engine_exited", "message": str(exc)}
+                yield {"type": "error", "code": "engine_exited", "message": scrub_home(str(exc))}
                 return
             if msg is None:
                 if self._interrupted:
                     yield {"type": "done", "status": "stopped"}
                 else:
-                    yield {"type": "error", "code": "engine_exited",
-                           "message": f"codex exited: {self._proc.stderr_tail()}".strip()}
+                    code, message = _failure_exit(self._proc.stderr_tail())
+                    yield {"type": "error", "code": code, "message": message}
                 return
             method = str(msg.get("method") or "")
             params = msg.get("params") or {}
@@ -361,7 +424,8 @@ class CodexAdapter:
         from hokma.engines.remote_mcp import codex_servers
 
         remote, remote_env = ({}, {}) if ctx.extra.get("mcp_servers") else await asyncio.to_thread(codex_servers)
-        write_config(ctx, ctx.extra.get("mcp_servers") or {**remote, "hokma": server_spec(ctx)})
+        version = await codex_version(binary)
+        write_config(ctx, ctx.extra.get("mcp_servers") or {**remote, "hokma": server_spec(ctx)}, version)
         env = filtered_env()
         env.update(remote_env)
         env["CODEX_HOME"] = str(codex_home_dir())
@@ -379,7 +443,7 @@ class CodexAdapter:
             proc = await RpcProcess.spawn([binary, "app-server"], env, ctx.cwd)
         except OSError as exc:
             raise EngineError("codex_not_found", str(exc)) from exc
-        return CodexSession(proc, ctx, bctx)
+        return CodexSession(proc, ctx, bctx, version)
 
 
 def _protected() -> list[Path]:

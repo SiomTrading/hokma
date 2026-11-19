@@ -93,7 +93,7 @@ def test_windows_server_is_logged_not_blocked():
     native = NATIVE.read_text()
     assert "function Test-WindowsServer" in native and "InstallationType" in native
     assert 'Info "inst.windows_edition" (Get-WindowsEdition)' in install
-    assert 'if ($IsServer) { Warn "inst.server_admin" } else { Die "inst.no_admin" }' in install
+    assert 'if ($IsServer) { Warn "inst.server_admin" }' in install and 'else { Die "inst.no_admin" }' in install
     for lang in ("es", "en"):
         props = (INSTALLER / "messages" / f"{lang}.properties").read_text(encoding="utf-8")
         assert "inst.windows_edition=" in props and "inst.server_admin=" in props

@@ -69,11 +69,14 @@ describe("delete a desk", () => {
     const dialog = screen.getByRole("alertdialog", { name: "Eliminar mesa" });
     const confirm = within(dialog).getByRole("button", { name: "Eliminar mesa" });
     expect(confirm).toBeDisabled();
-    const field = within(dialog).getByLabelText("Escribe Mesa A para confirmar");
+    const field = within(dialog).getByLabelText('Escribe "Mesa A" para confirmar');
     await userEvent.type(field, "mesa a");
     expect(confirm).toBeDisabled();
     await userEvent.clear(field);
     await userEvent.type(field, "Mesa A");
+    expect(confirm).toBeEnabled();
+    await userEvent.clear(field);
+    await userEvent.type(field, "  Mesa A ");
     expect(confirm).toBeEnabled();
     await userEvent.click(confirm);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Abrir la mesa Mesa A" })).not.toBeInTheDocument());
@@ -91,7 +94,7 @@ describe("delete a desk", () => {
     const zone = await screen.findByRole("region", { name: "Zona de peligro" });
     await userEvent.click(within(zone).getByRole("button", { name: "Eliminar mesa" }));
     const dialog = screen.getByRole("alertdialog", { name: "Eliminar mesa" });
-    await userEvent.type(within(dialog).getByLabelText("Escribe Mesa A para confirmar"), "Mesa A");
+    await userEvent.type(within(dialog).getByLabelText('Escribe "Mesa A" para confirmar'), "Mesa A");
     await userEvent.click(within(dialog).getByRole("button", { name: "Eliminar mesa" }));
     await screen.findByText(t("desks.fund.empty.title"));
     expect(screen.getByRole("heading", { name: t("desks.fund.tab") })).toBeInTheDocument();
@@ -106,7 +109,7 @@ describe("delete a desk", () => {
     await userEvent.click(await screen.findByRole("button", { name: t("desks.card.options", { name: "Mesa A" }) }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Eliminar mesa" }));
     const dialog = screen.getByRole("alertdialog", { name: "Eliminar mesa" });
-    await userEvent.type(within(dialog).getByLabelText("Escribe Mesa A para confirmar"), "Mesa A");
+    await userEvent.type(within(dialog).getByLabelText('Escribe "Mesa A" para confirmar'), "Mesa A");
     await userEvent.click(within(dialog).getByRole("button", { name: "Eliminar mesa" }));
     expect(await within(dialog).findByText("No se pudo eliminar la mesa.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Abrir la mesa Mesa A" })).toBeInTheDocument();

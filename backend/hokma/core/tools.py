@@ -90,8 +90,24 @@ def python_dirs() -> list[Path]:
     return [p for p in found if _real_dir(p)]
 
 
+def uv_path() -> Path:
+    return hokma_data_dir() / "bin" / _exe("uv")
+
+
+def uv_tools_dir() -> Path:
+    """UV_TOOL_DIR for the Python packages Hokma installs with `uv tool install` (skills such as graphify): their
+    environments live here, inside Hokma's data folder, never in the system's Python or Hokma's own."""
+    return hokma_data_dir() / "uv-tools"
+
+
+def uv_tools_bin_dir() -> Path:
+    """UV_TOOL_BIN_DIR: where `uv tool install` puts the commands of those packages (`graphify`)."""
+    return uv_tools_dir() / "bin"
+
+
 def tool_dirs() -> list[Path]:
-    """Hokma's own folders (uv, Node, Bun, Python), which go in front of the PATH."""
+    """Hokma's own folders (uv, Node, Bun, Python), in front of the PATH. The commands of installed Python packages
+    (uv_tools_bin_dir) are NOT here: they go at the end (installer_dirs), so they can never shadow a system command."""
     return [hokma_data_dir() / "bin", bin_dir("node"), bin_dir("bun"), *python_dirs()]
 
 
@@ -99,7 +115,7 @@ def installer_dirs() -> list[Path]:
     """Where plugin installers put what they download on their own, which go at the end of the PATH."""
     home = Path.home()
     bun_install = os.environ.get("BUN_INSTALL")
-    return [Path(bun_install) / "bin" if bun_install else home / ".bun" / "bin", home / ".local" / "bin"]
+    return [uv_tools_bin_dir(), Path(bun_install) / "bin" if bun_install else home / ".bun" / "bin", home / ".local" / "bin"]
 
 
 def path_with_tools(path: str | None, *, first: bool = True, only_existing: bool = False) -> str:

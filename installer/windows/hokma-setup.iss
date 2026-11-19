@@ -106,7 +106,7 @@ var
   ModePage, ComponentsPage: TInputOptionWizardPage;
   ProgressPage: TOutputProgressWizardPage;
   LogFile, BackupPath, KeptFailedPath, HelperError: String;
-  RunDone, ClaudeFailed, RestoreFailed, WebView2Missing: Boolean;
+  RunDone, AppInUse, ClaudeFailed, RestoreFailed, WebView2Missing: Boolean;
   StageCount: Integer;
 
 const
@@ -346,6 +346,7 @@ begin
   K := Copy(Pair, 1, P - 1);
   V := Copy(Pair, P + 1, MaxInt);
   if K = 'done' then RunDone := True
+  else if K = 'app_in_use' then AppInUse := True
   else if K = 'backup' then BackupPath := V
   else if (K = 'claude') and (V = 'failed') then ClaudeFailed := True
   else if (K = 'restore') and (V = 'failed') then RestoreFailed := True
@@ -419,7 +420,10 @@ begin
   end;
   if (not Ok) or (Code <> 0) or (not RunDone) then begin
     Log(Format('helper failed: ok=%d code=%d error=%s', [Ord(Ok), Code, HelperError]));
-    Result := FmtMessage(CustomMessage('Failed'), [LogFile]);
+    if AppInUse then
+      Result := FmtMessage(CustomMessage('AppInUse'), [LogFile])
+    else
+      Result := FmtMessage(CustomMessage('Failed'), [LogFile]);
   end;
 end;
 

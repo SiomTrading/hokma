@@ -61,7 +61,9 @@ def start() -> dict[str, Any]:
         if old is not None and old.poll() is None:
             old.terminate()
         env = filtered_env()
-        env["CODEX_HOME"] = str(codex_home_dir())
+        home = codex_home_dir()
+        home.mkdir(parents=True, exist_ok=True)               # bug 1206: Codex refuses a CODEX_HOME that does not exist
+        env["CODEX_HOME"] = str(home)
         proc = subprocess.Popen([binary, "login", "--device-auth"], env=env, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **spawn_kwargs())
         _state.update(state="waiting", url="", code="", proc=proc, reason="", tail=[])

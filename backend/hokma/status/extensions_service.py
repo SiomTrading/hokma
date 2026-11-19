@@ -212,6 +212,21 @@ def _source_error(exc: plugin_sources.SourceError):
     return ServiceError(exc.status, exc.message)
 
 
+def _python_skill_fallback(repo: str, exc: plugin_sources.SourceError) -> dict:
+    """Not a plugin: a skill that is a Python package (graphify) is installed with Hokma's uv; anything else keeps
+    the original error."""
+    from hokma.kit import skill_install
+
+    try:
+        done = skill_install.install(f"https://github.com/{repo}")
+    except skill_install.PythonInstallError as other:
+        raise ServiceError(422, str(other)) from None
+    except skill_install.SkillInstallError:
+        raise _source_error(exc) from None
+    return {"name": repo, "source": f"github:{repo}", "kind": done["kind"], "installed": [], "plugins": [],
+            "warnings": [], "notice": done.get("notice", "")}
+
+
 def add_marketplace(repo: str) -> dict:
     """Add a GitHub repository by its address. A repository that is a marketplace is registered once (the same
     repository under another name is the same entry) and, when it has one plugin only, that plugin is installed
@@ -220,6 +235,8 @@ def add_marketplace(repo: str) -> dict:
     try:
         found = plugin_sources.inspect(repo)
     except plugin_sources.SourceError as exc:
+        if exc.status == 422 and exc.message == t("status.source.neither", repo=repo):
+            return _python_skill_fallback(repo, exc)
         raise _source_error(exc) from None
     source: dict = {"source": "github", "repo": repo}
     if found["kind"] == "plugin":

@@ -155,3 +155,55 @@ def test_the_message_never_names_the_journal(client, desks_db):
     res = client.delete(f"/api/desks/{desk['id']}")
     assert res.status_code == 200
     assert "diario" not in res.text.lower() and "journal" not in res.text.lower()
+
+
+# ---- bug 1208: the cause is written to engine.log and the message says what to do ----------------
+
+def _fail_move(monkeypatch, exc):
+    def boom(*a, **k):
+        raise trash.TrashError("move_failed", "private path C:\\Users\\x") from exc
+    monkeypatch.setattr(trash, "move", boom)
+
+
+def test_folder_in_use_says_to_close_chats_and_terminals(desks_db, monkeypatch):
+    from hokma.core import config
+    from hokma.i18n import t
+    desk = make(desks_db, "Mesa Uso")
+    _fail_move(monkeypatch, PermissionError(13, "in use"))
+    with pytest.raises(service.DeskError) as err:
+        service.delete_desk(desk["id"], desks_db)
+    assert err.value.code == "delete_in_use" and err.value.message == t("desks.err.delete_in_use")
+    log = config.engine_log_path().read_text(encoding="utf-8")
+    assert "desks:" in log and "move_failed" in log and "PermissionError" in log and "private path" not in log
+
+
+def test_other_move_failure_and_db_failure_have_their_own_message(desks_db, monkeypatch):
+    from hokma.db import DbError
+    desk = make(desks_db, "Mesa Otra")
+    _fail_move(monkeypatch, OSError(5, "io"))
+    with pytest.raises(service.DeskError) as err:
+        service.delete_desk(desk["id"], desks_db)
+    assert err.value.code == "delete_move_failed"
+    assert service._log_delete_failure(DbError("x"), desk["id"]) == "delete_db_failed"
+
+
+def test_terminals_inside_the_desk_folder_are_closed_before_the_move(desks_db):
+    from hokma.terminal.session import registry
+    desk = make(desks_db, "Mesa Term")
+    folder = Path(folder_of(desks_db, desk))
+
+    class Pty:
+        killed = False
+        def kill_now(self): self.killed = True
+
+    class Sess:
+        def __init__(self, cwd): self.cwd, self.pty, self.closed = str(cwd), Pty(), False
+
+    inside, outside = Sess(folder / "sub"), Sess(folder.parent)
+    registry.sessions.update({inside, outside})
+    try:
+        service.delete_desk(desk["id"], desks_db)
+        assert inside.pty.killed and inside not in registry.sessions
+        assert not outside.pty.killed and outside in registry.sessions
+    finally:
+        registry.sessions.difference_update({inside, outside})

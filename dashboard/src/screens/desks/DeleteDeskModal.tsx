@@ -22,7 +22,7 @@ export function DeleteDeskModal({ desk, onClose }: Props) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const matches = typed === desk.name;
+  const matches = typed.trim() === desk.name.trim();
 
   const confirm = async () => {
     if (!matches || busy) return;
