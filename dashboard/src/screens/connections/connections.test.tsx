@@ -60,6 +60,7 @@ class FakeConnections {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     this.calls.push({ method, path: url.pathname, body });
     const parts = url.pathname.split("/").filter(Boolean); // api, connections, id, action
+    if (parts[1] === "mail") return reply({ connected: false, email: null, store_available: true, apppasswords_url: "https://myaccount.google.com/apppasswords" });
     if (parts[1] !== "connections") return reply({ detail: "unexpected" }, 404);
     if (parts.length === 2 && method === "GET") return reply({ connections: this.cards, groups: this.groups, store_available: this.storeAvailable });
     if (parts[2] === "priority" && method === "PUT") {

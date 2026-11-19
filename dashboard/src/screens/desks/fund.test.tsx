@@ -5,6 +5,7 @@ import { setLocale, t } from "@/i18n";
 import { setChatStart, takeChatStart } from "@/screens/chat/start";
 import { renderShell } from "@/test/utils";
 import { resetDesksStore } from "./store";
+import { TODAY_EMPTY } from "./todayFixture";
 import type { DeskSummary, DeskTemplateDef } from "./types";
 
 function desk(patch: Partial<DeskSummary>): DeskSummary {
@@ -42,6 +43,7 @@ function stubApi(desks: DeskSummary[], created: { id: number } | Response = { id
         return json(created, 201);
       }
       if (url === "/api/desks") return json({ desks });
+      if (url === "/api/today") return json(TODAY_EMPTY);
       return json({});
     }),
   );
@@ -51,7 +53,7 @@ function stubApi(desks: DeskSummary[], created: { id: number } | Response = { id
 const menu = () => screen.getByRole("complementary", { name: t("nav.menu") });
 const openFund = async () => {
   await userEvent.click(within(menu()).getByRole("button", { name: /Mesas de dinero/ }));
-  await screen.findByRole("heading", { name: "Mesas de dinero" });
+  await screen.findByRole("heading", { name: "Fondo" });
 };
 
 beforeEach(() => {
@@ -79,22 +81,37 @@ describe("the Fund", () => {
     expect(first).toHaveTextContent("0,00");
     expect(first).toHaveTextContent("Sin datos");
     expect(first).toHaveTextContent("2 de 7 agentes trabajando");
-    expect(first).toHaveTextContent(t("desks.mode.simulation"));
     const second = screen.getByRole("button", { name: "Abrir la mesa Swing" });
     expect(second).toHaveTextContent("En pausa");
     expect(second).toHaveTextContent("Presupuesto al 80%");
   });
 
-  it("adds up the capital of the desks in the header and shows the empty curve and activity", async () => {
-    stubApi([desk({ id: 1, capital: 10000, tokens_week: 100 }), desk({ id: 2, name: "B", capital: 25000, tokens_week: 50 })]);
+  it("adds up the capital, the day and the equity of the accounts assigned to desks, and drops the empty curve and activity", async () => {
+    const account = (id: number, initial: number, equity: number | null) => ({
+      id, name: "Cuenta " + id, broker: "Hokma Simulated", initial_capital: initial, balance: { cash: equity, equity, currency: "USD" }, as_of: "2026-11-19T12:00:00Z",
+    });
+    stubApi([
+      desk({ id: 1, today: 150, account: account(1, 10000, 10150) }),
+      desk({ id: 2, name: "B", today: -50, account: account(2, 25000, 24950) }),
+      desk({ id: 3, name: "C", capital: 99999 }),
+    ]);
     renderShell();
     await openFund();
     await screen.findByRole("button", { name: "Abrir la mesa Mesa A" });
     expect(screen.getByText("35.000")).toBeInTheDocument();
-    expect(screen.getByText("150")).toBeInTheDocument();
-    expect(screen.getAllByText(t("desks.fund.curve.empty.text"))).toHaveLength(2);
-    expect(screen.getByRole("region", { name: "Curva del fondo" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Actividad de las mesas" })).toBeInTheDocument();
+    expect(screen.getByText("+100,00")).toBeInTheDocument();
+    expect(screen.getByText("35.100,00")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Curva del fondo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Actividad de las mesas" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Abrir la mesa Mesa A" })).toHaveTextContent("Hokma Simulated");
+  });
+
+  it("says the equity is not available instead of inventing it", async () => {
+    stubApi([desk({ id: 1, account: { id: 1, name: "X", broker: "Hokma Simulated", initial_capital: 1000, balance: { cash: null, equity: null, currency: "USD" }, as_of: "" } })]);
+    renderShell();
+    await openFund();
+    await screen.findByRole("button", { name: "Abrir la mesa Mesa A" });
+    expect(screen.getAllByText(t("desks.accounts.unavailable")).length).toBeGreaterThan(0);
   });
 
   it("keeps 'Lecciones del fondo' disabled and shows no step label", async () => {
@@ -161,8 +178,8 @@ describe("creating a desk", () => {
     await userEvent.click(await screen.findByRole("button", { name: "+ Crear mesa" }));
     await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${t("desks.start.template.name")}`) }));
     await userEvent.type(await screen.findByLabelText("Nombre de la mesa"), "Swing");
-    await userEvent.clear(screen.getByLabelText("Capital simulado"));
-    await userEvent.type(screen.getByLabelText("Capital simulado"), "25.000");
+    await userEvent.clear(screen.getByLabelText("Capital"));
+    await userEvent.type(screen.getByLabelText("Capital"), "25.000");
     await userEvent.type(screen.getByLabelText("Objetivo mensual (%)"), "2,5");
     await userEvent.type(screen.getByLabelText("Mandato"), "Sin operar en resultados");
     await userEvent.click(screen.getByRole("button", { name: "Siguiente: equipo" }));
@@ -240,7 +257,7 @@ describe("creating a desk", () => {
     expect(within(dialog).getByText("Create it with Hokma")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: new RegExp(`^${t("desks.start.template.name")}`) }));
     expect(await screen.findByLabelText("Desk name")).toBeInTheDocument();
-    expect(screen.getByText("It starts in simulation. Real money stays blocked.")).toBeInTheDocument();
+    expect(screen.getByText("It does not send orders yet. Real money stays blocked.")).toBeInTheDocument();
   });
 });
 

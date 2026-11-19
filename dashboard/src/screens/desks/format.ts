@@ -1,4 +1,4 @@
-/** Simulated capital, whole units, grouped by the language ("10.000" in Spanish, "10,000" in English). */
+/** Capital, whole units, grouped by the language ("10.000" in Spanish, "10,000" in English). */
 export function formatCapital(value: number, locale: string): string {
   return value.toLocaleString(locale, { maximumFractionDigits: 0 });
 }
@@ -27,4 +27,11 @@ export function resultTone(value: number): ResultTone {
   if (value > 0) return "up";
   if (value < 0) return "down";
   return "flat";
+}
+
+/** Equity of an account, or "not available" when the broker cannot tell: never a made-up 0. */
+export function formatBalance(value: number | null, locale: string, unavailable: string, currency?: string): string {
+  if (value === null) return unavailable;
+  const text = value.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency ? `${text} ${currency}` : text;
 }

@@ -34,6 +34,8 @@ class Backend {
     claude: { status: "connected", plan: "Max", checked_at: null }, profile_exists: true,
   };
   jobs: JobItem[] = [];
+  running: number[] = [];
+  telegramLinked = false;
   failWith: { code: string; message: string; status: number } | null = null;
   nextId = 1;
 
@@ -56,7 +58,7 @@ class Backend {
     }
     const model = url.pathname.match(/^\/api\/agents\/([^/]+)\/model$/);
     const status = url.pathname.match(/^\/api\/agents\/([^/]+)\/status$/);
-    const job = url.pathname.match(/^\/api\/scheduled-jobs\/(\d+)(?:\/(activate|deactivate))?$/);
+    const job = url.pathname.match(/^\/api\/scheduled-jobs\/(\d+)(?:\/(activate|deactivate|run))?$/);
     if (method === "GET" && url.pathname === "/api/agents") return this.json(this.data());
     if (method === "PUT" && model) {
       const found = this.agents.find((a) => a.slug === model[1])!;
@@ -80,7 +82,7 @@ class Backend {
       this.usage.pct = body.cap ? Math.round((this.usage.used * 1000) / body.cap) / 10 : null;
       return this.json(this.usage);
     }
-    if (method === "GET" && url.pathname === "/api/scheduled-jobs") return this.json({ jobs: this.jobs, running: [] });
+    if (method === "GET" && url.pathname === "/api/scheduled-jobs") return this.json({ jobs: this.jobs, running: this.running });
     if (method === "POST" && url.pathname === "/api/scheduled-jobs") {
       const created: JobItem = {
         id: this.nextId++, name: body.name, agent: body.agent, agent_name: this.agents.find((a) => a.slug === body.agent)!.name,
@@ -89,6 +91,20 @@ class Backend {
       };
       this.jobs.push(created);
       return this.json(created, 201);
+    }
+    if (method === "POST" && url.pathname === "/api/scheduled-jobs/template/premarket-briefing") {
+      let found = this.jobs.find((j) => j.name === "Premarket briefing");
+      if (!found) {
+        found = { id: this.nextId++, name: "Premarket briefing", agent: "hokma", agent_name: "Hokma", agent_active: true, model: "sonnet", prompt: "p", kind: "weekly", expr: "mon,tue,wed,thu,fri 08:00", timezone: "UTC", active: false, approved: false, next_run_at: null, last_run_at: null, last: null };
+        this.jobs.push(found);
+      }
+      return this.json(found);
+    }
+    if (method === "GET" && url.pathname === "/api/telegram") return this.json({ linked: this.telegramLinked });
+    if (job && method === "POST" && job[2] === "run") {
+      const found = this.jobs.find((j) => j.id === Number(job[1]))!;
+      this.running.push(found.id);
+      return this.json(found, 202);
     }
     if (job && method === "POST" && job[2]) {
       const found = this.jobs.find((j) => j.id === Number(job[1]))!;
@@ -256,7 +272,74 @@ describe.each<Locale>(["es", "en"])("agents, usage and scheduled tasks (%s)", (l
   it("starts with an empty list of scheduled tasks", async () => {
     mount(<TasksScreen tabKey="tasks" params={{}} active />);
     expect(await screen.findByText(t("tasks.empty.title"))).toBeInTheDocument();
-    expect(screen.getByText(t("tasks.notice"))).toBeInTheDocument();
+    expect(screen.getByText(t("tasks.offline.title"))).toBeInTheDocument();
+    expect(screen.getByText(t("tasks.offline.late", { hours: 24 }))).toBeInTheDocument();
+    expect(screen.getByText(t("tasks.offline.always"))).toBeInTheDocument();
+    expect(screen.queryByTestId("job-late")).toBeNull();
+  });
+
+  it("adds the premarket briefing off, asks to confirm, turns it on and does not duplicate it", async () => {
+    const user = userEvent.setup();
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    await user.click(await screen.findByRole("button", { name: t("tasks.briefing.add") }));
+    const confirm = await screen.findByRole("dialog", { name: t("tasks.confirm.title", { name: "Premarket briefing" }) });
+    expect(backend.jobs[0]?.active).toBe(false);
+    await user.click(within(confirm).getByRole("button", { name: t("tasks.confirm.yes") }));
+    await waitFor(() => expect(backend.jobs[0]?.active).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await user.click(screen.getByRole("button", { name: t("tasks.briefing.add") }));
+    await waitFor(() => expect(backend.sent("POST", "/api/scheduled-jobs/template/premarket-briefing")).toHaveLength(2));
+    expect(backend.jobs).toHaveLength(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("runs an approved task now, shows it running and leaves the planned run alone; an unapproved one cannot", async () => {
+    const user = userEvent.setup();
+    backend.jobs.push({ id: 7, name: "Premarket briefing", agent: "hokma", agent_name: "Hokma", agent_active: true, model: "sonnet", prompt: "p", kind: "daily", expr: "08:00", timezone: "UTC", active: true, approved: true, next_run_at: "2026-11-06 13:00:00", last_run_at: null, last: null });
+    backend.jobs.push({ id: 8, name: "Never on", agent: "hokma", agent_name: "Hokma", agent_active: true, model: "sonnet", prompt: "p", kind: "daily", expr: "09:00", timezone: "UTC", active: false, approved: false, next_run_at: null, last_run_at: null, last: null });
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    const buttons = await screen.findAllByRole("button", { name: t("tasks.runNow") });
+    expect(buttons[1]).toBeDisabled();
+    await user.click(buttons[0]!);
+    await waitFor(() => expect(backend.sent("POST", "/api/scheduled-jobs/7/run")).toHaveLength(1));
+    expect(await screen.findByText(t("tasks.running"))).toBeInTheDocument();
+    expect(backend.jobs[0]?.next_run_at).toBe("2026-11-06 13:00:00");
+  });
+
+  const briefingJob: JobItem = { id: 7, name: "Premarket briefing", agent: "hokma", agent_name: "Hokma", agent_active: true, model: "sonnet", prompt: "p", kind: "daily", expr: "08:00", timezone: "UTC", active: true, approved: true, next_run_at: "2026-11-06 13:00:00", last_run_at: null, last: null };
+
+  it("says the briefing will not reach the phone when Telegram is not linked and there is a briefing routine", async () => {
+    backend.jobs.push({ ...briefingJob });
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    expect(await screen.findByText(t("tasks.briefing.noTelegram"))).toBeInTheDocument();
+  });
+
+  it("does not talk about the briefing and Telegram when there is no briefing routine", async () => {
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    await screen.findByText(t("tasks.empty.title"));
+    expect(screen.queryByText(t("tasks.briefing.noTelegram"))).toBeNull();
+  });
+
+  it("says the briefing has a shorter window to run late than the other tasks", async () => {
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    await screen.findByText(t("tasks.empty.title"));
+    expect(screen.getByText(t("tasks.offline.briefing"))).toBeInTheDocument();
+  });
+
+  it("explains a run skipped after a long closure in words, not the internal code", async () => {
+    backend.jobs.push({ ...briefingJob, last_skip: { at: "2026-11-06 12:00:00", planned: "2026-11-06 12:00:00", reason: "asked" } });
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    const skipped = await screen.findByTestId("job-skipped");
+    expect(skipped).toHaveTextContent(t("tasks.skip.asked"));
+    expect(skipped).not.toHaveTextContent(/: asked/);
+  });
+
+  it("stays quiet about Telegram when it is linked", async () => {
+    backend.telegramLinked = true;
+    backend.jobs.push({ ...briefingJob });
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    await screen.findByText("Premarket briefing");
+    expect(screen.queryByText(t("tasks.briefing.noTelegram"))).toBeNull();
   });
 
   it("creates a daily task, turns it on only after the confirmation and turns it off at once", async () => {
@@ -328,6 +411,17 @@ describe.each<Locale>(["es", "en"])("agents, usage and scheduled tasks (%s)", (l
     expect(skipped).toHaveTextContent(t("tasks.skip.missed"));
     expect(screen.getByText(new RegExp(`\\(America/Bogota\\)`))).toBeInTheDocument();
     expect(screen.getByText(new RegExp(formatDateTime("2026-11-05 12:03:00", locale).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeInTheDocument();
+  });
+
+  it("marks a run that went out late with the time it should have run", async () => {
+    backend.jobs = [{
+      id: 11, name: "Latecomer", agent: "hokma", agent_name: "Hokma", agent_active: true, model: "sonnet", prompt: "x",
+      kind: "daily", expr: "07:00", timezone: "UTC", active: true, approved: true,
+      next_run_at: "2026-11-07 07:00:00", last_run_at: "2026-11-06 12:00:00",
+      last: { task_id: 6, status: "done", summary: "ok", error: null, started_at: "2026-11-06 12:00:00", ended_at: "2026-11-06 12:01:00", tokens: 1, late_planned: "2026-11-06 07:00:00" },
+    }];
+    mount(<TasksScreen tabKey="tasks" params={{}} active />);
+    expect(await screen.findByTestId("job-late")).toHaveTextContent(t("tasks.late", { date: formatDateTime("2026-11-06 07:00:00", locale) }));
   });
 
   it("shows the first run date in the confirmation of turning on (bug 1140)", async () => {

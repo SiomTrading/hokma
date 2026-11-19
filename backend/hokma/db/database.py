@@ -12,6 +12,7 @@ from hokma.db.paths import db_path
 from hokma.db.repos.agents import AgentsRepo
 from hokma.db.repos.approvals import ApprovalsRepo
 from hokma.db.repos.conversations import AttachmentsRepo, ConversationsRepo, MessagesRepo
+from hokma.db.repos.broker import BrokerRepo
 from hokma.db.repos.desks import DesksRepo
 from hokma.db.repos.documents import DocumentsRepo
 from hokma.db.repos.library import LibraryRepo
@@ -57,6 +58,7 @@ class Unit:
         self.documents = DocumentsRepo(session)
         self.library = LibraryRepo(session)
         self.desks = DesksRepo(session)
+        self.broker = BrokerRepo(session)
 
 
 class Database:

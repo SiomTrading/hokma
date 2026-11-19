@@ -2,7 +2,14 @@
   "disableAllHooks": false,
   "permissions": {
     "allow": [
-      "mcp__hokma__trash_move"
+      "mcp__hokma__trash_move",
+      "mcp__hokma__today_show",
+      "mcp__hokma__watchlist_all",
+      "mcp__hokma__economic_calendar",
+      "mcp__hokma__market_news",
+      "mcp__hokma__earnings_calendar",
+      "mcp__hokma__market_quote",
+      "mcp__hokma__broker_list"
     ]
   },
   "hooks": {

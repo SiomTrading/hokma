@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from engine_support import Env, connect, posix_only, turn, until
 from hokma.db import Actor, IntegrityViolation, RuleViolation, current_version, get_database, migrate, open_database
-from hokma.db.migrate import MIGRATIONS_DIR
+from hokma.db.migrate import MIGRATIONS_DIR, discover
 from hokma.engine.api import create_router
 from hokma.engine.conversations_api import create_router as create_conversations_router
 from hokma.engine.dbstore import DbAgents, DbChatStore, DbProjects
@@ -18,6 +18,8 @@ from hokma.engine.engine import ChatEngine
 from hokma.permissions.api import create_router as create_permissions_router
 from hokma.rpc.ws import SESSION_TOKEN
 from permissions_support import HEADERS, owner  # noqa: F401  (fixture)
+
+LATEST = discover()[-1][0]                      # the newest migration: no list of versions to update
 
 AUTH = HEADERS
 
@@ -43,7 +45,7 @@ def test_migrations_0003_and_0004_keep_the_data_and_the_migrated_owner_stays_in_
         u.profile.complete_setup()
         u.guard_events.record("permission", "blocked", "an old block", tool="Write")
     result = migrate(path)
-    assert result.applied == [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] and result.version == 16 and result.backup is not None and result.backup.exists()
+    assert result.applied == list(range(3, LATEST + 1)) and result.version == LATEST and result.backup is not None and result.backup.exists()
     with db.read() as u:
         profile = u.profile.get()
         events = u.guard_events.list()

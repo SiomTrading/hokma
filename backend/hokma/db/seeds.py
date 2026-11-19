@@ -127,6 +127,22 @@ def seed_profile(session: Session) -> bool:
     return True
 
 
+SIM_BROKER = "Hokma Simulated"
+SIM_CONFIG = {"commission": {"type": "bps", "value": 1.0, "min": 0.0}, "slippage_bps": 2.0}
+
+
+def seed_broker(session: Session) -> bool:
+    """The simulated broker, once. Its costs are editable later, so an existing row is never rewritten."""
+    from hokma.db.repos.broker import BrokerRepo
+
+    repo = BrokerRepo(session)
+    if not session.table_exists("brokers") or repo.find_broker(SIM_BROKER) is not None:   # no table: migrations cut short
+        return False
+    repo.create_broker("sim", SIM_BROKER, SIM_CONFIG)
+    return True
+
+
 def run_seeds(session: Session) -> None:
     seed_agents(session)
     seed_profile(session)
+    seed_broker(session)

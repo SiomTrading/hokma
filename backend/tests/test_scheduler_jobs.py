@@ -8,6 +8,7 @@ import pytest
 from agents_support import HEADERS, SYSTEM, client, db, make_client, work  # noqa: F401
 from hokma.db import to_db_time
 from hokma.scheduler import runner
+from hokma.scheduler import loop
 from hokma.scheduler.loop import Scheduler
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the fake claude is a POSIX script")
@@ -158,9 +159,9 @@ def test_a_job_without_approval_or_off_never_runs(db, work):
     assert due == [] and work.entries("start") == []
 
 
-def test_runs_missed_while_closed_are_skipped_not_run_late(db, work):
+def test_runs_missed_beyond_the_window_are_skipped_and_asked(db, work):
     job_id = activate_due(db, work, kind="daily", expr="07:30",
-                          next=datetime.now(timezone.utc) - timedelta(hours=3))
+                          next=datetime.now(timezone.utc) - timedelta(hours=30))
 
     async def go():
         scheduler = make_scheduler(db, work)
@@ -169,7 +170,7 @@ def test_runs_missed_while_closed_are_skipped_not_run_late(db, work):
         return skipped
 
     skipped = asyncio.run(go())
-    assert [(s.job_id, s.status, s.detail) for s in skipped] == [(job_id, "skipped", "missed")]
+    assert [(s.job_id, s.status, s.detail) for s in skipped] == [(job_id, "skipped", "asked")]
     assert work.entries("start") == []                                # claude never started
     with db.read() as u:
         job = u.scheduled_jobs.get(job_id)
@@ -342,6 +343,20 @@ def test_the_listing_shows_the_last_skipped_run(db, work):
     assert item["last_skip"]["reason"] == "agent_off" and item["last_skip"]["at"]
 
 
+def test_the_listing_marks_a_run_that_went_out_late(db, work):
+    """C7-3b: the journal note of a late run carries `late_planned`; the listing shows it on `last`, and not otherwise."""
+    job_id = activate_due(db, work)
+    with make_client() as client:
+        assert client.get("/api/scheduled-jobs", headers=HEADERS).json()["jobs"][0]["last"]["late_planned"] is None
+    task_id = _job(db, job_id).last_task_id
+    with db.write() as u:
+        u.journal.add("action", "done", actor=runner.SYSTEM, task_id=task_id,
+                      refs={"scheduled_job": job_id, "late_planned": "2026-11-06 07:00:00"})
+    with make_client() as client:
+        item = client.get("/api/scheduled-jobs", headers=HEADERS).json()["jobs"][0]
+    assert item["last"]["late_planned"] == "2026-11-06 07:00:00"
+
+
 def test_a_later_run_clears_the_skip(db, work):
     job_id = activate_due(db, work)
     runner.skip(db, _job(db, job_id), datetime.now(timezone.utc), "missed")
@@ -352,7 +367,7 @@ def test_a_later_run_clears_the_skip(db, work):
 
 
 def test_startup_skips_notify_the_listeners(db, work):
-    job_id = activate_due(db, work)
+    job_id = activate_due(db, work, next=datetime.now(timezone.utc) - timedelta(hours=30))
     seen = []
     from hokma.scheduler import loop
     loop.OUTCOME_LISTENERS.append(lambda job, outcome: seen.append(outcome.status))
@@ -404,3 +419,111 @@ def test_an_interval_counts_from_the_real_tick(db, work):
     job_id = activate_due(db, work, kind="interval", expr="30m", next=datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc))
     following, keep = runner.advance(_job(db, job_id), now)
     assert keep and following == now + timedelta(minutes=30)
+
+
+# ---------------------------------------------------------------------- run now (C7-1b-b)
+
+def test_run_now_runs_without_moving_the_next_planned_run(db, work):
+    planned = datetime.now(timezone.utc) + timedelta(hours=5)
+    job_id = activate_due(db, work, kind="daily", expr="07:30", next=planned)
+    heard = []
+
+    async def go():
+        scheduler = make_scheduler(db, work)
+        loop.OUTCOME_LISTENERS.append(lambda job, outcome: heard.append((job.id, outcome.status, outcome.detail)))
+        try:
+            assert scheduler.run_now(_job(db, job_id)) is True
+            assert scheduler.run_now(_job(db, job_id)) is False             # already running
+            ok = await wait_until(lambda: _status(db, job_id) == "done")
+        finally:
+            loop.OUTCOME_LISTENERS.pop()
+        return ok
+
+    assert asyncio.run(go())
+    after = _job(db, job_id)
+    assert after.next_run_at == _job_planned(planned) and after.is_active and after.last_run_at
+    assert heard == [(job_id, "done", "pong")]                              # the same notice as a timed run
+
+
+def _job_planned(moment):
+    from hokma.db import to_db_time
+    return to_db_time(moment)
+
+
+def test_run_now_keeps_a_once_job_on(db, work):
+    job_id = activate_due(db, work, next=datetime.now(timezone.utc) + timedelta(hours=5))   # kind "once"
+    asyncio.run(runner.JobRunner(db, launch=lambda: work.launch_spec).run(_job(db, job_id), move_on=False))
+    after = _job(db, job_id)
+    assert after.is_active and after.next_run_at and _status(db, job_id) == "done"
+
+
+def test_run_now_with_the_agent_off_does_not_touch_the_job(db, work):
+    job_id = activate_due(db, work, agent="vera", next=datetime.now(timezone.utc) + timedelta(hours=5))
+    with db.write() as u:
+        u.agents.set_status("vera", "off")
+    before = _job(db, job_id)
+    outcome = asyncio.run(runner.JobRunner(db, launch=lambda: work.launch_spec).run(before, move_on=False))
+    assert (outcome.status, outcome.detail) == ("skipped", "agent_off")
+    assert _job(db, job_id).next_run_at == before.next_run_at and work.entries("start") == []
+
+
+def test_run_now_waits_for_a_free_slot(db, work):
+    async def go():
+        scheduler = make_scheduler(db, work)
+        ids = []
+        for n in range(5):
+            with db.write() as u:
+                job = u.scheduled_jobs.create(f"Job {n}", "hokma", "Say pong.", "daily", "07:30", "UTC")
+                approval = u.approvals.record("scheduled_job", job.id, "approved", decided_by="Ana")
+                u.scheduled_jobs.set_active(job.id, True, approval_id=approval.id)
+            ids.append(job.id)
+        for job_id in ids:
+            scheduler.run_now(_job(db, job_id))
+        peak = 0
+        for _ in range(400):
+            with db.read() as u:
+                states = [u.tasks.get(u.scheduled_jobs.get(i).last_task_id).status
+                          if u.scheduled_jobs.get(i).last_task_id else "queued" for i in ids]
+            peak = max(peak, states.count("running"))
+            if all(s == "done" for s in states):
+                break
+            await asyncio.sleep(0.05)
+        await scheduler.stop()
+        return peak, states
+
+    peak, states = asyncio.run(go())
+    assert states == ["done"] * 5 and peak <= loop.MAX_PARALLEL
+
+
+def test_run_now_refuses_what_it_should(client, db):
+    from hokma.agents import api as agents_api
+    assert client.post("/api/scheduled-jobs/999/run").status_code == 404
+    job = make(client)
+    res = client.post(f"/api/scheduled-jobs/{job['id']}/run")                  # never turned on: not approved
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "job_not_approved" and res.json()["detail"]["message"]
+    client.post(f"/api/scheduled-jobs/{job['id']}/activate", json={"confirm": True})
+    agents_api._running["scheduler"], app_scheduler = None, agents_api._running["scheduler"]
+    assert client.post(f"/api/scheduled-jobs/{job['id']}/run").json()["detail"]["code"] == "scheduler_off"
+
+    class Fake:
+        started = []
+
+        def running_ids(self):
+            return []
+
+        def run_now(self, job):
+            self.started.append(job.id)
+            return True
+
+    agents_api._running["scheduler"], real = Fake(), app_scheduler
+    try:
+        res = client.post(f"/api/scheduled-jobs/{job['id']}/run")
+        assert res.status_code == 202 and Fake.started == [job["id"]]
+        agents_api._running["scheduler"].running_ids = lambda: [job["id"]]
+        res = client.post(f"/api/scheduled-jobs/{job['id']}/run")
+        assert res.status_code == 409 and res.json()["detail"]["code"] == "job_running"
+        with db.write() as u:
+            u.agents.set_status("hokma", "off")
+        assert client.post(f"/api/scheduled-jobs/{job['id']}/run").json()["detail"]["code"] == "agent_off"
+    finally:
+        agents_api._running["scheduler"] = real

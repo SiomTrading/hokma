@@ -14,13 +14,17 @@ from hokma.db.backend import SqliteBackend
 from hokma.db.seeds import parse_frontmatter, seed_agents
 from hokma.i18n import t
 
+LATEST = discover()[-1][0]                      # the newest migration: no list of versions to update
+NEXT = LATEST + 1
+
 TABLES = {
     "schema_version", "profile", "license_checks", "agents", "projects", "tasks", "task_links", "task_runs",
     "task_events", "task_comments", "status_transitions", "approvals", "decisions", "journal_entries",
     "guard_events", "bugs", "conversations", "messages", "attachments", "extensions", "extension_requests",
     "scheduled_jobs", "onboarding_progress", "trash_items", "checkpoint_points", "engine_connections",
     "libraries", "documents", "doc_chunks", "doc_chunks_fts", "project_folders", "library_folders", "doc_chunk_vectors", "cloud_backup_state", "telegram_link", "telegram_outbox", "telegram_session",
-    "desks", "desk_agents", "desk_assets", "desk_connections",
+    "desks", "desk_agents", "desk_assets", "desk_connections", "today_config",
+    "brokers", "broker_accounts", "account_ledger", "desk_accounts",
 }
 
 
@@ -33,10 +37,10 @@ def raw(path=None):
 
 def test_fresh_database_has_the_22_tables_plus_onboarding_and_is_healthy(env):
     result = migrate()
-    assert result.created and result.applied == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] and result.version == 16 and result.backup is None
+    assert result.created and result.applied == list(range(1, LATEST + 1)) and result.version == LATEST and result.backup is None
     con = raw()
     names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
-    assert names - FTS_SHADOW == TABLES and len(TABLES) == 41
+    assert names - FTS_SHADOW == TABLES and len(TABLES) == 46
     assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
     assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -64,7 +68,7 @@ def test_migrating_twice_changes_nothing(env):
     dump = list(con.iterdump())
     con.close()
     second = migrate()
-    assert second.applied == [] and not second.created and second.backup is None and second.version == 16
+    assert second.applied == [] and not second.created and second.backup is None and second.version == LATEST
     con = raw()
     assert list(con.iterdump()) == dump
 
@@ -72,7 +76,7 @@ def test_migrating_twice_changes_nothing(env):
 def test_current_version(env):
     assert current_version() == 0
     migrate()
-    assert current_version() == 16
+    assert current_version() == LATEST
 
 
 def make_dir(tmp_path, files: dict[str, str]) -> Path:
@@ -87,12 +91,12 @@ def make_dir(tmp_path, files: dict[str, str]) -> Path:
 
 def test_a_new_migration_runs_after_a_backup_of_the_existing_database(env):
     migrate()
-    directory = make_dir(env, {"0017_extra.sql": "CREATE TABLE extra ({PK_ID});".replace("{PK_ID}", "id {PK}")})
+    directory = make_dir(env, {f"{NEXT:04d}_extra.sql": "CREATE TABLE extra ({PK_ID});".replace("{PK_ID}", "id {PK}")})
     result = migrate(migrations_dir=directory)
-    assert result.applied == [17] and result.version == 17
+    assert result.applied == [NEXT] and result.version == NEXT
     assert result.backup is not None and result.backup.parent == db_path().parent / "backups"
     backup = sqlite3.connect(str(result.backup))
-    assert backup.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 16
+    assert backup.execute("SELECT max(version) FROM schema_version").fetchone()[0] == LATEST
     assert backup.execute("SELECT count(*) FROM sqlite_master WHERE name = 'extra'").fetchone()[0] == 0
     assert raw().execute("SELECT count(*) FROM sqlite_master WHERE name = 'extra'").fetchone()[0] == 1
 
@@ -103,15 +107,15 @@ def test_a_broken_migration_rolls_back_leaves_the_copy_and_reports(env):
     before = list(con.iterdump())
     con.close()
     bad = "CREATE TABLE half (id {PK});\nINSERT INTO half (id) VALUES (1);\nCREATE TABLE half (id {PK});"
-    directory = make_dir(env, {"0017_bad.sql": bad})
+    directory = make_dir(env, {f"{NEXT:04d}_bad.sql": bad})
     with pytest.raises(MigrationError) as info:
         migrate(migrations_dir=directory)
-    assert info.value.version == 17
-    assert str(info.value) == t("db.migrate.failed", file="0017_bad.sql", error=str(info.value.__cause__.args[0]))
+    assert info.value.version == NEXT
+    assert str(info.value) == t("db.migrate.failed", file=f"{NEXT:04d}_bad.sql", error=str(info.value.__cause__.args[0]))
     con = raw()
     assert list(con.iterdump()) == before                           # the whole file was rolled back
-    assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 16
-    backups = list((db_path().parent / "backups").glob("hokma-v16-*.db"))
+    assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == LATEST
+    backups = list((db_path().parent / "backups").glob("hokma-v18-*.db"))
     assert len(backups) == 1
 
 
@@ -125,11 +129,11 @@ def test_a_broken_first_migration_leaves_no_schema_version(env):
 
 
 def test_a_database_newer_than_the_code_is_refused(env):
-    directory = make_dir(env, {"0017_extra.sql": "CREATE TABLE extra (id {PK});"})
+    directory = make_dir(env, {f"{NEXT:04d}_extra.sql": "CREATE TABLE extra (id {PK});"})
     migrate(migrations_dir=directory)
     with pytest.raises(MigrationError) as info:
-        migrate()                                                   # the code only knows version 16
-    assert str(info.value) == t("db.migrate.newer", found=17, known=16)
+        migrate()                                                   # the code only knows the latest version
+    assert str(info.value) == t("db.migrate.newer", found=NEXT, known=LATEST)
 
 
 def test_a_file_that_is_not_a_database_is_reported(env):
@@ -141,8 +145,8 @@ def test_a_file_that_is_not_a_database_is_reported(env):
 
 def test_old_backups_are_pruned(env):
     migrate()
-    for n in range(17, 30):
-        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(17, n + 1)})
+    for n in range(19, 30):
+        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(19, n + 1)})
         migrate(migrations_dir=directory)
     assert len(list((db_path().parent / "backups").glob("hokma-v*.db"))) == 10
 
@@ -180,7 +184,7 @@ def test_two_processes_migrating_at_once_apply_it_once(env):
     [th.start() for th in threads]
     [th.join() for th in threads]
     assert not errors
-    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == 16
+    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == LATEST
 
 
 # ------------------------------------------------------------------------------------------------ seeds
@@ -317,7 +321,7 @@ def test_the_desk_migration_leaves_every_existing_row_untouched(env):
     before = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in watched}
     con.close()
     result = migrate()
-    assert result.applied == [15, 16] and result.version == 16
+    assert result.applied == list(range(15, LATEST + 1)) and result.version == LATEST
     con = raw()
     after = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in watched}
     after["projects"] = [row[:-1] for row in after["projects"]]       # 0016 adds archived_at at the end, empty

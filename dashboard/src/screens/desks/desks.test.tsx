@@ -6,6 +6,7 @@ import { renderShell, renderWithApp } from "@/test/utils";
 import { DesksScreen } from "./DesksScreen";
 import { resetDesksStore } from "./store";
 import { DESK_TABS } from "./types";
+import { TODAY_EMPTY } from "./todayFixture";
 import type { DeskSummary } from "./types";
 
 function desk(patch: Partial<DeskSummary>): DeskSummary {
@@ -23,7 +24,8 @@ function stubApi(response: () => Response | Promise<Response>) {
     vi.fn(async (url: string) => {
       calls.push(String(url));
       if (String(url).startsWith("/api/desks")) return response();
-      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      const body = String(url) === "/api/today" ? JSON.stringify(TODAY_EMPTY) : "{}";
+      return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
     }),
   );
   return calls;
@@ -52,7 +54,7 @@ describe("desks menu", () => {
     const chat = entries.indexOf(t("nav.chat"));
     expect(entries[chat + 1]).toContain("Mesas de dinero");
     await userEvent.click(within(menu()).getByRole("button", { name: /Mesas de dinero/ }));
-    expect(await screen.findByRole("heading", { name: "Mesas de dinero" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Fondo" })).toBeInTheDocument();
     expect(await screen.findByText(t("desks.fund.empty.title"))).toBeInTheDocument();
   });
 
@@ -78,13 +80,12 @@ describe("desks menu", () => {
     expect(await within(menu()).findByText("Mesa suelta")).toBeInTheDocument();
   });
 
-  it("clicking a row opens that desk in the window, in simulation mode, with its five tabs", async () => {
+  it("clicking a row opens that desk in the window, with its five tabs", async () => {
     stubApi(() => json({ desks: [desk({ id: 7, name: "Futuros NQ" })] }));
     renderShell();
     await userEvent.click(await within(menu()).findByRole("button", { name: /Futuros NQ/ }));
     const tabs = await screen.findByRole("tablist", { name: t("desks.tabs.label") });
     expect(within(tabs).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(DESK_TABS.map((id) => t("desks.tab." + id)));
-    expect(screen.getByText(t("desks.mode.simulation"))).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Futuros NQ" })).toBeInTheDocument();
     expect(within(tabs).getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
   });
@@ -139,6 +140,5 @@ describe("desks texts", () => {
     renderShell();
     await userEvent.click(await within(menu()).findByRole("button", { name: /NQ futures/ }));
     expect(within(await screen.findByRole("tablist")).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Terminal", "Agents", "Operations", "Rules", "Settings"]);
-    expect(screen.getByText("Simulation")).toBeInTheDocument();
   });
 });

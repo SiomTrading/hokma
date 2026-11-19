@@ -220,7 +220,10 @@ def test_the_launch_wires_the_server_and_pre_approves_only_trash_move(owner):
     config = json.loads((owner.data / "claude-config" / "hokma-mcp.json").read_text())
     server = config["mcpServers"][HOKMA_SERVER]
     assert server["command"] == sys.executable and server["args"][:2] == ["-I", str(MCP_FILE)]
-    assert build_settings()["permissions"]["allow"] == ["mcp__hokma__trash_move"]
+    allow = build_settings()["permissions"]["allow"]
+    assert allow[0] == "mcp__hokma__trash_move"                      # the only write that is pre-approved
+    from hokma.kit import hokma_tools
+    assert all(not hokma_tools.TOOLS[x.removeprefix("mcp__hokma__")][4] for x in allow[1:])   # the rest only read
 
 
 # ------------------------------------------------------------------------- bug 1034: move and restore agree

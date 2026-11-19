@@ -18,11 +18,12 @@ from hokma.core.tls import outbound_context
 from hokma.db import Database
 from hokma.engine.protocols import DEFAULT_MODEL
 from hokma.i18n import t
+from hokma.mail import notify as mail_notify
 from hokma.telegram.core import TelegramLink
 from hokma.telegram.core.link import GROUP_PLATFORM, PLATFORM, _topic_thread_id
 from hokma.telegram.core.session_policy import SessionResetPolicy, should_reset
 from hokma.telegram.core.telegram_ids import normalize_telegram_chat_id
-from hokma.telegram.link_ext import HokmaApprovalsUI, HokmaPairingStore
+from hokma.telegram.link_ext import HokmaPairingStore, LateRunUI
 
 log = logging.getLogger("hokma.telegram")
 TOKEN_ENTRY = "telegram_bot"            # entry of the bot token in the system credential store
@@ -195,9 +196,10 @@ class HokmaLink(TelegramLink):
     def _register_handlers(self, app) -> None:
         from telegram.ext import MessageHandler, filters
 
-        self._ui = HokmaApprovalsUI(                       # before core registers its callback handler
+        self._ui = LateRunUI(                       # before core registers its callback handler
             self._bot, is_authorized=self._is_authorized, on_decision=self._on_decision, t=self._t,
             on_rejected=self._note_ignored, is_sender_ok=self._sender_ok)
+        self._ui.on_late = self.on_late
         super()._register_handlers(app)
         # Bug 1157: voice, photos, documents... were dropped without a word. Added last, so text and commands
         # still reach core's handlers first.
@@ -313,6 +315,18 @@ class HokmaLink(TelegramLink):
                                "group_pairing_code_message")
 
     # ----- bug 1155: a permission goes to the chat or topic where it is being talked about -----
+
+    on_late: Callable | None = None          # async (job_id, choice) -> text; the glue sets it
+
+    async def send_late_prompt(self, job: Any) -> bool:
+        """Ask by Telegram whether to run now a routine that fell due too long ago. False when it could not be sent."""
+        chat_id, destination = self._destination(None)
+        if self._ui is None or chat_id is None:
+            return False
+        text = self._t("telegram.late_ask", name=job.name, planned=job.next_run_at)
+        result = await self._ui.send_late_prompt(chat_id, destination, text, job.id,
+                                                 self._t("telegram.late_btn_run"), self._t("telegram.late_btn_skip"))
+        return bool(result.success)
 
     async def send_exec_approval(self, command: str, request_id: str, description: str = "", *,
                                  thread_id: int | None = None, origin: str | None = None, **kwargs: Any):
@@ -471,6 +485,7 @@ class TelegramGlue:
                                  on_owner_text=self.on_owner_text, on_decision=self.on_decision, on_reset=self.on_reset,
                                  application_factory=application_factory)
         self.link.mode_text = self.mode_notice
+        self.link.on_late = self.on_late_choice
         self._announce: set[str] = set()                # conversations born here that still owe the mode notice
         self._connection, self._conns = Connection, {}          # one per conversation, so its answers know their topic
         self._now = now
@@ -712,9 +727,11 @@ class TelegramGlue:
             if not self.link.connected or self.link.linked_chat_id() is None:
                 return 0
             with self._db().read() as u:
-                rows = u.session.query("SELECT id, text, thread_id FROM telegram_outbox WHERE sent_at IS NULL ORDER BY id")
+                rows = u.session.query("SELECT id, text, thread_id, attempts FROM telegram_outbox WHERE sent_at IS NULL ORDER BY id")
             for row in rows:
                 result = await self.link.send_text(row["text"], row["thread_id"])
+                if not result.success and not row["attempts"]:      # first failure only: a retry never mails it again
+                    await asyncio.to_thread(mail_notify.fallback, row["text"])
                 with self._db().write() as u:
                     if result.success:
                         u.session.execute("UPDATE telegram_outbox SET sent_at = CURRENT_TIMESTAMP, attempts = attempts + 1, "
@@ -757,7 +774,10 @@ class TelegramGlue:
 
     def notify_job(self, job: Any, outcome: Any) -> None:
         """Scheduler hook: tell the phone when a routine finishes, fails or is skipped (bug 1136)."""
-        if outcome.status not in ("done", "failed", "skipped") or self.store.load() is None:
+        if outcome.status not in ("done", "failed", "skipped"):
+            return
+        if outcome.status == "skipped" and outcome.detail == "asked":
+            self._spawn(self._ask_late(job))
             return
         if outcome.status == "skipped":
             code = str(outcome.detail or "")
@@ -770,4 +790,43 @@ class TelegramGlue:
             text = t("telegram.job_done", name=job.name) + "\n\n" + (outcome.detail or "")
         else:
             text = t("telegram.job_failed", name=job.name, detail=(outcome.detail or "")[:300])
-        self.enqueue(text)
+        planned = getattr(outcome, "late_planned", None)
+        if planned and outcome.status in ("done", "failed"):         # it ran at startup instead of at its hour
+            text = t("telegram.job_late", name=job.name, planned=planned) + "\n\n" + text
+        if getattr(job, "id", None) in mail_notify.load()["jobs"]:         # C7-2c: the routines the owner also wants in the mailbox
+            self._spawn(asyncio.to_thread(mail_notify.for_job, job.id, text))
+        if self.store.load() is not None:
+            self.enqueue(text)
+
+    async def _ask_late(self, job: Any) -> None:
+        """Too old to run on its own: ask with two buttons. If Telegram cannot take the question, say it was skipped."""
+        if not await self.link.send_late_prompt(job):
+            self.enqueue(t("telegram.job_skipped", name=job.name, detail=t("sched.reason.missed")))
+
+    async def on_late_choice(self, job_id: int, choice: str) -> str:
+        """The owner tapped "Run now" or "Skip": do it and leave the answer in the journal. Returns the text shown."""
+        from hokma.agents.api import current_scheduler
+        from hokma.db import NotFound
+        from hokma.scheduler import runner
+
+        with self._db().read() as u:
+            try:
+                job = u.scheduled_jobs.get(job_id)
+            except NotFound:
+                return t("telegram.late_gone")
+        scheduler = current_scheduler()
+        allowed = job.approval_id is not None and (job.is_active or job.schedule_kind == "once")   # a `once` turns off when skipped
+        ran = choice == "run" and allowed and scheduler is not None and scheduler.run_now(job)
+        if ran:
+            reason, text = "ran", t("telegram.late_ran", name=job.name)
+        elif choice != "run":
+            reason, text = "skip", t("telegram.late_omitted", name=job.name)
+        elif allowed and scheduler is not None:
+            reason, text = "busy", t("telegram.late_busy", name=job.name)         # run_now said no: already running
+        else:
+            reason, text = "refused", t("telegram.late_refused", name=job.name)   # off, not approved, or no scheduler
+        with self._db().write() as u:
+            u.journal.add("note", t("telegram.late_journal", name=job.name), actor=runner.SYSTEM, outcome="success",
+                          agent_slug=job.agent_slug, body=text,
+                          refs={"scheduled_job": job.id, "late_answer": reason})
+        return text

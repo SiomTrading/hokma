@@ -14,10 +14,11 @@ log = logging.getLogger("hokma.features")
 def routers() -> list[APIRouter]:
     from hokma.backup.api import create_router as backup_router
     from hokma.github_connect.api import router as github_router
+    from hokma.mail.api import router as mail_router
     from hokma.power.api import create_router as power_router
     from hokma.telegram.api import create_router as telegram_router
 
-    return [power_router(), telegram_router(), github_router, backup_router()]
+    return [power_router(), telegram_router(), github_router, mail_router, backup_router()]
 
 
 async def on_startup(app: FastAPI) -> None:

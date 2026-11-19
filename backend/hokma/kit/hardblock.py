@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from hokma.i18n import t
 from hokma.kit import guard
 from hokma.kit.guard import _fold, under_any
+from hokma.permissions.modes import ALWAYS_ASK
 
 BLOCK = 2
 RULES = ("delete", "hokma_internal", "outside_workdir", "secrets", "real_money")
@@ -1906,6 +1907,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = json.loads(guard.read_stdin_text())
         block = evaluate(payload, ctx)
         if block is None:
+            if payload.get("tool_name") in ALWAYS_ASK:      # Claude Code in auto mode: this call still needs the owner
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask"}}))
             return 0
         log_block(ctx, str(payload.get("tool_name", "")), block)
         print(f"HOKMA_BLOCKED {block.rule}", file=sys.stderr)

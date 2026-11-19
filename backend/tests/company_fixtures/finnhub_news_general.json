@@ -1,0 +1,5 @@
+[
+  {"category": "general", "datetime": 1731060000, "headline": "Stocks open higher ahead of inflation data", "id": 1, "image": "", "related": "", "source": "Reuters", "summary": "Futures point up.", "url": "https://example.com/a"},
+  {"category": "general", "datetime": 1731063600, "headline": "Fed speakers due today", "id": 2, "image": "", "related": "", "source": "Bloomberg", "summary": "Two speakers.", "url": "https://example.com/b"},
+  {"category": "general", "datetime": 1731057000, "headline": "Oil slips on demand worries", "id": 3, "image": "", "related": "", "source": "CNBC", "summary": "Brent down.", "url": "https://example.com/c"}
+]

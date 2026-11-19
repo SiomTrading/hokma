@@ -37,7 +37,9 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "bug_update", "bug_list", "docs_search", "docs_list", "notify_owner",
                 "desk_list", "desk_show", "desk_create", "desk_configure", "trash_move", "market_quote",
                 "market_candles", "company_profile", "company_news", "earnings_calendar", "earnings_surprises",
-                "basic_financials"}
+                "basic_financials", "economic_calendar", "market_news", "watchlist_all", "today_show", "today_configure",
+                "broker_list", "account_create", "account_reset", "desk_assign_account", "desk_unassign_account",
+                "gmail_search", "gmail_read", "gmail_send"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]
     assert all(t["inputSchema"]["additionalProperties"] is False for t in listed)
@@ -633,7 +635,7 @@ def test_desk_tools_are_declared_with_strict_schemas():
     assert listed["desk_list"]["inputSchema"]["properties"] == {}
     assert listed["desk_show"]["inputSchema"]["required"] == []
     assert {n for n in hokma_tools.TOOLS if n.startswith("desk_") and hokma_tools.TOOLS[n][4]} == {
-        "desk_create", "desk_configure"}
+        "desk_create", "desk_configure", "desk_assign_account", "desk_unassign_account"}
 
 
 def test_desk_list_gives_id_name_and_status_and_leaves_archived_out(two_desks, db):

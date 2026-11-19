@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import { cx, Menu, MenuItem, Pill } from "@/design";
 import { useI18n } from "@/i18n";
+import { AssignAccount } from "./AssignAccount";
 import { DeleteDeskModal } from "./DeleteDeskModal";
-import { formatCapital, formatPercent, formatResult, resultTone } from "./format";
+import { formatBalance, formatCapital, formatPercent, formatResult, resultTone } from "./format";
 import type { DeskSummary } from "./types";
 
 interface Props {
@@ -15,6 +16,7 @@ export function DeskCard({ desk, onOpen }: Props) {
   const { t, locale } = useI18n();
   const [menu, setMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [assigning, setAssigning] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const paused = desk.status === "paused";
   const today = formatResult(desk.today, locale);
@@ -42,22 +44,40 @@ export function DeskCard({ desk, onOpen }: Props) {
           <div className="mono">{desk.drawdown === null ? t("desks.stat.none") : formatPercent(desk.drawdown, locale)}</div>
         </div>
       </div>
+      <div className="desk-card-account">
+        {desk.account ? (
+          <>
+            <span className="desk-card-acct-name">{desk.account.name}<small>{desk.account.broker}</small></span>
+            <span className="desk-card-acct-nums">
+              <span><span className="lbl">{t("desks.accounts.balance")}</span><b className="mono">{formatBalance(desk.account.balance.cash, locale, t("desks.accounts.unavailable"))}</b></span>
+              <span><span className="lbl">{t("desks.kpi.equity")}</span><b className="mono">{formatBalance(desk.account.balance.equity, locale, t("desks.accounts.unavailable"))}</b></span>
+            </span>
+          </>
+        ) : (
+          <span>{t("desks.card.noAccount")}</span>
+        )}
+      </div>
       <div className="desk-card-foot">
         <span>{t("desks.card.working", { n: String(desk.agents_working), total: String(desk.agents_total) })}</span>
         <span className="desk-card-pills">
           {desk.budget_state !== "ok" ? (
             <Pill tone={desk.budget_state === "exhausted" ? "bad" : "warn"}>{t(`desks.budget.${desk.budget_state}`)}</Pill>
           ) : null}
-          <Pill>{t("desks.mode.simulation")}</Pill>
         </span>
       </div>
     </button>
+      {desk.account ? null : (
+        <button type="button" className="desk-card-assign" onClick={() => setAssigning(true)}>
+          {t("desks.card.assign")}
+        </button>
+      )}
       <button ref={trigger} type="button" className="desk-card-more" aria-label={t("desks.card.options", { name: desk.name })} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
         ···
       </button>
       <Menu open={menu} onClose={() => setMenu(false)} label={t("desks.card.options", { name: desk.name })} triggerRef={trigger} className="desk-card-menu">
         <MenuItem onClick={() => { setMenu(false); setDeleting(true); }}>{t("desks.delete.button")}</MenuItem>
       </Menu>
+      {assigning ? <AssignAccount desk={desk} onClose={() => setAssigning(false)} /> : null}
       {deleting ? <DeleteDeskModal desk={desk} onClose={() => setDeleting(false)} /> : null}
     </div>
   );

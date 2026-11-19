@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from hokma.broker import service as broker_service
 from hokma.db import Database, DbError, IntegrityViolation, NotFound, ValidationError, get_database
 from hokma.db.repos import desks as repo
 from hokma.db.repos.base import UNSET
@@ -158,6 +159,7 @@ def _view(u, desk: repo.Desk, *, detail: bool) -> dict[str, Any]:
     out["agents_working"] = sum(1 for a in agents if a.active and a.agent_slug in working)
     out["today"] = 0                    # no simulated trades yet (step 4)
     out["drawdown"] = None
+    out["account"] = broker_service.desk_account(u, desk.id)
     out["tokens_week"] = week["used"]
     out["budget_state"] = week["state"]
     if detail:

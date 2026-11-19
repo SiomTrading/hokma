@@ -160,6 +160,14 @@ def create_router() -> APIRouter:
         except AgentsError as exc:
             raise _fail(exc) from exc
 
+    @router.post("/api/scheduled-jobs/template/premarket-briefing")
+    def premarket_briefing(x_hokma_token: str = Header(default=""), token: str = Query(default="")):
+        _auth(x_hokma_token, token)
+        try:
+            return jobs.ensure_template()
+        except AgentsError as exc:
+            raise _fail(exc) from exc
+
     @router.put("/api/scheduled-jobs/{job_id}")
     def update_job(job_id: int, body: JobBody, x_hokma_token: str = Header(default=""),
                    token: str = Query(default="")):
@@ -184,6 +192,14 @@ def create_router() -> APIRouter:
         _auth(x_hokma_token, token)
         try:
             return jobs.activate(job_id, confirmed=body.confirm)
+        except AgentsError as exc:
+            raise _fail(exc) from exc
+
+    @router.post("/api/scheduled-jobs/{job_id}/run", status_code=202)
+    async def run_job(job_id: int, x_hokma_token: str = Header(default=""), token: str = Query(default="")):
+        _auth(x_hokma_token, token)
+        try:
+            return jobs.run_now(job_id)
         except AgentsError as exc:
             raise _fail(exc) from exc
 

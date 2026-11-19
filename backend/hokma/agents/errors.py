@@ -31,6 +31,8 @@ _TEXT: dict[str, Callable[[], str]] = {
     "confirmation_required": lambda: t("agents.error.confirmation_required"),
     "agent_off": lambda: t("agents.error.agent_off"),
     "job_running": lambda: t("agents.error.job_running"),
+    "job_not_approved": lambda: t("agents.error.job_not_approved"),
+    "scheduler_off": lambda: t("agents.error.scheduler_off"),
     "name_too_long": lambda: t("agents.error.name_too_long"),
     "run_in_past": lambda: t("agents.error.run_in_past"),
 }

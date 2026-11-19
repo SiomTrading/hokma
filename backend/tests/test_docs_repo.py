@@ -14,6 +14,9 @@ from hokma.db.errors import DuplicateDocument, NotFound, ValidationError
 from hokma.db.migrate import MIGRATIONS_DIR
 from hokma.db.paths import db_path
 from hokma.db.repos.documents import fold, make_excerpt, query_terms
+from hokma.db.migrate import discover
+
+LATEST = discover()[-1][0]                      # the newest migration: no list of versions to update
 
 SHA_A, SHA_B, SHA_C = "a" * 64, "b" * 64, "c" * 64
 
@@ -77,7 +80,7 @@ def test_0007_applies_on_top_of_a_0006_database_without_touching_data(env):
     with database.write() as u:
         u.projects.create("Old project", "/p/old")
     result = migrate()
-    assert result.applied == [7, 8, 9, 10, 11, 12, 13, 14, 15, 16] and result.version == 16
+    assert result.applied == list(range(7, LATEST + 1)) and result.version == LATEST
     with database.read() as u:
         assert [p.name for p in u.projects.list()] == ["Old project"]
         assert u.documents.find_project_library(u.projects.list()[0].id) is None

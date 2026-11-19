@@ -12,6 +12,9 @@ from hokma.db import IntegrityViolation, get_database, migrate
 from hokma.db.dbconfig import DatabaseConfig, save_config
 from hokma.db.migrate import MIGRATIONS_DIR
 from hokma.db.paths import db_path
+from hokma.db.migrate import discover
+
+LATEST = discover()[-1][0]                      # the newest migration: no list of versions to update
 
 SHA_A, SHA_B = "a" * 64, "b" * 64
 
@@ -50,7 +53,7 @@ def test_0008_applies_on_a_0_0_26_database_without_touching_its_data(env):
         u.session.execute("INSERT INTO doc_chunks (document_id, ord, section, body, search_text) "
                           "VALUES (:d, 0, 'p1', 'alpha beta gamma', 'alpha beta gamma')", {"d": doc_id})
     result = migrate()
-    assert result.applied == [8, 9, 10, 11, 12, 13, 14, 15, 16] and result.version == 16 and result.backup is not None
+    assert result.applied == list(range(8, LATEST + 1)) and result.version == LATEST and result.backup is not None
     with database.read() as u:
         student = u.library.find_student_library()                 # the data step moved the document there
         assert u.documents.list_documents(library.id) == []

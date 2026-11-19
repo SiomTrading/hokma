@@ -191,7 +191,7 @@ class DirectSession:
         if not verdict.allowed:
             yield {"type": "result", "text": verdict.text, "is_error": True}
             return
-        if self.ctx.mode != "auto" and name not in tools.READ_ONLY:
+        if modes.asks(self.ctx.mode, name) and name not in tools.READ_ONLY:
             request_id = uuid.uuid4().hex[:12]
             fut: asyncio.Future = asyncio.get_running_loop().create_future()
             self._answers[request_id] = fut

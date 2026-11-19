@@ -39,3 +39,27 @@ export function connectionErrorText(cause: unknown): string {
 export function isStoreUnavailable(cause: unknown): boolean {
   return cause instanceof ApiError && cause.code === "connections.store_unavailable";
 }
+
+export interface MailState {
+  connected: boolean;
+  email: string | null;
+  store_available: boolean;
+  apppasswords_url: string;
+}
+
+/** Gmail of the student (app password). The password goes out once and never comes back. */
+export const mailApi = {
+  state: () => api.get<MailState>("/api/mail"),
+  connect: (email: string, password: string) => api.put<{ connected: true; email: string }>("/api/mail", { email, password }, { timeoutMs: 45_000 }),
+  disconnect: () => api.delete<{ connected: false }>("/api/mail"),
+  notify: () => api.get<MailNotify>("/api/mail/notify"),
+  saveNotify: (fallback: boolean, jobs: number[]) => api.put<MailNotify>("/api/mail/notify", { fallback, jobs }),
+  sendTest: () => api.post<{ sent: true }>("/api/mail/notify/test", {}, { timeoutMs: 45_000 }),
+};
+
+export interface MailNotify {
+  connected: boolean;
+  email: string | null;
+  fallback: boolean;
+  jobs: Array<{ id: number; name: string; mail: boolean }>;
+}

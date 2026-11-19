@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale, t } from "@/i18n";
 import { renderShell } from "@/test/utils";
 import { resetDesksStore } from "./store";
+import { TODAY_EMPTY } from "./todayFixture";
 import type { DeskSummary } from "./types";
 
 function desk(patch: Partial<DeskSummary>): DeskSummary {
@@ -34,6 +35,7 @@ function stubApi(desks: DeskSummary[], deleteStatus = 200) {
       }
       if (match && method === "GET") return json({ id: Number(match[1]), name: "Mesa A", capital: 10000, assets: [] });
       if (url === "/api/desks") return json({ desks });
+      if (url === "/api/today") return json(TODAY_EMPTY);
       return json({});
     }),
   );
@@ -43,7 +45,7 @@ function stubApi(desks: DeskSummary[], deleteStatus = 200) {
 const menu = () => screen.getByRole("complementary", { name: t("nav.menu") });
 const openFund = async () => {
   await userEvent.click(within(menu()).getByRole("button", { name: /Mesas de dinero/ }));
-  await screen.findByRole("heading", { name: t("desks.fund.title") });
+  await screen.findByRole("heading", { name: t("desks.fund.tab") });
 };
 const deletes = (calls: Call[]) => calls.filter((c) => c.method === "DELETE");
 
@@ -92,7 +94,7 @@ describe("delete a desk", () => {
     await userEvent.type(within(dialog).getByLabelText("Escribe Mesa A para confirmar"), "Mesa A");
     await userEvent.click(within(dialog).getByRole("button", { name: "Eliminar mesa" }));
     await screen.findByText(t("desks.fund.empty.title"));
-    expect(screen.getByRole("heading", { name: t("desks.fund.title") })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: t("desks.fund.tab") })).toBeInTheDocument();
     expect(deletes(calls)).toHaveLength(1);
     expect(within(menu()).queryByRole("button", { name: /^Mesa A, / })).not.toBeInTheDocument();
   });

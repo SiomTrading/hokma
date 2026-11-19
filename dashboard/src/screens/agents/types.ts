@@ -63,6 +63,8 @@ export interface JobLast {
   tokens: number;
   /** Permission requests refused during a run that ended `done`: it did not do everything. */
   denied?: number;
+  /** The time this run should have happened, when Hokma was closed and it ran on opening. */
+  late_planned?: string | null;
 }
 
 export interface JobItem {

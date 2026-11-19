@@ -84,13 +84,12 @@ afterEach(() => {
 });
 
 describe("desk bar", () => {
-  it("shows the desk selector, the Simulation pill, capital, result of the day, drawdown and a disabled Ctrl K", async () => {
+  it("shows the desk selector, capital, result of the day, drawdown and a disabled Ctrl K", async () => {
     stubServer();
     open("operations");
     const bar = await screen.findByRole("banner");
     expect(within(bar).getByRole("combobox", { name: t("desks.bar.pick") })).toHaveValue("7");
     expect(within(bar).getAllByRole("option").map((o) => o.textContent)).toEqual(["Futuros NQ", "Swing acciones"]);
-    expect(within(bar).getByText(t("desks.mode.simulation"))).toBeInTheDocument();
     expect(within(bar).getByText("10.000")).toBeInTheDocument();
     expect(within(bar).getByText("0,00")).toBeInTheDocument();
     expect(within(bar).getByText(t("desks.stat.none"))).toBeInTheDocument();
@@ -155,7 +154,7 @@ describe("Settings: objective and capital", () => {
     await userEvent.clear(capital);
     await userEvent.type(capital, "50");
     await userEvent.click(screen.getByRole("button", { name: t("desks.cfg.save") }));
-    expect(await screen.findByText(/El capital simulado va desde 100/)).toBeInTheDocument();
+    expect(await screen.findByText(/El capital va desde 100/)).toBeInTheDocument();
     expect(sent(server, "PATCH", "/api/desks/7")).toHaveLength(0);
   });
 
@@ -212,14 +211,14 @@ describe("Settings: menu", () => {
     }
   });
 
-  it("marks Trading accounts with a neutral Simulation pill, no date promised", async () => {
+  it("marks Trading accounts with a neutral Later pill, no date promised", async () => {
     stubServer();
     open("config");
     await userEvent.click(await screen.findByRole("button", { name: /Cuentas de trading/ }));
     const nav = screen.getByRole("navigation", { name: t("desks.cfg.nav") });
     expect(within(nav).getByText(t("desks.cfg.sim"))).toBeInTheDocument();
     expect(within(nav).queryByText(/^Despu/)).not.toBeInTheDocument();
-    expect(getCatalog("en")["desks.cfg.sim"]).toBe("Simulation");
+    expect(getCatalog("en")["desks.cfg.sim"]).toBe("Later");
   });
 });
 
@@ -245,7 +244,7 @@ describe("Settings: connections and empty sections", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Memoria y mesas conectadas/ }));
     expect(screen.queryByText(/paso \d/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Cuentas de trading/ }));
-    expect(screen.getByText(/todo lo que toque dinero real sigue bloqueado/)).toBeInTheDocument();
+    expect(screen.getByText(/Todo lo que toque dinero real sigue bloqueado/)).toBeInTheDocument();
   });
 });
 
@@ -263,7 +262,7 @@ describe("Settings texts", () => {
     setLocale("en");
     stubServer();
     open("config");
-    expect(await screen.findByLabelText("Simulated capital")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Capital")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Memory and linked desks" })).toBeInTheDocument();
   });

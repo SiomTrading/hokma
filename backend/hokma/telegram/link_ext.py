@@ -4,6 +4,7 @@ and the approval prompts name where a permission comes from and say so when a bu
 from __future__ import annotations
 
 import contextlib
+import secrets
 import time
 from typing import Any, Optional
 
@@ -111,3 +112,47 @@ class HokmaApprovalsUI(ApprovalsUI):
             with contextlib.suppress(Exception):
                 await query.edit_message_reply_markup(reply_markup=None)
         return None
+
+
+class LateRunUI(HokmaApprovalsUI):
+    """The two buttons under "this routine was missed and is too old": `lr:run:<token>` runs it now, `lr:skip:<token>`
+    leaves it. The token is random, single use and kept only here: a button of an earlier run (or a forged one) finds
+    nothing and is refused, like the `ea:` buttons."""
+
+    on_late: Any = None                      # async (job_id, choice) -> the text that replaces the question
+
+    def __init__(self, *args: Any, **kw: Any) -> None:
+        super().__init__(*args, **kw)
+        self._late: dict[str, int] = {}      # token -> routine the question was about
+
+    async def send_late_prompt(self, chat_id, thread_id, text: str, job_id: int, run_label: str, skip_label: str):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        token = secrets.token_hex(6)
+
+        def build():
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(run_label, callback_data=f"lr:run:{token}"),
+                                              InlineKeyboardButton(skip_label, callback_data=f"lr:skip:{token}")]])
+            return text, keyboard, lambda _msg: self._late.__setitem__(token, job_id)
+        return await self._send_prompt("send_late_prompt", chat_id, build, parse_mode=None, thread_id=thread_id)
+
+    async def handle_callback_query(self, update: Any, context: Any = None) -> None:
+        query = update.callback_query
+        data = getattr(query, "data", None) or ""
+        if not data.startswith("lr:"):
+            return await super().handle_callback_query(update, context)
+        parts = data.split(":")
+        if len(parts) != 3 or parts[1] not in ("run", "skip") or self.on_late is None:
+            return await query.answer(text=self._t("approval_invalid"))
+        if not await self._callback_authorized(query, self._callback_ctx(query), f"⛔ {self._t('approval_not_authorized')}"):
+            return
+        job_id = self._late.pop(parts[2], None)
+        if job_id is None:                                # answered already, or from before a restart
+            await query.answer(text=self._t("approval_gone"))
+            with contextlib.suppress(Exception):
+                await query.edit_message_reply_markup(reply_markup=None)
+            return
+        answer = await self.on_late(job_id, parts[1])
+        await query.answer()
+        with contextlib.suppress(Exception):
+            await query.edit_message_text(text=answer, reply_markup=None)

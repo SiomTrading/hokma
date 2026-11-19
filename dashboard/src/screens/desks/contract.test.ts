@@ -37,6 +37,15 @@ describe("the shapes the desks server really sends", () => {
     expect(team[0]!.cannot).toEqual([]);
   });
 
+  it("desks: the optional account arrives with its balance, and an old answer without it still reads", async () => {
+    const base = { id: 7, project_id: 3, name: "Futuros", capital: 10000, currency: "USD", status: "active", template: "minimal" };
+    const account = { id: 2, name: "Swing", broker: "Hokma Simulated", balance: { cash: 25000, equity: 25000, currency: "USD" }, as_of: "2026-11-18T12:00:00Z" };
+    answer({ desks: [{ ...base, account }, { ...base, id: 8, account: null }, { ...base, id: 9 }] });
+    const desks = await desksApi.list();
+    expect(desks.map((d) => d.account ?? null)).toEqual([account, null, null]);
+    expect(desks[0]!.account!.balance.cash).toBe(25000);
+  });
+
   it("conversation: the numeric id of the database is sent to the chat socket as text", async () => {
     answer({ conversation_id: 12, desk_id: 7, project_id: 3, agent_slug: "desk-chief", model: "sonnet", engine: "claude_code", title: "Futuros", created: true });
     expect(await deskChatApi.conversation(7)).toEqual({ id: "12", agent: "desk-chief", model: "sonnet" });

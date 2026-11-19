@@ -10,8 +10,10 @@ import sqlite3
 from pgsupport import pg_admin_url, pg_url  # noqa: F401  (fixtures)
 
 from hokma.db import migrate
-from hokma.db.migrate import MIGRATIONS_DIR
+from hokma.db.migrate import MIGRATIONS_DIR, discover
 from hokma.db.postgres import PostgresBackend
+
+LATEST = discover()[-1][0]                      # the newest migration: no list of versions to update
 
 OLD = ("0001_base.sql", "0002_chat_state.sql", "0003_permissions_trash.sql", "0004_guard_session.sql")
 
@@ -49,7 +51,7 @@ def test_b01_sqlite_existing_conversations_keep_their_project_and_follow(tmp_pat
     con.close()
 
     result = migrate(path, seed=False)
-    assert result.applied == [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] and result.backup is not None
+    assert result.applied == list(range(5, LATEST + 1)) and result.backup is not None
 
     con = sqlite3.connect(str(path))
     after = con.execute("SELECT id, project_id, title, pinned, archived FROM conversations ORDER BY id").fetchall()
@@ -80,7 +82,7 @@ def test_b01_postgres_same_result(pg_url, tmp_path):
         session.close()
 
     result = migrate(backend=backend, seed=False)
-    assert result.applied == [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    assert result.applied == list(range(5, LATEST + 1))
 
     session = backend.connect()
     try:

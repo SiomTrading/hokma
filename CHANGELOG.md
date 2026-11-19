@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.5
+
+- New: Fund is your home: total Capital across your desks, the Today card (watchlist of all desks, economic calendar, market news, premarket briefing) and every desk with its account and broker. Ask Hokma in the chat to change what Today shows.
+- New: Premarket briefing routine ready to turn on from Tasks, delivered by Telegram, and "Run now" for any approved routine.
+- New: A routine missed while your computer was off runs once when Hokma opens; later than its window, Hokma asks you on Telegram.
+- New: Broker tab: Hokma's broker on real prices with editable commission and slippage; create accounts, reset them and assign one per desk.
+- New: Gmail with an app password: search and read mail as quoted data, send only with your permission, and routine notices by email.
+
 ## 1.0.4
 
 - New: Desk agents read company data from your connections: profile, news, earnings calendar, EPS surprises and key financials.

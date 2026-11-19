@@ -18,7 +18,7 @@ const STEPS = ["focus", "team", "rules", "assets"] as const;
 const TEMPLATES: readonly WizardTemplate[] = ["minimal", "standard", "debate"];
 const SPEND: Record<WizardTemplate, "ok" | "warn" | "bad"> = { minimal: "ok", standard: "warn", debate: "bad" };
 
-/** The four-step assistant: focus, team of agents, rules (token budget) and assets. Creates a desk in simulation. */
+/** The four-step assistant: focus, team of agents, rules (token budget) and assets. Creates a desk. */
 export function TemplateWizard({ onClose, onCreated }: Props) {
   const { t, locale } = useI18n();
   const [step, setStep] = useState(0);

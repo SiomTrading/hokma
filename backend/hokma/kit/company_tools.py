@@ -44,6 +44,7 @@ CACHE_DEFAULT = 300
 CACHE_MAX = 200
 DENIED_MEMORY = 3600
 CALLS_PER_MINUTE = {"finnhub": 30, "alpaca": 100}       # Finnhub free plan: 60 a minute, shared with the chart
+IMPACT = {"low": 1, "medium": 2, "high": 3}              # Finnhub's own words for how much an event moves markets
 SYMBOL = re.compile(r"[A-Z0-9]{1,6}([.\-][A-Z])?")
 
 METRICS = ("52WeekHigh", "52WeekLow", "marketCapitalization", "peTTM", "peBasicExclExtraTTM", "forwardPE", "psTTM",
@@ -55,8 +56,8 @@ METRICS = ("52WeekHigh", "52WeekLow", "marketCapitalization", "peTTM", "peBasicE
 # provider id -> (name shown, tools it has)
 PROVIDERS = {
     "finnhub": ("Finnhub", ("company_profile", "company_news", "earnings_calendar", "earnings_surprises",
-                            "basic_financials")),
-    "alpaca": ("Alpaca", ("company_news",)),
+                            "basic_financials", "economic_calendar", "market_news")),
+    "alpaca": ("Alpaca", ("company_news", "market_news")),
 }
 ORDER = ("finnhub", "alpaca")
 
@@ -64,7 +65,8 @@ ORDER = ("finnhub", "alpaca")
 def _what(tool: str) -> str:
     return {"company_profile": t("company.what.profile"), "company_news": t("company.what.news"),
             "earnings_calendar": t("company.what.calendar"), "earnings_surprises": t("company.what.surprises"),
-            "basic_financials": t("company.what.financials")}[tool]
+            "basic_financials": t("company.what.financials"), "economic_calendar": t("company.what.economic"),
+            "market_news": t("company.what.market_news")}[tool]
 
 
 Fetch = Callable[[str, dict], tuple[int, str]]
@@ -80,6 +82,11 @@ def reset() -> None:
     _cache.clear()
     _denied.clear()
     _limiters.clear()
+
+
+def forget_cache() -> None:
+    """Forget only the short cache (the Refresh button): the limiters and remembered refusals stay."""
+    _cache.clear()
 
 
 class _Skip(Exception):
@@ -228,6 +235,33 @@ def _finnhub(tool: str, args: dict, secret: str, fetch: Fetch) -> dict:
              "quarter": r.get("quarter"), "eps_estimate": _num(r.get("epsEstimate")), "eps_actual": _num(r.get("epsActual")),
              "revenue_estimate": _num(r.get("revenueEstimate")), "revenue_actual": _num(r.get("revenueActual"))}
             for r in rows[:MAX_CALENDAR]]}
+    if tool == "market_news":
+        data = get("news", category=args["categoria"])
+        if not isinstance(data, list):
+            raise _Skip(t("company.err.bad_response", provider="{provider}"))
+        rows = sorted((r for r in data if isinstance(r, dict) and r.get("headline")),
+                      key=lambda r: _num(r.get("datetime")) or 0, reverse=True)[:args["limite"]]
+        if not rows:
+            raise _Empty
+        return {"category": args["categoria"], "count": len(rows), "news": [
+            {"time": _iso(r.get("datetime")), "headline": _text(r.get("headline")), "summary": _text(r.get("summary")),
+             "source": _text(r.get("source")), "url": r.get("url")} for r in rows]}
+    if tool == "economic_calendar":
+        data = get("calendar/economic", **{"from": args["desde"].isoformat(), "to": args["hasta"].isoformat()})
+        rows = data.get("economicCalendar") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            raise _Skip(t("company.err.bad_response", provider="{provider}"))
+        wanted = args["paises"]
+        rows = sorted((r for r in rows if isinstance(r, dict) and r.get("event")
+                       and (not wanted or str(r.get("country", "")).upper() in wanted)
+                       and IMPACT.get(str(r.get("impact", "")).lower(), 0) >= IMPACT[args["importancia"]]),
+                      key=lambda r: str(r.get("time")))
+        if not rows:
+            raise _Empty
+        return {"count": min(len(rows), MAX_CALENDAR), "truncated": len(rows) > MAX_CALENDAR, "events": [
+            {"time": r.get("time"), "country": r.get("country"), "event": _text(r.get("event")),
+             "impact": r.get("impact"), "unit": r.get("unit"), "actual": _num(r.get("actual")),
+             "estimate": _num(r.get("estimate")), "previous": _num(r.get("prev"))} for r in rows[:MAX_CALENDAR]]}
     if tool == "earnings_surprises":
         data = get("stock/earnings", symbol=symbol, limit=args["limite"])
         if not isinstance(data, list):
@@ -274,7 +308,8 @@ def _alpaca(tool: str, args: dict, secret: str, fetch: Fetch) -> dict:
         headers = {"APCA-API-KEY-ID": keys["key_id"], "APCA-API-SECRET-KEY": keys["secret"]}
     except (ValueError, KeyError, TypeError):
         raise _BadKey from None
-    query = urllib.parse.urlencode({"symbols": args["symbol"], "start": args["desde"].isoformat() + "T00:00:00Z",
+    symbol = args.get("symbol")                                              # none: general market news
+    query = urllib.parse.urlencode({**({"symbols": symbol} if symbol else {}), "start": args["desde"].isoformat() + "T00:00:00Z",
                                     "end": args["hasta"].isoformat() + "T23:59:59Z", "limit": args["limite"],
                                     "sort": "desc", "include_content": "false"})
     status, text = fetch(f"{ALPACA_NEWS}?{query}", headers)
@@ -286,7 +321,7 @@ def _alpaca(tool: str, args: dict, secret: str, fetch: Fetch) -> dict:
     rows = [r for r in rows if isinstance(r, dict) and r.get("headline")][:args["limite"]]
     if not rows:
         raise _Empty
-    return {"symbol": args["symbol"], "count": len(rows), "news": [
+    return {**({"symbol": symbol} if symbol else {}), "count": len(rows), "news": [
         {"time": r.get("created_at"), "headline": _text(r.get("headline")), "summary": _text(r.get("summary")),
          "source": _text(r.get("source")), "url": r.get("url")} for r in rows]}
 
@@ -314,7 +349,7 @@ def _allowed(desk_id: int | None) -> set[str] | None:
 
 
 def _missing(tool: str) -> str:
-    if tool == "company_news":
+    if tool in ("company_news", "market_news"):
         return t("company.err.missing_news")
     return t("company.err.missing")
 

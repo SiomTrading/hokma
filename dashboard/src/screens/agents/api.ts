@@ -19,4 +19,6 @@ export const jobsApi = {
   remove: (id: number) => api.delete<void>(`/api/scheduled-jobs/${id}`),
   activate: (id: number) => api.post<JobItem>(`/api/scheduled-jobs/${id}/activate`, { confirm: true }),
   deactivate: (id: number) => api.post<JobItem>(`/api/scheduled-jobs/${id}/deactivate`),
+  runNow: (id: number) => api.post<JobItem>(`/api/scheduled-jobs/${id}/run`),
+  addBriefing: () => api.post<JobItem>("/api/scheduled-jobs/template/premarket-briefing"),
 };

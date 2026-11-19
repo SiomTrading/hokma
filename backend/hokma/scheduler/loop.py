@@ -1,9 +1,11 @@
 """The loop that fires scheduled jobs while Hokma is open.
 
 - Every tick it runs the jobs that are due, are on and carry an approval of the owner.
-- A run that is more than GRACE late (Hokma was closed) is marked skipped, never executed late. After a sleep
-  (see `power.resume`) the runs that fell due while it slept are executed once each.
-- On startup every run that fell due while Hokma was closed is marked skipped.
+- A run that is more than GRACE late is marked skipped. After a sleep (see `power.resume`) the runs that fell due
+  while it slept are executed once each.
+- On startup a run missed while Hokma was closed (one per routine, however many times it was missed) runs once and
+  says so (`late_planned`) when it is inside the window: 24 h, 3 h for the briefing. Older than that it is not run:
+  it is marked skipped and the owner is asked (Telegram) whether to run it now.
 """
 from __future__ import annotations
 
@@ -16,11 +18,14 @@ from hokma.db import Database, DbError, from_db_time, get_database
 from hokma.i18n import t
 from hokma.power import resume
 from hokma.scheduler import runner
+from hokma.scheduler.service import BRIEFING_NAME
 
 log = logging.getLogger("hokma.scheduler")
 
 DEFAULT_TICK = 15.0
 GRACE = timedelta(seconds=120)
+LATE_WINDOW = resume.WINDOW                  # how late a missed routine may still run when Hokma opens
+BRIEFING_WINDOW = timedelta(hours=3)         # the premarket briefing is worth nothing after the market opens
 MAX_PARALLEL = 3
 OUTCOME_LISTENERS: list = []      # callables `(job, outcome)` told after each run; a failing one is logged, never raised
 
@@ -124,17 +129,31 @@ class Scheduler:
         skipped: list[runner.RunOutcome] = []
         with self.db.read() as u:
             due = u.scheduled_jobs.due(now)
+        briefing = self._briefing_id() if due else None
         for job in due:
             if job.id in self._running or job.approval_id is None:
                 continue
             planned = from_db_time(job.next_run_at) if job.next_run_at else now
-            if startup or now - planned > (grace or self.grace):
-                outcome = runner.skip(self.db, job, now, "missed")
+            limit = LATE_WINDOW if startup else (grace or self.grace)
+            if job.id == briefing or job.name == BRIEFING_NAME:
+                limit = min(limit, BRIEFING_WINDOW)
+            late = now - planned
+            if late > limit:
+                # Past the window at startup the owner decides (the skip is recorded, the buttons come by Telegram).
+                outcome = (runner.skip(self.db, job, now, "asked", limit) if startup
+                           else runner.skip(self.db, job, now, "missed"))
                 skipped.append(outcome)
                 self._notify(job, outcome)
                 continue
-            self._launch(job, now)
+            self._launch(job, now, late_planned=job.next_run_at if late > GRACE else None)
         return skipped
+
+    def _briefing_id(self) -> int | None:
+        from hokma.today.service import get_config
+        try:
+            return get_config(self.db)["briefing_job_id"]
+        except Exception:
+            return None
 
     def _ready(self) -> bool:
         from hokma.db import current_version
@@ -151,10 +170,17 @@ class Scheduler:
             except Exception:
                 log.exception("outcome listener failed")
 
-    def _launch(self, job, now: datetime) -> None:
+    def run_now(self, job) -> bool:
+        """The owner asked to run it now: same run, same notice, but the planned `next_run_at` stays. False if it runs."""
+        if job.id in self._running:
+            return False
+        self._launch(job, datetime.now(timezone.utc), move_on=False)
+        return True
+
+    def _launch(self, job, now: datetime, move_on: bool = True, late_planned: str | None = None) -> None:
         async def go() -> None:
             async with self._gate:
-                outcome = await self.job_runner.run(job, now)
+                outcome = await self.job_runner.run(job, now, move_on=move_on, late_planned=late_planned)
                 log.info("scheduled job %s: %s", job.name, outcome.status)
                 self._notify(job, outcome)
 

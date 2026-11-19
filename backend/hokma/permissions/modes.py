@@ -14,11 +14,17 @@ from typing import Any
 
 MODES = ("ask", "auto")
 DEFAULT_MODE = "ask"
+ALWAYS_ASK = ("mcp__hokma__gmail_send",)       # what leaves the computer on the owner's behalf: asked in `auto` too
 FLAG = {"ask": "default", "auto": "bypassPermissions"}
 
 
 def flag_for(mode: str) -> str:
     return FLAG.get(mode, FLAG[DEFAULT_MODE])
+
+
+def asks(mode: str, tool: str) -> bool:
+    """Whether the owner must answer before this call runs. `tool` is the plain or the `mcp__hokma__` name."""
+    return mode != "auto" or tool.removeprefix("mcp__hokma__") in (x.removeprefix("mcp__hokma__") for x in ALWAYS_ASK)
 
 
 def current_mode(db: Any = None) -> str:

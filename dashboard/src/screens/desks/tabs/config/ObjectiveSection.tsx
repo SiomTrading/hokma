@@ -14,7 +14,7 @@ interface Props {
   onSaved: (detail: DeskDetail) => void;
 }
 
-/** Name, focus, simulated capital, monthly goal and mandate. One Save button writes only what changed. */
+/** Name, focus, capital, monthly goal and mandate. One Save button writes only what changed. */
 export function ObjectiveSection({ deskId, detail, onSaved }: Props) {
   const { t, locale } = useI18n();
   const [name, setName] = useState(detail.name);

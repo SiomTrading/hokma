@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from hokma.agents.files import TIER_MODEL
@@ -24,6 +24,7 @@ from hokma.engines.registry import build_adapter, tier_of
 from hokma.i18n import t
 from hokma.kit import instructions
 from hokma.kit.launch import LaunchSpec, prepare_claude_launch
+from hokma.power import resume
 from hokma.permissions import checkpoints, guard_log, modes
 from hokma.scheduler import schedule
 
@@ -43,6 +44,7 @@ class RunOutcome:
     status: str                   # done | failed | skipped
     detail: str = ""
     denied: int = 0               # permission requests refused during a `done` run (it did not do everything)
+    late_planned: str | None = None   # the planned time of a run that went out late (Hokma was closed)
 
 
 def _now() -> datetime:
@@ -60,11 +62,13 @@ def advance(job: ScheduledJob, now: datetime) -> tuple[datetime | None, bool]:
     return following, following is not None
 
 
-def skip(db: Database, job: ScheduledJob, now: datetime, reason: str) -> RunOutcome:
-    """The run did not happen (Hokma was closed or the agent is off). Never executed late."""
+def skip(db: Database, job: ScheduledJob, now: datetime, reason: str, window: timedelta = resume.WINDOW) -> RunOutcome:
+    """The run did not happen: the agent is off, or it fell due before the late window (`asked`: the owner is asked)."""
     following, keep = advance(job, now)
     planned = job.next_run_at or ""
-    body = t("sched.skip.agent_off", planned=planned) if reason == "agent_off" else t("sched.skip.missed", planned=planned)
+    body = (t("sched.skip.agent_off", planned=planned) if reason == "agent_off" else
+            t("sched.skip.asked", planned=planned, hours=int(window.total_seconds() // 3600)) if reason == "asked"
+            else t("sched.skip.missed", planned=planned))
     with db.write() as u:
         u.scheduled_jobs.update(job.id, next_run_at=following)
         if not keep:
@@ -75,9 +79,10 @@ def skip(db: Database, job: ScheduledJob, now: datetime, reason: str) -> RunOutc
     return RunOutcome(job.id, None, "skipped", reason)
 
 
-def _prepare(db: Database, job: ScheduledJob, now: datetime) -> tuple[int, str] | RunOutcome | None:
-    """Create the task, claim it, open the run and move the job on, in one transaction (so it can fire only once)."""
-    following, keep = advance(job, now)
+def _prepare(db: Database, job: ScheduledJob, now: datetime, move_on: bool = True) -> tuple[int, str] | RunOutcome | None:
+    """Create the task, claim it, open the run and move the job on, in one transaction (so it can fire only once).
+    `move_on=False` (a run the owner asked for now) leaves `next_run_at` and the on/off state as they were."""
+    following, keep = advance(job, now) if move_on else (job.next_run_at, True)
     try:
         with db.write() as u:
             agent = u.agents.find(job.agent_slug)
@@ -101,29 +106,30 @@ class JobRunner:
         self.adapters = {"claude_code": ClaudeCodeAdapter(self)}
         self._denied: dict[int, int] = {}                      # task id -> permission requests refused in that run
 
-    async def run(self, job: ScheduledJob, now: datetime | None = None) -> RunOutcome:
+    async def run(self, job: ScheduledJob, now: datetime | None = None, *, move_on: bool = True,
+                  late_planned: str | None = None) -> RunOutcome:
         now = now or _now()
-        prepared = _prepare(self.db, job, now)
+        prepared = _prepare(self.db, job, now, move_on)
         if isinstance(prepared, RunOutcome):
             return prepared
         if prepared is None:
-            return skip(self.db, job, now, "agent_off")
+            return skip(self.db, job, now, "agent_off") if move_on else RunOutcome(job.id, None, "skipped", "agent_off")
         task_id, model = prepared
         with self.db.read() as u:
             max_seconds = u.tasks.get(task_id).max_runtime_seconds
         try:
             text, usage = await asyncio.wait_for(self._execute(job, task_id, model), max_seconds)
         except asyncio.TimeoutError:
-            return self._fail(job, task_id, t("sched.error.timeout", seconds=max_seconds), "timed_out")
+            return self._fail(job, task_id, t("sched.error.timeout", seconds=max_seconds), "timed_out", late=late_planned)
         except asyncio.CancelledError:                                # bug 1134: shutdown, restart or update mid-run
-            self._fail(job, task_id, t("sched.error.interrupted"), "crashed")
+            self._fail(job, task_id, t("sched.error.interrupted"), "crashed", late=late_planned)
             raise
         except _RunFailed as exc:
-            return self._fail(job, task_id, str(exc), "failure", exc.usage)
+            return self._fail(job, task_id, str(exc), "failure", exc.usage, late=late_planned)
         except Exception as exc:                                      # never leave a task running
             log.exception("scheduled run %s crashed", job.name)
-            return self._fail(job, task_id, f"{type(exc).__name__}: {exc}", "crashed")
-        return self._finish(job, task_id, text, usage)
+            return self._fail(job, task_id, f"{type(exc).__name__}: {exc}", "crashed", late=late_planned)
+        return self._finish(job, task_id, text, usage, late_planned)
 
     # ------------------------------------------------------------------ process
 
@@ -206,7 +212,8 @@ class JobRunner:
 
     # ------------------------------------------------------------------ result
 
-    def _finish(self, job: ScheduledJob, task_id: int, text: str, usage: dict[str, Any]) -> RunOutcome:
+    def _finish(self, job: ScheduledJob, task_id: int, text: str, usage: dict[str, Any],
+                late: str | None = None) -> RunOutcome:
         summary = (text.strip() or t("sched.result.empty"))[:MAX_SUMMARY]
         denied = self._denied.pop(task_id, 0)
         if denied:                         # bug 1129: "finished" alone would hide that part of the work was refused
@@ -221,11 +228,11 @@ class JobRunner:
             u.journal.add("action", t("sched.journal.done", name=job.name), actor=SYSTEM,
                           outcome="partial" if denied else "success",
                           agent_slug=job.agent_slug, task_id=task_id, body=summary[:2000],
-                          refs={"scheduled_job": job.id})
-        return RunOutcome(job.id, task_id, "done", summary, denied)
+                          refs={"scheduled_job": job.id, **({"late_planned": late} if late else {})})
+        return RunOutcome(job.id, task_id, "done", summary, denied, late)
 
     def _fail(self, job: ScheduledJob, task_id: int, error: str, outcome: str,
-              usage: dict[str, Any] | None = None) -> RunOutcome:
+              usage: dict[str, Any] | None = None, late: str | None = None) -> RunOutcome:
         self._denied.pop(task_id, None)
         try:
             with self.db.write() as u:
@@ -235,10 +242,11 @@ class JobRunner:
                 u.tasks.fail(task_id, error)
                 u.journal.add("alert", t("sched.journal.failed", name=job.name), actor=SYSTEM, outcome="failure",
                               agent_slug=job.agent_slug, task_id=task_id, body=error[:2000],
-                              refs={"scheduled_job": job.id, "outcome": outcome})
+                              refs={"scheduled_job": job.id, "outcome": outcome,
+                                    **({"late_planned": late} if late else {})})
         except DbError:
             log.exception("could not record the failure of %s", job.name)
-        return RunOutcome(job.id, task_id, "failed", error)
+        return RunOutcome(job.id, task_id, "failed", error, late_planned=late)
 
 
 class _RunFailed(Exception):

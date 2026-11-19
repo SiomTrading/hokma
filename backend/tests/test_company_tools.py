@@ -59,6 +59,8 @@ class Net:
             raise MarketError(NETWORK, 502)
         parts = urllib.parse.urlsplit(url)
         host, path = parts.netloc, parts.path
+        if path == "/ff_calendar_thisweek.json" and path not in self.bodies:
+            return 503, ""                  # Forex Factory is off unless a test serves it (the Finnhub tests stay as they were)
         forced = self.status.get(host)
         if forced:
             return forced, recorded("finnhub_error_403.json")
@@ -84,6 +86,9 @@ def net(monkeypatch):
     fake.connections = Connections({"finnhub": FINNHUB_KEY})
     fake.allowed = None
     fake.clock = clock
+    from datetime import timezone
+    from hokma.kit import today_data
+    monkeypatch.setattr(today_data, "_owner_zone", lambda: timezone.utc)      # never the zone of the real profile on this machine
     company_tools.reset()
     yield fake
     company_tools.reset()

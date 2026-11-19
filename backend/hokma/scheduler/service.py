@@ -10,6 +10,8 @@ from hokma.db import Database, DbError, IntegrityViolation, NotFound, get_databa
 from hokma.scheduler import schedule
 
 MAX_PROMPT = 4000
+BRIEFING_NAME = "Premarket briefing"
+BRIEFING_SCHEDULE = ("weekly", "mon-fri 08:00")
 MAX_NAME_INPUT = 200
 SKIP_SCAN = 300          # newest journal notes read to find the last skipped run of each routine
 
@@ -25,6 +27,16 @@ def last_skips(u) -> dict[int, dict[str, Any]]:
             continue
         found[job_id] = {"at": entry.created_at, "planned": refs.get("planned"), "reason": str(refs.get("reason") or "")}
     return found
+
+
+def _late_planned(u, task_id: int) -> str | None:
+    """When the last run of a routine went out late (Hokma was closed), the time it should have run: the journal
+    note of that run carries it as `late_planned`."""
+    for entry in u.journal.list(task_id=task_id, limit=5):
+        refs = entry.refs if isinstance(entry.refs, dict) else {}
+        if refs.get("late_planned"):
+            return str(refs["late_planned"])
+    return None
 
 
 def _schedule_error(exc: schedule.ScheduleError) -> AgentsError:
@@ -70,7 +82,8 @@ class JobsService:
                         "ended_at": run.ended_at if run else None,
                         "tokens": (run.tokens_in + run.tokens_out) if run else 0,
                         "denied": int((task.result_metadata or {}).get("denied") or 0)
-                        if isinstance(task.result_metadata, dict) else 0}
+                        if isinstance(task.result_metadata, dict) else 0,
+                        "late_planned": _late_planned(u, job.last_task_id)}
         return {"id": job.id, "name": job.name, "agent": job.agent_slug,
                 "agent_name": agent.display_name if agent else job.agent_slug,
                 "agent_active": bool(agent and agent.status == "active"),
@@ -128,6 +141,58 @@ class JobsService:
         except DbError as exc:
             raise AgentsError("job_invalid", 422, str(exc)) from exc
         return self.get(job.id)
+
+    def ensure_template(self) -> dict[str, Any]:
+        """The premarket briefing routine: created off, Monday to Friday 08:00 in the owner's zone, Hokma as agent.
+        If one with that name already exists it is returned as is (never duplicated, never edited, even when its prompt
+        differs: the owner or an agent made it). Either way it becomes the routine the Today card reads, unless the card
+        already points to a routine that exists."""
+        from hokma.kit.integrity import app_root
+
+        prompt = (app_root() / "kit" / "template" / "routines" / "premarket_briefing.md").read_text(encoding="utf-8")
+        with self.db.read() as u:
+            found = next((j for j in u.scheduled_jobs.list() if j.name == BRIEFING_NAME), None)
+            tz = u.profile.get_or_default().timezone
+        job = self.get(found.id) if found is not None else self.create(BRIEFING_NAME, "hokma", prompt, *BRIEFING_SCHEDULE, tz)
+        self._link_briefing(job["id"])
+        return job
+
+    def _link_briefing(self, job_id: int) -> None:
+        """Save `job_id` as the briefing routine of the Today card when it has none or its routine is gone."""
+        from hokma.db import NotFound
+        from hokma.today.service import change_config, get_config
+
+        current = get_config(self.db)["briefing_job_id"]
+        if current is not None:
+            try:
+                with self.db.read() as u:
+                    u.scheduled_jobs.get(current)
+                return
+            except NotFound:
+                pass
+        change_config({"briefing_job_id": job_id}, self.db)
+
+    def run_now(self, job_id: int) -> dict[str, Any]:
+        """Run a routine the owner already approved without waiting for its hour. The next planned run does not move."""
+        from hokma.agents.api import current_scheduler
+
+        with self.db.read() as u:
+            try:
+                job = u.scheduled_jobs.get(job_id)
+            except NotFound as exc:
+                raise AgentsError("job_not_found", 404, str(exc)) from exc
+            agent = u.agents.find(job.agent_slug)
+        if job.approval_id is None:
+            raise AgentsError("job_not_approved", 409)
+        if agent is None or agent.status != "active":
+            raise AgentsError("agent_off", 409)
+        self._refuse_if_running(job_id)
+        active = current_scheduler()
+        if active is None:
+            raise AgentsError("scheduler_off", 409)
+        if not active.run_now(job):
+            raise AgentsError("job_running", 409)
+        return self.get(job_id)
 
     def update(self, job_id: int, name: str, agent: str, prompt: str, kind: str, expr: str, tz: str) -> dict[str, Any]:
         values = self._fields(name, agent, prompt, kind, expr, tz)

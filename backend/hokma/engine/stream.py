@@ -24,6 +24,8 @@ def _desk_target(name: str, tool_input: Any) -> str:
     """What a desk tool is about to create or change, in neutral `key=value` terms, so the owner sees it in the
     permission request (the panel shows it as the target). Empty for any other tool."""
     short = name.rsplit("__", 1)[-1]
+    if short in ("today_configure", "account_create", "account_reset", "desk_assign_account", "desk_unassign_account", "gmail_send") and isinstance(tool_input, dict):
+        return " | ".join(f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in tool_input.items())
     if short not in ("desk_create", "desk_configure") or not isinstance(tool_input, dict):
         return ""
     parts = []

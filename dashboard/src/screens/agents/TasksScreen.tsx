@@ -21,6 +21,7 @@ export function TasksScreen(_props: ScreenProps) {
   const shell = useShell();
   const jobs = useApiQuery<JobsData>("/api/scheduled-jobs");
   const agents = useApiQuery<AgentsData>("/api/agents");
+  const telegram = useApiQuery<{ linked: boolean }>("/api/telegram");
   const [editing, setEditing] = useState<JobItem | "new" | null>(null);
   const [confirming, setConfirming] = useState<JobItem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,6 +46,14 @@ export function TasksScreen(_props: ScreenProps) {
     }
   };
 
+  const addBriefing = () =>
+    run(async () => {
+      const job = await jobsApi.addBriefing();
+      jobs.reload();
+      if (job.active) shell.toast({ tone: "info", text: t("tasks.briefing.already") });
+      else setConfirming(job);
+    });
+
   const activate = (job: JobItem) =>
     run(async () => {
       await jobsApi.activate(job.id);
@@ -57,6 +66,13 @@ export function TasksScreen(_props: ScreenProps) {
     run(async () => {
       await jobsApi.deactivate(job.id);
       shell.toast({ tone: "info", text: t("tasks.deactivated") });
+      jobs.reload();
+    });
+
+  const runNow = (job: JobItem) =>
+    run(async () => {
+      await jobsApi.runNow(job.id);
+      shell.toast({ tone: "info", text: t("tasks.runNow.started", { name: job.name }) });
       jobs.reload();
     });
 
@@ -76,9 +92,22 @@ export function TasksScreen(_props: ScreenProps) {
   return (
     <section className="fade" style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, overflow: "auto" }}>
       <Pane style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <span className="p" style={{ flex: 1, minWidth: 220, color: "var(--t1)" }}>{t("tasks.notice")}</span>
+        <details style={{ flex: 1, minWidth: 220 }} data-testid="tasks-offline">
+          <summary className="p" style={{ color: "var(--t1)", cursor: "pointer" }}>{t("tasks.offline.title")}</summary>
+          <ul className="p" style={{ fontSize: 12, margin: "6px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+            <li>{t("tasks.offline.open")}</li>
+            <li>{t("tasks.offline.late", { hours: 24 })}</li>
+            <li>{t("tasks.offline.briefing")}</li>
+            <li>{t("tasks.offline.wake")}</li>
+            <li>{t("tasks.offline.always")}</li>
+          </ul>
+        </details>
+        <Button variant="ghost" disabled={busy} onClick={() => void addBriefing()}>{t("tasks.briefing.add")}</Button>
         <Button variant="primary" onClick={() => setEditing("new")}>{t("tasks.new")}</Button>
       </Pane>
+      {telegram.data && !telegram.data.linked && jobs.data.jobs.some((j) => j.name === "Premarket briefing") ? (
+        <p className="p" style={{ fontSize: 12 }} data-testid="no-telegram">{t("tasks.briefing.noTelegram")}</p>
+      ) : null}
       {error ? <p className="p" role="alert" style={{ color: "var(--bad)" }}>{error}</p> : null}
 
       {jobs.data.jobs.length === 0 ? (
@@ -95,6 +124,7 @@ export function TasksScreen(_props: ScreenProps) {
               locale={locale}
               disabled={busy}
               onToggle={(on) => (on ? setConfirming(job) : void deactivate(job))}
+              onRunNow={() => runNow(job)}
               onEdit={() => setEditing(job)}
               onDelete={() => remove(job)}
             />
@@ -148,6 +178,7 @@ export function TasksScreen(_props: ScreenProps) {
 
 function skipReason(reason: string, t: (key: string) => string): string {
   if (reason === "missed") return t("tasks.skip.missed");
+  if (reason === "asked") return t("tasks.skip.asked");
   if (reason === "agent_off") return t("tasks.skip.agent_off");
   return reason || t("tasks.skip.other");
 }
@@ -158,11 +189,12 @@ interface RowProps {
   locale: string;
   disabled: boolean;
   onToggle: (on: boolean) => void;
+  onRunNow: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-function JobRow({ job, running, locale, disabled, onToggle, onEdit, onDelete }: RowProps) {
+function JobRow({ job, running, locale, disabled, onToggle, onRunNow, onEdit, onDelete }: RowProps) {
   const { t } = useI18n();
   const last = job.last;
   const partial = last?.status === "done" && (last.denied ?? 0) > 0;     // finished, but permissions were refused
@@ -187,6 +219,11 @@ function JobRow({ job, running, locale, disabled, onToggle, onEdit, onDelete }: 
             {t("tasks.skipped", { date: formatDateTime(job.last_skip.at, locale), reason: skipReason(job.last_skip.reason, t) })}
           </span>
         ) : null}
+        {last?.late_planned ? (
+          <span className="p" style={{ fontSize: 12, color: "var(--warn)" }} data-testid="job-late">
+            {t("tasks.late", { date: formatDateTime(last.late_planned, locale) })}
+          </span>
+        ) : null}
         {last ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <span className="p" style={{ fontSize: 12 }}>
@@ -209,6 +246,10 @@ function JobRow({ job, running, locale, disabled, onToggle, onEdit, onDelete }: 
       {job.model ? <Pill>{t(`agents.model.${job.model}`)}</Pill> : null}
       <Toggle checked={job.active} label={t("tasks.toggle", { name: job.name })} disabled={disabled || running} onChange={onToggle} />
       <span style={{ display: "flex", gap: 4 }}>
+        <Button size="sm" variant="ghost" disabled={disabled || running || !job.approved || !job.agent_active}
+                title={job.approved ? undefined : t("tasks.runNow.needsOn")} onClick={onRunNow}>
+          {t("tasks.runNow")}
+        </Button>
         <Button size="sm" variant="ghost" disabled={disabled || running} onClick={onEdit}>{t("tasks.edit")}</Button>
         <Button size="sm" variant="ghost" disabled={disabled || running} onClick={onDelete}>{t("tasks.delete")}</Button>
       </span>

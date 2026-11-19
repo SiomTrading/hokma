@@ -3,6 +3,16 @@ export type DeskStatus = "active" | "paused" | "archived";
 export type DeskTemplate = "minimal" | "standard" | "debate" | "custom";
 export type BudgetState = "ok" | "warn" | "exhausted";
 
+/** The account of a desk. `cash` and `equity` are null when the broker cannot tell: say so, never show 0. */
+export interface DeskAccount {
+  id: number;
+  name: string;
+  broker: string;
+  initial_capital: number;
+  balance: { cash: number | null; equity: number | null; currency: string };
+  as_of: string;
+}
+
 export interface DeskSummary {
   id: number;
   project_id: number;
@@ -12,9 +22,9 @@ export interface DeskSummary {
   currency: string;
   status: DeskStatus;
   template: DeskTemplate;
-  /** Result of the day. Always 0 until simulated operations exist. */
+  /** Result of the day. Always 0 until there are trades. */
   today: number;
-  /** Null until simulated operations exist. */
+  /** Null until there are trades. */
   drawdown: number | null;
   agents_total: number;
   agents_working: number;
@@ -22,6 +32,8 @@ export interface DeskSummary {
   /** Weekly cap of the desk. Null means no cap of its own. */
   token_budget: number | null;
   budget_state: BudgetState;
+  /** Optional for old data: null while the desk has no account. */
+  account?: DeskAccount | null;
 }
 
 export interface DeskList {

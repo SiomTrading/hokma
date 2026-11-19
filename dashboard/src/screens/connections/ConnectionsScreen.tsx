@@ -7,6 +7,7 @@ import { useFocus } from "./focus";
 import { PriorityList } from "./PriorityList";
 import { ProviderCard } from "./ProviderCard";
 import type { AssetClass, ConnectionCard } from "./types";
+import { MailCard } from "./MailCard";
 import { useConnections } from "./useConnections";
 
 /** How the cards are laid out: one section per kind of data. Every provider appears once, in its section. */
@@ -107,6 +108,13 @@ export function ConnectionsScreen() {
               </section>
             ))}
             </div>
+
+            <section className="conn-group" aria-label={t("mail.group")} data-testid="mail-section">
+              <h2 className="sec conn-group-title">{t("mail.group")}</h2>
+              <div className="conn-grid">
+                <MailCard />
+              </div>
+            </section>
 
             {orderedClasses.length > 0 ? (
               <section className="conn-group" aria-label={t("connections.priority.title")} data-group="priority">

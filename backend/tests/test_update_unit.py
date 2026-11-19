@@ -196,7 +196,8 @@ def test_extensions_merge_and_cannot_disable_locks(env):
     s = build_settings()
     assert s["enabledPlugins"] == {"good@market": True}
     assert list(s["extraKnownMarketplaces"]) == ["market"]
-    assert s["permissions"] == {"allow": ["mcp__hokma__trash_move"]}   # not the student's
+    assert list(s["permissions"]) == ["allow"] and "Bash(*)" not in s["permissions"]["allow"]   # not the student's
+    assert s["permissions"]["allow"][0] == "mcp__hokma__trash_move"
     assert "sandbox" not in s and s["hooks"]["PreToolUse"] and "env" not in s
     _, problems = extensions.load()
     assert any("permissions" in p for p in problems) and any("evil" in p for p in problems)

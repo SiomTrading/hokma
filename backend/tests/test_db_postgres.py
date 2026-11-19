@@ -26,6 +26,9 @@ from hokma.db.postgres import PostgresBackend, convert_sql
 from hokma.db.probe import probe_connection
 from hokma.db.transfer import TransferError, sample_counts, transfer
 from hokma.rpc.ws import SESSION_TOKEN
+from hokma.db.migrate import discover
+
+LATEST = discover()[-1][0]                      # the newest migration: no list of versions to update
 
 HEADERS = {"X-Hokma-Token": SESSION_TOKEN}
 SECRET = "s3cr3t-P@ss:w/rd"
@@ -237,7 +240,7 @@ def test_sqlite_to_postgres_and_back_keeps_every_row(seeded, pg_url, env):
 
     target = PostgresBackend(pg_url)
     result = transfer(source, target)
-    assert result.counts == {k: v for k, v in sizes.items()} and result.schema_version == 16
+    assert result.counts == {k: v for k, v in sizes.items()} and result.schema_version == LATEST
     assert sample_counts(target) == sizes
     assert snapshot(target) == before                         # same values, same ids, same timestamps
     # the destination says it is Postgres; the origin was not touched
@@ -368,7 +371,7 @@ def test_endpoints_need_the_session_token(env):
 def test_status_of_the_default_database(env):
     migrate()
     body = TestClient(create_app(), headers=HEADERS).get("/api/database").json()
-    assert body["engine"] == "sqlite" and body["reachable"] and body["schema_version"] == 16
+    assert body["engine"] == "sqlite" and body["reachable"] and body["schema_version"] == LATEST
     assert body["location"].endswith("hokma.db") and body["saved_url"] is None
 
 
@@ -449,7 +452,7 @@ def test_full_switch_over_http_and_back(seeded, pg_password_url, env, caplog):
         assert SECRET_ENCODED in database_config_path().read_text(encoding="utf-8")      # only here
 
         status = client.get("/api/database").json()
-        assert status["engine"] == "postgres" and status["reachable"] and status["schema_version"] == 16
+        assert status["engine"] == "postgres" and status["reachable"] and status["schema_version"] == LATEST
         assert SECRET not in json.dumps(status) and SECRET_ENCODED not in json.dumps(status)
         assert SECRET not in json.dumps(tested) and SECRET_ENCODED not in json.dumps(tested)
 
@@ -511,7 +514,7 @@ def test_the_desk_tables_exist_in_postgres_with_their_locks(pg_url_migrated):
         with pytest.raises(psycopg.errors.UniqueViolation):
             con.execute(add, (desk, "other", "chief", "sonnet"))
     result = migrate(backend=PostgresBackend(pg_url_migrated), seed=False)
-    assert result.applied == [] and result.version == 16            # applying again is a no-op
+    assert result.applied == [] and result.version == LATEST            # applying again is a no-op
 
 
 def test_the_agent_role_cannot_write_desks(seeded, pg_url, env):
