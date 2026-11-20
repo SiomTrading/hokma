@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7
+
+- New: Learn has 14 new step-by-step guides: engines, basic plugins, Telegram, Gmail, routines and premarket briefing, Fund and desks, broker and capital, troubleshooting, voice, library and documents, backup and trash, data connections, permissions and security, and GitHub.
+- Fixed: The Desks guide describes desks as they work today.
+
 ## 1.0.6
 
 - Fixed: On Mac, closing a Hokma terminal ends only its own processes; it no longer closes your browser or other apps.

@@ -1,24 +1,23 @@
 # Money desks
 
-A money desk is a small team of agents that works on one idea with a simulated capital. Each desk has its own
+A money desk is a small team of agents that works on one idea with its capital. Each desk has its own
 mandate, its own agents, its own assets and its own token budget. Several desks can run side by side, and each one
 keeps its work apart from the others.
 
-**Everything on a desk is simulation. Real money is blocked.** No desk connects a real account or sends an order to a
-broker, and no setting changes that.
+This version does not send orders from the desks yet. The account of each desk is assigned in the Broker tab.
 
 ## Open the desks
 
 In the side menu press **Money desks**. Below it there is one row per desk with its name, its capital and its result
-of the day. In this version the result of the day is always 0.00, because simulated trades arrive in a later version.
+of the day. In this version the result of the day is always 0.00, because trades arrive in a later version.
 
 ## The Fund view
 
-The first screen shows the numbers of the whole fund: the simulated capital of all desks and the tokens used this
+The first screen shows the numbers of the whole fund: the capital of all desks and the tokens used this
 week. Below there is one card per desk with its name, focus, state, capital, result of today, drawdown, the agents
-working now and the "Simulation" mark.
+working now.
 
-- The fund curve and the activity of the desks show an empty state. They fill in when simulated trades arrive.
+- The fund curve and the activity of the desks show an empty state. They fill in when trades arrive.
 - The "Fund lessons" tab is disabled. It arrives in a later version.
 
 ## Create a desk
@@ -29,7 +28,7 @@ Press **+ Create desk**. Hokma asks "How do you want to create the desk?" and of
 
 This way creates the desk. It has four steps:
 
-1. **Focus.** Name, what the desk looks at, simulated capital, monthly objective and mandate. The mandate is the text
+1. **Focus.** Name, what the desk looks at, capital, monthly objective and mandate. The mandate is the text
    every agent of the desk reads before each decision.
 2. **Team of agents.** Choose a template. You can change the team later.
 3. **Rules.** Shows the token budget of the desk. The risk rules arrive in a later version and the screen says so.
@@ -56,7 +55,7 @@ only after you approve. You can also ask it later to change a desk, and it asks 
 
 ## Inside a desk
 
-The top bar shows the desk selector, the "Simulation" mark, the capital, the result of today and the drawdown. The tabs
+The top bar shows the desk selector, the capital, the result of today and the drawdown. The tabs
 are Terminal, Agents, Operations, Rules and Settings.
 
 - **Terminal.** The assets of the desk on the left, the chart of the asset in focus in the center, the chat with the

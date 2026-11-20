@@ -1,26 +1,24 @@
 # Mesas de dinero
 
-Una mesa de dinero es un equipo pequeño de agentes que trabaja una idea con un capital simulado. Cada mesa tiene su
+Una mesa de dinero es un equipo pequeño de agentes que trabaja una idea con su capital. Cada mesa tiene su
 propio mandato, sus propios agentes, sus propios activos y su propio presupuesto de tokens. Varias mesas pueden correr
 a la vez, y cada una mantiene su trabajo aparte de las demás.
 
-**Todo en una mesa es simulación. El dinero real está bloqueado.** Ninguna mesa conecta una cuenta real ni envía una
-orden a un broker, y ningún ajuste cambia eso.
+Esta versión todavía no envía órdenes desde las mesas. La cuenta de cada mesa se asigna en la pestaña Bróker.
 
 ## Abrir las mesas
 
 En el menú lateral pulsa **Mesas de dinero**. Debajo hay una fila por mesa con su nombre, su capital y su resultado del
-día. En esta versión el resultado del día siempre es 0,00, porque las operaciones simuladas llegan en una versión
+día. En esta versión el resultado del día siempre es 0,00, porque las operaciones llegan en una versión
 posterior.
 
 ## La vista Fondo
 
-La primera pantalla muestra las cifras de todo el fondo: el capital simulado de todas las mesas y los tokens usados esta
+La primera pantalla muestra las cifras de todo el fondo: el capital de todas las mesas y los tokens usados esta
 semana. Debajo hay una tarjeta por mesa con su nombre, enfoque, estado, capital, resultado de hoy, drawdown, los agentes
-que trabajan ahora y la marca "Simulación".
+que trabajan ahora.
 
-- La curva del fondo y la actividad de las mesas muestran un estado vacío. Se llenan cuando llegan las operaciones
-  simuladas.
+- La curva del fondo y la actividad de las mesas muestran un estado vacío. Se llenan cuando llegan las operaciones.
 - La pestaña "Lecciones del fondo" está deshabilitada. Llega en una versión posterior.
 
 ## Crear una mesa
@@ -31,7 +29,7 @@ Pulsa **+ Crear mesa**. Hokma pregunta "¿Cómo quieres crear la mesa?" y ofrece
 
 Este camino crea la mesa. Tiene cuatro pasos:
 
-1. **Enfoque.** Nombre, qué mira la mesa, capital simulado, objetivo mensual y mandato. El mandato es el texto que
+1. **Enfoque.** Nombre, qué mira la mesa, capital, objetivo mensual y mandato. El mandato es el texto que
    todos los agentes de la mesa leen antes de cada decisión.
 2. **Equipo de agentes.** Elige una plantilla. Puedes cambiar el equipo después.
 3. **Reglas.** Muestra el presupuesto de tokens de la mesa. Las reglas de riesgo llegan en una versión posterior y la
@@ -59,7 +57,7 @@ apruebas. Después también puedes pedirle que cambie una mesa y te pedirá perm
 
 ## Dentro de una mesa
 
-La barra superior muestra el selector de mesa, la marca "Simulación", el capital, el resultado de hoy y el drawdown.
+La barra superior muestra el selector de mesa, el capital, el resultado de hoy y el drawdown.
 Las pestañas son Terminal, Agentes, Operaciones, Reglas y Configuración.
 
 - **Terminal.** Los activos de la mesa a la izquierda, el gráfico del activo en foco al centro, el chat con el jefe de
