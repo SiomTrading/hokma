@@ -62,19 +62,19 @@ await runSuite("connections", { script: "connections-serve.py" }, async ({ page,
     window.__stillHere = true;
   });
 
-  // C1. Connections is its own section of the navigation, with the six cards visible at once
+  // C1. Connections is its own section of the navigation, with the four cards visible at once
   await nav().click();
   await card("coinbase").waitFor();
-  assert.equal(await front.locator("article[data-provider]").count(), 6);
-  for (const name of ["Coinbase", "Alpaca", "Finnhub", "SiomTrading Futures", "Databento", "Massive"]) {
+  assert.equal(await front.locator("article[data-provider]").count(), 4);
+  for (const name of ["Coinbase", "Alpaca", "Finnhub", "SiomTrading Futures"]) {
     assert.ok(await front.getByRole("article", { name }).isVisible(), `${name} visible`);
   }
   assert.equal(await card("coinbase").locator("input").count(), 0, "Coinbase has no key field");
   assert.equal(await card("coinbase").getByRole("switch").getAttribute("aria-checked"), "true", "Coinbase is on by default");
   assert.equal(await card("alpaca").locator('input[type="password"]').count(), 2, "Alpaca has Key ID and Secret");
-  for (const id of ["finnhub", "siomtrading_futures", "databento", "massive"]) assert.equal(await card(id).locator("input").count(), 1, id);
+  for (const id of ["finnhub", "siomtrading_futures"]) assert.equal(await card(id).locator("input").count(), 1, id);
   await card("alpaca").getByText(msg("connections.note.alpaca")).waitFor();
-  await card("databento").getByText(msg("connections.note.premium")).waitFor();
+  assert.equal(await front.locator('[data-provider="databento"], [data-provider="massive"]').count(), 0, "no card of the removed providers");
   await until(async () => (await server.api("/api/connections")).connections.find((c) => c.id === "coinbase").state === "connected", "Coinbase connected in the engine");
   await until(async () => (await card("coinbase").getByTestId("conn-state").getAttribute("data-state")) === "connected", "Coinbase connected on its card");
   const list = await server.api("/api/connections");
@@ -146,16 +146,16 @@ await runSuite("connections", { script: "connections-serve.py" }, async ({ page,
   await link.click();
   await card("alpaca").waitFor();
   const focused = async () => (await front.locator("[data-focus='true']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-testid")))).sort();
-  assert.deepEqual(await focused(), ["connection-alpaca", "connection-databento", "connection-finnhub", "priority-equity"]);
+  assert.deepEqual(await focused(), ["connection-alpaca", "connection-finnhub", "priority-equity"]);
   assert.equal(await page.evaluate(() => window.location.hash), "", "the address is clean");
   // the same by address
   await page.evaluate(() => {
     window.location.hash = "#/connections?class=future";
   });
-  await until(async () => (await focused()).includes("priority-future"), "futures group in front by address");
-  assert.deepEqual(await focused(), ["connection-databento", "connection-massive", "connection-siomtrading_futures", "priority-future"]);
+  await until(async () => (await focused()).includes("connection-siomtrading_futures"), "futures group in front by address");
+  assert.deepEqual(await focused(), ["connection-siomtrading_futures"]);
 
-  // M10 NQ: no SiomTrading Futures, no premium: delayed with the link to the futures group
+  // M10 NQ: no SiomTrading Futures: delayed with the link to the futures group
   await openChart("nq=f", "NQ=F");
   await front.getByTestId("live-status").waitFor();
   await until(async () => (await status().getAttribute("data-data-state")) === "delayed", "NQ=F delayed");
@@ -211,7 +211,7 @@ await runSuite("connections", { script: "connections-serve.py" }, async ({ page,
   assert.equal(await page.evaluate(() => window.__stillHere === true), true, "the page was not reloaded");
 
   // C5. Settings has no key field and no provider selector, in either language
-  const forbidden = new Set(["Alpaca", "Finnhub", "Coinbase", "Databento", "Massive"]);
+  const forbidden = new Set(["Alpaca", "Finnhub", "Coinbase"]);
   for (const other of ["en", "es"]) {
     const T = translator(other).M;
     for (const key of ["connections.field.key", "connections.field.token", "connections.field.keyId", "connections.field.secret", "connections.key.save", "connections.key.remove"]) forbidden.add(T[key]);

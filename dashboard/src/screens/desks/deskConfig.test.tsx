@@ -40,7 +40,7 @@ function stubServer(over: Partial<Server> = {}): Server {
     detail: { id: 7, name: "Futuros NQ", focus: "Intraday futures", capital: 10000, objective_pct: 3, mandate: "Operar retrocesos al VWAP.", assets: ["NQ=F", { symbol: "ES=F" }] },
     assetsStatus: 200,
     connections: [
-      { provider_id: "databento", name: "Databento", enabled: true, asset_classes: ["future"] },
+      { provider_id: "finnhub", name: "Finnhub", enabled: true, asset_classes: ["equity"] },
       { provider_id: "alpaca", name: "Alpaca", enabled: false, asset_classes: ["equity"] },
     ],
     ...over,
@@ -227,9 +227,9 @@ describe("Settings: connections and empty sections", () => {
     const server = stubServer();
     open("config");
     await userEvent.click(await screen.findByRole("button", { name: t("desks.cfg.section.connections") }));
-    const databento = await screen.findByRole("switch", { name: "Usar Databento" });
+    const finnhub = await screen.findByRole("switch", { name: "Usar Finnhub" });
     const alpaca = screen.getByRole("switch", { name: "Usar Alpaca" });
-    expect(databento).toHaveAttribute("aria-checked", "true");
+    expect(finnhub).toHaveAttribute("aria-checked", "true");
     expect(alpaca).toHaveAttribute("aria-checked", "false");
     await userEvent.click(alpaca);
     await waitFor(() => expect(alpaca).toHaveAttribute("aria-checked", "true"));

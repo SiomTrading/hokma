@@ -328,7 +328,7 @@ def test_m13_priority_decides_the_provider_and_changes_apply_to_the_next_subscri
             c = Collector(ws)
             assert subscribe(c, "a", "AAPL", "5m")["source"] == "Alpaca IEX"
             response = client.put("/api/connections/priority", headers=AUTH,
-                                  json={"asset_class": "equity", "order": ["finnhub", "alpaca", "databento"]})
+                                  json={"asset_class": "equity", "order": ["finnhub", "alpaca"]})
             assert response.status_code == 200 and response.json()["groups"]["equity"][0] == "finnhub"
             second = subscribe(c, "b", "MSFT", "5m")
             assert second["source"] == "Finnhub"

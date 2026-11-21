@@ -31,6 +31,10 @@ def _i(desc: str = "") -> dict[str, Any]:
     return {"type": "integer", "description": desc}
 
 
+def _n(desc: str = "") -> dict[str, Any]:
+    return {"type": "number", "description": desc}
+
+
 def _b(desc: str = "") -> dict[str, Any]:
     return {"type": "boolean", "description": desc}
 
@@ -482,6 +486,14 @@ def market_candles(u, c: Caller, a: dict) -> str:
     return _dump(market_tools.candles(a["symbol"], a.get("interval"), a.get("limit"), _own_desk_id(c)))
 
 
+def options_chain(u, c: Caller, a: dict) -> str:
+    from hokma.market import options
+
+    return _dump(options.options_chain(
+        a["symbol"], a.get("expiration"), a.get("type"), a.get("min_days"), a.get("max_days"), a.get("min_delta"),
+        a.get("max_delta"), a.get("min_open_interest"), a.get("max_spread_pct"), a.get("limit"), _own_desk_id(c)))
+
+
 def company_profile(u, c: Caller, a: dict) -> str:
     from hokma.kit import company_tools
 
@@ -840,7 +852,7 @@ def bug_list(u, c: Caller, a: dict) -> str:
 Handler = Callable[[Any, Caller, dict], str]
 # these open their own database units
 NO_UNIT = {"project_create", "agent_save", "skill_save", "skill_install", "desk_list", "desk_show",
-         "desk_create", "desk_configure", "market_quote", "market_candles", "company_profile", "company_news",
+         "desk_create", "desk_configure", "market_quote", "market_candles", "options_chain", "company_profile", "company_news",
          "earnings_calendar", "earnings_surprises", "basic_financials", "economic_calendar", "market_news",
          "watchlist_all", "today_show", "today_configure", "broker_list", "account_create", "account_reset",
          "desk_assign_account", "desk_unassign_account", "gmail_search", "gmail_read", "gmail_send"}
@@ -884,7 +896,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
         enum=["ips", "wealth", "strategy", "research", "robot", "other"])}, ["name"], project_create, False),
     "desk_list": ("List the money desks that are not archived (id, name, status). Read only.", {}, [], desk_list,
                   False),
-    "desk_show": ("Show one money desk: mandate, simulated capital, assets, team with the model of this desk and the "
+    "desk_show": ("Show one money desk: mandate, capital, assets, team with the model of this desk and the "
                   "state of the weekly token budget, and each asset with its last price. Without desk_id it is the desk of the "
                   "active project. Read only: "
                   "desk_create and desk_configure change desks.", {"desk_id": _i("Desk id; default: the desk of the active project.")}, [],
@@ -899,6 +911,21 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
         "symbol": _s("Market symbol, e.g. NQ=F, AAPL, BTC-USD."),
         "interval": _s("1m, 5m (default), 15m, 1h or 1D.", enum=["1m", "5m", "15m", "1h", "1D"]),
         "limit": _i("How many of the newest bars, 1 to 300 (default 60).")}, ["symbol"], market_candles, False),
+    "options_chain": ("Option chain of one US stock or ETF, read only, from the Alpaca key saved in Connections: strike, "
+                      "expiration, days, type, bid, ask, mid, spread percent, last, volume, open interest, delta, gamma, "
+                      "theta, vega and IV. Filters by days to expiration, absolute delta, minimum open interest and "
+                      "maximum spread. On the free Alpaca plan prices are indicative and greeks are estimated; the answer "
+                      "says which. Works with the market closed: it returns the last quotes.", {
+        "symbol": _s("US stock or ETF symbol, e.g. AAPL."),
+        "expiration": _s("One expiration, YYYY-MM-DD. When given, min_days and max_days are ignored."),
+        "type": _s("call or put (default: both).", enum=["call", "put"]),
+        "min_days": _i("Minimum days to expiration, 0 to 1100 (default 0)."),
+        "max_days": _i("Maximum days to expiration, 0 to 1100 (default 60)."),
+        "min_delta": _n("Minimum absolute delta, 0 to 1."),
+        "max_delta": _n("Maximum absolute delta, 0 to 1."),
+        "min_open_interest": _i("Minimum open interest, 0 or more."),
+        "max_spread_pct": _n("Maximum bid-ask spread as a percent of the mid price, greater than 0."),
+        "limit": _i("How many contracts to return, 1 to 200 (default 50).")}, ["symbol"], options_chain, False),
     "company_profile": ("Company profile of one stock, read only: name, exchange, country, industry, market cap, "
                         "shares and website. Uses the key the student saved in Connections (Finnhub); the answer "
                         "says the source and the date of the data. Fails with a clear reason, in the student's "
@@ -1113,12 +1140,12 @@ def validate(name: str, args: Any) -> str | None:
     missing = [k for k in req if k not in args]
     if missing:
         return f"missing argument: {', '.join(missing)}"
-    kinds = {"string": str, "integer": int, "boolean": bool, "object": dict, "array": list}
+    kinds = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "object": dict, "array": list}
     for key, value in args.items():
         spec = props[key]
         types = spec["type"] if isinstance(spec["type"], list) else [spec["type"]]       # ["integer", "null"]: may be null
         ok = (value is None and "null" in types) or any(
-            isinstance(value, kinds[k]) and not (k == "integer" and isinstance(value, bool)) for k in types if k != "null")
+            isinstance(value, kinds[k]) and not (k in ("integer", "number") and isinstance(value, bool)) for k in types if k != "null")
         if not ok:
             return f"{key} must be {' or '.join(types)}"
         if "enum" in spec and value not in spec["enum"]:

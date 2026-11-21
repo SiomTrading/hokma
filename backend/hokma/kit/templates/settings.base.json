@@ -9,6 +9,7 @@
       "mcp__hokma__market_news",
       "mcp__hokma__earnings_calendar",
       "mcp__hokma__market_quote",
+      "mcp__hokma__options_chain",
       "mcp__hokma__broker_list"
     ]
   },

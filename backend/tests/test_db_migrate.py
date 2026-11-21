@@ -115,7 +115,7 @@ def test_a_broken_migration_rolls_back_leaves_the_copy_and_reports(env):
     con = raw()
     assert list(con.iterdump()) == before                           # the whole file was rolled back
     assert con.execute("SELECT max(version) FROM schema_version").fetchone()[0] == LATEST
-    backups = list((db_path().parent / "backups").glob("hokma-v18-*.db"))
+    backups = list((db_path().parent / "backups").glob(f"hokma-v{LATEST}-*.db"))
     assert len(backups) == 1
 
 
@@ -145,8 +145,8 @@ def test_a_file_that_is_not_a_database_is_reported(env):
 
 def test_old_backups_are_pruned(env):
     migrate()
-    for n in range(19, 30):
-        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(19, n + 1)})
+    for n in range(NEXT, NEXT + 11):
+        directory = make_dir(env, {f"{k:04d}_x{k}.sql": f"CREATE TABLE x{k} (id {{PK}});" for k in range(NEXT, n + 1)})
         migrate(migrations_dir=directory)
     assert len(list((db_path().parent / "backups").glob("hokma-v*.db"))) == 10
 

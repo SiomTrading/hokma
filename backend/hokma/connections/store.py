@@ -7,6 +7,7 @@ there is no file fallback and no environment variable, ever.
 `<data>/connections.json` holds only what is not secret: which providers are switched on and the priority order.
 """
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -18,6 +19,11 @@ from hokma.core.config import hokma_data_dir
 
 SERVICE = "hokma-market"
 STATE_FILE = "connections.json"
+SETTINGS_VERSION = 2
+# Providers that Hokma no longer offers (1.0.8). Their saved key and their traces in `connections.json` are removed once.
+RETIRED_PROVIDERS = ("databento", "massive")
+
+log = logging.getLogger("hokma.connections")
 
 
 class StoreUnavailable(Exception):
@@ -77,12 +83,14 @@ class KeyStore:
 
 
 class ConnectionSettings:
-    """`<data>/connections.json`: `{"version": 1, "enabled": {id: bool}, "priority": {asset_class: [id]}}`."""
+    """`<data>/connections.json`: `{"version": 2, "enabled": {id: bool}, "priority": {asset_class: [id]}}`."""
 
     def __init__(self, path: Path | None = None) -> None:
         self._path = path
         self._enabled: dict[str, bool] = {}
         self._priority: dict[str, list[str]] = {}
+        self.version = 0                                 # of the file read; 0 when there is none
+        self.unreadable = False                          # the file exists but could not be read or parsed
         self.load()
 
     @property
@@ -90,10 +98,18 @@ class ConnectionSettings:
         return self._path or hokma_data_dir() / STATE_FILE
 
     def load(self) -> None:
+        self.unreadable = False
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
             raw = {}
+        except (OSError, ValueError) as exc:
+            log.error("connections.json could not be read (%s); it is left as it is", type(exc).__name__)
+            self.unreadable = True
+            raw = {}
+        version = raw.get("version") if isinstance(raw, dict) else None
+        self.version = version if isinstance(version, int) and not isinstance(version, bool) else 0
+        raw = raw if isinstance(raw, dict) else {}
         enabled, priority = raw.get("enabled"), raw.get("priority")
         self._enabled = {k: v for k, v in enabled.items() if isinstance(v, bool)} if isinstance(enabled, dict) else {}
         self._priority = ({k: [x for x in v if isinstance(x, str)] for k, v in priority.items()
@@ -107,6 +123,19 @@ class ConnectionSettings:
         saved = [p for p in self._priority.get(asset_class, []) if p in default]
         return saved + [p for p in default if p not in saved]
 
+    def retire(self, provider_ids: tuple[str, ...]) -> list[str]:
+        """Forget retired providers (switch and priority) and save the file as the current version. Returns the ids
+        that had any trace in the file."""
+        if self.unreadable:                              # a file we could not read is never rewritten from nothing
+            log.error("connections.json is unreadable: retired providers were not cleaned from it")
+            return []
+        found = [p for p in provider_ids if p in self._enabled or any(p in v for v in self._priority.values())]
+        for provider_id in provider_ids:
+            self._enabled.pop(provider_id, None)
+        self._priority = {k: [x for x in v if x not in provider_ids] for k, v in self._priority.items()}
+        self._save()
+        return found
+
     def set_enabled(self, provider_id: str, value: bool) -> None:
         self._enabled[provider_id] = value
         self._save()
@@ -118,12 +147,13 @@ class ConnectionSettings:
     def _save(self) -> None:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        body = json.dumps({"version": 1, "enabled": self._enabled, "priority": self._priority}, indent=2)
+        body = json.dumps({"version": SETTINGS_VERSION, "enabled": self._enabled, "priority": self._priority}, indent=2)
         fd, temp = tempfile.mkstemp(prefix=".connections-", dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(body)
             os.replace(temp, path)
+            self.version = SETTINGS_VERSION
         except BaseException:
             try:
                 os.unlink(temp)

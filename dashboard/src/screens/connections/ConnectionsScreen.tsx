@@ -15,7 +15,7 @@ const SECTIONS: ReadonlyArray<{ id: string; titleKey: string; providers: readonl
   { id: "crypto", titleKey: "connections.group.crypto", providers: ["coinbase"], order: "crypto" },
   { id: "equity", titleKey: "connections.group.equity", providers: ["alpaca"], order: "equity" },
   { id: "mixed", titleKey: "connections.group.mixed", providers: ["finnhub"], order: "equity" },
-  { id: "future", titleKey: "connections.group.future", providers: ["siomtrading_futures", "databento", "massive"], order: "future" },
+  { id: "future", titleKey: "connections.group.future", providers: ["siomtrading_futures"], order: "future" },
 ];
 
 export function ConnectionsScreen() {
@@ -28,16 +28,13 @@ export function ConnectionsScreen() {
 
   const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
   const sections = useMemo(() => {
-    const placed = new Set(SECTIONS.flatMap((section) => section.providers));
-    const known = SECTIONS.map((section) => {
+    return SECTIONS.map((section) => {
       const list = section.providers.map((id) => byId.get(id)).filter((card): card is ConnectionCard => !!card);
       // The futures section is also the futures priority: the card on top is the one tried first.
       if (section.id === "future") list.sort((a, b) => (a.priority.future ?? 99) - (b.priority.future ?? 99));
       return { id: section.id, title: t(section.titleKey), cards: list };
     });
-    const extra = cards.filter((card) => !placed.has(card.id));
-    return extra.length ? [...known, { id: "more", title: t("connections.group.more"), cards: extra }] : known;
-  }, [byId, cards, t]);
+  }, [byId, t]);
 
   const focusClass = focus.assetClass;
   useEffect(() => {

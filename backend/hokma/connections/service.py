@@ -5,9 +5,12 @@ logs one; it only remembers, in memory, whether each provider has one saved."""
 import json
 import re
 
-from hokma.connections.store import ConnectionSettings, KeyStore, StoreUnavailable
+import logging
+
+from hokma.connections.store import RETIRED_PROVIDERS, SETTINGS_VERSION, ConnectionSettings, KeyStore, StoreUnavailable
 from hokma.market.providers import ASSET_CLASSES, ProviderCatalog, ProviderSpec
 
+log = logging.getLogger("hokma.connections")
 KEY_VALUE = re.compile(r"[\x21-\x7e]{4,256}")           # printable ASCII, no spaces, no control characters
 
 
@@ -48,8 +51,30 @@ class ConnectionService:
 
     def load(self) -> None:
         """Blocking: learn once which providers have a saved key. Never reads or keeps the values."""
+        self._retire_providers()
         self._saved = {pid: self.store.has(pid) for pid, spec in self.catalog.providers.items() if spec.needs_key}
         self.loaded = True
+
+    def _retire_providers(self) -> None:
+        """Once, for a settings file older than version 2 (or none): remove the saved key of every provider Hokma no
+        longer offers and its traces in the file. A store that is not available does not stop it: the file is saved as
+        version 2 anyway, and the key that stays is never read by any code."""
+        if self.settings.version >= SETTINGS_VERSION or self.settings.unreadable:
+            return                                     # an unreadable file is not migrated: it is tried again next time
+        removed: list[str] = []
+        for provider_id in RETIRED_PROVIDERS:
+            try:
+                if self.store.has(provider_id):
+                    removed.append(provider_id)
+                self.store.delete(provider_id)
+            except StoreUnavailable:
+                pass
+        try:
+            removed += [p for p in self.settings.retire(RETIRED_PROVIDERS) if p not in removed]
+        except OSError:
+            return                                     # the folder cannot be written now: it is tried again next time
+        for provider_id in removed:
+            log.info("retired provider removed: %s", provider_id)
 
     def store_available(self) -> bool:
         return self.store.available()

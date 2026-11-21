@@ -182,125 +182,12 @@ async def finnhub_script(ws, fake: FakeWs) -> None:
         fake.received.append((ws.request.path, json.loads(raw)))
 
 
-def massive_script(key: str):
-    async def script(ws, fake: FakeWs) -> None:
-        await ws.send(json.dumps([{"ev": "status", "status": "connected", "message": "Connected Successfully"}]))
-        async for raw in ws:
-            message = json.loads(raw)
-            fake.received.append((ws.request.path, message))
-            if message.get("action") == "auth":
-                ok = message.get("params") == key
-                await ws.send(json.dumps([{"ev": "status", "status": "auth_success" if ok else "auth_failed",
-                                           "message": "authenticated" if ok else "authentication failed"}]))
-                if not ok:
-                    await ws.close(1008)
-                    return
-            elif message.get("action") == "subscribe":
-                await ws.send(json.dumps([{"ev": "status", "status": "success",
-                                           "message": f"subscribed to: {message['params']}"}]))
-    return script
-
-
 def trade_alpaca(symbol: str, price: float, ts: str = "2026-11-05T05:42:54.100Z", size: int = 10) -> list:
     return [{"T": "t", "S": symbol, "p": price, "s": size, "t": ts}]
 
 
 def trade_coinbase(product: str, price: float, ts: str, size: float = 0.01) -> dict:
     return {"type": "match", "product_id": product, "price": str(price), "size": str(size), "time": ts}
-
-
-class FakeDatabento:
-    """The Databento live gateway: greeting, CRAM challenge, authentication, subscription lines and DBN records."""
-
-    def __init__(self, key: str) -> None:
-        self.key = key
-        self.lines: list[str] = []
-        self.writers: set = set()
-        self.port = 0
-        self._thread: Thread | None = None
-        self._server = None
-        self._streams: dict = {}
-
-    def start(self, port: int = 0) -> "FakeDatabento":
-        self._thread = Thread()
-        self._thread.call(self._start(port))
-        return self
-
-    async def _start(self, port: int) -> None:
-        from databento.common import cram
-
-        async def handle(reader, writer):
-            writer.write(b"lsg_version=0.1\n")
-            writer.write(b"cram=abcdef\n")
-            await writer.drain()
-            auth = (await reader.readline()).decode()
-            if not auth.startswith("auth=" + cram.get_challenge_response("abcdef", self.key)):
-                writer.write(b"success=0|error=Authentication failed\n")
-                await writer.drain()
-                writer.close()
-                return
-            writer.write(b"success=1|session_id=fake\n")
-            await writer.drain()
-            symbols: list[str] = []
-            while True:
-                line = await reader.readline()
-                if not line:
-                    break
-                text = line.decode().strip()
-                self.lines.append(text)
-                if text.startswith("schema=") and "symbols=" in text:
-                    symbols += dict(p.partition("=")[::2] for p in text.split("|"))["symbols"].split(",")
-                if text.startswith("start_session"):
-                    self._begin(writer, symbols)
-                    self.writers.add(writer)
-                elif text.startswith("schema=") and writer in self.writers:
-                    self._mappings(writer, symbols)
-            self.writers.discard(writer)
-
-        self._server = await asyncio.start_server(handle, "127.0.0.1", port)
-        self.port = self._server.sockets[0].getsockname()[1]
-
-    def _begin(self, writer, symbols: list[str]) -> None:
-        import databento_dbn as dbn
-
-        metadata = dbn.Metadata(dataset="GLBX.MDP3", start=0, stype_in=dbn.SType.CONTINUOUS,
-                                stype_out=dbn.SType.INSTRUMENT_ID, schema=dbn.Schema.TRADES, symbols=symbols,
-                                version=3)
-        writer.write(bytes(metadata.encode()))
-        self._mappings(writer, symbols)
-
-    def _mappings(self, writer, symbols: list[str]) -> None:
-        import databento_dbn as dbn
-
-        for index, symbol in enumerate(symbols):
-            record = dbn.SymbolMappingMsg(1, 40 + index, 0, dbn.SType.CONTINUOUS, symbol, dbn.SType.INSTRUMENT_ID,
-                                          str(40 + index), 0, 2 ** 63)
-            writer.write(bytes(record))
-
-    def push_trade(self, price: float, size: int = 2, instrument_id: int = 40, ts_ms: int | None = None) -> None:
-        import databento_dbn as dbn
-
-        stamp = int((ts_ms if ts_ms is not None else time.time() * 1000) * 1_000_000)
-        record = dbn.TradeMsg(1, instrument_id, stamp, int(price * 1e9), size, dbn.Action.TRADE if hasattr(
-            dbn.Action, "TRADE") else "T", dbn.Side.ASK if hasattr(dbn.Side, "ASK") else "A", 0, stamp)
-
-        async def go():
-            for writer in list(self.writers):
-                writer.write(bytes(record))
-                await writer.drain()
-        self._thread.call(go())
-
-    def stop(self) -> None:
-        if self._thread is None:
-            return
-
-        async def go():
-            self._server.close()
-            for writer in list(self.writers):
-                writer.close()
-        self._thread.call(go())
-        self._thread.stop()
-        self._thread = None
 
 
 DEAD_URL = "ws://127.0.0.1:9/"                                   # nothing listens there: a refused connection

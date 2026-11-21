@@ -9,9 +9,7 @@ from collections.abc import Callable
 
 from hokma.market.adapters.alpaca import AlpacaSource
 from hokma.market.adapters.coinbase import CoinbaseSource
-from hokma.market.adapters.databento_source import DatabentoSource
 from hokma.market.adapters.finnhub import FinnhubSource
-from hokma.market.adapters.massive import MassiveFuturesSource
 from hokma.market.adapters.polling import PollingLiveSource
 from hokma.market.adapters.siomtrading_futures import SiomTradingFuturesSource
 from hokma.market.providers import ProviderSpec
@@ -23,8 +21,6 @@ ADAPTERS: dict[str, AdapterFactory] = {
     "coinbase": lambda spec, secret, url: CoinbaseSource(spec, url),
     "alpaca": lambda spec, secret, url: AlpacaSource(spec, json.loads(secret or "{}"), url),
     "finnhub": lambda spec, secret, url: FinnhubSource(spec, secret or "", url),
-    "massive": lambda spec, secret, url: MassiveFuturesSource(spec, secret or "", url),
-    "databento": lambda spec, secret, url: DatabentoSource(spec, secret or ""),
     "siomtrading_futures": lambda spec, secret, url: SiomTradingFuturesSource(spec, secret or "", url),
 }
 
@@ -33,5 +29,5 @@ def register_adapter(provider_id: str, factory: AdapterFactory) -> None:
     ADAPTERS[provider_id] = factory
 
 
-__all__ = ["ADAPTERS", "AdapterFactory", "AlpacaSource", "CoinbaseSource", "DatabentoSource", "FinnhubSource",
-           "MassiveFuturesSource", "PollingLiveSource", "SiomTradingFuturesSource", "register_adapter"]
+__all__ = ["ADAPTERS", "AdapterFactory", "AlpacaSource", "CoinbaseSource", "FinnhubSource", "PollingLiveSource",
+           "SiomTradingFuturesSource", "register_adapter"]

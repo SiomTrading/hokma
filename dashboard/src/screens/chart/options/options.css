@@ -1,0 +1,42 @@
+/* The option chain of the chart screen (SPEC-014). Tokens of the design only, one shaded color for in the money, no motion:
+   the table changes at once when the student refreshes, opens a group or changes strikes. */
+.opt { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 10px 14px; gap: 10px; }
+.opt-under { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; background: var(--glass-subtle); }
+.opt-fold { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--t1); font: 600 12px Montserrat, sans-serif; cursor: pointer; padding: 2px 4px; border-radius: 6px; text-align: left; }
+.opt-fold:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+.opt-fields { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; }
+.opt-field { display: flex; flex-direction: column; gap: 1px; min-width: 70px; }
+.opt-field dt { font: 500 11px Montserrat, sans-serif; color: var(--t3); }
+.opt-field dd { margin: 0; font-size: 13px; color: var(--t1); white-space: nowrap; }
+.opt-up { color: var(--up); }
+.opt-down { color: var(--down); }
+.opt-chain { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+.opt-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.opt-fixed { font: 500 12px Montserrat, sans-serif; color: var(--t2); white-space: nowrap; }
+.opt-strikes { display: inline-flex; align-items: center; gap: 6px; font: 500 12px Montserrat, sans-serif; color: var(--t2); }
+.opt-select { min-height: 30px; border-radius: 8px; border: 1px solid var(--border); background: var(--glass-subtle); color: var(--t1); font: 500 12px Montserrat, sans-serif; padding: 0 8px; }
+.opt-select option { background: var(--bg); color: var(--t1); }
+.opt-pop-anchor { position: relative; }
+.opt-pop { position: absolute; z-index: 6; top: calc(100% + 4px); left: 0; width: 300px; max-width: calc(100vw - 32px); background: var(--pop); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-menu); padding: 10px; backdrop-filter: blur(24px); }
+.opt-filter { display: flex; flex-direction: column; gap: 8px; }
+.opt-filter-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; font: 500 12px Montserrat, sans-serif; color: var(--t2); }
+.opt-filter-field .in { width: 96px; min-height: 30px; text-align: right; }
+.opt-filter-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 2px; }
+.opt-status { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font: 500 12px Montserrat, sans-serif; color: var(--t2); min-height: 16px; }
+.opt-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 28px 20px; flex: 1; }
+.opt-scroll { overflow: auto; min-height: 0; flex: 1; border: 1px solid var(--border); border-radius: 12px; }
+.opt-table { border-collapse: collapse; width: 100%; font-size: 12px; color: var(--t1); }
+.opt-table th { position: sticky; top: 0; z-index: 1; background: var(--pop); font: 600 11px Montserrat, sans-serif; color: var(--t3); text-align: right; padding: 6px 8px; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.opt-table .opt-sides th { text-align: center; color: var(--t2); letter-spacing: 0.06em; }
+.opt-table td { padding: 3px 8px; white-space: nowrap; }
+.opt-table td.num { text-align: right; }
+.opt-group td { background: var(--glass-subtle); border-top: 1px solid var(--border); padding: 4px 8px; }
+.opt-group-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.opt-note td { color: var(--t2); text-align: center; padding: 14px 8px; font: 500 12px Montserrat, sans-serif; }
+.opt-center-col { color: var(--t2); }
+.opt-strike { color: var(--t1); font-weight: 600; }
+.opt-itm { background: var(--acc-sub); }
+.opt-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; padding: 2px; background: var(--glass-subtle); }
+.opt-tabs button { border: 0; background: transparent; color: var(--t2); font: 600 12px Montserrat, sans-serif; padding: 4px 12px; border-radius: 999px; cursor: pointer; }
+.opt-tabs button[aria-selected="true"] { background: var(--acc-sub); color: var(--acc); }
+.opt-tabs button:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }

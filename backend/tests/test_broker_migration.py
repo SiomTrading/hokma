@@ -28,7 +28,7 @@ def test_it_runs_on_a_1_0_4_base_without_losing_rows_and_seeds_the_broker(env):
     con.commit()
     before = [con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in ("projects", "desks")]
     con.close()
-    assert migrate().applied == [17, 18]
+    assert migrate().applied == [17, 18, 19]
     con = raw()
     assert [con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in ("projects", "desks")] == before
     assert con.execute("SELECT kind, name FROM brokers").fetchall() == [("sim", "Hokma Simulated")]

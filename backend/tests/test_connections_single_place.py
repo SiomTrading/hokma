@@ -86,8 +86,7 @@ def test_nothing_in_the_backend_reads_or_writes_a_market_settings_file_or_a_key_
     offenders = []
     for path in (ROOT / "backend" / "hokma").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
-        for needle in ("market.json", "MARKET_API_KEY", "MARKET_KEY", "ALPACA_API_KEY", "FINNHUB_API_KEY",
-                       "DATABENTO_API_KEY"):
+        for needle in ("market.json", "MARKET_API_KEY", "MARKET_KEY", "ALPACA_API_KEY", "FINNHUB_API_KEY"):
             if needle in text:
                 offenders.append(f"{path.relative_to(ROOT)}: {needle}")
     assert offenders == []

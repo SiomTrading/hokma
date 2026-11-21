@@ -81,6 +81,18 @@ async function readError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, code, message, reason, extra);
 }
 
+/** A 401 that is not about this panel's session: the data provider refused the key the student saved (`options.auth_failed`). */
+async function providerRefusal(res: Response): Promise<boolean> {
+  try {
+    const body: unknown = await res.clone().json();
+    const detail = body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined;
+    const code = detail && typeof detail === "object" ? (detail as { code?: unknown }).code : undefined;
+    return typeof code === "string" && code.startsWith("options.");
+  } catch {
+    return false;
+  }
+}
+
 export async function request(path: string, options: RequestOptions = {}): Promise<Response> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -113,7 +125,7 @@ export async function request(path: string, options: RequestOptions = {}): Promi
     if (timer) clearTimeout(timer);
   }
 
-  if (res.status === 401) {
+  if (res.status === 401 && !(await providerRefusal(res))) {
     clearToken();
     throw new ApiError(401, "unauthorized", t("api.unauthorized"));
   }

@@ -61,7 +61,7 @@ def test_an_unattended_routine_can_call_the_read_only_tools_it_asks_for():
     asked = cited(TEMPLATE / "routines" / "premarket_briefing.md")
     assert asked and asked <= read_only and asked <= allow
     assert {"today_show", "watchlist_all", "economic_calendar", "market_news", "earnings_calendar", "market_quote",
-            "broker_list"} <= allow
+            "options_chain", "broker_list"} <= allow
     assert allow - {"trash_move"} <= read_only                         # nothing that writes is allowed without asking
     assert not allow & {"gmail_send", "gmail_read", "gmail_search", "today_configure", "account_create"}
 

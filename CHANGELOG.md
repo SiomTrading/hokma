@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8
+
+- Changed: Databento and Massive are no longer offered. Futures use SiomTrading Futures, with Yahoo as backup. A key saved for them is removed from your system credential store when Hokma starts.
+- New: Option chain of US stocks and ETFs from the Alpaca IEX key you already saved, with strike, expiration, bid, ask, last, volume, open interest, greeks and IV. On the free Alpaca plan prices are indicative and greeks are estimated, and the screen says so.
+- New: Agents get a read-only tool `options_chain` that filters contracts by days, delta, open interest and spread.
+
 ## 1.0.7
 
 - New: Learn has 14 new step-by-step guides: engines, basic plugins, Telegram, Gmail, routines and premarket briefing, Fund and desks, broker and capital, troubleshooting, voice, library and documents, backup and trash, data connections, permissions and security, and GitHub.

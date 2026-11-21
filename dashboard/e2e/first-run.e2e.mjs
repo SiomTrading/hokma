@@ -20,7 +20,7 @@ await runSuite("first-run", { script: "firstrun-serve.py", signedIn: true }, asy
   const heading = (key) => dialog.getByRole("heading", { name: msg(key) }).waitFor();
   const stepsLabel = dialog.getByLabel(msg("firstrun.steps"));
   // C5: no step of the first run has a key field or a provider selector
-  const forbidden = ["Alpaca", "Finnhub", "Coinbase", "Databento", "Massive"];
+  const forbidden = ["Alpaca", "Finnhub", "Coinbase"];
   for (const other of ["en", "es"]) {
     const T = translator(other).M;
     for (const key of ["connections.field.key", "connections.field.token", "connections.field.keyId", "connections.field.secret", "connections.key.save"]) forbidden.push(T[key]);

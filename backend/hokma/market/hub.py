@@ -928,7 +928,7 @@ class MarketHub:
             "key_state": self._key_state(spec), "enabled": self.config.is_enabled(provider_id),
             "state": runtime.state, "data_state": runtime.data_state, "error_code": runtime.error_code,
             "error_message": connection_message(runtime.error_code), "symbols_in_use": len(runtime.feeds),
-            "max_symbols": spec.max_symbols, "priority": priority, "premium": spec.premium,
+            "max_symbols": spec.max_symbols, "priority": priority,
             "available": provider_id in ADAPTERS,
         }
 

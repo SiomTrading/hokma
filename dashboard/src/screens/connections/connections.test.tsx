@@ -16,33 +16,31 @@ const SECRET = "sk-live-VERY-SECRET-value-98765";
 function card(over: Partial<ConnectionCard> & Pick<ConnectionCard, "id" | "name">): ConnectionCard {
   return {
     asset_classes: [], needs_key: true, key_fields: ["key"], key_state: "missing", enabled: true, state: "not_connected", data_state: "live",
-    error_code: null, error_message: "", symbols_in_use: 0, max_symbols: 50, priority: {}, premium: false, available: true, ...over,
+    error_code: null, error_message: "", symbols_in_use: 0, max_symbols: 50, priority: {}, available: true, ...over,
   };
 }
 
-function sixCards(): ConnectionCard[] {
+function fourCards(): ConnectionCard[] {
   return [
     card({ id: "coinbase", name: "Coinbase", asset_classes: ["crypto"], needs_key: false, key_fields: [], key_state: "not_required", state: "connected", max_symbols: 100, priority: { crypto: 0 } }),
     card({ id: "alpaca", name: "Alpaca", asset_classes: ["equity"], key_fields: ["key_id", "secret"], max_symbols: 30, priority: { equity: 0 } }),
     card({ id: "finnhub", name: "Finnhub", asset_classes: ["equity", "forex", "crypto"], data_state: "delayed", max_symbols: 50, priority: { equity: 1, forex: 0, crypto: 1 } }),
     card({ id: "siomtrading_futures", name: "SiomTrading Futures", asset_classes: ["future"], max_symbols: 20, available: false, priority: { future: 0 } }),
-    card({ id: "databento", name: "Databento", asset_classes: ["future", "equity"], premium: true, max_symbols: 100, priority: { future: 1, equity: 2 } }),
-    card({ id: "massive", name: "Massive", asset_classes: ["future"], premium: true, max_symbols: 50, priority: { future: 2 } }),
   ];
 }
 
 const GROUPS: ConnectionsList["groups"] = {
-  equity: ["alpaca", "finnhub", "databento"],
+  equity: ["alpaca", "finnhub"],
   crypto: ["coinbase", "finnhub"],
   forex: ["finnhub"],
-  future: ["siomtrading_futures", "databento", "massive"],
+  future: ["siomtrading_futures"],
 };
 
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 /** The routes of /api/connections, with a store that remembers the keys apart from what the list says. */
 class FakeConnections {
-  cards = sixCards();
+  cards = fourCards();
   groups: ConnectionsList["groups"] = structuredClone(GROUPS);
   storeAvailable = true;
   calls: Array<{ method: string; path: string; body: unknown }> = [];
@@ -127,7 +125,7 @@ afterEach(() => {
 });
 
 describe("C1: the screen", () => {
-  it("shows the six cards at once, grouped by kind of data, in this order", async () => {
+  it("shows the four cards at once, grouped by kind of data, in this order", async () => {
     await show();
     const groups = [...document.querySelectorAll("[data-group]")].map((g) => g.getAttribute("data-group"));
     expect(groups).toEqual(["crypto", "equity", "mixed", "future", "priority"]);
@@ -135,19 +133,24 @@ describe("C1: the screen", () => {
     expect(inGroup("crypto")).toEqual(["coinbase"]);
     expect(inGroup("equity")).toEqual(["alpaca"]);
     expect(inGroup("mixed")).toEqual(["finnhub"]);
-    expect(inGroup("future")).toEqual(["siomtrading_futures", "databento", "massive"]);
-    expect(document.querySelectorAll("article[data-provider]")).toHaveLength(6);
-    for (const name of ["Coinbase", "Alpaca", "Finnhub", "SiomTrading Futures", "Databento", "Massive"]) expect(screen.getByRole("article", { name })).toBeVisible();
+    expect(inGroup("future")).toEqual(["siomtrading_futures"]);
+    expect(document.querySelectorAll("article[data-provider]")).toHaveLength(4);
+    for (const name of ["Coinbase", "Alpaca", "Finnhub", "SiomTrading Futures"]) expect(screen.getByRole("article", { name })).toBeVisible();
     expect(screen.getByRole("heading", { name: t("connections.group.equity") })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: t("connections.group.mixed") })).toBeInTheDocument();
   });
 
-  it("the futures cards follow the futures priority", async () => {
-    backend.find("siomtrading_futures").priority = { future: 2 };
-    backend.find("massive").priority = { future: 0 };
+  it("has no card of the removed providers and the futures priority lists only SiomTrading Futures", async () => {
     await show();
-    const order = [...document.querySelector('[data-group="future"]')!.querySelectorAll("article")].map((e) => e.getAttribute("data-provider"));
-    expect(order).toEqual(["massive", "databento", "siomtrading_futures"]);
+    expect(document.querySelector('[data-provider="databento"]')).toBeNull();
+    expect(document.querySelector('[data-provider="massive"]')).toBeNull();
+    expect(screen.queryByRole("article", { name: /databento|massive/i })).toBeNull();
+    const futures = [...document.querySelector('[data-group="future"]')!.querySelectorAll("article")].map((e) => e.getAttribute("data-provider"));
+    expect(futures).toEqual(["siomtrading_futures"]);
+    expect(document.querySelector('[data-group="more"]')).toBeNull();
+    // one provider only: there is nothing to order, so the futures priority row does not show
+    expect(screen.queryByTestId("priority-future")).toBeNull();
+    expect(backend.groups.future).toEqual(["siomtrading_futures"]);
   });
 
   it("Coinbase has a switch and no key field; Alpaca has two fields and the others one", async () => {
@@ -161,7 +164,7 @@ describe("C1: the screen", () => {
     expect(cardOf("alpaca").querySelectorAll("input")).toHaveLength(2);
     expect(within(cardOf("alpaca")).getByLabelText(t("connections.field.keyId"))).toHaveAttribute("type", "password");
     expect(within(cardOf("alpaca")).getByLabelText(t("connections.field.secret"))).toHaveAttribute("type", "password");
-    for (const id of ["finnhub", "databento", "massive"]) expect(cardOf(id).querySelectorAll("input")).toHaveLength(1);
+    for (const id of ["finnhub"]) expect(cardOf(id).querySelectorAll("input")).toHaveLength(1);
     expect(within(cardOf("siomtrading_futures")).getByLabelText(t("connections.field.token"))).toBeInTheDocument();
     expect(within(cardOf("finnhub")).getByLabelText(t("connections.field.key"))).toBeInTheDocument();
   });
@@ -180,14 +183,11 @@ describe("C1: the screen", () => {
     expect(within(cardOf("finnhub")).getByTestId("conn-data")).toHaveTextContent(t("connections.data.delayed"));
   });
 
-  it("shows the notes of the cards: IEX, the limits, premium, and the source that is not available yet", async () => {
+  it("shows the notes of the cards: IEX, the limits, and the source that is not available yet", async () => {
     await show();
     expect(within(cardOf("alpaca")).getByText(t("connections.note.alpaca"))).toBeInTheDocument();
     expect(within(cardOf("alpaca")).getByText(t("connections.note.limit", { max: 30 }))).toBeInTheDocument();
     expect(within(cardOf("finnhub")).getByText(t("connections.note.limit", { max: 50 }))).toBeInTheDocument();
-    expect(within(cardOf("databento")).getByText(t("connections.note.premium"))).toBeInTheDocument();
-    expect(within(cardOf("massive")).getByText(t("connections.note.premium"))).toBeInTheDocument();
-    expect(within(cardOf("coinbase")).queryByText(t("connections.note.premium"))).toBeNull();
     expect(within(cardOf("siomtrading_futures")).getByTestId("conn-unavailable")).toBeInTheDocument();
     expect(within(cardOf("siomtrading_futures")).getByRole("button", { name: t("connections.test") })).toBeDisabled();
   });
@@ -392,9 +392,9 @@ describe("priority", () => {
 
   it("lists the classes that have more than one provider, in order", async () => {
     await show();
-    expect(rows("equity")).toEqual(["alpaca", "finnhub", "databento"]);
+    expect(rows("equity")).toEqual(["alpaca", "finnhub"]);
     expect(rows("crypto")).toEqual(["coinbase", "finnhub"]);
-    expect(rows("future")).toEqual(["siomtrading_futures", "databento", "massive"]);
+    expect(screen.queryByTestId("priority-future")).toBeNull(); // one provider: nothing to order
     expect(screen.queryByTestId("priority-forex")).toBeNull(); // one provider: nothing to order
   });
 
@@ -402,21 +402,21 @@ describe("priority", () => {
     await show();
     await userEvent.click(within(screen.getByTestId("priority-equity")).getByRole("button", { name: t("connections.priority.down", { name: "Alpaca" }) }));
     await waitFor(() => expect(backend.sent("PUT", "/connections/priority")).toHaveLength(1));
-    expect(backend.sent("PUT", "/connections/priority")[0]!.body).toEqual({ asset_class: "equity", order: ["finnhub", "alpaca", "databento"] });
-    expect(rows("equity")).toEqual(["finnhub", "alpaca", "databento"]);
+    expect(backend.sent("PUT", "/connections/priority")[0]!.body).toEqual({ asset_class: "equity", order: ["finnhub", "alpaca"] });
+    expect(rows("equity")).toEqual(["finnhub", "alpaca"]);
     expect(within(screen.getByTestId("priority-equity")).getAllByRole("button", { name: /^Move/ })[0]).toBeDisabled(); // first cannot go up
   });
 
   it("dragging a row onto another reorders and sends it", async () => {
     await show();
-    const list = screen.getByTestId("priority-future");
+    const list = screen.getByTestId("priority-equity");
     const items = list.querySelectorAll("li");
     const data = { setData: vi.fn(), effectAllowed: "", dropEffect: "" };
-    fireEvent.dragStart(items[2]!, { dataTransfer: data });
+    fireEvent.dragStart(items[1]!, { dataTransfer: data });
     fireEvent.dragOver(items[0]!, { dataTransfer: data });
     fireEvent.drop(items[0]!, { dataTransfer: data });
     await waitFor(() => expect(backend.sent("PUT", "/connections/priority")).toHaveLength(1));
-    expect(backend.sent("PUT", "/connections/priority")[0]!.body).toEqual({ asset_class: "future", order: ["massive", "siomtrading_futures", "databento"] });
+    expect(backend.sent("PUT", "/connections/priority")[0]!.body).toEqual({ asset_class: "equity", order: ["finnhub", "alpaca"] });
   });
 
   it("puts the order back and says why when the engine refuses it", async () => {
@@ -440,7 +440,7 @@ describe("C6: the group of a class comes forward", () => {
     requestFocus("equity");
     await show();
     const marked = [...document.querySelectorAll("[data-focus='true']")].map((e) => e.getAttribute("data-testid"));
-    expect(marked.sort()).toEqual(["connection-alpaca", "connection-databento", "connection-finnhub", "priority-equity"]);
+    expect(marked.sort()).toEqual(["connection-alpaca", "connection-finnhub", "priority-equity"]);
     expect(cardOf("coinbase")).not.toHaveAttribute("data-focus");
   });
 

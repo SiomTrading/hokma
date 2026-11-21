@@ -802,5 +802,15 @@
   "broker.err.not_confirmed": "Resetting wipes the account's result and puts it back at its initial capital. Confirm to go on.",
   "broker.err.account_in_use": "That account is already assigned to another desk. Remove it from there first.",
   "broker.err.desk_has_account": "That desk already has an account. Remove it before assigning another.",
-  "broker.err.desk_without_account": "That desk has no account assigned."
+  "broker.err.desk_without_account": "That desk has no account assigned.",
+  "options.note.indicative": "Indicative prices and estimated greeks (free Alpaca plan).",
+  "options.note.opra": "OPRA prices; greeks calculated by Alpaca.",
+  "options.note.truncated": "The chain is longer than what Hokma reads in one request; narrow the days or the expiration to see the rest.",
+  "options.err.no_connection": "The option chain needs Alpaca IEX: save its key and turn it on in Connections.",
+  "options.err.desk": "This desk does not use Alpaca IEX. Turn it on in the desk's connections.",
+  "options.err.not_equity": "Options are available only for US stocks and ETFs, not for {symbol}.",
+  "options.err.auth_failed": "Alpaca did not accept the saved key.",
+  "options.err.rate_limited": "Alpaca is limiting requests; try again in a minute.",
+  "options.err.upstream": "Alpaca did not answer the option chain.",
+  "options.err.args": "{name} must be {rule}."
 }

@@ -92,10 +92,6 @@ class Net:
         if host == "finnhub.io":
             return 200, json.dumps({"s": "ok", "t": [OPEN, OPEN + 300], "o": [1, 2], "h": [3, 4], "l": [0, 1],
                                     "c": [2, 3], "v": [7, 8]})
-        if host == "hist.databento.com":
-            rows = [{"hd": {"ts_event": str((OPEN + i * 60) * 1_000_000_000)}, "open": "100.5", "high": "101",
-                     "low": "100", "close": "100.75", "volume": "3"} for i in range(10)]
-            return 200, "\n".join(json.dumps(r) for r in rows)
         return 500, ""
 
 
@@ -152,9 +148,9 @@ def test_the_answer_is_cached_so_repeated_reads_make_one_request(tmp_path):
 
 def test_the_priority_of_connections_decides_and_a_switched_off_provider_is_not_asked(tmp_path):
     keys = {"alpaca": KEY, "finnhub": "finnhub-key-value-13579"}
-    source, _, _ = chain(tmp_path, keys, order={"equity": ["finnhub", "alpaca", "databento"]})
+    source, _, _ = chain(tmp_path, keys, order={"equity": ["finnhub", "alpaca"]})
     assert source.history("AAPL", "5m").source == "Finnhub"
-    source, _, _ = chain(tmp_path / "off", keys, off=("finnhub",), order={"equity": ["finnhub", "alpaca", "databento"]})
+    source, _, _ = chain(tmp_path / "off", keys, off=("finnhub",), order={"equity": ["finnhub", "alpaca"]})
     assert source.history("AAPL", "5m").source == "Alpaca IEX"
 
 
@@ -178,12 +174,10 @@ def test_crypto_uses_coinbase_candles_and_without_it_alpaca_bars(tmp_path):
     assert "/v1beta3/crypto/us/bars" in net.urls[0] and "BTC%2FUSD" in net.urls[0]
 
 
-def test_futures_use_databento_and_fold_minutes_into_five_minute_bars(tmp_path):
-    source, yahoo, net = chain(tmp_path, {"databento": "db-test-key-123456"})
-    series = source.history("NQ=F", "5m")
-    assert series.source == "Databento" and series.kind == "future" and len(series.candles) == 2
-    assert series.candles[0].v == 15 and net.urls == ["https://hist.databento.com/v0/timeseries.get_range"]
-    assert yahoo.calls == []
+def test_futures_have_no_connected_history_and_come_from_yahoo(tmp_path):
+    source, yahoo, net = chain(tmp_path, {"alpaca": KEY})
+    assert source.history("NQ=F", "5m").source == "Yahoo Finance"
+    assert ("NQ=F", "5m") in yahoo.calls and net.urls == []
 
 
 def test_a_desk_with_only_coinbase_active_uses_coinbase_for_btc_and_yahoo_for_stocks(tmp_path):
@@ -230,3 +224,17 @@ def test_the_snapshot_reports_the_real_source_of_the_history():
     assert hub._history_info(live, "equity", "Alpaca IEX") == {"source": "Alpaca IEX", "delay_seconds": 0}
     assert hub._history_info(live, "equity", "Yahoo Finance") == {"source": "Yahoo Finance", "delay_seconds": 900}
     assert hub._history_info(hub._fallback, "equity", "Yahoo Finance") == {"source": "Yahoo Finance", "delay_seconds": 0}
+
+
+def test_a_redirect_to_another_host_does_not_carry_the_alpaca_headers():
+    from hokma.market.history import _KeepKeysOnHost
+
+    request = urllib.request.Request("https://data.alpaca.markets/v2/stocks/AAPL/bars",
+                                     headers={"APCA-API-KEY-ID": "AKTESTKEYID12345", "APCA-API-SECRET-KEY": "s3cret",
+                                              "Accept": "application/json"})
+    handler = _KeepKeysOnHost()
+    other = handler.redirect_request(request, None, 302, "Found", {}, "https://elsewhere.example.com/x")
+    assert other is not None and not [n for n in other.headers if n.lower().startswith("apca-")]
+    assert other.get_header("Accept") == "application/json"
+    same = handler.redirect_request(request, None, 302, "Found", {}, "https://data.alpaca.markets/v2/other")
+    assert same.get_header("Apca-api-key-id") == "AKTESTKEYID12345" and same.get_header("Apca-api-secret-key") == "s3cret"

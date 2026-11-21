@@ -41,7 +41,7 @@ from hokma.market.adapters import ADAPTERS  # noqa: E402
 from hokma.market.providers import get_catalog  # noqa: E402
 from hokma.market.stream import BarUpdate, SourceStatus, Tick  # noqa: E402
 
-DEFAULT_SYMBOL = {"coinbase": "BTC-USD", "alpaca": "SPY", "finnhub": "AAPL", "databento": "NQ=F", "massive": "NQ=F"}
+DEFAULT_SYMBOL = {"coinbase": "BTC-USD", "alpaca": "SPY", "finnhub": "AAPL"}
 
 
 def percentile(values: list[float], fraction: float) -> float:

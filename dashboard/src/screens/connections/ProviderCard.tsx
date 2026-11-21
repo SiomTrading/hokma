@@ -105,7 +105,6 @@ export function ProviderCard({ card, storeAvailable, focused, onChange, onStoreM
   const notes: Array<{ key: string; text: string; testId?: string }> = [];
   if (card.id === "alpaca") notes.push({ key: "iex", text: t("connections.note.alpaca") });
   if (card.id === "alpaca" || card.id === "finnhub") notes.push({ key: "limit", text: t("connections.note.limit", { max: card.max_symbols }) });
-  if (card.premium) notes.push({ key: "premium", text: t("connections.note.premium") });
   if (!card.available) notes.push({ key: "unavailable", text: t("connections.note.unavailable"), testId: "conn-unavailable" });
 
   const keyStatus = card.key_state === "saved" ? t("connections.key.saved") : t("connections.key.missing");

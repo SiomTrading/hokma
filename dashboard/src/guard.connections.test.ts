@@ -30,10 +30,14 @@ describe("keys and providers live in one place", () => {
     }
   });
 
+  it("no source names a retired provider", () => {
+    expect(filesWith(/databento|massive/i)).toEqual([]);
+  });
+
   it("no other screen names a data provider", () => {
-    const providers = /\b(alpaca|finnhub|coinbase|databento|massive)\b/i;
+    const providers = /\b(alpaca|finnhub|coinbase)\b/i;
     for (const file of filesWith(providers)) {
-      expect(file.startsWith("./screens/connections/") || file === "./i18n/messages/connections.ts", file).toBe(true);
+      expect(file.startsWith("./screens/connections/") || file === "./i18n/messages/connections.ts" || file === "./i18n/messages/options.ts", file).toBe(true);   // the option chain says which plan Alpaca gives
     }
   });
 });

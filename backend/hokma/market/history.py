@@ -44,7 +44,6 @@ HISTORY_CLASSES = {
     "alpaca": ("equity", "crypto"),
     "coinbase": ("crypto",),
     "finnhub": ("equity", "forex", "crypto"),
-    "databento": ("future", "equity"),
 }
 # Providers that serve bars but are not in the order of Connections for the class, by class, in the order they go last.
 EXTRA_ORDER = {"crypto": ("alpaca",), "equity": ("alpaca",)}
@@ -53,12 +52,24 @@ HttpGet = Callable[[str, dict], tuple[int, str]]
 Allowed = Callable[[str], bool] | None
 
 
+class _KeepKeysOnHost(urllib.request.HTTPRedirectHandler):
+    """A redirect to another host does not carry the provider's key headers (APCA-*)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlsplit(newurl).hostname != urllib.parse.urlsplit(req.full_url).hostname:
+            for store in (new.headers, new.unredirected_hdrs):
+                for name in [n for n in store if n.lower().startswith("apca-")]:
+                    del store[name]
+        return new
+
+
 def http_get(url: str, headers: dict, body: bytes | None = None) -> tuple[int, str]:
     """GET (POST with a body) `url` over `tls.outbound_context`. Returns (status, text); raises MarketError(network)."""
     request = urllib.request.Request(url, data=body, headers={"User-Agent": "Mozilla/5.0 (compatible; Hokma)",
                                                               "Accept": "application/json", **headers})
     try:
-        with tls.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with tls.opener(_KeepKeysOnHost).open(request, timeout=TIMEOUT_SECONDS) as response:
             return response.status, response.read(MAX_BODY_BYTES).decode("utf-8", "replace")
     except urllib.error.HTTPError as error:
         try:
@@ -224,58 +235,7 @@ def _finnhub(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, no
     return _regular_hours(out, base) if asset == "equity" else out
 
 
-# base -> (schema, seconds of the bars the schema serves)
-DATABENTO_SCHEMA = {"1m": ("ohlcv-1m", 60), "5m": ("ohlcv-1m", 60), "15m": ("ohlcv-1m", 60),
-                    "1h": ("ohlcv-1h", 3600), "1D": ("ohlcv-1d", 86400)}
-
-
-def _databento(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, now: float) -> list[Candle]:
-    """The historical API has no 5 or 15 minute schema: those come from the 1-minute bars, folded here."""
-    import base64
-
-    mapped = symbol_map.to_provider("databento", symbol, asset)
-    if mapped is None:
-        raise MarketError(UNKNOWN_SYMBOL, 404)
-    schema, served = DATABENTO_SCHEMA[base]
-    form = {"dataset": symbol_map.databento_dataset(asset), "symbols": mapped, "schema": schema,
-            "stype_in": "continuous" if asset == "future" else "raw_symbol", "encoding": "json",
-            "start": _iso(now - SPAN_DAYS[base if served == TIMEFRAME_SECONDS[base] else "1m"] * 86400),
-            "end": _iso(now - 60), "pretty_px": "true", "pretty_ts": "false"}
-    token = base64.b64encode(f"{secret}:".encode()).decode()
-    status, text = fetch("https://hist.databento.com/v0/timeseries.get_range",
-                         {"Authorization": f"Basic {token}", "Content-Type": "application/x-www-form-urlencoded",
-                          "Accept": "application/x-ndjson"}, urllib.parse.urlencode(form).encode())
-    if status == 422:
-        raise MarketError(UPSTREAM, 502)               # for example the end is after what the license has: next one
-    _check(status)
-    out: list[Candle] = []
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        try:
-            row = json.loads(line)
-            stamp = int(row["hd"]["ts_event"]) // 1_000_000_000
-        except (ValueError, KeyError, TypeError):
-            continue
-        item = _candle(stamp, row.get("open"), row.get("high"), row.get("low"), row.get("close"), row.get("volume"))
-        if item:
-            out.append(item)
-    if served != TIMEFRAME_SECONDS[base]:
-        out = _fold(out, TIMEFRAME_SECONDS[base])
-    return out
-
-
-def _fold(candles: list[Candle], size: int) -> list[Candle]:
-    folded: dict[int, Candle] = {}
-    for candle in candles:
-        start = candle.t - candle.t % size
-        held = folded.get(start)
-        folded[start] = (Candle(start, candle.o, candle.h, candle.l, candle.c, candle.v) if held is None else
-                         Candle(start, held.o, max(held.h, candle.h), min(held.l, candle.l), candle.c, held.v + candle.v))
-    return sorted(folded.values(), key=lambda candle: candle.t)
-
-
-FETCHERS = {"alpaca": _alpaca, "coinbase": _coinbase, "finnhub": _finnhub, "databento": _databento}
+FETCHERS = {"alpaca": _alpaca, "coinbase": _coinbase, "finnhub": _finnhub}
 
 
 # ---------- the series around the bars ----------
@@ -312,7 +272,7 @@ class ConnectedSource:
         self._fetch = fetch
         self._fetchers = fetchers if fetchers is not None else FETCHERS
         self._limiters = {pid: RateLimiter(limit=limit, window=60.0) for pid, limit in
-                          {"alpaca": 150, "coinbase": 240, "finnhub": 50, "databento": 30}.items()}
+                          {"alpaca": 150, "coinbase": 240, "finnhub": 50}.items()}
         self._memory: dict[tuple, float] = {}              # (provider, symbol, base) -> epoch until which it is skipped
         self._denied: dict[str, float] = {}                # provider -> epoch until which its refusal is remembered
 

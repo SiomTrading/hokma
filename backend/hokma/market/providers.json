@@ -2,10 +2,10 @@
   "version": 1,
   "asset_classes": ["equity", "crypto", "forex", "future"],
   "default_priority": {
-    "equity": ["alpaca", "finnhub", "databento"],
+    "equity": ["alpaca", "finnhub"],
     "crypto": ["coinbase", "finnhub"],
     "forex": ["finnhub"],
-    "future": ["siomtrading_futures", "databento", "massive"]
+    "future": ["siomtrading_futures"]
   },
   "providers": {
     "coinbase": {
@@ -17,7 +17,6 @@
       "data_state": "live",
       "delay_seconds": 0,
       "max_symbols": 100,
-      "premium": false,
       "url": "wss://ws-feed.exchange.coinbase.com",
       "test_symbol": "BTC-USD"
     },
@@ -30,7 +29,6 @@
       "data_state": "live",
       "delay_seconds": 0,
       "max_symbols": 30,
-      "premium": false,
       "url": "wss://stream.data.alpaca.markets/v2/iex",
       "test_symbol": "SPY"
     },
@@ -43,7 +41,6 @@
       "data_state": "live",
       "delay_seconds": 0,
       "max_symbols": 50,
-      "premium": false,
       "url": "wss://ws.finnhub.io",
       "test_symbol": "BTC-USD"
     },
@@ -56,35 +53,7 @@
       "data_state": "live",
       "delay_seconds": 0,
       "max_symbols": 20,
-      "premium": false,
       "url": "wss://stream.siomtrading.com/v1/stream/futures",
-      "test_symbol": "NQ=F"
-    },
-    "databento": {
-      "name": "Databento",
-      "asset_classes": ["future", "equity"],
-      "needs_key": true,
-      "key_fields": ["key"],
-      "enabled_by_default": true,
-      "data_state": "live",
-      "delay_seconds": 0,
-      "max_symbols": 100,
-      "premium": true,
-      "host": null,
-      "port": null,
-      "test_symbol": "NQ=F"
-    },
-    "massive": {
-      "name": "Massive",
-      "asset_classes": ["future"],
-      "needs_key": true,
-      "key_fields": ["key"],
-      "enabled_by_default": true,
-      "data_state": "live",
-      "delay_seconds": 0,
-      "max_symbols": 50,
-      "premium": true,
-      "url": "wss://socket.massive.com/futures",
       "test_symbol": "NQ=F"
     }
   },

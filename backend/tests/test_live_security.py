@@ -11,14 +11,12 @@ from hokma.core.config import hokma_data_dir
 from hokma.engine.session import SECRET_ENV
 from hardblock_support import Box, box  # noqa: F401  (fixture)
 from live_fixtures import AUTH, Collector, live  # noqa: F401  (fixture)
-from live_support import FakeDatabento, FakeWs, alpaca_script, finnhub_script, massive_script
+from live_support import FakeWs, alpaca_script, finnhub_script
 from market_support import RECORDED_AT
 from test_live_market import KEY_ID, SECRET, iso, subscribe
 
 FINNHUB = "finnhub-key-value-13579"
-MASSIVE = "massive-key-24680"
-DATABENTO = "db-" + "q" * 29
-SECRETS = (KEY_ID, SECRET, FINNHUB, MASSIVE, DATABENTO)
+SECRETS = (KEY_ID, SECRET, FINNHUB)
 
 
 class Recorder:
@@ -42,28 +40,23 @@ def test_m9_a_saved_key_is_nowhere_but_the_system_store(live, caplog, capfd):
     logging.getLogger().setLevel(logging.DEBUG)
     alpaca = FakeWs(alpaca_script(KEY_ID, SECRET)).start()
     finnhub = FakeWs(finnhub_script, reject_token=FINNHUB).start()
-    massive = FakeWs(massive_script(MASSIVE)).start()
-    gateway = FakeDatabento(DATABENTO).start()
     try:
-        live.use({"alpaca": alpaca.url, "finnhub": finnhub.url, "massive": massive.url,
-                  "databento": f"tcp://127.0.0.1:{gateway.port}"})
+        live.use({"alpaca": alpaca.url, "finnhub": finnhub.url})
         with live.app() as client, live.connect(client) as ws:
             http = Recorder(client)
             c = Collector(ws)
             http.put("/api/connections/alpaca/key", json={"key_id": KEY_ID, "secret": SECRET}, headers=AUTH)
             http.put("/api/connections/finnhub/key", json={"key": FINNHUB}, headers=AUTH)
-            http.put("/api/connections/massive/key", json={"key": MASSIVE}, headers=AUTH)
-            http.put("/api/connections/databento/key", json={"key": DATABENTO}, headers=AUTH)
             assert subscribe(c, "a", "AAPL", "5m")["source"] == "Alpaca IEX"
             alpaca.send_all([{"T": "t", "S": "AAPL", "p": 351.0, "s": 5, "t": iso(int(RECORDED_AT * 1000) + 1000)}])
             c.find(lambda m: m["type"] == "bar")
-            for provider in ("alpaca", "finnhub", "massive", "databento"):
+            for provider in ("alpaca", "finnhub"):
                 http.post(f"/api/connections/{provider}/test", headers=AUTH)
             http.get("/api/connections", headers=AUTH)
             http.put("/api/connections/finnhub/key", json={"key": "bad key"}, headers=AUTH)
             http.put("/api/connections/alpaca/enabled", json={"enabled": True}, headers=AUTH)
             http.put("/api/connections/priority", headers=AUTH,
-                     json={"asset_class": "equity", "order": ["finnhub", "alpaca", "databento"]})
+                     json={"asset_class": "equity", "order": ["finnhub", "alpaca"]})
             c.drain(0.5)
             socket_text = json.dumps([{k: v for k, v in m.items() if k != "_at"} for m in c.all])
             everything = {"websocket": socket_text, "http": "\n".join(http.texts), "logs": caplog.text,
@@ -86,32 +79,25 @@ def test_m9_a_saved_key_is_nowhere_but_the_system_store(live, caplog, capfd):
             assert set(state) == {"version", "enabled", "priority"}
             assert all(isinstance(v, bool) for v in state["enabled"].values())
             assert all(isinstance(v, str) for order in state["priority"].values() for v in order)
-        stored = {name: live.keyring.items[("hokma-market", name)] for name in ("alpaca", "finnhub", "massive", "databento")}
+        stored = {name: live.keyring.items[("hokma-market", name)] for name in ("alpaca", "finnhub")}
         assert json.loads(stored["alpaca"]) == {"key_id": KEY_ID, "secret": SECRET}
-        assert stored["finnhub"] == FINNHUB and stored["massive"] == MASSIVE and stored["databento"] == DATABENTO
+        assert stored["finnhub"] == FINNHUB
     finally:
         alpaca.stop()
         finnhub.stop()
-        massive.stop()
-        gateway.stop()
 
 
 def test_f6_the_key_is_not_in_the_url_of_any_provider_that_takes_it_in_a_message(live):
     alpaca = FakeWs(alpaca_script(KEY_ID, SECRET)).start()
-    massive = FakeWs(massive_script(MASSIVE)).start()
     try:
-        live.use({"alpaca": alpaca.url, "massive": massive.url})
+        live.use({"alpaca": alpaca.url})
         with live.app() as client:
             client.put("/api/connections/alpaca/key", json={"key_id": KEY_ID, "secret": SECRET}, headers=AUTH)
-            client.put("/api/connections/massive/key", json={"key": MASSIVE}, headers=AUTH)
             client.post("/api/connections/alpaca/test", headers=AUTH)
-            client.post("/api/connections/massive/test", headers=AUTH)
-            for fake in (alpaca, massive):
-                assert fake.paths and not any(s in p for p in fake.paths for s in SECRETS)
-                assert not any("?" in p for p in fake.paths)
+            assert alpaca.paths and not any(s in p for p in alpaca.paths for s in SECRETS)
+            assert not any("?" in p for p in alpaca.paths)
     finally:
         alpaca.stop()
-        massive.stop()
 
 
 def test_the_hub_and_service_never_put_a_key_in_the_process_environment(live):

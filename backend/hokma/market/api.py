@@ -4,6 +4,9 @@
                                           its asset class and which source would serve it today (`route`); `class`
                                           filters (future, equity, crypto, forex, index)
     GET /api/market/candles?symbol=&tf=   recent bars, last price, market state, delay and the opening high
+    GET /api/market/options/underlying?symbol=              the bar above the option chain (SPEC-014)
+    GET /api/market/options/expirations?symbol=             the expirations of the next 400 days
+    GET /api/market/options/chain?symbol=&expirations=&strikes=   up to 4 expirations, calls and puts side by side
 
 Every route needs the per-boot session token (`X-Hokma-Token` or `?token=`). Errors are `{"detail": {"code",
 "message"}}` and the panel translates by `code`. The data source sits behind `MarketDataSource` (`source.py`);
@@ -22,6 +25,7 @@ from pydantic import BaseModel
 from hokma.core.origin import token_matches
 from hokma.core.config import hokma_data_dir
 from hokma.i18n import t
+from hokma.market import options
 from hokma.market.cache import RateLimiter
 from hokma.market.catalog import SUGGESTIONS
 from hokma.market.errors import BAD_RESPONSE, NETWORK, RATE_LIMITED, UNKNOWN_SYMBOL, UPSTREAM, MarketError
@@ -236,3 +240,40 @@ def candles(symbol: str = Query(max_length=20), tf: Literal["1m", "5m", "15m", "
     data = asdict(chart)
     data.pop("notes", None)
     return ChartOut(**data)
+
+
+# ---------------------------------------------------------------------------------------------- option chain (SPEC-014)
+
+def _options_fail(error: options.OptionsError) -> HTTPException:
+    return HTTPException(status_code=error.status, detail={"code": f"options.{error.code}", "message": str(error)})
+
+
+def _options_call(fn, *args, refresh: bool = False):
+    if refresh:
+        options.forget_cache()
+    try:
+        return fn(*args)
+    except options.OptionsError as error:
+        raise _options_fail(error) from None
+
+
+@router.get("/options/underlying", summary="The bar above the option chain: last, change, bid, ask, size, volume, open, high, low")
+def options_underlying(symbol: str = Query(max_length=20), x_hokma_token: str = Header(default=""),
+                       token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    return _options_call(options.underlying, symbol)
+
+
+@router.get("/options/expirations", summary="Expirations of one US stock or ETF for the next 400 days")
+def options_expirations(symbol: str = Query(max_length=20), x_hokma_token: str = Header(default=""),
+                        token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    return _options_call(options.expirations, symbol)
+
+
+@router.get("/options/chain", summary="Up to 4 expirations of the option chain, calls and puts side by side")
+def options_chain(symbol: str = Query(max_length=20), expirations: str = Query(max_length=80),
+                  strikes: str = Query(default="14", max_length=4), refresh: bool = False,
+                  x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    return _options_call(options.chain, symbol, expirations, strikes, refresh=refresh)

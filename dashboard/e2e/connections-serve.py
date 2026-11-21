@@ -4,7 +4,7 @@ an in-memory credential store. Nothing here reaches the network.
     python e2e/connections-serve.py <dist-folder> <port>
 
 - Coinbase, Alpaca and Finnhub are local WebSocket servers (backend/tests/live_support.py); the Alpaca fake accepts
-  only the key below. Databento, Massive and SiomTrading Futures point at a dead port.
+  only the key below. SiomTrading Futures points at a dead port.
 - Yahoo is replayed from e2e/market-replay; BTC-USD is derived from the AAPL recording so the crypto chart has history.
 - A small control server (a second port, printed in the first line) lets the suite play the providers: send a trade,
   take a provider down and bring it back, count the subscriptions that reached it.

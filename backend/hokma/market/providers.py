@@ -26,7 +26,6 @@ class ProviderSpec:
     data_state: str
     delay_seconds: int | None
     max_symbols: int
-    premium: bool
     test_symbol: str
     url: str | None = None
     host: str | None = None
@@ -63,7 +62,7 @@ def parse_catalog(raw: dict) -> ProviderCatalog:
             id=provider_id, name=item["name"], asset_classes=classes, needs_key=bool(item["needs_key"]),
             key_fields=tuple(item.get("key_fields", ())), enabled_by_default=bool(item["enabled_by_default"]),
             data_state=state, delay_seconds=item.get("delay_seconds"), max_symbols=int(item["max_symbols"]),
-            premium=bool(item.get("premium", False)), test_symbol=item["test_symbol"], url=item.get("url"),
+            test_symbol=item["test_symbol"], url=item.get("url"),
             host=item.get("host"), port=item.get("port"),
         )
     priority: dict[str, tuple[str, ...]] = {}

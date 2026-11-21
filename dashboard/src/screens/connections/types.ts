@@ -22,7 +22,6 @@ export interface ConnectionCard {
   symbols_in_use: number;
   max_symbols: number;
   priority: Partial<Record<AssetClass, number>>;
-  premium: boolean;
   available: boolean;
 }
 

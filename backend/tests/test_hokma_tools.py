@@ -36,7 +36,7 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "schedule_list", "extension_request", "agents_list", "agent_save", "skill_save", "skill_install", "bug_report",
                 "bug_update", "bug_list", "docs_search", "docs_list", "notify_owner",
                 "desk_list", "desk_show", "desk_create", "desk_configure", "trash_move", "market_quote",
-                "market_candles", "company_profile", "company_news", "earnings_calendar", "earnings_surprises",
+                "market_candles", "options_chain", "company_profile", "company_news", "earnings_calendar", "earnings_surprises",
                 "basic_financials", "economic_calendar", "market_news", "watchlist_all", "today_show", "today_configure",
                 "broker_list", "account_create", "account_reset", "desk_assign_account", "desk_unassign_account",
                 "gmail_search", "gmail_read", "gmail_send"}
@@ -750,6 +750,39 @@ def test_desk_show_keeps_an_asset_the_source_does_not_have_and_says_why(two_desk
     shown, err = run("desk_show", {"desk_id": first["id"]})
     by = {a["symbol"]: a for a in shown["assets"]}
     assert not err and by["NQ=F"]["last"] and by["ZZZZ"]["last"] is None and "does not have this asset" in by["ZZZZ"]["error"]
+
+
+def test_options_chain_is_a_read_only_tool_without_unit_and_pre_allowed():
+    import json
+    from pathlib import Path
+
+    assert hokma_tools.TOOLS["options_chain"][4] is False and "options_chain" in hokma_tools.NO_UNIT
+    listed = {d["name"]: d for d in hokma_tools.definitions()}["options_chain"]
+    assert listed["inputSchema"]["required"] == ["symbol"]
+    assert set(listed["inputSchema"]["properties"]) == {"symbol", "expiration", "type", "min_days", "max_days", "min_delta",
+                                                         "max_delta", "min_open_interest", "max_spread_pct", "limit"}
+    assert listed["description"] == ("Option chain of one US stock or ETF, read only, from the Alpaca key saved in "
+                                     "Connections: strike, expiration, days, type, bid, ask, mid, spread percent, last, "
+                                     "volume, open interest, delta, gamma, theta, vega and IV. Filters by days to "
+                                     "expiration, absolute delta, minimum open interest and maximum spread. On the free "
+                                     "Alpaca plan prices are indicative and greeks are estimated; the answer says which. "
+                                     "Works with the market closed: it returns the last quotes.")
+    settings = Path(hokma_tools.__file__).parent / "templates" / "settings.base.json"
+    assert "mcp__hokma__options_chain" in json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"]
+
+
+def test_desk_show_does_not_call_the_capital_simulated():
+    assert "simulated" not in hokma_tools.TOOLS["desk_show"][0].lower()
+    assert "capital" in hokma_tools.TOOLS["desk_show"][0]
+
+
+def test_options_chain_argument_types_are_checked_before_the_call():
+    assert hokma_tools.validate("options_chain", {"symbol": "AAPL", "min_delta": 0.5, "max_spread_pct": 5}) is None
+    assert hokma_tools.validate("options_chain", {"symbol": "AAPL", "min_delta": 1}) is None
+    assert hokma_tools.validate("options_chain", {"symbol": "AAPL", "min_delta": "0.5"}) == "min_delta must be number"
+    assert hokma_tools.validate("options_chain", {"symbol": "AAPL", "min_delta": True}) == "min_delta must be number"
+    assert hokma_tools.validate("options_chain", {"symbol": "AAPL", "type": "straddle"}) == "type must be one of call, put"
+    assert hokma_tools.validate("options_chain", {}) == "missing argument: symbol"
 
 
 def test_market_tools_are_read_only_and_listed():

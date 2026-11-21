@@ -116,6 +116,20 @@ def load_brokers(path: str = BROKERS_FILE) -> dict:
     return data
 
 
+def read_exception_allows(host: str, method: str, path: str, consumer: str, brokers: dict | None = None) -> bool:
+    """True when `brokers["read_exceptions"]` lets `consumer` make exactly this request to a listed host.
+
+    Only Hokma's own backend asks this (the option chain reads contracts from the live Alpaca host, SPEC-014). The hook
+    never calls it: for an agent every listed host stays refused, whatever the method or the path. A rule matches only
+    when host, method (compared in capitals), consumer and the exact path (no query) all agree; the query string is
+    not part of the path."""
+    rules = (brokers if brokers is not None else load_brokers()).get("read_exceptions", [])
+    bare = path.split("?", 1)[0].split("#", 1)[0]
+    return any(isinstance(r, dict) and r.get("match") == "exact_path_query_allowed" and r.get("consumer") == consumer
+               and str(r.get("host", "")).lower() == host.lower() and str(r.get("method", "")).upper() == method.upper()
+               and r.get("path") == bare for r in rules)
+
+
 # ------------------------------------------------------------------------------------------- text and paths
 
 _VAR = re.compile(r"\$\{?env:([A-Za-z_]\w*)\}?|\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)|%([A-Za-z_]\w*)%", re.I)
@@ -1664,6 +1678,7 @@ def write_rules(name: str, words: list[Word], args: list[Word], mode: str, run: 
 FILE_TOOLS = guard.FILE_TOOLS
 READ_TOOLS = {"Read", "Grep", "Glob"}
 SHELL_TOOLS = {"Bash": "bash", "PowerShell": "ps"}
+URL_TOOLS = {"WebFetch"}                                        # tools that take a URL: judged against the broker hosts
 ORDER_TOOL = re.compile(r"(?:place|submit|send|create|modify|replace|cancel)[_-]?order(?!s?[_-]?book)|"
                         r"order[_-](?:create|send|cancel)", re.I)
 
@@ -1820,6 +1835,14 @@ def check_command(tool: str, command: object, cwd: str, ctx: Ctx) -> None:
     analyze_text(command, mode, run, 0)
 
 
+def check_url_tool(url: object, ctx: Ctx) -> None:
+    """A URL handed to a fetch tool: a host that places real orders, or a URL shape that does, is refused the same way as
+    in a command. There is no exception here: `read_exceptions` is for Hokma's backend only."""
+    text = url if isinstance(url, str) else ""
+    if ctx.host_re and ctx.host_re.search(text) or ctx.url_re and ctx.url_re.search(text):
+        raise Block("real_money", short(text))
+
+
 def evaluate(payload: dict, ctx: Ctx) -> Block | None:
     """The rule a tool call breaks, or None when it is allowed."""
     tool = payload.get("tool_name")
@@ -1842,6 +1865,8 @@ def evaluate(payload: dict, ctx: Ctx) -> Block | None:
             check_read_tool(tool, tool_input, ctx, cwd)
         elif tool in SHELL_TOOLS:
             check_command(tool, tool_input.get("command"), cwd, ctx)
+        elif tool in URL_TOOLS:
+            check_url_tool(tool_input.get("url"), ctx)
     except Block as block:
         return block
     return None

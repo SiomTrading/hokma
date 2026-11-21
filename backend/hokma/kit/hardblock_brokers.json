@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Hosts and URL shapes that place real-money orders. Data hosts, paper and sandbox hosts are not listed. A command that mentions one of these is refused by the always-on protections (rule real_money).",
+  "note": "Hosts and URL shapes that place real-money orders. Data hosts, paper and sandbox hosts are not listed. A command that mentions one of these is refused by the always-on protections (rule real_money). `read_exceptions` is NOT read by that hook: an agent never gets one. It is the list of the only requests Hokma's own backend may make to a listed host (see `hardblock.read_exception_allows`).",
   "hosts": [
     "api.alpaca.markets",
     "api-fxtrade.oanda.com",
@@ -20,6 +20,11 @@
     "api.ibkr.com",
     "ndax.io",
     "trading-api.kalshi.com"
+  ],
+  "read_exceptions": [
+    {"host": "api.alpaca.markets", "method": "GET", "path": "/v2/options/contracts",
+     "match": "exact_path_query_allowed", "consumer": "hokma_backend",
+     "reason": "Option contracts and open interest, read only (SPEC-014)"}
   ],
   "url_patterns": [
     "(?:api\\.exchange\\.coinbase\\.com|api\\.coinbase\\.com|api\\.international\\.coinbase\\.com)/\\S*orders?\\b",

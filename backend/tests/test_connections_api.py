@@ -11,12 +11,12 @@ from hokma.core.config import hokma_data_dir
 from hokma.market import hub as hub_module
 from hokma.market.adapters import ADAPTERS
 from live_fixtures import AUTH, WS_URL, Collector, live  # noqa: F401  (fixture)
-from live_support import (FakeDatabento, FakeWs, alpaca_script, coinbase_script, finnhub_script, trade_coinbase,
+from live_support import (FakeWs, alpaca_script, coinbase_script, finnhub_script, trade_coinbase,
                           wait_until)
 from test_live_market import FINNHUB_KEY, KEY_ID, SECRET, iso, save_alpaca, save_finnhub, subscribe
 from market_support import RECORDED_AT
 
-PROVIDERS = ["coinbase", "alpaca", "finnhub", "siomtrading_futures", "databento", "massive"]
+PROVIDERS = ["coinbase", "alpaca", "finnhub", "siomtrading_futures"]
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,7 @@ def cards(client) -> dict[str, dict]:
     return {c["id"]: c for c in body["connections"]}
 
 
-def test_the_six_cards_are_listed_with_their_fields(live):
+def test_the_four_cards_are_listed_with_their_fields(live):
     with live.app() as client:
         body = client.get("/api/connections", headers=AUTH).json()
         assert [c["id"] for c in body["connections"]] == PROVIDERS
@@ -44,10 +44,10 @@ def test_the_six_cards_are_listed_with_their_fields(live):
         assert by_id["finnhub"]["max_symbols"] == 50 and by_id["finnhub"]["data_state"] == "live"
         assert by_id["siomtrading_futures"]["state"] == "not_connected"
         assert by_id["siomtrading_futures"]["needs_key"] is True and by_id["siomtrading_futures"]["available"] is True
-        assert by_id["databento"]["premium"] and by_id["massive"]["premium"]
+        assert all("premium" not in c for c in body["connections"])
         assert all(c["key_state"] == "missing" for c in body["connections"] if c["needs_key"])
-        assert body["groups"] == {"equity": ["alpaca", "finnhub", "databento"], "crypto": ["coinbase", "finnhub"],
-                                  "forex": ["finnhub"], "future": ["siomtrading_futures", "databento", "massive"]}
+        assert body["groups"] == {"equity": ["alpaca", "finnhub"], "crypto": ["coinbase", "finnhub"],
+                                  "forex": ["finnhub"], "future": ["siomtrading_futures"]}
         assert body["store_available"] is True
         assert by_id["finnhub"]["priority"] == {"equity": 1, "forex": 0, "crypto": 1}
 
@@ -179,19 +179,19 @@ def test_the_switch_and_the_priority_are_saved_without_any_key(live):
         assert card["enabled"] is False and card["id"] == "coinbase"
         assert client.put("/api/connections/coinbase/enabled", json={"enabled": "no"}, headers=AUTH).status_code == 422
         ok = client.put("/api/connections/priority", headers=AUTH,
-                        json={"asset_class": "future", "order": ["massive", "databento", "siomtrading_futures"]})
-        assert ok.status_code == 200 and ok.json()["groups"]["future"][0] == "massive"
-        for bad in ({"asset_class": "future", "order": ["massive"]},
-                    {"asset_class": "future", "order": ["massive", "massive", "databento"]},
-                    {"asset_class": "future", "order": ["alpaca", "databento", "massive"]},
+                        json={"asset_class": "equity", "order": ["finnhub", "alpaca"]})
+        assert ok.status_code == 200 and ok.json()["groups"]["equity"][0] == "finnhub"
+        for bad in ({"asset_class": "equity", "order": ["finnhub"]},
+                    {"asset_class": "equity", "order": ["finnhub", "finnhub", "alpaca"]},
+                    {"asset_class": "equity", "order": ["alpaca", "finnhub", "siomtrading_futures"]},
                     {"asset_class": "nope", "order": []}, {"order": []}):
             response = client.put("/api/connections/priority", headers=AUTH, json=bad)
             assert response.status_code == 422 and response.json()["detail"]["code"] == "connections.bad_priority"
         saved = json.loads((hokma_data_dir() / "connections.json").read_text())
-        assert saved["enabled"]["coinbase"] is False and saved["priority"]["future"][0] == "massive"
+        assert saved["enabled"]["coinbase"] is False and saved["priority"]["equity"][0] == "finnhub"
     with live.app() as again:                                           # it survives a new engine run
         assert cards(again)["coinbase"]["enabled"] is False
-        assert again.get("/api/connections", headers=AUTH).json()["groups"]["future"][0] == "massive"
+        assert again.get("/api/connections", headers=AUTH).json()["groups"]["equity"][0] == "finnhub"
 
 
 # ------------------------------------------------------------------ test connection (C2)
@@ -265,41 +265,6 @@ def test_c2_finnhub_ok_when_a_trade_arrives_and_the_state_is_the_one_in_the_prov
             assert any(m.get("symbol") == "BINANCE:BTCUSDT" for m in finnhub.messages())
     finally:
         finnhub.stop()
-
-
-def test_c2_massive_and_databento_with_fake_servers(live):
-    async def massive(ws, fake):
-        await ws.send(json.dumps([{"ev": "status", "status": "connected"}]))
-        async for raw in ws:
-            message = json.loads(raw)
-            fake.received.append((ws.request.path, message))
-            if message.get("action") == "auth":
-                good = message["params"] == "massive-key-24680"
-                await ws.send(json.dumps([{"ev": "status", "status": "auth_success" if good else "auth_failed"}]))
-            elif message.get("action") == "subscribe":
-                sym = message["params"].split(",")[0].split(".", 1)[1]
-                await ws.send(json.dumps([{"ev": "T", "sym": sym, "p": 28200.25, "s": 2, "t": int(RECORDED_AT * 1000)}]))
-    server = FakeWs(massive).start()
-    gateway = FakeDatabento("db-" + "k" * 29).start()
-    try:
-        live.use({"massive": server.url, "databento": f"tcp://127.0.0.1:{gateway.port}"})
-        with live.app() as client:
-            client.put("/api/connections/massive/key", json={"key": "massive-key-24680"}, headers=AUTH)
-            ok = client.post("/api/connections/massive/test", headers=AUTH).json()
-            assert ok["ok"] is True and ok["symbol"] == "NQ=F" and ok["data_state"] == "live"
-            client.put("/api/connections/massive/key", json={"key": "another-key-13579"}, headers=AUTH)
-            assert client.post("/api/connections/massive/test", headers=AUTH).json()["error_code"] == \
-                "connections.auth_failed"
-            client.put("/api/connections/databento/key", json={"key": "db-" + "k" * 29}, headers=AUTH)
-            ok = client.post("/api/connections/databento/test", headers=AUTH).json()
-            assert ok["ok"] is True or ok["first_data"] is False
-            gateway.push_trade(28200.5)
-            client.put("/api/connections/databento/key", json={"key": "db-" + "z" * 29}, headers=AUTH)
-            bad = client.post("/api/connections/databento/test", headers=AUTH).json()
-            assert bad["ok"] is False and bad["error_code"] == "connections.auth_failed"
-    finally:
-        server.stop()
-        gateway.stop()
 
 
 def test_c2_without_a_network_the_answer_is_an_error_within_ten_seconds(live):

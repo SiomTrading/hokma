@@ -802,5 +802,15 @@
   "broker.err.not_confirmed": "Reiniciar borra el resultado de la cuenta y la deja en su capital inicial. Confírmalo para seguir.",
   "broker.err.account_in_use": "Esa cuenta ya está asignada a otra mesa. Quítasela primero.",
   "broker.err.desk_has_account": "Esa mesa ya tiene una cuenta. Quítala antes de asignar otra.",
-  "broker.err.desk_without_account": "Esa mesa no tiene cuenta asignada."
+  "broker.err.desk_without_account": "Esa mesa no tiene cuenta asignada.",
+  "options.note.indicative": "Precios indicativos y griegas estimadas (plan gratis de Alpaca).",
+  "options.note.opra": "Precios OPRA; griegas calculadas por Alpaca.",
+  "options.note.truncated": "La cadena es más larga de lo que Hokma lee en una solicitud; acota los días o el vencimiento para ver el resto.",
+  "options.err.no_connection": "La cadena de opciones necesita Alpaca IEX: guarda su llave y enciéndela en Conexiones.",
+  "options.err.desk": "Esta mesa no usa Alpaca IEX. Enciéndela en las conexiones de la mesa.",
+  "options.err.not_equity": "Las opciones solo están disponibles para acciones y ETF de EE. UU., no para {symbol}.",
+  "options.err.auth_failed": "Alpaca no aceptó la llave guardada.",
+  "options.err.rate_limited": "Alpaca está limitando las solicitudes; inténtalo en un minuto.",
+  "options.err.upstream": "Alpaca no respondió la cadena de opciones.",
+  "options.err.args": "{name} debe ser {rule}."
 }

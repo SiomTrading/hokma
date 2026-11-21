@@ -228,6 +228,13 @@ describe("rest client", () => {
     expect(getToken()).toBeNull();
   });
 
+  it("keeps the token when a 401 says the provider refused the saved key (the session is fine)", async () => {
+    const detail = { detail: { code: "options.auth_failed", message: "Alpaca did not accept the saved key." } };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(detail), { status: 401 }));
+    await expect(api.get("/api/market/options/chain")).rejects.toMatchObject({ status: 401, code: "options.auth_failed" });
+    expect(getToken()).not.toBeNull();
+  });
+
   it("turns network failures into a readable ApiError", async () => {
     fetchMock.mockRejectedValue(new TypeError("failed"));
     await expect(api.get("/api/x")).rejects.toMatchObject({ status: 0, code: "network" });

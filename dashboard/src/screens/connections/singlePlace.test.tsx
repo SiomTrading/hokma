@@ -23,7 +23,7 @@ function forbiddenTexts(): string[] {
   ];
   const texts = new Set<string>();
   for (const locale of ["en", "es"] as Locale[]) for (const key of keys) texts.add(t(key, undefined, locale));
-  for (const name of ["Alpaca", "Finnhub", "Coinbase", "Databento", "Massive"]) texts.add(name);
+  for (const name of ["Alpaca", "Finnhub", "Coinbase"]) texts.add(name);
   return [...texts];
 }
 
@@ -38,7 +38,7 @@ function assertNoKeyFields(root: ParentNode, where: string) {
   for (const word of forbiddenTexts()) expect(text.includes(word), `${where}: "${word}"`).toBe(false);
   // a provider selector would be a select, a combobox or a listbox with a provider among its options
   for (const select of root.querySelectorAll("select, [role=combobox], [role=listbox]")) {
-    expect((select as HTMLElement).textContent ?? "", where + ": selector").not.toMatch(/alpaca|finnhub|coinbase|databento|massive/i);
+    expect((select as HTMLElement).textContent ?? "", where + ": selector").not.toMatch(/alpaca|finnhub|coinbase/i);
   }
 }
 

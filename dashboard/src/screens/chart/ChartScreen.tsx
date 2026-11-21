@@ -15,6 +15,7 @@ import { activateTab, cancelPending, defaultInterval, dropClosed, dropTab, flush
 import type { ChartViewState } from "./chartState";
 import { IntervalBar } from "./IntervalBar";
 import { intervalLabel } from "./intervals";
+import { OptionChainView } from "./options/OptionChainView";
 import { PriceChart } from "./PriceChart";
 import type { PriceChartHandle } from "./PriceChart";
 import "./live.css";
@@ -133,6 +134,8 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
   const [popup, setPopup] = useState<Popup>(null);
   const { live, data, retry } = useLiveChart(symbol, timeframe);
   const [asking, setAsking] = useState(false);
+  /** "Chart" or "Options": the second one only exists for stocks and ETFs (SPEC-014). */
+  const [view, setView] = useState<"chart" | "options">("chart");
   const rootRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<PriceChartHandle>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -199,6 +202,8 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
   const priceColor = direction < 0 ? "var(--down)" : "var(--up)";
   const lastMoment = data ? (data.last_trade_at ?? data.candles[data.candles.length - 1]?.t ?? data.fetched_at) : 0;
   const ready = data !== null && data.candles.length > 0;
+  const canOptions = data?.kind === "equity" || data?.kind === "etf";
+  const showOptions = view === "options" && canOptions;
   const error = live.error;
   const delayedLabel = minutes === null ? t("chart.live.delayed") : t("chart.live.delayedMinutes", { minutes });
   const historyMinutes = historyDelayMinutes(live);
@@ -280,6 +285,17 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
             ) : null}
           </div>
           <div style={{ marginLeft: "auto", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
+            {canOptions ? (
+              <div className="opt-tabs" role="tablist" aria-label={t("options.tab.label")}>
+                <button type="button" role="tab" aria-selected={!showOptions} data-testid="view-chart" onClick={() => setView("chart")}>
+                  {t("options.tab.chart")}
+                </button>
+                <button type="button" role="tab" aria-selected={showOptions} data-testid="view-options" onClick={() => setView("options")}>
+                  {t("options.tab.options")}
+                </button>
+              </div>
+            ) : null}
+            {showOptions ? null : (
             <IntervalBar
               value={timeframe}
               onChange={changeTimeframe}
@@ -291,6 +307,7 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
               returnFocusRef={focusRef}
               boxStyle={{ top: "calc(100% + 4px)", right: 14 }}
             />
+            )}
           </div>
           {popup?.kind === "search" ? (
             <AssetSearchPopover
@@ -306,7 +323,9 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
 
         <div ref={bodyRef} style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
 
-        {error ? (
+        {showOptions ? (
+          <OptionChainView symbol={symbol} />
+        ) : error ? (
           <div className="live-error" role="alert" data-testid="live-error" data-code={error.code}>
             <span className="h2">{t("chart.error.title")}</span>
             <p className="p">{errorText(error, t)}</p>
@@ -341,6 +360,7 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
         ) : null}
         </div>
 
+        {showOptions ? null : (
         <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border)", flexWrap: "wrap", alignItems: "center" }}>
           <span className="p" style={{ fontSize: 12 }}>
             {sourceLine(live, t)}
@@ -349,6 +369,7 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
             {asking ? t("chart.ask.sending") : t("chart.ask")}
           </Button>
         </div>
+        )}
       </div>
     </Pane>
   );
