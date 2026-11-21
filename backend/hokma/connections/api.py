@@ -1,12 +1,19 @@
 """Connections: the only place where data providers are configured. Every route needs the per-boot session token
 (`X-Hokma-Token` or `?token=`) and the same Host and Origin guard as the rest of the API, so no agent can reach it.
 
-    GET    /api/connections                  {connections[], groups{asset_class: [id]}, store_available}
+    GET    /api/connections                  {connections[], groups{asset_class: [id]}, uses{use: [id]}, store_available}
     PUT    /api/connections/{id}/key         {key} or {key_id, secret}  ->  {id, key_state}   (never echoes the key)
     DELETE /api/connections/{id}/key         ->  {id, key_state}
     PUT    /api/connections/{id}/enabled     {enabled}  ->  the card
-    PUT    /api/connections/priority         {asset_class, order[]}  ->  {groups}
+    PUT    /api/connections/priority         {asset_class (any use: equity, bars, options, future, crypto, forex, news), order[]}
+                                             ->  {groups, uses}
     POST   /api/connections/{id}/test        ->  {ok, state, data_state, latency_ms, symbol, first_data, error_code, message}
+    POST   /api/connections/{id}/add         key fields or {}  ->  {added, card, test}   (a failed test undoes the key)
+    POST   /api/connections/{id}/remove      {}  ->  the card
+    POST   /api/connections/schwab/login/start    {}  ->  {auth_url}
+    POST   /api/connections/schwab/login/open     {url}  ->  {opened}
+    POST   /api/connections/schwab/login/finish   {redirect_url}  ->  {card, test}   (10 per minute)
+    GET    /api/connections/schwab/account         ->  the "View account" panel, plus `orders_enabled`
 
 Errors are `{"detail": {"code", "message"}}` with a `connections.*` catalog code. The body of a key request is read by
 hand, so no validation message can ever repeat the key.
@@ -20,8 +27,10 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from hokma.connections import runtime
 from hokma.connections.service import ServiceError
 from hokma.core.origin import token_matches
+from hokma.i18n import t
 from hokma.market.cache import RateLimiter
-from hokma.market.messages import connection_message
+from hokma.market.messages import CONNECTION_CODES, connection_message
+from hokma.schwab.http import NOT_CONNECTED, SchwabError
 from hokma.rpc.ws import SESSION_TOKEN
 
 log = logging.getLogger("hokma.connections")
@@ -29,6 +38,8 @@ router = APIRouter(prefix="/api/connections")
 
 MAX_BODY_BYTES = 2048
 _tests = RateLimiter(limit=20, window=60.0)
+_finishes = RateLimiter(limit=10, window=60.0)
+MAX_URL_CHARS = 1500
 
 
 def _fail(status: int, code: str) -> HTTPException:
@@ -57,10 +68,25 @@ def _service_error(error: ServiceError) -> HTTPException:
     return _fail(error.status, error.code)
 
 
+def _schwab_error(error: SchwabError) -> HTTPException:
+    """A `SchwabError` as `{"detail": {"code", "message"}}`. `connections.*` codes keep their text; a Schwab call that
+    found no session says `connections.no_login`; any other `schwab.err.*` keeps its own catalog text."""
+    code = "connections.no_login" if error.code == NOT_CONNECTED else error.code
+    status = 409 if error.code == NOT_CONNECTED else error.status
+    if code in CONNECTION_CODES:
+        return _fail(status, code)
+    try:
+        message = t(code)
+    except Exception:                                    # noqa: BLE001  (a code with placeholders or without text)
+        message = connection_message("connections.unreachable")
+    return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
 async def _listing() -> dict:
     hub = await runtime.prepare()
     service = runtime.get_service()
-    return {"connections": hub.cards(), "groups": hub.groups(),
+    # In a thread: the Schwab card asks the sign-in module, which may read the system store.
+    return {"connections": await asyncio.to_thread(hub.cards), "groups": hub.groups(), "uses": hub.uses(),
             "store_available": await asyncio.to_thread(service.store_available)}
 
 
@@ -84,7 +110,7 @@ async def set_priority(request: Request, x_hokma_token: str = Header(default="")
     except ServiceError as error:
         raise _service_error(error) from None
     hub = await runtime.prepare()
-    return {"groups": hub.groups()}
+    return {"groups": hub.groups(), "uses": hub.uses()}
 
 
 @router.put("/{provider_id}/key", summary="Save the key in the system credential store")
@@ -131,7 +157,7 @@ async def put_enabled(provider_id: str, request: Request, x_hokma_token: str = H
         raise _service_error(error) from None
     hub.forget_error(provider_id)
     await hub.refresh(provider_id)
-    return hub.card(provider_id)
+    return await asyncio.to_thread(hub.card, provider_id)
 
 
 @router.post("/{provider_id}/test", summary="Open the stream and wait for the first message")
@@ -145,3 +171,134 @@ async def test_connection(provider_id: str, x_hokma_token: str = Header(default=
     hub = await runtime.prepare()
     log.info("connection test for %s", provider_id)
     return await hub.test_provider(provider_id)
+
+
+@router.post("/{provider_id}/add", summary="Save the key, switch the provider on and test it, all or nothing")
+async def add_connection(provider_id: str, request: Request, x_hokma_token: str = Header(default=""),
+                         token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    body = await _json(request)
+    service = runtime.get_service()
+    try:
+        service.spec(provider_id)
+    except ServiceError as error:
+        raise _service_error(error) from None
+    if not _tests.allow():
+        raise _fail(429, "connections.rate_limited")
+    hub = await runtime.prepare()
+    loop = asyncio.get_running_loop()
+
+    async def probe() -> dict:
+        hub.forget_error(provider_id)
+        await hub.refresh(provider_id, restart=True)          # the new key, not the connection the old one opened
+        return await hub.test_provider(provider_id)
+
+    def tester() -> dict:
+        return asyncio.run_coroutine_threadsafe(probe(), loop).result()
+
+    log.info("add %s", provider_id)
+    try:
+        result = await asyncio.to_thread(service.add, provider_id, body, tester)
+    except ServiceError as error:
+        raise _service_error(error) from None
+    if not result["added"]:
+        hub.forget_error(provider_id)
+    await hub.refresh(provider_id, restart=not result["added"])  # a failed add reconnects with the key that stays
+    card = await asyncio.to_thread(hub.card, provider_id)
+    return {"added": result["added"], "card": card, "test": result["test"]}
+
+
+@router.post("/{provider_id}/remove", summary="Forget the provider: its key, and for Schwab its session")
+async def remove_connection(provider_id: str, request: Request, x_hokma_token: str = Header(default=""),
+                            token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    await _json(request)
+    hub = await runtime.prepare()
+    try:
+        await asyncio.to_thread(runtime.get_service().remove, provider_id)
+    except ServiceError as error:
+        raise _service_error(error) from None
+    hub.forget_error(provider_id)
+    await hub.refresh(provider_id, restart=True)
+    return await asyncio.to_thread(hub.card, provider_id)
+
+
+# ------------------------------------------------------------------ Schwab sign-in (5.3) and account (5.7)
+
+
+def _text(body: dict, name: str) -> str:
+    value = body.get(name)
+    if not isinstance(value, str) or not value.strip() or len(value) > MAX_URL_CHARS:
+        raise _fail(422, "connections.schwab_url")
+    return value.strip()
+
+
+@router.post("/schwab/login/start", summary="The Schwab sign-in address")
+async def schwab_login_start(request: Request, x_hokma_token: str = Header(default=""),
+                             token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    await _json(request)
+    await runtime.prepare()
+    if not runtime.get_service().has_key("schwab"):
+        raise _fail(409, "connections.no_key")
+    from hokma.schwab import auth
+
+    try:
+        started = await asyncio.to_thread(auth.start_login)
+    except SchwabError as error:
+        raise _schwab_error(error) from None
+    return {"auth_url": started["auth_url"]}
+
+
+@router.post("/schwab/login/open", summary="Open the sign-in address in the browser of this computer")
+async def schwab_login_open(request: Request, x_hokma_token: str = Header(default=""),
+                            token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    url = _text(await _json(request), "url")
+    from hokma.schwab import auth
+
+    try:
+        opened = await asyncio.to_thread(auth.open_login_in_browser, url)
+    except SchwabError as error:
+        raise _schwab_error(error) from None
+    return {"opened": bool(opened)}
+
+
+@router.post("/schwab/login/finish", summary="Finish the sign-in with the address Schwab sent the browser to")
+async def schwab_login_finish(request: Request, x_hokma_token: str = Header(default=""),
+                              token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    if not _finishes.allow():
+        raise _fail(429, "connections.rate_limited")
+    redirect_url = _text(await _json(request), "redirect_url")
+    hub = await runtime.prepare()
+    from hokma.schwab import auth
+
+    try:
+        finished = await asyncio.to_thread(auth.finish_login, redirect_url)
+    except SchwabError as error:
+        raise _schwab_error(error) from None
+    test = finished.get("test", {})
+    if test.get("ok"):
+        await asyncio.to_thread(runtime.get_service().mark_added, "schwab")   # idempotent: `finish_login` did it already
+    hub.forget_error("schwab")
+    await hub.refresh("schwab")
+    return {"card": await asyncio.to_thread(hub.card, "schwab"), "test": test}
+
+
+@router.get("/schwab/account", summary="The View account panel: accounts, balances, positions and open orders")
+async def schwab_account(x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    from hokma.broker import service as broker_service
+    from hokma.schwab import accounts
+
+    try:
+        data = await asyncio.to_thread(accounts.panel_data)
+    except SchwabError as error:
+        raise _schwab_error(error) from None
+    try:
+        data["orders_enabled"] = await asyncio.to_thread(broker_service.schwab_orders_enabled)
+    except Exception as exc:                              # noqa: BLE001  (the switch is read only: off when it cannot be read)
+        log.warning("the orders switch of Schwab could not be read: %s", type(exc).__name__)
+        data["orders_enabled"] = False
+    return data

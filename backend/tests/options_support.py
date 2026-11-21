@@ -26,8 +26,17 @@ def load(name: str):
 class Connections:
     loaded = True
 
-    def __init__(self, keys: dict | None = None, off: tuple[str, ...] = ()) -> None:
-        self.keys, self.off = keys or {}, off
+    def __init__(self, keys: dict | None = None, off: tuple[str, ...] = (), options: tuple[str, ...] = ("schwab", "alpaca"),
+                 signed: bool = True) -> None:
+        self.keys, self.off, self.options, self.signed = keys or {}, off, options, signed
+
+    def order(self, use: str) -> list[str]:
+        """The order of the use "options" of Connections (4.4); Schwab first by default."""
+        assert use == "options"
+        return list(self.options)
+
+    def signed_in(self, provider_id: str) -> bool:
+        return provider_id == "schwab" and self.signed
 
     def is_enabled(self, provider_id: str) -> bool:
         return provider_id not in self.off

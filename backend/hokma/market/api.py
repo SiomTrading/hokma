@@ -8,6 +8,12 @@
     GET /api/market/options/expirations?symbol=             the expirations of the next 400 days
     GET /api/market/options/chain?symbol=&expirations=&strikes=   up to 4 expirations, calls and puts side by side
 
+The three option routes answer from the first source of the use "options" that can (Schwab, then Alpaca, by default).
+`source` names it; the chain adds `price_feed` ("schwab", "opra" or "indicative"), `greeks` ("provider", "calculated" or
+"estimated") and, for Schwab, `delayed`. A Schwab failure is `options.schwab.auth` (401), `options.schwab.rate_limited`
+(429) or `options.schwab.upstream` (502); every code starts with `options.`, so the client never reads one as the end of
+Hokma's own session.
+
 Every route needs the per-boot session token (`X-Hokma-Token` or `?token=`). Errors are `{"detail": {"code",
 "message"}}` and the panel translates by `code`. The data source sits behind `MarketDataSource` (`source.py`);
 `set_source` swaps it (tests, or a future provider).
@@ -245,6 +251,8 @@ def candles(symbol: str = Query(max_length=20), tf: Literal["1m", "5m", "15m", "
 # ---------------------------------------------------------------------------------------------- option chain (SPEC-014)
 
 def _options_fail(error: options.OptionsError) -> HTTPException:
+    """`error.code` is `no_connection`, `auth_failed`... for Alpaca and `schwab.auth`, `schwab.rate_limited`, `schwab.upstream`
+    for Schwab; the dashboard translates `options.err.<code>` (and a 401 with an `options.` code does not close the session)."""
     return HTTPException(status_code=error.status, detail={"code": f"options.{error.code}", "message": str(error)})
 
 

@@ -83,7 +83,7 @@ def test_create_makes_project_row_folder_and_claude_file(desks_db):
     text = open(os.path.join(folder, "CLAUDE.md"), encoding="utf-8").read()
     assert "Futuros NQ" in text and "Trade NQ opening range" in text and "10,000 USD" in text
     assert "{{" not in text and "Ana" in text
-    assert "real money is blocked" in text.lower()
+    assert "real money moves only through hokma's order tools" in text.lower()
 
 
 def test_placeholders_typed_by_the_owner_are_not_substituted_again(desks_db):

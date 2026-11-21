@@ -31,8 +31,14 @@ class Connections:
 
     loaded = True
 
-    def __init__(self, keys: dict[str, str] | None = None, off: tuple[str, ...] = ()) -> None:
-        self.keys, self.off = keys or {}, off
+    def __init__(self, keys: dict[str, str] | None = None, off: tuple[str, ...] = (),
+                 news: tuple[str, ...] = ("finnhub", "alpaca")) -> None:
+        self.keys, self.off, self.news = keys or {}, off, news
+
+    def order(self, use: str) -> list[str]:
+        """The order of the use "news" of Connections (4.4); the company tools ask nothing else."""
+        assert use == "news"
+        return list(self.news)
 
     def is_enabled(self, provider_id: str) -> bool:
         return provider_id not in self.off
@@ -324,6 +330,23 @@ def test_news_falls_back_to_alpaca_when_the_finnhub_plan_has_no_news(net):
     net.status["finnhub.io"] = 403
     out = company_tools.company_news("AAPL")
     assert out["source"] == "Alpaca"
+
+
+def test_news_follow_the_order_of_the_use_news(net):
+    net.connections = Connections({"finnhub": FINNHUB_KEY, "alpaca": json.dumps(ALPACA_KEYS)}, news=("alpaca", "finnhub"))
+    out = company_tools.company_news("AAPL", limite=5)
+    assert out["source"] == "Alpaca" and all("alpaca" in url for url, _ in net.calls)
+    net.connections.news = ("finnhub", "alpaca")
+    company_tools.reset()
+    assert company_tools.company_news("AAPL", limite=5)["source"] == "Finnhub"
+
+
+def test_a_provider_that_is_not_in_the_use_news_is_never_asked(net):
+    net.connections = Connections({"finnhub": FINNHUB_KEY, "alpaca": json.dumps(ALPACA_KEYS)}, news=("alpaca",))
+    assert company_tools.company_news("AAPL")["source"] == "Alpaca"
+    with pytest.raises(LookupError):
+        company_tools.company_profile("AAPL")                      # only Finnhub has profiles and it is out of the order
+    assert not any("finnhub" in url for url, _ in net.calls)
 
 
 def test_only_news_has_a_second_provider(net):

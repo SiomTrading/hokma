@@ -679,8 +679,8 @@ def test_3064_the_data_folder_and_control_channel_do_not_regress(box):
 
 
 LAUNCHER_FREE = [
-    "hokma --version", "hokma -V", "hokma --help", "hokma doctor", "hokma status", "hokma version", "hokma",
-    "hokma doctor --verbose", "hokma.exe --version", "/usr/local/bin/hokma --version", "uv run hokma doctor",
+    "hokma --version", "hokma -V", "hokma --help", "hokma doctor", "hokma version", "hokma",
+    "hokma.exe --version", "/usr/local/bin/hokma --version", "uv run hokma doctor",
     "uv run hokma --version", "python -m hokma_cli.main --version", "python -m hokma_cli.main doctor",
     "uv run pytest -q", "uv run python -m pytest backend/tests", "python -m pytest", "python main.py start",
     "python app.py stop", "node server.js start", "npm start", "npm run start", "npm stop", "npm run open",

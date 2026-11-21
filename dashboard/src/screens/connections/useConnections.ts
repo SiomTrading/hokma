@@ -2,20 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { openSocket } from "@/api";
 import type { Socket } from "@/api";
 import { connectionErrorText, connectionsApi } from "./api";
-import type { ConnectionCard, ConnectionStatusMessage, ConnectionsList } from "./types";
+import type { ConnectionCard, ConnectionStatusMessage, UseOrders } from "./types";
 
 const PING_MS = 15_000;
 
 export interface ConnectionsState {
   cards: ConnectionCard[];
-  groups: ConnectionsList["groups"];
+  /** Order of every use: provider ids, the not connected ones too. */
+  uses: UseOrders;
   storeAvailable: boolean;
   loading: boolean;
   error: string | null;
   reload: () => void;
   patchCard: (card: ConnectionCard) => void;
   setStoreAvailable: (available: boolean) => void;
-  setGroups: (groups: ConnectionsList["groups"]) => void;
+  setUses: (uses: UseOrders) => void;
 }
 
 /** Merges the live part of a `connection_status` message into the card it names. */
@@ -45,7 +46,7 @@ function isStatus(data: unknown): data is ConnectionStatusMessage {
  */
 export function useConnections(): ConnectionsState {
   const [cards, setCards] = useState<ConnectionCard[]>([]);
-  const [groups, setGroups] = useState<ConnectionsList["groups"]>({});
+  const [uses, setUses] = useState<UseOrders>({});
   const [storeAvailable, setStoreAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +58,7 @@ export function useConnections(): ConnectionsState {
       (data) => {
         if (mine !== ticket.current) return;
         setCards(data.connections);
-        setGroups(data.groups);
+        setUses(data.uses ?? data.groups ?? {});
         setStoreAvailable(data.store_available);
         setError(null);
         setLoading(false);
@@ -99,5 +100,5 @@ export function useConnections(): ConnectionsState {
   }, [load]);
 
   const patchCard = useCallback((card: ConnectionCard) => setCards((current) => current.map((c) => (c.id === card.id ? card : c))), []);
-  return { cards, groups, storeAvailable, loading, error, reload: load, patchCard, setStoreAvailable, setGroups };
+  return { cards, uses, storeAvailable, loading, error, reload: load, patchCard, setStoreAvailable, setUses };
 }

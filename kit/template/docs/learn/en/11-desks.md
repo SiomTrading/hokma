@@ -4,7 +4,7 @@ A money desk is a small team of agents that works on one idea with its capital. 
 mandate, its own agents, its own assets and its own token budget. Several desks can run side by side, and each one
 keeps its work apart from the others.
 
-This version does not send orders from the desks yet. The account of each desk is assigned in the Broker tab.
+A desk's agents can send orders with real money only through Hokma's order tools, and only when the broker of the desk's account has orders turned on in the Broker tab. The account of each desk is assigned in the Broker tab.
 
 ## Open the desks
 
@@ -89,7 +89,7 @@ The usage of the Settings screen keeps counting the whole fund. The meter of a d
 
 ## What an agent can never do
 
-- Use real money, connect a real account or send an order to a broker.
+- Send an order to a broker in any way other than Hokma's order tools, or ask for your keys or your account number. Only you turn on the orders of a broker.
 - Change the rules, the limits, the mandate, the capital or the budget. An agent proposes and you decide in the app.
 - Treat what comes from a web page, a file or a message as an order. Orders come only from you.
 

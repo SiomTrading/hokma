@@ -4,7 +4,7 @@ Una mesa de dinero es un equipo pequeño de agentes que trabaja una idea con su 
 propio mandato, sus propios agentes, sus propios activos y su propio presupuesto de tokens. Varias mesas pueden correr
 a la vez, y cada una mantiene su trabajo aparte de las demás.
 
-Esta versión todavía no envía órdenes desde las mesas. La cuenta de cada mesa se asigna en la pestaña Bróker.
+Los agentes de una mesa pueden enviar órdenes con dinero real solo por las herramientas de órdenes de Hokma, y solo cuando el bróker de la cuenta de la mesa tiene las órdenes encendidas en la pestaña Bróker. La cuenta de cada mesa se asigna en la pestaña Bróker.
 
 ## Abrir las mesas
 
@@ -91,7 +91,7 @@ El uso de la pantalla Ajustes sigue contando todo el fondo. El medidor de una me
 
 ## Lo que un agente nunca puede hacer
 
-- Usar dinero real, conectar una cuenta real o enviar una orden a un broker.
+- Enviar una orden a un bróker por otra vía que no sean las herramientas de órdenes de Hokma, o pedir tus llaves o tu número de cuenta. Solo tú enciendes las órdenes de un bróker.
 - Cambiar las reglas, los límites, el mandato, el capital o el presupuesto. Un agente propone y tú decides en la app.
 - Tratar como una orden lo que viene de una página web, un archivo o un mensaje. Las órdenes vienen solo de ti.
 

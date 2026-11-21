@@ -134,7 +134,7 @@ function answerItems(base: string, text: string, tools: StoredTool[], status: "c
 }
 
 function blockItem(block: GuardBlock): Item {
-  return { kind: "block", key: `block-${block.id}`, block: { id: block.id, rule: block.rule, tool: block.tool, target: block.target, at: block.at } };
+  return { kind: "block", key: `block-${block.id}`, block: { id: block.id, rule: block.rule, tool: block.tool, target: block.target, at: block.at, ...(block.reason ? { reason: block.reason } : {}) } };
 }
 
 function permissionItem(body: PermissionBody): Item {

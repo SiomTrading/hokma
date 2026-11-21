@@ -7,7 +7,9 @@ import os
 import sys
 import threading
 
-from hokma.core import session
+from typing import Callable
+
+from hokma.core import launchproof, processguard, session
 
 PARENT_GONE_GRACE_SECONDS = 5.0          # the supervisor died: the engine is gone within this time
 CLEAN_STOP_GRACE_SECONDS = 9.0           # the supervisor asked for a stop: a little less than its own 10 s
@@ -45,6 +47,11 @@ def read_channel_key(stream) -> str:
     return line
 
 
+def read_launch_proof(stream) -> str:
+    """The fifth line: the launch proof the supervisor made for this engine. Empty when there is none."""
+    return stream.readline().strip()
+
+
 def watch_parent(stream, on_gone, on_stop=None) -> threading.Thread:
     """Watch the supervisor's end of standard input. Its end means the supervisor is gone: call `on_gone`. Any data
     (the supervisor writes a `stop` line before it closes the pipe) means a clean stop was asked: call `on_stop`
@@ -67,7 +74,10 @@ def watch_parent(stream, on_gone, on_stop=None) -> threading.Thread:
     return thread
 
 
-def main(port: int) -> int:
+def main(port: int, prepare: Callable[[], int] | None = None) -> int:
+    """Run the engine. The process becomes the server only after the supervisor's launch proof checks out (a proof that
+    is missing, forged, signed with another key, expired or already used ends the command with an error and no mark).
+    `prepare` runs once the mark is on (the database migration needs the sensitive modules); a non-zero result ends."""
     if sys.stdin.isatty():
         print("engine: this command is started by `hokma start`", file=sys.stderr)
         return 2
@@ -76,9 +86,20 @@ def main(port: int) -> int:
         owner_hash = read_owner_hash(sys.stdin)
         owner_secret_hash = read_owner_secret_hash(sys.stdin)
         session.adopt(token, owner_hash, owner_secret_hash, read_channel_key(sys.stdin))
+        proof = read_launch_proof(sys.stdin)
     except (ValueError, RuntimeError) as exc:
         print(f"engine: {exc}", file=sys.stderr)
         return 2
+    if not launchproof.verify(proof):
+        print("engine: not started by the Hokma supervisor (no valid launch proof); use `hokma start`", file=sys.stderr)
+        return 2
+    del proof                                          # one use: nothing keeps it
+    with processguard.allow(processguard.SERVER):      # the only mark of the server process; no child inherits it
+        code = prepare() if prepare is not None else 0
+        return code if code else _serve(port)
+
+
+def _serve(port: int) -> int:
     from hokma.core.lifecycle import Lifecycle, checkpoint_database
     from hokma.core.server import run
 

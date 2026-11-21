@@ -43,6 +43,7 @@ import ntpath
 import os
 import re
 import sys
+import urllib.parse
 from datetime import datetime, timezone
 
 from hokma.i18n import t
@@ -55,15 +56,16 @@ RULES = ("delete", "hokma_internal", "outside_workdir", "secrets", "real_money")
 MAX_DEPTH = 6
 MAX_SCRIPT_BYTES = 512 * 1024
 MAX_TARGET = 200
+ORDER_CONSUMER = "hokma_broker"                                    # the broker service: the only consumer of `order_exceptions`
 BROKERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hardblock_brokers.json")
 
 
 class Block(Exception):
     """A rule fired. `target` is what the call wanted to touch (shown to the owner, cut to 200 characters)."""
 
-    def __init__(self, rule: str, target: str = "") -> None:
+    def __init__(self, rule: str, target: str = "", reason: str = "") -> None:
         super().__init__(rule)
-        self.rule, self.target = rule, str(target)
+        self.rule, self.target, self.reason = rule, str(target), reason
 
 
 # ------------------------------------------------------------------------------------------------ context
@@ -96,7 +98,7 @@ class Ctx:
         out = {"HOME": home, "USERPROFILE": home, "LOCALAPPDATA": local, "APPDATA": roaming,
                "XDG_DATA_HOME": env.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share"),
                "XDG_CONFIG_HOME": env.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"),
-               "HOKMA_DATA_DIR": self.data, "PWD": self.cwd}
+               "HOKMA_DATA_DIR": self.data, "HOKMA_DATA": self.data, "PWD": self.cwd}
         if self.roots:
             out["HOKMA_HOME"] = self.roots[0]
         for name in ("TMPDIR", "TEMP", "TMP"):
@@ -116,18 +118,105 @@ def load_brokers(path: str = BROKERS_FILE) -> dict:
     return data
 
 
-def read_exception_allows(host: str, method: str, path: str, consumer: str, brokers: dict | None = None) -> bool:
-    """True when `brokers["read_exceptions"]` lets `consumer` make exactly this request to a listed host.
+_MARKER = re.compile(r"\{(\w+)\}")
 
-    Only Hokma's own backend asks this (the option chain reads contracts from the live Alpaca host, SPEC-014). The hook
-    never calls it: for an agent every listed host stays refused, whatever the method or the path. A rule matches only
-    when host, method (compared in capitals), consumer and the exact path (no query) all agree; the query string is
-    not part of the path."""
+
+def unsafe_segment(segment: str) -> bool:
+    """A path segment that is `.` or `..`, or that hides one, a `/` or a `\\` behind percent encoding (`%2e`, `%2F`, `%5c`,
+    also encoded twice: `%252e`). It is decoded again and again until nothing changes; a segment that keeps decoding
+    after four rounds is refused as well. A plain `%24SPX` (an encoded `$`) is not unsafe."""
+    current = segment
+    for _ in range(4):
+        if current in (".", "..") or "/" in current or "\\" in current:
+            return True
+        decoded = urllib.parse.unquote(current)
+        if decoded == current:
+            return False
+        current = decoded
+    return True
+
+
+def _template_matches(template: str, params: dict, bare: str) -> bool:
+    """A `path_template` rule: `{name}` stands for exactly one path segment (no `/`, not empty) that must fully match
+    the regex given for `name` in `params`. The path has the same number of segments as the template; every other
+    segment is compared as written."""
+    wanted, got = template.split("/"), bare.split("/")          # a trailing "/" is an empty segment: no match
+    if len(wanted) != len(got):
+        return False
+    for want, have in zip(wanted, got):
+        marker = _MARKER.fullmatch(want)
+        if marker is None:
+            if want != have:
+                return False
+            continue
+        pattern = params.get(marker.group(1)) if isinstance(params, dict) else None
+        if not isinstance(pattern, str) or not have or "/" in have or unsafe_segment(have) or re.fullmatch(pattern, have) is None:
+            return False
+    return True
+
+
+def read_exception_match(host: str, method: str, path: str, consumer: str, brokers: dict | None = None) -> dict | None:
+    """The `read_exceptions` rule that lets `consumer` make exactly this request to a listed host, or None.
+
+    Only Hokma's own backend asks this (the option chain reads contracts from the live Alpaca host, SPEC-014; the Schwab
+    reads of SPEC-015). The hook never calls it: for an agent every listed host stays refused, whatever the method or
+    the path. A rule matches only when host, method (compared in capitals), consumer and the path (no query) all agree.
+    Two kinds of rule: `exact_path_query_allowed` (the path is the rule's `path`) and `path_template` (the rule's
+    `path` has `{name}` markers and `params` gives the regex each marker must fully match; see `_template_matches`)."""
     rules = (brokers if brokers is not None else load_brokers()).get("read_exceptions", [])
     bare = path.split("?", 1)[0].split("#", 1)[0]
-    return any(isinstance(r, dict) and r.get("match") == "exact_path_query_allowed" and r.get("consumer") == consumer
-               and str(r.get("host", "")).lower() == host.lower() and str(r.get("method", "")).upper() == method.upper()
-               and r.get("path") == bare for r in rules)
+    for rule in rules:
+        if not (isinstance(rule, dict) and rule.get("consumer") == consumer
+                and str(rule.get("host", "")).lower() == host.lower()
+                and str(rule.get("method", "")).upper() == method.upper()):
+            continue
+        kind = rule.get("match")
+        if kind == "exact_path_query_allowed" and rule.get("path") == bare:
+            return rule
+        if kind == "path_template" and _template_matches(str(rule.get("path", "")), rule.get("params") or {}, bare):
+            return rule
+    return None
+
+
+def read_exception_allows(host: str, method: str, path: str, consumer: str, brokers: dict | None = None) -> bool:
+    """True when `read_exception_match` finds a rule for this request."""
+    return read_exception_match(host, method, path, consumer, brokers) is not None
+
+
+def _rule_match(list_name: str, host: str, method: str, path: str, consumer: str, brokers: dict | None) -> dict | None:
+    rules = (brokers if brokers is not None else load_brokers()).get(list_name, [])
+    bare = path.split("?", 1)[0].split("#", 1)[0]
+    for rule in rules if isinstance(rules, list) else []:
+        if not (isinstance(rule, dict) and rule.get("consumer") == consumer
+                and str(rule.get("host", "")).lower() == host.lower()
+                and str(rule.get("method", "")).upper() == method.upper()):
+            continue
+        if rule.get("match") == "path_template" and _template_matches(str(rule.get("path", "")),
+                                                                      rule.get("params") or {}, bare):
+            return rule
+    return None
+
+
+def order_exception_match(host: str, method: str, path: str, consumer: str, brokers: dict | None = None) -> dict | None:
+    """The `order_exceptions` rule (SPEC-015 18.7) that lets `consumer` send, replace, cancel or preview exactly this order
+    request, or None. A separate list from `read_exceptions`: a rule of one list never authorizes a request of the other
+    (this function never looks at `read_exceptions`, and `read_exception_match` never looks at this list). Only
+    `path_template` rules count, and the hook never calls this: for an agent every listed host stays refused."""
+    if consumer != ORDER_CONSUMER:                                  # no rule file can give an order to anybody else
+        return None
+    return _rule_match("order_exceptions", host, method, path, consumer, brokers)
+
+
+def order_exception_allows(host: str, method: str, path: str, consumer: str, brokers: dict | None = None) -> bool:
+    """True when `order_exception_match` finds a rule for this request."""
+    return order_exception_match(host, method, path, consumer, brokers) is not None
+
+
+def exception_match(host: str, method: str, path: str, consumer: str, brokers: dict | None = None) -> dict | None:
+    """The rule of the one list that belongs to `consumer`: the backend reads (`read_exceptions`), the broker service orders
+    (`order_exceptions`). Any other consumer gets None. `schwab/http.py` asks this, so it never names the lists."""
+    finder = {"hokma_backend": read_exception_match, ORDER_CONSUMER: order_exception_match}.get(consumer)
+    return finder(host, method, path, consumer, brokers) if finder else None
 
 
 # ------------------------------------------------------------------------------------------- text and paths
@@ -301,6 +390,406 @@ def check_text_markers(text: str, ctx: Ctx, *, reading: bool = False) -> None:
         for candidate in (norm_text(text), norm_text(expanded)):
             if names_protected(candidate, ctx):
                 raise Block("hokma_internal", short(text))
+
+
+# --------------------------------------------------------------------- the broker service and its interpreter (SPEC-015 18.7)
+# An agent never imports the order code of Hokma (`hokma.broker`, `hokma.schwab`, `hokma.connections`: they hold the
+# Schwab session and send real orders) and never runs the interpreter of Hokma's own runtime (`<data>/runtime/<x>/venv`):
+# it has them installed, so a script of the agent could place an order with the owner's keys. Both are `real_money`.
+_HOKMA_MODS = r"(?:broker|schwab|connections)"
+_HOKMA_DOT = r"\s*(?:\.|[/\\]+)\s*"                    # `hokma.broker`, `hokma/broker`, `hokma\\broker` (a path or a string)
+HOKMA_MODULE_RE = re.compile(
+    r"(?<![\w])hokma" + _HOKMA_DOT + _HOKMA_MODS + r"(?![\w])"            # import, -m, path, importlib, __import__
+    r"|\bfrom\s+hokma\s+import\s+(?:\([^)]*?\b" + _HOKMA_MODS + r"\b|[^\n;(]*?\b" + _HOKMA_MODS + r"\b)"
+    r"|[\"']hokma[\"']\s*[,/)]\s*(?:[\w.()\s]*[,/]\s*)?[\"']" + _HOKMA_MODS + r"[\"']",   # join("hokma", "broker"), Path("hokma") / "broker"
+    re.I)
+_HOKMA_IMPORT_STMT = re.compile(
+    r"(?<![\w.])import(?:\s|\\)+(?:[\w.]+(?:\s+as\s+\w+)?\s*,\s*)*hokma\b(?![\w-])"
+    r"(?=\s*(?:$|[;.,)\"'\x60\\#]|as\b))"                                       # `import hokma`, never the words "import hokma module"
+    r"|(?<![\w.])from(?:\s|\\)+hokma\b(?:\.[\w.]+)?(?:\s|\\)+import\b", re.I | re.M)
+_DYN_NAMES = (r"(?:import_module|__import__|run_module|run_path|find_spec|find_loader|load_module|load_source|load_dynamic|"
+              r"resolve_name|get_loader|get_importer|"
+              r"spec_from_file_location|spec_from_loader|SourceFileLoader|SourcelessFileLoader|ExtensionFileLoader)")
+# A dynamic import that names hokma in its arguments, in any text (a command, a script, an MCP argument).
+_HOKMA_DYN_CALL = re.compile(_DYN_NAMES + r"\s*\([^)\n]{0,300}?hokma", re.I)
+# Kept for callers that look for the three order-code words next to an import of the package.
+_HOKMA_IMPORTED = _HOKMA_IMPORT_STMT
+_HOKMA_MOD_WORD = re.compile(r"\b" + _HOKMA_MODS + r"\b", re.I)
+# A file inside `bin` or `Scripts` of a runtime venv of the data folder (the folder itself may be listed).
+HOKMA_VENV_TEXT_RE = re.compile(r"(?:^|[/\s\"'=:;(])runtime/+[^/\s\"']+/+venv/+(?:bin|scripts)/+[^/\s\"']")
+
+
+# The runtime mark that lets a process load the order modules (`hokma.core.processguard`): naming it is the same thing.
+_PROCESSGUARD = re.compile(r"\bprocessguard\b", re.I)
+
+
+def names_hokma_module(text: str) -> bool:
+    """The text (a command, a script, code) imports the `hokma` package or names one of its order modules:
+    `import hokma`, `import hokma.x`, `from hokma import x`, a dynamic import that names it, or the path or dotted name of
+    `hokma.broker`, `hokma.schwab`, `hokma.connections` (any submodule counts: the agent has no reason to import Hokma
+    at all). Third-party code with a similar name (`import schwab`, `import hokma_extras`) is not this. The one thing that
+    stays free is `python -m hokma doctor` (see `run_interpreter`: it is not an import in the agent's own process)."""
+    return bool(HOKMA_MODULE_RE.search(text) or _HOKMA_IMPORT_STMT.search(text) or _HOKMA_DYN_CALL.search(text)
+                or _PROCESSGUARD.search(text))
+
+
+# --- the package folder and the runtime folder: the agent must not put them on its import path, nor run python from them
+def package_roots(ctx: "Ctx") -> list[str]:
+    """Folders from where `import hokma` would work: the folder that holds the `hokma` package of this very file and the
+    runtime folders of the data folder (venvs with every dependency, the Schwab client included)."""
+    roots: list[str] = []
+    kit = os.path.dirname(os.path.abspath(__file__))
+    pkg = os.path.dirname(kit)
+    if os.path.basename(kit) == "kit" and os.path.basename(pkg) == "hokma":
+        roots.append(os.path.dirname(pkg))
+    roots.append(os.path.join(ctx.data, "runtime"))
+    out: list[str] = []
+    for r in roots:
+        for v in (r, os.path.realpath(r)):
+            if len(v) > 3 and v not in out:
+                out.append(v)
+    return out
+
+
+_LIT = r"""(?:[rR]?"[^"\\\n]*"|[rR]?'[^'\\\n]*')"""          # a plain string literal: no escapes, no prefix but r
+_PATH_INJECT = re.compile(r"sys\s*\.\s*path\s*(?:\.\s*(?:insert|append|extend|__setitem__|__iadd__|__setslice__)\s*\(|\+=|=(?!=)|"
+                          r"\[[^\]\n]*\]\s*\+?=(?!=))|\bPYTHONPATH\b|"             # sys.path[0] = x, sys.path[:] = x, sys.path[1:1] = x
+                          r"\baddsitedir\b|\bsite\s*\.\s*main\b|\.pth\b", re.I)
+_PATH_TARGET = re.compile(r"site-packages|dist-packages|[/\\]runtime[/\\][^/\\\s\"']+[/\\]venv|(?<![\w-])hokma[/\\]", re.I)
+_PATH_FUZZY = re.compile(r"venv|runtime|hokma|site-|packages|backend|lib[/\\]python|\.local|appdata|share", re.I)
+_QUOTED = re.compile(r"\"([^\"\n]{1,300})\"|'([^'\n]{1,300})'")
+
+
+def _under_roots(path: str, roots: list[str], here: str) -> bool:
+    if not path or "\0" in path:
+        return False
+    full = clean_path(joined(path, here))
+    return any(under_any(c, roots) for c in dict.fromkeys((full, os.path.realpath(full))))
+
+
+def names_hokma_path_injection(text: str, ctx: "Ctx", here: str | None = None) -> bool:
+    """`sys.path.insert/append/extend`, `sys.path = `, `PYTHONPATH=`, `site.addsitedir`, a `.pth` file that points at a
+    venv's `site-packages`, at the folder of the `hokma` package or at Hokma's runtime. A path the text builds at run time is
+    judged by what else the text says (a venv, a runtime, a package folder). A student's own `sys.path.insert(0, 'src')` is free."""
+    here = here or ctx.cwd
+    roots = package_roots(ctx)
+    for m in _PATH_INJECT.finditer(text):
+        seg = text[m.start(): m.start() + 400].split("\n", 1)[0]
+        whole = m.group(0).lower().endswith(".pth")
+        if _PATH_TARGET.search(seg) or any(norm_text(r) in norm_text(seg) for r in roots):
+            return True
+        for q in _QUOTED.finditer(seg):
+            lit = q.group(1) if q.group(1) is not None else q.group(2)
+            for piece in re.split(r"[:;]", lit):
+                if piece and _under_roots(expand(piece, ctx), roots, here):
+                    return True
+        if whole:
+            if _PATH_TARGET.search(text):
+                return True
+            continue
+        rest = re.sub(_LIT, "", seg[len(m.group(0)):].split(")", 1)[0])
+        if "PYTHONPATH" in m.group(0).upper():
+            built = "$" in seg or "\x60" in seg
+        else:
+            built = bool(re.search(r"[A-Za-z_$\x60]", rest))
+        if built and _PATH_FUZZY.search(text):
+            return True
+    return False
+
+
+# --- Hokma's own database: no agent opens it, reads or writes (SPEC-015 18.7). The file name is the one of `hokma.db.paths`.
+_DB_NAME = re.compile(r"hokma\.db(?:-wal|-shm|-journal)?(?![\w])", re.I)
+_DB_ACCESS = re.compile(
+    r"sqlite|\bconnect\s*\(|\bopen\s*\(|\bpsql\b|\bpg_(?:dump|dumpall|restore)\b|duckdb|apsw|\bshelve\b|\bdbm\b|create_engine|"
+    r"read_sql|litecli|db[\s_-]?browser|\.(?:read_bytes|read_text|write_bytes|write_text)\s*\(|\bfileinput\b|>|\btee\b|"
+    r"\bsed\s+-\w*i|\b(?:cp|mv|dd|ln|install|rsync|truncate|copy|move|xcopy|robocopy|copy-item|move-item|set-content|"
+    r"add-content|out-file|new-item|tee-object|write|import)\b", re.I)
+_DB_ENGINE = re.compile(r"sqlite|duckdb|apsw|litecli|db[\s_-]?browser|\bconnect\s*\(|\bopen\s*\(", re.I)
+_DB_FILE_KIND = re.compile(r"\.db\b|\.sqlite3?\b|sqlite", re.I)
+_DB_PG = re.compile(r"\bpsql\b|\bpg_(?:dump|dumpall|restore)\b|\bpgcli\b|\bpg_isready\b", re.I)
+_DB_CONNECT_BUILT = re.compile(r"(?<![\w])(?:sqlite3\s*\.\s*connect|aiosqlite\s*\.\s*connect|apsw\s*\.\s*Connection|"
+                               r"duckdb\s*\.\s*connect)\s*\((?!\s*" + _LIT + r"\s*[,)])", re.I)
+_DB_OPEN_BUILT = re.compile(r"(?<![\w])open\s*\((?!\s*" + _LIT + r"\s*[,)])", re.I)
+_DB_ENV_HINT = re.compile(r"environ|getenv|hokma|localappdata|appdata|\.local|share|expanduser|path\s*\.\s*home|\$env:", re.I)
+
+
+def names_hokma_database(text: str, ctx: "Ctx") -> bool:
+    """The text opens, connects to or writes Hokma's database. Reading it with `cat` and the like is `secrets` already (the
+    file is among the data folder's secrets); this is the access by an engine or by `open()`, by name or built at run time."""
+    low = norm_text(text)
+    if _DB_NAME.search(low) and _DB_ACCESS.search(text):
+        return True
+    if names_data_folder(low, ctx) and _DB_ENGINE.search(text) and _DB_FILE_KIND.search(text):
+        return True
+    if _DB_PG.search(text) and re.search(r"hokma|database\.json", low):
+        return True
+    if _DB_CONNECT_BUILT.search(text) and _DB_ENV_HINT.search(text):
+        return True
+    return bool(_DB_OPEN_BUILT.search(text) and re.search(r"hokma", low))
+
+
+# --- python that builds a name or code at run time (SPEC-015 18.7): judged by the way it is used, not by words
+_DYN_NAME_RE = re.compile(r"(?<![\w])" + _DYN_NAMES + r"\b")
+_FROM_IMPORT = re.compile(r"(?<![\w.])from[ \t]+([\w.]+)[ \t]+import[ \t]+(\([^)]*\)|[^\n;]*)")
+_EXEC_RE = re.compile(r"(?<![\w.])(?:exec|eval|compile|execfile)\s*\(")
+_BUILTINS_RE = re.compile(r"__builtins__|\bbuiltins\s*\.\s*(?:__dict__|__import__|exec|eval|compile)|"
+                          r"\bgetattr\s*\(\s*(?:builtins|importlib|__import__|sys\b|runpy|imp\b)", re.I)
+_SPAWN_BUILT = re.compile(r"[\"']-[mc][\"']\s*,(?!\s*" + _LIT + r"\s*[\],)])\s*\S|"                 # [py, "-c", code_built]
+                          r"\bpython[\d.]*\s+-\w*c\s*[\"']?[^\n]*\{|"                                    # f"python -c '{x}'"
+                          r"\bpython[\d.]*\s+-\w*c\s*[\"'][^\"'\n]*[\"']?\s*(?:\+|%|\.\s*(?:format|join))", re.I)
+_FILE_IMPORTS = ("spec_from_file_location", "spec_from_loader", "sourcefileloader", "sourcelessfileloader",
+                 "extensionfileloader", "run_path", "load_source", "load_dynamic")
+
+
+def names_python_dynamic(code: str) -> str | None:
+    """Why this python code is built or loaded at run time, or None. A dynamic import (`importlib.import_module`, `__import__`,
+    `runpy`, `find_spec`, loaders by file) whose argument is not a plain string literal, a literal that names hokma, or
+    `exec`/`eval`/`compile` of a string that is not a plain literal, is how a name is assembled from parts (concatenation, join,
+    format, %, f-string, chr, bytes, base64, codecs, rot13). `import_module('json')` with a plain literal is free."""
+    masked = code
+    for m in _FROM_IMPORT.finditer(code):                      # `from importlib import import_module` is no use yet: the call is judged
+        names = m.group(2)
+        if re.search(_DYN_NAMES + r"\s+as\b", names) or ("*" in names and m.group(1).split(".")[0] in
+                                                          ("importlib", "runpy", "builtins", "imp", "pkgutil")):
+            return "aliased dynamic import"
+        masked = masked[:m.start()] + " " * (m.end() - m.start()) + masked[m.end():]
+    first = re.compile(r"\s*\(\s*(" + _LIT + r")\s*(?=[,)])")
+    for m in _DYN_NAME_RE.finditer(masked):
+        name = m.group(0).lower()
+        if masked[max(0, m.start() - 4): m.start()].strip().endswith("def"):
+            continue
+        lit = first.match(masked, m.end())
+        if lit is None:
+            return "dynamic import: " + short(m.group(0))
+        text = lit.group(1)
+        body = text.lstrip("rR")[1:-1]
+        if "hokma" in body.lower() or body.startswith("."):
+            return "dynamic import of hokma"
+        if name in _FILE_IMPORTS:
+            args = re.match(r"\s*\(([^()\n]*)\)", masked[m.end():])
+            pieces = [p.strip() for p in args.group(1).split(",")] if args else ["?"]
+            ok = all(re.fullmatch(r"(?:\w+\s*=\s*)?(?:" + _LIT + r"|[\d.]+|None|True|False)", p) for p in pieces if p)
+            if not ok or re.search(r"hokma|site-packages|runtime", args.group(1) if args else "", re.I):
+                return "dynamic file import"
+    for m in _EXEC_RE.finditer(masked):
+        if masked[max(0, m.start() - 4): m.start()].strip().endswith("def"):
+            continue
+        if re.match(r"\s*\(\s*\)", masked[m.end() - 1:]):
+            continue
+        if first.match(masked, m.end() - 1) is None:
+            return "exec of a built string"
+    if _BUILTINS_RE.search(masked):
+        return "builtins access"
+    if _SPAWN_BUILT.search(masked):
+        return "python launched with built code"
+    return None
+
+
+# --- more ways to reach Hokma's code from python without writing its name (SPEC-015 18.7, security review of 5280c87)
+_LIT_PATH = r"""(?:[rR]'[^'\n]*'|[rR]"[^"\n]*"|'(?:[^'\\\n]|\\\\)*'|"(?:[^"\\\n]|\\\\)*")"""   # a path literal: raw, or with doubled backslashes
+_CHDIR = re.compile(r"(?<![\w.])(?:(?:os|contextlib)\s*\.\s*)?f?chdir\s*\(")
+_CHDIR_OWN_FILE = re.compile(r"(?:os\s*\.\s*path\s*\.\s*)?(?:dirname|abspath|realpath)\s*\(|(?:pathlib\s*\.\s*)?Path\s*\(|"
+                             r"\.\s*(?:parent|resolve)\s*(?:\(\s*\))?|__file__|[\s().,]")
+_PICKLE_LOAD = re.compile(r"(?<![\w])(?:c?pickle|_pickle|marshal|dill|cloudpickle|shelve)\s*\.\s*(?:loads?|Unpickler|open)\b|"
+                          r"\bfrom\s+(?:c?pickle|_pickle|marshal|dill|cloudpickle|shelve)\s+import\s+[^\n]*\b(?:loads?|Unpickler|open)\b", re.I)
+# What makes a load of a pickle one that can name Hokma's code: the word hokma, a runtime or site-packages path, or a
+# payload that is decoded or assembled by hand (a hand made pickle names its module in bytes nobody can read as text).
+_PICKLE_PAYLOAD = re.compile(r"hokma|site-packages|dist-packages|runtime[/\\][^/\\\s\"']+[/\\]venv|b(?:64|32)decode|a85decode|"
+                             r"\bfromhex\b|unhexlify|a2b_|codecs\s*\.\s*(?:decode|encode)|(?:zlib|bz2|lzma|gzip)\s*\.\s*decompress|"
+                             r"\bchr\s*\(|\bbyte(?:s|array)\s*\(|\\x[0-9a-f]{2}|\bb[\"']{2}\s*\.\s*join\s*\(", re.I)
+_OPERATOR_CALLER = re.compile(r"(?<![\w.])(?:operator\s*\.\s*)?(?:attrgetter|methodcaller)\s*\(", re.I)
+_MARSHAL = re.compile(r"(?<![\w.])(?:import\s+(?:[\w.]+(?:\s+as\s+\w+)?\s*,\s*)*|from\s+)marshal\b|(?<![\w])marshal\s*\.\s*loads?\b|"
+                      r"[\"']marshal[\"']")          # marshal runs code when read and has no use in a student's script: always real money
+_DYN_FUNC = r"(?:(?:builtins|__builtins__|importlib)\s*\.\s*)?(?:getattr|eval|exec|__import__|import_module)"
+_DYN_FUNC_NAME = re.compile(r"^\s*(?:(?:builtins|__builtins__|importlib)\s*\.\s*)?(getattr|eval|exec|__import__|import_module)\s*$")
+_PARTIAL_FORMS = ("partial", "partialmethod")
+_HOKMA_ENTRY = re.compile(r"\bhokma_cli\b|\bengine_main\b|\btrash_mcp\b", re.I)     # the CLI and the two server entry points
+_DANGEROUS_NAME = re.compile(r"importlib|__import__|import_module|\beval\b|\bexec\b|\bcompile\b|__builtins__|\bbuiltins\b|__globals__|"
+                             r"__subclasses__|__loader__|__spec__|\brun_module\b|\brun_path\b|\bhokma\b", re.I)
+
+
+def names_python_escape(code: str, ctx: "Ctx", here: str | None = None) -> str | None:
+    """Python that reaches Hokma's order code without writing its name (SPEC-015 18.7), or None:
+    - `os.chdir(x)` (also `contextlib.chdir`, `fchdir`) with an argument that is not a plain literal: the new current folder is
+      what `import` searches next. A literal is free unless it points into Hokma's package, its runtime or a venv. The idiom
+      that only climbs from the script's own file (`os.chdir(os.path.dirname(__file__))`) is free.
+    - `pickle|cPickle|marshal|dill|cloudpickle|shelve` `load`/`loads`/`Unpickler`/`open`: a pickle runs code when read and can
+      name `hokma.broker` in its own bytes. Refused only together with a sign that Hokma is the target: the word `hokma`,
+      a runtime or site-packages path, or a payload decoded or assembled by hand (base64, hex, zlib, chr, bytes, `\\x` escapes,
+      a bytes `b''.join`). Loading the student's own model file (`pickle.load(open('model.pkl', 'rb'))`, `joblib.load`) stays
+      free: an absolute block would break every sklearn project. Residual risk: a pickle file made elsewhere with Hokma's name inside.
+    - `operator.attrgetter` / `methodcaller` with an argument that is not a plain literal, or a literal that names importlib,
+      `__import__`, `eval`, `exec`, `compile`, builtins, `__globals__`, `__subclasses__` or hokma; and
+      `functools.partial(getattr|eval|exec|__import__ ...)` unless it carries a harmless plain literal name."""
+    here = here or ctx.cwd
+    roots = package_roots(ctx)
+    for m in _CHDIR.finditer(code):
+        if code[max(0, m.start() - 4): m.start()].strip().endswith("def"):
+            continue
+        arg = code[m.end(): m.end() + 300].split("\n", 1)[0]
+        lit = re.match(r"\s*(" + _LIT_PATH + r")\s*\)", arg)
+        if lit:
+            raw = lit.group(1)[:1] in "rR"
+            body = lit.group(1).lstrip("rR")[1:-1]
+            body = body if raw else body.replace("\\\\", "\\")
+            if _PATH_TARGET.search(body + "/") or _under_roots(expand(body, ctx), roots, here) or names_hokma_venv(body, ctx):
+                return "chdir into the folders of hokma"
+            continue
+        inner = arg
+        depth = 1
+        for k, ch in enumerate(arg):                           # the argument is what stands up to the closing parenthesis
+            depth += (ch == "(") - (ch == ")")
+            if depth == 0:
+                inner = arg[:k]
+                break
+        if inner.strip() and re.fullmatch(r"(?:" + _CHDIR_OWN_FILE.pattern + r")+", inner.strip()) and "__file__" in inner:
+            continue
+        return "chdir with a built path"
+    if _PICKLE_LOAD.search(code) and _PICKLE_PAYLOAD.search(code):
+        return "pickle load with a payload that can name hokma"
+    for m in _OPERATOR_CALLER.finditer(code):
+        if code[max(0, m.start() - 4): m.start()].strip().endswith("def"):
+            continue
+        args = code[m.end(): m.end() + 300].split("\n", 1)[0]
+        lit = re.match(r"\s*(" + _LIT + r")\s*([,)])", args)
+        if lit is None:
+            return "attrgetter or methodcaller on a built name"
+        if _DANGEROUS_NAME.search(lit.group(1)):
+            return "attrgetter or methodcaller on a dangerous name"
+    if _MARSHAL.search(code):
+        return "marshal load"
+    if _HOKMA_ENTRY.search(code):
+        return "hokma command line or server entry"
+    if partial_of_dynamic(code):
+        return "partial of getattr or eval"
+    return None
+
+
+def _call_args(code: str, start: int) -> list[str]:
+    """The top-level arguments of the call whose opening parenthesis sits just before `start` (read to 600 characters)."""
+    args, depth, cur, quote = [], 1, "", ""
+    for ch in code[start: start + 600]:
+        if quote:
+            cur += ch
+            quote = "" if ch == quote else quote
+            continue
+        if ch in "\"'":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                break
+        elif ch == "," and depth == 1:
+            args.append(cur.strip())
+            cur = ""
+            continue
+        cur += ch
+    if cur.strip():
+        args.append(cur.strip())
+    return args
+
+
+def partial_of_dynamic(code: str) -> bool:
+    """`functools.partial` or `partialmethod` (any spelling, any alias) that wraps getattr, eval, exec, __import__ or
+    import_module. `partial(getattr, obj, 'x')` with a plain harmless literal name stays free. A partial built from a
+    star argument or a `func=` keyword is refused: its first argument cannot be read."""
+    callees = set(_PARTIAL_FORMS)
+    dyn = {x: x for x in ("getattr", "eval", "exec", "__import__", "import_module")}       # name -> the function it stands for
+    for m in re.finditer(r"\bfrom\s+functools\s+import\s+[^\n;]*", code):
+        for a in re.finditer(r"\b(?:partial|partialmethod)\s+as\s+(\w+)", m.group(0)):
+            callees.add(a.group(1))
+    for m in re.finditer(r"(?<![\w.])(\w+)\s*=\s*(?:\w+\s*\.\s*)?(?:partial|partialmethod)\b(?!\s*\()", code):
+        callees.add(m.group(1))
+    for m in re.finditer(r"(?<![\w.])(\w+)\s*=\s*(?:(?:builtins|__builtins__|importlib)\s*\.\s*)?(getattr|eval|exec|__import__|import_module)\b(?![ \t]*[(\w])", code):
+        dyn[m.group(1)] = m.group(2)
+    for m in re.finditer(r"\bfrom\s+(?:builtins|importlib)\s+import\s+[^\n;]*?\b(getattr|eval|exec|__import__|import_module)\s+as\s+(\w+)", code):
+        dyn[m.group(2)] = m.group(1)
+    call = re.compile(r"(?<![\w])(?:" + "|".join(re.escape(x) for x in sorted(callees)) + r")\s*\(")
+    for m in call.finditer(code):
+        args = _call_args(code, m.end())
+        if not args:
+            continue
+        first = args[0]
+        if first.startswith("*") or re.match(r"func\s*=", first):
+            return True
+        fm = _DYN_FUNC_NAME.match(first)
+        name = fm.group(1) if fm else dyn.get(first)
+        if name is None:
+            continue
+        if name == "getattr":
+            plain = len(args) in (3, 4) and re.fullmatch(_LIT, args[2]) and not _DANGEROUS_NAME.search(args[2])
+            if plain:
+                continue
+        return True
+    return False
+
+
+# The reasons of `python_block_reason` that name Hokma itself. Every other one is code assembled at run time (`dynamic_code`).
+_NAMES_HOKMA = ("dynamic import of hokma", "chdir into the folders of hokma")
+DYNAMIC_CODE = "dynamic_code"
+
+
+def python_block(why: str) -> "Block":
+    """The `real_money` block for a reason of `python_block_reason`. Same rule and same verdict for every reason; a
+    reason that is code built at run time carries `reason="dynamic_code"`, which only changes the text the agent reads."""
+    return Block("real_money", why, "" if why in _NAMES_HOKMA else DYNAMIC_CODE)
+
+
+def python_block_reason(candidate: str, ctx: "Ctx", here: str | None = None) -> str | None:
+    """Every textual reason to refuse python code: a name or code built at run time, or another way into Hokma's code."""
+    return names_python_dynamic(candidate) or names_python_escape(candidate, ctx, here)
+
+
+def names_hokma_venv(text: str, ctx: Ctx) -> bool:
+    """The text names a file of the interpreter folder of Hokma's own runtime, by its written form or expanded."""
+    return any(HOKMA_VENV_TEXT_RE.search(norm_text(c)) for c in (text, expand(text, ctx)))
+
+
+def in_hokma_venv(word: str, ctx: Ctx, here: str) -> bool:
+    """A command word that is, or resolves (relative path, `..`, a link, `$HOKMA_DATA`) to, a file inside
+    `<data>/runtime/<x>/venv/bin` or `Scripts`, or an interpreter inside the folder of the `hokma` package.
+    A student's own `.venv` or `venv` is not this."""
+    if names_hokma_venv(word, ctx):
+        return True
+    expanded = expand(word, ctx)
+    if not any(ch in expanded for ch in "/\\") or "\0" in expanded:
+        return False
+    data = {norm_text(ctx.data).rstrip("/"), norm_text(os.path.realpath(ctx.data)).rstrip("/")}
+    full = clean_path(joined(expanded, here))
+    seen = {norm_text(full)}
+    if not (is_win_abs(full) and os.name != "nt"):
+        seen.add(norm_text(os.path.realpath(full)))
+    if any(re.match(re.escape(d) + r"/runtime/[^/]+/venv/(?:bin|scripts)/+[^/]", s) for d in data for s in seen):
+        return True
+    pkg = [norm_text(r).rstrip("/") for r in package_roots(ctx) if not norm_text(r).rstrip("/").endswith("/runtime")]
+    return any(re.match(re.escape(r) + r"/(?:[^/]+/)*(?:bin|scripts)/+python[\d.]*(?:\.exe)?$", s) for r in pkg for s in seen)
+
+
+def python_runs_from_hokma(here: str, ctx: Ctx) -> bool:
+    """Python started with the package folder, the runtime or one of their folders as the current one: the current
+    folder is on its import path, so `import hokma` would work from there."""
+    return _under_roots(here, package_roots(ctx), here)
+
+
+def check_hokma_code(text: str, ctx: Ctx, here: str | None = None, python: bool = False) -> None:
+    """`real_money` for code or a command that imports Hokma, names its order modules, opens its database, puts its
+    folders on the import path or runs the runtime interpreter. `python=True`: the text is python code, so a name
+    or a piece of code built at run time is refused too."""
+    for candidate in (text, expand(text, ctx)):
+        if names_hokma_module(candidate):
+            raise Block("real_money", "hokma package")
+        if names_hokma_path_injection(candidate, ctx, here):
+            raise Block("real_money", "hokma import path")
+        if names_hokma_database(candidate, ctx):
+            raise Block("real_money", "hokma database")
+        if python:
+            why = python_block_reason(candidate, ctx, here)
+            if why:
+                raise python_block(why)
+    if names_hokma_venv(text, ctx):
+        raise Block("real_money", "hokma runtime interpreter")
 
 
 def check_real_path(path: str, ctx: Ctx, *, reading: bool = False, here: str | None = None, guarded: bool = True) -> None:
@@ -822,7 +1311,7 @@ SKIP_WORDS = {"{", "}", "!", "then", "else", "elif", "if", "do", "while", "until
               "coproc", "function"}
 EXE_SUFFIX = re.compile(r"\.(exe|cmd|bat|com|ps1|sh)$", re.I)
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
-PY_NAME = re.compile(r"^(python[\d.]*|pythonw[\d.]*|py|pypy[\d.]*)$")
+PY_NAME = re.compile(r"^(python[\d.]*[dt]?|pythonw[\d.]*[dt]?|py|pypy[\d.]*)$")
 NODE_NAMES = {"node", "nodejs", "deno", "bun"}
 WRAPPERS: dict[str, set[str]] = {
     "sudo": {"-u", "-g", "-h", "-p", "-C", "-r", "-t", "-D", "-R", "-T", "--user", "--group", "--host", "--prompt",
@@ -1137,6 +1626,10 @@ def check_recursive(name: str, words: list[Word], run: Run) -> None:
 def scan_words(name: str, words: list[Word], cmd: Cmd, run: Run) -> None:
     """Markers of secrets (and of the hook files) anywhere in the arguments, plus the host list of brokers."""
     ctx = run.ctx
+    for w in words:                                          # the broker modules and the runtime interpreter: before anything else
+        check_hokma_code(w.text, ctx, here=run.here)
+        if in_hokma_venv(w.text, ctx, run.here):
+            raise Block("real_money", "hokma runtime interpreter")
     args = [w for w in words[1:]]
     if name in ("echo", "printf", "write-output", "write-host", "write-error", "write-warning"):
         scan = []
@@ -1305,6 +1798,20 @@ def dispatch(name: str, words: list[Word], args: list[Word], cmd: Cmd, prev: Cmd
     if name in ("ruby", "perl"):
         run_interpreter(name, args, cmd, run, depth, stdin)
         return
+
+    if name in RUNNERS:                                        # the command after `run` or `exec`, after its own options
+        rest = args[[x.lower() for x in texts].index("run") + 1:] if "run" in low else args[low.index("exec") + 1:] \
+            if "exec" in low else args if name in ("uvx", "pipx") else []
+        for k in range(len(rest)):
+            if not rest[k].text.startswith("-"):
+                sub = Cmd()
+                sub.words, sub.redirs, sub.heredocs, sub.herestrs, sub.pipe_in = rest[k:], cmd.redirs, cmd.heredocs, \
+                    cmd.herestrs, cmd.pipe_in
+                analyze_cmd_words(sub, prev, mode, run, depth, stdin)
+    if is_hokma_cli_word(words[0].text):                      # `hokma engine`, `/x/hokma.exe start`, `./hokma db migrate`
+        check_hokma_cli(texts, shown)
+    if is_hokma_server_file(words[0].text):                    # `./engine_main.py`: the server entry point by its path
+        raise Block("real_money", shown)
 
     # scripts run directly: ./do.sh, ./tool.py, script.ps1
     first = words[0]
@@ -1548,11 +2055,16 @@ def script_file(path: str, cmd: Cmd, run: Run, depth: int) -> None:
 def scan_code(kind: str, code: str, run: Run, depth: int) -> None:
     """Check the text of a script or of `-c` code the way its language is written."""
     ctx = run.ctx
+    check_hokma_code(code, ctx, here=run.here)
     if kind in ("sh", "ps", "cmd"):
         analyze_text(code, {"sh": "bash", "ps": "ps", "cmd": "cmd"}[kind], Run(ctx, run.here, strict=False), depth)
         return
     check_code_markers(code, ctx)
     if kind == "py":
+        for candidate in (code, expand(code, ctx)):               # after the secrets: a keyring name built by parts is `secrets`
+            why = python_block_reason(candidate, ctx, run.here)
+            if why:
+                raise python_block(why)
         if PY_DELETE.search(code):
             raise Block("delete", short(PY_DELETE.search(code).group(0)))
     elif kind == "node":
@@ -1564,8 +2076,17 @@ def scan_code(kind: str, code: str, run: Run, depth: int) -> None:
     elif kind == "perl" and PERL_DELETE.search(code):
         raise Block("delete", short(PERL_DELETE.search(code).group(0)))
     if EXEC_HINT.search(code):
+        for m in re.finditer(r"[\[(]\s*(" + _LIT + r"(?:\s*,\s*" + _LIT + r")*)", code):      # an argument list: ["hokma", "engine"]
+            items = [x.strip()[1:-1] for x in re.findall(_LIT, m.group(1))]
+            if items and is_hokma_cli_word(items[0]):
+                if code[m.end():].lstrip()[:1] not in ("]", ")"):          # more follows, built at run time: cannot be read
+                    raise Block("real_money", short(" ".join(items)))
+                check_hokma_cli(items[1:], " ".join(items))
         for m in STR_LITERAL.finditer(code):
             literal = m.group(1) if m.group(1) is not None else m.group(2)
+            parts = literal.split()
+            if len(parts) > 1 and is_hokma_cli_word(parts[0]):
+                check_hokma_cli(parts[1:], literal)
             parts = literal.split()
             if parts and parts[0].lower() in SHELL_DELETE_WORD and (len(parts) > 1 or literal.strip() == parts[0]):
                 raise Block("delete", short(literal))
@@ -1583,37 +2104,126 @@ def check_code_markers(code: str, ctx: Ctx) -> None:
         raise Block("real_money", "broker host")
 
 
+# --- the options of the python interpreter, read the way CPython reads them (getopt: short options combine in a group)
+_PY_SHORT_VALUE = "WXQ"                                        # short options that take a value (glued to the group or the next word)
+_PY_LONG_VALUE = ("--check-hash-based-pycs",)                  # long options that take the next word as their value
+_PY_LAUNCHER = re.compile(r"^-(?:V:\S*|\d[\w.\-]*)$")           # `py -3`, `py -3.12`, `py -3-64`, `py -V:3.12`: options of the launcher
+
+
+def parse_python_args(texts: list[str]) -> tuple[str, str | None, int]:
+    """What a python command line runs: `("m", module, index)`, `("c", code, index)`, `("script", path, index)`,
+    `("stdin", None, index)` or `("none", None, index)`; `index` is where the module, the code or the script word sits.
+    A short group may combine flags (`-Im`, `-IBm`, `-Ic`, `-OOm`, `-Ssm`, `-uc`, `-Xdev`, `-Wdefault`): the group is read
+    character by character; `c` and `m` take what is glued after them in the group or else the next word; `W`, `X` and `Q`
+    swallow the rest of the group or else the next word. `-` is stdin, `--` ends the options, `--check-hash-based-pycs` takes a value."""
+    i = 0
+    while i < len(texts):
+        a = texts[i]
+        if a == "-":
+            return "stdin", None, i
+        if a == "--":
+            return ("script", texts[i + 1], i + 1) if i + 1 < len(texts) else ("none", None, i)
+        if not a.startswith("-"):
+            return "script", a, i
+        if _PY_LAUNCHER.match(a):
+            i += 1
+            continue
+        if a.startswith("--"):
+            i += 2 if a in _PY_LONG_VALUE else 1
+            continue
+        step = 1
+        for j in range(1, len(a)):
+            ch = a[j]
+            if ch in "cm":
+                glued = a[j + 1:]
+                if glued:
+                    return ch, glued, i
+                return ch, (texts[i + 1] if i + 1 < len(texts) else ""), i + 1
+            if ch in _PY_SHORT_VALUE:
+                step = 1 if j + 1 < len(a) else 2
+                break
+        i += step
+    return "none", None, len(texts)
+
+
+# --- the command line of Hokma and its two server entry points (bug 1228): an agent that starts its own engine
+# (`printf 'token\n' | hokma engine --port N &`) gets a server of its own and with it the broker, the orders and the owner.
+# Only the read-only commands of the CLI stay free. A list of what is allowed, never of what is refused: a new subcommand is
+# refused until it is listed here. The text of the block is the normal `real_money` one.
+HOKMA_CLI_NAMES = {"hokma", "hokma_cli", "hokma-cli", "hokma_cli.py"}
+HOKMA_SERVER_FILES = {"engine_main.py", "trash_mcp.py"}
+CLI_FREE_ALONE = {(), ("doctor",), ("version",), ("--help",), ("-h",), ("--version",), ("-v",)}       # no subcommand, or only a flag: argparse prints and exits
+RUNNERS = {"uv", "uvx", "pipx", "poetry", "pipenv", "pdm", "hatch", "rye", "conda", "mamba", "micromamba"}      # `uv run hokma engine`
+CLI_FREE_PREFIX = {("ext", "request"), ("ext", "requests")}
+_QUOTES = "\"'\x60"
+
+
+def hokma_cli_free(args: list[str]) -> bool:
+    """True for the arguments of a `hokma` command that only read: `doctor`, `version`, `ext request ...`, `ext requests`,
+    and a lone `--help` or `-h`. Everything else (engine, start, restart, stop, db, update, ext add, kit-sync, ...) is not."""
+    low = tuple(x.strip(_QUOTES).lower() for x in args)
+    return low in CLI_FREE_ALONE or low[:2] in CLI_FREE_PREFIX
+
+
+def check_hokma_cli(args: list[str], shown: str) -> None:
+    if not hokma_cli_free(args):
+        raise Block("real_money", short(shown))
+
+
+def is_hokma_cli_word(text: str) -> bool:
+    return base_name(text.strip(_QUOTES)) in HOKMA_CLI_NAMES or re.split(r"[\\/]", text.strip(_QUOTES))[-1].lower() in HOKMA_CLI_NAMES
+
+
+def is_hokma_server_file(text: str) -> bool:
+    return re.split(r"[\\/]", text.strip(_QUOTES))[-1].lower() in HOKMA_SERVER_FILES
+
+
+def check_python_module(module_args: list[str]) -> None:
+    """`python -m <module> ...`: a module of the package `hokma` is real money; only the owner's `hokma doctor` stays free."""
+    module_args = [x.strip().strip("\"'") for x in module_args]       # `-m"hokma.db"` reaching here with its quotes still on
+    if module_args and re.match(r"hokma_cli(?:\.main)?$", module_args[0], re.I):       # the CLI: only its read-only commands
+        check_hokma_cli(module_args[1:], "python -m " + module_args[0])
+    if module_args and re.match(r"(?:[\w.]*\.)?(?:engine_main|trash_mcp)$|hokma_cli[./\\:](?!main$)", module_args[0], re.I):
+        raise Block("real_money", short("python -m " + module_args[0]))
+    if any(re.match(r"hokma(?:[./\\:]|$)", x, re.I) for x in module_args) and not (
+            module_args[:2] and [x.lower() for x in module_args[:2]] == ["hokma", "doctor"]):
+        raise Block("real_money", "python -m hokma")
+
+
 def run_interpreter(kind: str, args: list[Word], cmd: Cmd, run: Run, depth: int, stdin: str | None) -> None:
     code, script = None, None
     i = 0
+    if kind == "py" and python_runs_from_hokma(run.here, run.ctx):
+        raise Block("real_money", "python run from the folder of hokma")        # its current folder is on the import path
+    if kind == "py":
+        how, value, at = parse_python_args([w.text for w in args])
+        if how == "m":
+            check_python_module([value or ""] + [w.text for w in args[at + 1:]])
+        elif how == "c":
+            code = value
+        elif how == "script":
+            script = value
+            if script is not None and is_hokma_server_file(script):
+                raise Block("real_money", short("python " + script))
+            if script is not None and is_hokma_cli_word(script):
+                check_hokma_cli([w.text for w in args[at + 1:]], "python " + script)
+        i = len(args)                                                              # the generic scan below is for the other languages
     while i < len(args):
         a = args[i].text
-        if kind == "py":
-            if a == "-m":
-                break
-            if a in ("-W", "-X", "-Q"):
-                i += 2
-                continue
-            if a == "-c" or (a.startswith("-") and not a.startswith("--") and len(a) > 2 and a[1:].isalpha()
-                             and a.endswith("c")):
-                code = args[i + 1].text if i + 1 < len(args) else ""
-                break
-            if a.startswith("-c") and len(a) > 2:
-                code = a[2:]
-                break
-            if a.startswith("-") and a != "-":
-                i += 1
-                continue
-        else:
-            if a in ("-e", "--eval", "-p", "--print", "-E") or (kind in ("perl", "ruby") and a.startswith("-")
-                                                              and "e" in a[1:] and not a.startswith("--")):
-                code = args[i + 1].text if i + 1 < len(args) else ""
-                break
-            if a.startswith("-") and a != "-":
-                i += 1
-                continue
+        if a in ("-e", "--eval", "-p", "--print", "-E") or (kind in ("perl", "ruby") and a.startswith("-")
+                                                          and "e" in a[1:] and not a.startswith("--")):
+            code = args[i + 1].text if i + 1 < len(args) else ""
+            break
+        if a.startswith("-") and a != "-":
+            i += 1
+            continue
         script = a
         break
+    if kind == "py" and code is not None and ("\0" in code or re.match(r"\s*(?:\$|\x60)", code)):
+        raise Block("real_money", "python code built by the shell", DYNAMIC_CODE)             # `python -c "$(...)"`: code nobody can read
+    if kind == "py" and script is not None and script != "-" and not unresolved(expand(script, run.ctx)) and \
+            _under_roots(expand(script, run.ctx), package_roots(run.ctx), run.here):
+        raise Block("real_money", "python script of the hokma folder")
     if code is not None:
         scan_code(kind, code, run, depth + 1)
     elif script is not None and script != "-":
@@ -1679,8 +2289,18 @@ FILE_TOOLS = guard.FILE_TOOLS
 READ_TOOLS = {"Read", "Grep", "Glob"}
 SHELL_TOOLS = {"Bash": "bash", "PowerShell": "ps"}
 URL_TOOLS = {"WebFetch"}                                        # tools that take a URL: judged against the broker hosts
-ORDER_TOOL = re.compile(r"(?:place|submit|send|create|modify|replace|cancel)[_-]?order(?!s?[_-]?book)|"
-                        r"order[_-](?:create|send|cancel)", re.I)
+# An order verb next to `order`, in either order, with or without a separator, in any case: `place_order`, `order_place`,
+# `placeOrder`, `orderPlace`, `ORDER-REPLACE`, `order_preview`, `order_amend`. An order book is data, not an order.
+ORDER_VERBS = r"(?:place|submit|send|create|modify|replace|cancel|amend|preview)"
+ORDER_TOOL = re.compile(ORDER_VERBS + r"[_-]?order(?!s?[_-]?book)|order[_-]?" + ORDER_VERBS, re.I)
+
+
+def is_hokma_order_tool(tool: str, brokers: dict | None = None) -> bool:
+    """True for the four exact MCP names of Hokma's own server in `hokma_order_tools` (SPEC-015 18.7): `evaluate` and the
+    permission broker skip the ORDER_TOOL name pattern for them (the host and secret checks still run). The match is
+    exact: `mcp__hokma__place_order`, the same tool of another server or a different case are not on the list."""
+    names = (brokers if brokers is not None else load_brokers()).get("hokma_order_tools", [])
+    return isinstance(tool, str) and isinstance(names, list) and tool in names
 
 
 def check_file_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
@@ -1694,6 +2314,41 @@ def check_file_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
     elif guard.decide({"tool_name": tool, "tool_input": tool_input, "cwd": cwd}, ctx.protect)[0]:
         raise Block("hokma_internal", shown)
     check_write_dest(target, ctx, cwd, guarded=False)
+    if not (isinstance(target, str) and os.path.splitext(target)[1].lower() not in CODE_SUFFIXES | {""}):
+        suffix = os.path.splitext(target)[1].lower() if isinstance(target, str) else ""
+        for text in _written_texts(tool_input):                  # a script that imports Hokma is refused when it is written
+            if suffix == ".ipynb":
+                text = text.replace('\\"', '"').replace("\\n", "\n")      # the JSON of a notebook escapes its code
+            check_hokma_code(text, ctx, here=cwd, python=_is_python_text(target, text))
+
+
+CODE_SUFFIXES = set(SCRIPT_SUFFIX) | {".pyw", ".ipynb", ".psm1", ".zsh"}
+PY_SUFFIXES = {".py", ".pyw", ".ipynb"}
+# A command that writes a python file (redirection, tee, cp, mv, install): its text is python code too.
+PY_WRITE_RE = re.compile(r"(?:>>?|\btee\b(?:\s+-\w+)*|\b(?:cp|mv|install)\b[^\n;|&]*?)\s*[\"']?[^\s\"'|;&<>]*\.pyw?\b", re.I)
+
+
+def _is_python_text(target: object, text: str) -> bool:
+    """A file the agent writes is python when its suffix says so, or when it has no suffix and no other interpreter's line."""
+    suffix = os.path.splitext(target)[1].lower() if isinstance(target, str) else ""
+    if suffix in PY_SUFFIXES:
+        return True
+    if suffix:
+        return False
+    head = text.lstrip()[:120].splitlines()[0] if text.strip() else ""
+    return not (head.startswith("#!") and "python" not in head)
+
+
+def _written_texts(tool_input: dict) -> list[str]:
+    """The text a Write, Edit, MultiEdit or NotebookEdit call puts into a file."""
+    out: list[str] = []
+    for key in ("content", "new_string", "new_source"):
+        if isinstance(tool_input.get(key), str):
+            out.append(tool_input[key])
+    for item in tool_input.get("edits") if isinstance(tool_input.get("edits"), list) else []:
+        if isinstance(item, dict) and isinstance(item.get("new_string"), str):
+            out.append(item["new_string"])
+    return out
 
 
 def check_read_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
@@ -1820,6 +2475,9 @@ def check_command(tool: str, command: object, cwd: str, ctx: Ctx) -> None:
     run.source = command
     mode = SHELL_TOOLS[tool]
     raw = norm_text(command)                                   # backslashes may be eaten by the shell reading below
+    check_hokma_code(command, ctx, here=cwd)                   # also what a here-document writes into a script
+    if PY_WRITE_RE.search(command):                            # a script written by the command: judged as python when written
+        check_hokma_code(command, ctx, here=cwd, python=True)
     for candidate in (raw, norm_text(expand(command, ctx))):   # the text as typed: a shell eats backslashes
         if RAW_DATA_SECRET_RE.search(candidate) or data_secret_in_text(candidate, ctx):
             raise Block("secrets", short(command))
@@ -1857,7 +2515,7 @@ def evaluate(payload: dict, ctx: Ctx) -> Block | None:
     ctx._vars["PWD"] = cwd
     try:
         if tool.startswith("mcp__"):
-            if ORDER_TOOL.search(tool):
+            if ORDER_TOOL.search(tool) and not is_hokma_order_tool(tool, ctx.brokers):
                 raise Block("real_money", tool)
         elif tool in FILE_TOOLS:
             check_file_tool(tool, tool_input, ctx, cwd)
@@ -1880,6 +2538,8 @@ MESSAGES = {
     "outside_workdir": lambda x: (t("hardblock.outside_workdir", target=x), t("hardblock.hint.outside_workdir")),
     "secrets": lambda x: (t("hardblock.secrets", target=x), t("hardblock.hint.secrets")),
     "real_money": lambda x: (t("hardblock.real_money", target=x), t("hardblock.hint.real_money")),
+    # Same block as real_money (the rule stays `real_money` in the log, in guard_events and in the verdict), another text.
+    "dynamic_code": lambda x: (t("hardblock.dynamic_code", target=x), t("hardblock.hint.dynamic_code")),
 }
 
 
@@ -1890,6 +2550,8 @@ def log_block(ctx: Ctx, tool: str, block: Block) -> None:
         os.makedirs(folder, exist_ok=True)
         line = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "rule": block.rule, "tool": tool,
                 "target": short(block.target), "conversation_id": ctx.conversation_id}
+        if block.reason:
+            line["reason"] = block.reason
         if ctx.task_id:
             line["task_id"] = ctx.task_id
         data = (json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8")
@@ -1937,7 +2599,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         log_block(ctx, str(payload.get("tool_name", "")), block)
         print(f"HOKMA_BLOCKED {block.rule}", file=sys.stderr)
-        reason, hint = MESSAGES[block.rule](short(block.target))
+        reason, hint = MESSAGES[block.reason if block.reason in MESSAGES else block.rule](short(block.target))
         print(reason, file=sys.stderr)
         print(hint, file=sys.stderr)
         return BLOCK

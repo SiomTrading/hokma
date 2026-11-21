@@ -55,7 +55,7 @@ def test_errors_carry_their_code_and_status(monkeypatch):
     monkeypatch.setattr(market_api, "_requests", RateLimiter(limit=1000, window=60))
     client = TestClient(create_app())
     detail = error(client, CHAIN + "2026-12-18", 409, "options.no_connection")
-    assert detail["message"] == "The option chain needs Alpaca IEX: save its key and turn it on in Connections."
+    assert detail["message"] == "The option chain needs Schwab or Alpaca IEX: connect one of them in Connections."
     error(client, "/api/market/options/expirations?symbol=AAPL", 409, "options.no_connection")
     assert fake.calls == []
 

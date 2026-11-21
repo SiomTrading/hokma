@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Hosts and URL shapes that place real-money orders. Data hosts, paper and sandbox hosts are not listed. A command that mentions one of these is refused by the always-on protections (rule real_money). `read_exceptions` is NOT read by that hook: an agent never gets one. It is the list of the only requests Hokma's own backend may make to a listed host (see `hardblock.read_exception_allows`).",
+  "note": "Hosts and URL shapes that place real-money orders. Data hosts, paper and sandbox hosts are not listed. A command that mentions one of these is refused by the always-on protections (rule real_money). `read_exceptions` is NOT read by that hook: an agent never gets one. It is the list of the only requests Hokma's own backend may make to a listed host (see `hardblock.read_exception_allows`). Schwab (SPEC-015): 19 reads and the OAuth token call only; sending, changing, cancelling or previewing an order is NOT in read_exceptions.",
   "hosts": [
     "api.alpaca.markets",
     "api-fxtrade.oanda.com",
@@ -21,10 +21,260 @@
     "ndax.io",
     "trading-api.kalshi.com"
   ],
+  "order_exceptions_note": "The only order requests Hokma's broker service may make to Schwab (SPEC-015 18.7), consumer hokma_broker. Kept apart from read_exceptions: a rule of one list never authorizes a request of the other, and the hook reads neither (see hardblock.order_exception_allows).",
+  "hokma_order_tools_note": "The exact MCP tool names of Hokma's own server that the real_money rule lets through its order-name pattern (SPEC-015 18.7). The host and secret checks still apply to them. The server name hokma is reserved (kit/mcp_config.py).",
+  "hokma_order_tools": [
+    "mcp__hokma__order_place",
+    "mcp__hokma__order_replace",
+    "mcp__hokma__order_cancel",
+    "mcp__hokma__order_preview"
+  ],
+  "order_exceptions": [
+    {
+      "host": "api.schwabapi.com",
+      "method": "POST",
+      "path": "/trader/v1/accounts/{accountNumber}/orders",
+      "match": "path_template",
+      "consumer": "hokma_broker",
+      "reason": "Place an order (SPEC-015 18.7)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "PUT",
+      "path": "/trader/v1/accounts/{accountNumber}/orders/{orderId}",
+      "match": "path_template",
+      "consumer": "hokma_broker",
+      "reason": "Replace an order (SPEC-015 18.7)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}",
+        "orderId": "[0-9]{1,19}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "DELETE",
+      "path": "/trader/v1/accounts/{accountNumber}/orders/{orderId}",
+      "match": "path_template",
+      "consumer": "hokma_broker",
+      "reason": "Cancel an order (SPEC-015 18.7)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}",
+        "orderId": "[0-9]{1,19}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "POST",
+      "path": "/trader/v1/accounts/{accountNumber}/previewOrder",
+      "match": "path_template",
+      "consumer": "hokma_broker",
+      "reason": "Preview an order (SPEC-015 18.7)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}"
+      }
+    }
+  ],
   "read_exceptions": [
-    {"host": "api.alpaca.markets", "method": "GET", "path": "/v2/options/contracts",
-     "match": "exact_path_query_allowed", "consumer": "hokma_backend",
-     "reason": "Option contracts and open interest, read only (SPEC-014)"}
+    {
+      "host": "api.alpaca.markets",
+      "method": "GET",
+      "path": "/v2/options/contracts",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Option contracts and open interest, read only (SPEC-014)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "POST",
+      "path": "/v1/oauth/token",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "OAuth token exchange and renewal (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/quotes",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Quotes, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/{symbol_id}/quotes",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "One quote, read only (SPEC-015)",
+      "params": {
+        "symbol_id": "[A-Za-z0-9.%^-]{1,32}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/chains",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Option chain, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/expirationchain",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Option expirations, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/pricehistory",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Candles, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/movers/{symbol_id}",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "Movers, read only (SPEC-015)",
+      "params": {
+        "symbol_id": "%24DJI|%24COMPX|%24SPX|NYSE|NASDAQ|OTCBB|INDEX_ALL|EQUITY_ALL|OPTION_ALL|OPTION_PUT|OPTION_CALL"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/markets",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Market hours, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/markets/{market_id}",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "Market hours of one market, read only (SPEC-015)",
+      "params": {
+        "market_id": "equity|option|bond|future|forex"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/instruments",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Instrument search, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/marketdata/v1/instruments/{cusip_id}",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "Instrument by CUSIP, read only (SPEC-015)",
+      "params": {
+        "cusip_id": "[A-Za-z0-9]{9}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/accounts/accountNumbers",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Account hashes, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/accounts",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Accounts and balances, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/accounts/{accountNumber}",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "One account, read only (SPEC-015)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/accounts/{accountNumber}/orders",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "Orders of one account, read only (SPEC-015)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/accounts/{accountNumber}/orders/{orderId}",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "One order, read only; PUT and DELETE on this path are not listed (SPEC-015)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}",
+        "orderId": "[0-9]{1,19}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/orders",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Orders of all accounts, read only (SPEC-015)"
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/accounts/{accountNumber}/transactions",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "Transactions, read only (SPEC-015)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/accounts/{accountNumber}/transactions/{transactionId}",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "One transaction, read only (SPEC-015)",
+      "params": {
+        "accountNumber": "(?!accountNumbers$)[A-Za-z0-9]{8,128}",
+        "transactionId": "[0-9]{1,19}"
+      }
+    },
+    {
+      "host": "api.schwabapi.com",
+      "method": "GET",
+      "path": "/trader/v1/userPreference",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "User preferences, read only (SPEC-015)"
+    }
   ],
   "url_patterns": [
     "(?:api\\.exchange\\.coinbase\\.com|api\\.coinbase\\.com|api\\.international\\.coinbase\\.com)/\\S*orders?\\b",

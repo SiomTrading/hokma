@@ -2,10 +2,13 @@
   "version": 1,
   "asset_classes": ["equity", "crypto", "forex", "future"],
   "default_priority": {
-    "equity": ["alpaca", "finnhub"],
+    "equity": ["schwab", "alpaca", "finnhub"],
+    "bars": ["schwab", "alpaca", "finnhub"],
+    "options": ["schwab", "alpaca"],
     "crypto": ["coinbase", "finnhub"],
     "forex": ["finnhub"],
-    "future": ["siomtrading_futures"]
+    "future": ["siomtrading_futures"],
+    "news": ["finnhub", "alpaca"]
   },
   "providers": {
     "coinbase": {
@@ -55,6 +58,18 @@
       "max_symbols": 20,
       "url": "wss://stream.siomtrading.com/v1/stream/futures",
       "test_symbol": "NQ=F"
+    },
+    "schwab": {
+      "name": "Schwab",
+      "asset_classes": ["equity"],
+      "needs_key": true,
+      "key_fields": ["client_id", "client_secret"],
+      "auth": "oauth",
+      "enabled_by_default": true,
+      "data_state": "live",
+      "delay_seconds": 0,
+      "max_symbols": 100,
+      "test_symbol": "SPY"
     }
   },
   "polling": {

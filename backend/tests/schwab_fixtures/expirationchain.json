@@ -1,0 +1,29 @@
+{
+  "status": "SUCCESS",
+  "expirationList": [
+    {
+      "expirationDate": "2026-11-27",
+      "daysToExpiration": 7,
+      "expirationType": "W",
+      "standard": true
+    },
+    {
+      "daysToExpiration": 28,
+      "expiration": "2026-12-18",
+      "expirationDate": "2026-12-18",
+      "expirationType": "S",
+      "standard": true,
+      "settlementType": "P",
+      "optionRoots": "FAKE"
+    },
+    {
+      "daysToExpiration": 392,
+      "expiration": "2027-12-17",
+      "expirationDate": "2027-12-17",
+      "expirationType": "Q",
+      "standard": false,
+      "settlementType": "A",
+      "optionRoots": "FAKE"
+    }
+  ]
+}

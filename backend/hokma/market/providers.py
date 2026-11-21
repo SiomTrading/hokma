@@ -12,6 +12,10 @@ from pathlib import Path
 
 CATALOG_FILE = Path(__file__).with_name("providers.json")
 ASSET_CLASSES = ("equity", "crypto", "forex", "future")
+# The keys `priority` accepts in connections.json: the asset classes plus the uses that are not an asset class
+# (candles of stocks, options, news and company data). The order here is the order of the rows of "Order of use".
+USES = ("equity", "bars", "options", "future", "crypto", "forex", "news")
+AUTH_KINDS = ("key", "oauth")
 DATA_STATES = ("live", "delayed")
 
 
@@ -30,6 +34,7 @@ class ProviderSpec:
     url: str | None = None
     host: str | None = None
     port: int | None = None
+    auth: str = "key"                                  # "key" (a pasted key) or "oauth" (Schwab: keys plus a sign-in)
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,10 @@ class ProviderCatalog:
     def get(self, provider_id: str) -> ProviderSpec | None:
         return self.providers.get(provider_id)
 
+    def uses_of(self, provider_id: str) -> list[str]:
+        """The uses (4.4) whose default order lists the provider, in the order of `USES`."""
+        return [u for u in USES if provider_id in self.default_priority.get(u, ())]
+
 
 def parse_catalog(raw: dict) -> ProviderCatalog:
     providers: dict[str, ProviderSpec] = {}
@@ -58,19 +67,24 @@ def parse_catalog(raw: dict) -> ProviderCatalog:
         classes = tuple(item["asset_classes"])
         if not classes or any(c not in ASSET_CLASSES for c in classes):
             raise ValueError(f"{provider_id}: unknown asset class")
+        auth = item.get("auth", "key")
+        if auth not in AUTH_KINDS:
+            raise ValueError(f"{provider_id}: auth must be one of {AUTH_KINDS}")
         providers[provider_id] = ProviderSpec(
             id=provider_id, name=item["name"], asset_classes=classes, needs_key=bool(item["needs_key"]),
             key_fields=tuple(item.get("key_fields", ())), enabled_by_default=bool(item["enabled_by_default"]),
             data_state=state, delay_seconds=item.get("delay_seconds"), max_symbols=int(item["max_symbols"]),
             test_symbol=item["test_symbol"], url=item.get("url"),
-            host=item.get("host"), port=item.get("port"),
+            host=item.get("host"), port=item.get("port"), auth=auth,
         )
     priority: dict[str, tuple[str, ...]] = {}
-    for asset_class in ASSET_CLASSES:
-        order = [p for p in raw["default_priority"].get(asset_class, []) if p in providers]
-        # A provider that covers the class but is missing from the default order goes last.
-        order += [p.id for p in providers.values() if asset_class in p.asset_classes and p.id not in order]
-        priority[asset_class] = tuple(order)
+    for use in USES:
+        order = [p for p in raw["default_priority"].get(use, []) if p in providers]
+        if use in ASSET_CLASSES:
+            # A provider that covers the class but is missing from the default order goes last. The uses that are not
+            # an asset class (bars, options, news) list exactly the providers the file names.
+            order += [p.id for p in providers.values() if use in p.asset_classes and p.id not in order]
+        priority[use] = tuple(order)
     poll = raw["polling"]
     return ProviderCatalog(providers, priority, PollingSpec(
         poll["name"], float(poll["interval_seconds"]), {k: int(v) for k, v in poll["delay_seconds"].items()}))

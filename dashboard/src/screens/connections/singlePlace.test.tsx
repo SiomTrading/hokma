@@ -19,11 +19,11 @@ const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body)
 function forbiddenTexts(): string[] {
   const keys = [
     "connections.field.key", "connections.field.token", "connections.field.keyId", "connections.field.secret",
-    "connections.key.save", "connections.key.remove", "connections.test", "connections.priority.title",
+    "connections.add.testAndAdd", "connections.field.clientId", "connections.field.clientSecret", "connections.schwab.saveNext", "connections.schwab.login", "connections.test", "connections.order.title",
   ];
   const texts = new Set<string>();
   for (const locale of ["en", "es"] as Locale[]) for (const key of keys) texts.add(t(key, undefined, locale));
-  for (const name of ["Alpaca", "Finnhub", "Coinbase"]) texts.add(name);
+  for (const name of ["Alpaca", "Finnhub", "Coinbase", "Schwab"]) texts.add(name);
   return [...texts];
 }
 
@@ -38,7 +38,7 @@ function assertNoKeyFields(root: ParentNode, where: string) {
   for (const word of forbiddenTexts()) expect(text.includes(word), `${where}: "${word}"`).toBe(false);
   // a provider selector would be a select, a combobox or a listbox with a provider among its options
   for (const select of root.querySelectorAll("select, [role=combobox], [role=listbox]")) {
-    expect((select as HTMLElement).textContent ?? "", where + ": selector").not.toMatch(/alpaca|finnhub|coinbase/i);
+    expect((select as HTMLElement).textContent ?? "", where + ": selector").not.toMatch(/alpaca|finnhub|coinbase|schwab/i);
   }
 }
 

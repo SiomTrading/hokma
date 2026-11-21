@@ -21,13 +21,17 @@ describe("keys and providers live in one place", () => {
   });
 
   it("only the Connections card draws a password field or names a key field", () => {
-    // The key of a data provider lives in the Connections card. The key of an AI engine (task 3127) is another feature,
-    // in Settings > Engines and in the engines step of the first run, so its card is another password field. The Telegram bot token (Settings > Telegram) is the third; the Gmail app password (Connections > Email) the fourth.
-    expect(filesWith('type="password"')).toEqual(["./screens/connections/MailCard.tsx", "./screens/connections/ProviderCard.tsx", "./screens/engines/ConnectCards.tsx", "./screens/settings/BackupSection.tsx", "./screens/settings/TelegramSection.tsx"]);
+    // The key of a data provider lives in the Connections "Add" dialog (AddConnectionDialog and SchwabSteps). The key of an AI engine (task 3127) is another feature,
+    // in Settings > Engines and in the engines step of the first run, so its card is another password field. The Telegram bot token (Settings > Telegram) is the third; the Gmail app password (Connections > Add > Email) the fourth.
+    expect(filesWith('type="password"')).toEqual(["./screens/connections/AddConnectionDialog.tsx", "./screens/connections/MailCard.tsx", "./screens/connections/SchwabSteps.tsx", "./screens/engines/ConnectCards.tsx", "./screens/settings/BackupSection.tsx", "./screens/settings/TelegramSection.tsx"]);
     for (const file of filesWith(/\bkey_id\b|\bsecret\b/)) {
       // backup.ts names the omitted-file reason "secret" (a backend code, not a provider key field).
       expect(file.startsWith("./screens/connections/") || file === "./i18n/messages/connections.ts" || file === "./i18n/messages/backup.ts" || file === "./screens/settings/BackupSection.tsx", file).toBe(true);
     }
+  });
+
+  it("only the Connections screen talks to the sign-in of Schwab and its account", () => {
+    for (const file of filesWith(/login\/(start|open|finish)|schwab\/account/)) expect(file.startsWith("./screens/connections/"), file).toBe(true);
   });
 
   it("no source names a retired provider", () => {

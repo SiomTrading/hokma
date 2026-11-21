@@ -51,9 +51,11 @@ export function AgentsSettings() {
   /** The kit's agents read from the catalog in the user's language; the owner's own agents show their own text. */
   const describe = (agent: AgentItem): string => {
     if (!agent.is_custom) {
-      const key = `agents.kit.${agent.slug}.desc`;
-      const text = t(key);
-      if (text !== key) return text;
+      // A description rewritten after a release lives under `.desc2` (SPEC-015 7.5); the old key is retired.
+      for (const key of [`agents.kit.${agent.slug}.desc2`, `agents.kit.${agent.slug}.desc`]) {
+        const text = t(key);
+        if (text !== key) return text;
+      }
     }
     return shortDescription(agent.description);
   };

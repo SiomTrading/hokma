@@ -66,7 +66,7 @@ export function FirstRunMode({ completed, fallback }: Props) {
         <Toggle label={t("permissions.mode.auto")} checked={mode === "auto"} disabled={busy} onChange={(on) => void change(on)} />
       </div>
       <span className="p" style={{ fontSize: 12 }}>
-        {t("permissions.firstrun.body")}
+        {t("permissions.firstrun.body2")}
       </span>
     </Pane>
   );

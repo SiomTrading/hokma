@@ -1,76 +1,91 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ErrorState, Loading, Pane } from "@/design";
+import { Button, ErrorState, Icon, Loading, Pane } from "@/design";
 import { useI18n } from "@/i18n";
-import { connectionErrorText, connectionsApi } from "./api";
+import { AddConnectionDialog } from "./AddConnectionDialog";
+import type { DialogView } from "./AddConnectionDialog";
+import { connectionErrorText, connectionsApi, mailApi } from "./api";
+import type { MailState } from "./api";
+import { ConnectedList } from "./ConnectedList";
 import "./connections.css";
-import { useFocus } from "./focus";
-import { PriorityList } from "./PriorityList";
-import { ProviderCard } from "./ProviderCard";
-import type { AssetClass, ConnectionCard } from "./types";
-import { MailCard } from "./MailCard";
+import { requestFocus, takeLogin, useFocus } from "./focus";
+import { SchwabAccountDialog } from "./SchwabAccount";
+import { SchwabBand } from "./SchwabBand";
+import type { UseKey } from "./types";
+import { UseOrder } from "./UseOrder";
 import { useConnections } from "./useConnections";
 
-/** How the cards are laid out: one section per kind of data. Every provider appears once, in its section. */
-const SECTIONS: ReadonlyArray<{ id: string; titleKey: string; providers: readonly string[]; order: AssetClass }> = [
-  { id: "crypto", titleKey: "connections.group.crypto", providers: ["coinbase"], order: "crypto" },
-  { id: "equity", titleKey: "connections.group.equity", providers: ["alpaca"], order: "equity" },
-  { id: "mixed", titleKey: "connections.group.mixed", providers: ["finnhub"], order: "equity" },
-  { id: "future", titleKey: "connections.group.future", providers: ["siomtrading_futures"], order: "future" },
-];
+type Dialog = { kind: "add"; start: DialogView; nonce: number } | { kind: "account" } | null;
 
+/** Connections: the "Add" button, what is connected, and the order of use of each kind of data. */
 export function ConnectionsScreen() {
   const { t } = useI18n();
   const state = useConnections();
   const focus = useFocus();
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [mail, setMail] = useState<MailState | null>(null);
   const [priorityError, setPriorityError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const { cards, groups, setGroups, reload } = state;
+  const opened = useRef(0);
+  const { cards, uses, setUses, reload, loading } = state;
+
+  const loadMail = useCallback(() => {
+    mailApi.state().then(setMail, () => undefined); // Gmail has its own error line inside its card
+  }, []);
+  useEffect(loadMail, [loadMail]);
 
   const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
-  const sections = useMemo(() => {
-    return SECTIONS.map((section) => {
-      const list = section.providers.map((id) => byId.get(id)).filter((card): card is ConnectionCard => !!card);
-      // The futures section is also the futures priority: the card on top is the one tried first.
-      if (section.id === "future") list.sort((a, b) => (a.priority.future ?? 99) - (b.priority.future ?? 99));
-      return { id: section.id, title: t(section.titleKey), cards: list };
-    });
-  }, [byId, t]);
+  const schwab = byId.get("schwab");
+
+  const open = useCallback((start: DialogView) => {
+    opened.current += 1;
+    setDialog({ kind: "add", start, nonce: opened.current });
+  }, []);
+
+  // "Sign in with Schwab" of the notice (login=1): the sign-in step opens by itself, once per request.
+  useEffect(() => {
+    if (loading || !takeLogin()) return;
+    open({ view: "form", id: "schwab", mode: schwab?.added ? "change" : "add", step: schwab?.key_state === "saved" ? 2 : 1 });
+  }, [focus.nonce, loading, open, schwab]);
 
   const focusClass = focus.assetClass;
   useEffect(() => {
-    if (!focusClass || state.loading) return;
+    if ((!focusClass && !focus.provider) || loading) return;
     const target = rootRef.current?.querySelector('[data-focus="true"]');
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
-  }, [focus.nonce, focusClass, state.loading]);
+  }, [focus.nonce, focusClass, focus.provider, loading]);
 
   const reorder = useCallback(
-    (assetClass: AssetClass, order: string[]) => {
-      const before = groups;
-      setGroups({ ...groups, [assetClass]: order });
+    (use: UseKey, order: string[]) => {
+      const before = uses;
+      setUses({ ...uses, [use]: order });
       setPriorityError(null);
-      connectionsApi.setPriority(assetClass, order).then(
+      connectionsApi.setPriority(use, order).then(
         (answer) => {
-          setGroups(answer.groups);
+          if (answer.uses) setUses(answer.uses);
           reload();
         },
         (cause: unknown) => {
-          setGroups(before);
+          setUses(before);
           setPriorityError(connectionErrorText(cause));
         },
       );
     },
-    [groups, reload, setGroups],
+    [uses, reload, setUses],
   );
 
-  const patch = state.patchCard;
-  const orderedClasses = (Object.keys(groups) as AssetClass[]).filter((cls) => (groups[cls]?.length ?? 0) > 1);
+  const close = () => setDialog(null);
 
   return (
     <Pane as="section" aria-label={t("screen.connections")} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
       <div ref={rootRef} className="conn-page">
-        <div className="conn-intro">
-          <h1 className="disp">{t("connections.title")}</h1>
-          <p className="p">{t("connections.intro")}</p>
+        <div className="conn-intro conn-header">
+          <div className="conn-intro">
+            <h1 className="disp">{t("connections.title")}</h1>
+            <p className="p">{t("connections.intro2")}</p>
+          </div>
+          <Button variant="primary" onClick={() => open({ view: "list" })}>
+            <Icon name="plus" size={14} /> {t("connections.add")}
+          </Button>
         </div>
 
         {!state.storeAvailable ? (
@@ -79,59 +94,49 @@ export function ConnectionsScreen() {
           </p>
         ) : null}
 
-        {state.loading ? (
+        <SchwabBand session={schwab?.session} onLogin={() => requestFocus(null, { provider: "schwab", login: true })} />
+
+        {loading ? (
           <Loading label={t("connections.loading")} />
         ) : state.error && cards.length === 0 ? (
           <ErrorState title={t("connections.error.title")} message={state.error} onRetry={reload} />
         ) : (
           <>
-            <div className="conn-groups">
-            {sections.map((section) => (
-              <section key={section.id} className={"conn-group" + (section.cards.length > 1 ? " wide" : "")} aria-label={section.title} data-group={section.id}>
-                <h2 className="sec conn-group-title">{section.title}</h2>
-                <div className="conn-grid">
-                  {section.cards.map((card) => (
-                    <ProviderCard
-                      key={card.id}
-                      card={card}
-                      storeAvailable={state.storeAvailable}
-                      focused={focusClass !== null && card.asset_classes.includes(focusClass)}
-                      onChange={patch}
-                      onStoreMissing={() => state.setStoreAvailable(false)}
-                      onReload={reload}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-            </div>
-
-            <section className="conn-group" aria-label={t("mail.group")} data-testid="mail-section">
-              <h2 className="sec conn-group-title">{t("mail.group")}</h2>
-              <div className="conn-grid">
-                <MailCard />
-              </div>
-            </section>
-
-            {orderedClasses.length > 0 ? (
-              <section className="conn-group" aria-label={t("connections.priority.title")} data-group="priority">
-                <h2 className="sec conn-group-title">{t("connections.priority.title")}</h2>
-                <p className="p">{t("connections.priority.help")}</p>
-                {priorityError ? (
-                  <p className="conn-error" role="alert">
-                    {priorityError}
-                  </p>
-                ) : null}
-                <div className="conn-grid">
-                  {orderedClasses.map((cls) => (
-                    <PriorityList key={cls} assetClass={cls} order={groups[cls] ?? []} cards={byId} focused={focusClass === cls} onReorder={reorder} />
-                  ))}
-                </div>
-              </section>
+            <ConnectedList
+              cards={cards}
+              mail={mail}
+              focusClass={focusClass}
+              focusProvider={focus.provider}
+              onCard={state.patchCard}
+              onReload={reload}
+              onStoreMissing={() => state.setStoreAvailable(false)}
+              onOpen={open}
+              onViewAccount={() => setDialog({ kind: "account" })}
+            />
+            {priorityError ? (
+              <p className="conn-error" role="alert" data-testid="priority-error">
+                {priorityError}
+              </p>
             ) : null}
+            <UseOrder uses={uses} cards={byId} focusUse={focusClass} onReorder={reorder} />
           </>
         )}
       </div>
+
+      {dialog?.kind === "add" ? (
+        <AddConnectionDialog
+          key={dialog.nonce}
+          start={dialog.start}
+          cards={cards}
+          mail={mail}
+          onClose={close}
+          onCard={state.patchCard}
+          onReload={reload}
+          onMailChange={loadMail}
+          onStoreMissing={() => state.setStoreAvailable(false)}
+        />
+      ) : null}
+      {dialog?.kind === "account" ? <SchwabAccountDialog onClose={close} /> : null}
     </Pane>
   );
 }

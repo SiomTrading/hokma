@@ -346,7 +346,8 @@ def test_removing_a_document_removes_its_vectors_and_prune_clears_the_rest(env):
 def test_numpy_is_not_imported_by_the_sqlite_store(env):  # noqa: F811
     import subprocess
     import sys
-    code = ("import sys; import hokma.db.vectors as v, hokma.db.database; "
+    code = ("import sys; from hokma.core import processguard; processguard._role = processguard.SERVER; "   # the server's mark
+            "import hokma.db.vectors as v, hokma.db.database; "
             "assert 'numpy' not in sys.modules, 'numpy was imported'")
     done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
                           env={"PYTHONPATH": str(ROOT / "backend"), "PATH": ""})

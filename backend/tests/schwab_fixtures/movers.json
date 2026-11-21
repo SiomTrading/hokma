@@ -1,0 +1,20 @@
+{
+  "screeners": [
+    {
+      "change": 122.5,
+      "description": "Screener description",
+      "direction": "up",
+      "last": 122.75,
+      "symbol": "FAKEUP",
+      "totalVolume": 552
+    },
+    {
+      "change": 123.25,
+      "description": "Screener description",
+      "direction": "down",
+      "last": 123.5,
+      "symbol": "FAKEDN",
+      "totalVolume": 555
+    }
+  ]
+}

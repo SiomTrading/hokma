@@ -1,6 +1,16 @@
-"""Option chain of US stocks and ETFs, read only, from the Alpaca key the student saved in Connections (SPEC-014).
+"""Option chain of US stocks and ETFs, read only, from Schwab or from the Alpaca key the student saved in Connections
+(SPEC-014 and SPEC-015).
 
-Two sources, always with the same key (headers only, never in a URL, a log or an answer):
+The source comes from the order of the use "options" of Connections (Schwab first by default). A source that is not
+connected, is switched off or is not on the desk is skipped; when the first one fails (an ended session, a limit, a server
+error) the next one answers in the same call, and `source` says which one did. Without any, the code is `no_connection`.
+
+**Schwab** (5.6): `GET /marketdata/v1/chains` and `/expirationchain` through `hokma.schwab.endpoints` (the only door to the
+host is `schwab/http.py`). Prices and greeks are Schwab's (`price_feed: "schwab"`, `greeks: "provider"`); Prob. ITM and the
+intrinsic value are Hokma's, as in 1.0.8. Its failures leave as `schwab.auth`, `schwab.rate_limited` and `schwab.upstream`.
+Whether the market is open comes from `GET /markets` (holidays included) when Schwab is connected.
+
+**Alpaca** (two sources, always with the same key; headers only, never in a URL, a log or an answer):
 
 * contracts and open interest: `GET /v2/options/contracts` on the trading host of the key. A demo key (prefix PK) goes to
   `paper-api.alpaca.markets`; a real key (prefix AK) goes to `api.alpaca.markets`. This module is the ONLY code of Hokma that
@@ -12,7 +22,7 @@ Two sources, always with the same key (headers only, never in a URL, a log or an
 
 The agent tool (`options_chain`) and the three routes of the dashboard (`market/api.py`) use the functions below. Limits: a
 cache of 30 seconds for the chain and 15 minutes for contracts and expirations, at most 5 pages per request, 60 calls a
-minute and 2 MB per answer. Nothing here writes anything. Failures raise `OptionsError`, a `LookupError` that is also a
+minute and 2 MB per answer (Alpaca). Nothing here writes anything. Failures raise `OptionsError`, a `LookupError` that is also a
 `ValueError` and carries the code and the HTTP status the dashboard uses.
 """
 from __future__ import annotations
@@ -33,6 +43,9 @@ from hokma.market.errors import MarketError
 from hokma.market.history import http_get
 from hokma.market.tz import NEW_YORK
 from hokma.market.yahoo import valid_symbol
+from hokma.schwab import endpoints as schwab_endpoints
+from hokma.schwab import http as schwab_http
+from hokma.schwab import models as schwab_models
 
 PAPER_HOST = "https://paper-api.alpaca.markets"
 LIVE_HOST = "https://api.alpaca.markets"
@@ -57,6 +70,14 @@ MAX_LIMIT = 200
 STRIKE_CHOICES = (4, 6, 8, 10, 12, 14, 16, 20, 30, 50)
 DEFAULT_STRIKES = 14
 MINUTES_PER_YEAR = 525600
+SCHWAB, ALPACA = "schwab", "alpaca"
+DEFAULT_ORDER = (SCHWAB, ALPACA)
+NO_FALLBACK = ("bad_request", "not_equity", "desk")       # the next source would refuse the same way
+RATE_CODES = ("rate_limited", "schwab.rate_limited")
+HOURS_SECONDS = 300
+HOURS_FAILED_SECONDS = 60
+DEFAULT_MULTIPLIER = 100
+NO_DATA = -999.0                                         # Schwab's "no data" is this or less (SPEC-015 12, point 9)
 
 Fetch = Callable[[str, dict], tuple[int, str]]
 _fetch: Fetch = http_get
@@ -65,15 +86,17 @@ _cache: dict[tuple, tuple[float, Any]] = {}
 _feed_denied: dict[str, float] = {}
 _host_memory: dict[str, str] = {}
 _limiter: RateLimiter | None = None
+_hours_failed_until = 0.0
 
 
 def reset() -> None:
     """Forget the cache, the limiter, the remembered feed refusals and the remembered hosts (tests, and a new key)."""
-    global _limiter
+    global _limiter, _hours_failed_until
     _cache.clear()
     _feed_denied.clear()
     _host_memory.clear()
     _limiter = None
+    _hours_failed_until = 0.0
 
 
 def forget_cache() -> None:
@@ -83,7 +106,9 @@ def forget_cache() -> None:
 
 class OptionsError(LookupError, ValueError):
     """What went wrong, in the student's language. `code` is the short code of the dashboard (`no_connection`,
-    `auth_failed`, `not_equity`, `bad_request`, `rate_limited`, `upstream`) and `status` its HTTP status."""
+    `auth_failed`, `not_equity`, `bad_request`, `rate_limited`, `upstream`; Schwab's own are `schwab.auth`,
+    `schwab.rate_limited` and `schwab.upstream`) and `status` its HTTP status. All of them start with `options.` on the
+    wire, so the client never takes one as the end of Hokma's own session."""
 
     def __init__(self, code: str, status: int, message: str) -> None:
         super().__init__(message)
@@ -101,6 +126,12 @@ def _text(code: str, symbol: str = "") -> str:
         return t("options.err.auth_failed")
     if code == "rate_limited":
         return t("options.err.rate_limited")
+    if code == "schwab.auth":
+        return t("options.err.schwab.auth")
+    if code == "schwab.rate_limited":
+        return t("options.err.schwab.rate_limited")
+    if code == "schwab.upstream":
+        return t("options.err.schwab.upstream")
     return t("options.err.upstream")
 
 
@@ -217,19 +248,74 @@ class _Creds:
         return [remembered] + [h for h in order if h != remembered] if remembered else order
 
 
-def _credentials(desk_id: int | None) -> _Creds:
+def _service():
     from hokma.connections import runtime
 
     service = runtime.get_service()
     if not getattr(service, "loaded", True):
         service.load()
-    if not service.is_enabled("alpaca") or not service.has_key("alpaca"):
-        raise _fail("no_connection", 409)
-    if desk_id is not None:
-        allowed = runtime._desk_providers(desk_id)
-        if allowed is not None and "alpaca" not in allowed:
-            raise _fail("desk", 409)
-    raw = service.read_secret("alpaca")
+    return service
+
+
+def _schwab_ready(service) -> bool:
+    """Schwab can answer: keys saved, switched on and a live session (cheap, in memory)."""
+    if not service.is_enabled(SCHWAB) or not service.has_key(SCHWAB):
+        return False
+    said = getattr(service, "signed_in", None)
+    if said is not None:
+        return bool(said(SCHWAB))
+    from hokma.schwab import auth
+
+    return bool(auth.is_connected())
+
+
+def _providers(desk_id: int | None) -> list[str]:
+    """The sources that can serve the chain now, in the order of the use "options" of Connections: connected, switched on
+    and (for a desk chart) used by the desk. Raises `no_connection`, or `desk` when one is connected but the desk does not use it."""
+    from hokma.connections import runtime
+
+    service = _service()
+    order = getattr(service, "order", None)
+    wanted = list(order("options")) if order is not None else list(DEFAULT_ORDER)
+    allowed = runtime._desk_providers(desk_id) if desk_id is not None else None
+    ready: list[str] = []
+    blocked = False
+    for provider in wanted:
+        if provider == SCHWAB:
+            usable = _schwab_ready(service)
+        elif provider == ALPACA:
+            usable = service.is_enabled(ALPACA) and service.has_key(ALPACA)
+        else:
+            continue
+        if not usable:
+            continue
+        if allowed is not None and provider not in allowed:
+            blocked = True
+            continue
+        ready.append(provider)
+    if not ready:
+        raise _fail("desk" if blocked else "no_connection", 409)
+    return ready
+
+
+def _serve(providers: list[str], runners: dict[str, Callable[[], Any]]) -> Any:
+    """Ask the sources one by one: the first that answers wins. A failure of a source (session, limit, server) goes on to
+    the next in the same call; the last failure is the one raised when none answers."""
+    last: OptionsError | None = None
+    for provider in providers:
+        try:
+            return runners[provider]()
+        except OptionsError as error:
+            if error.code in NO_FALLBACK:
+                raise
+            last = error
+    assert last is not None
+    raise last
+
+
+def _credentials(desk_id: int | None = None) -> _Creds:
+    """The saved Alpaca key, read for the call that needs it (`_providers` already decided that Alpaca is to be used)."""
+    raw = _service().read_secret(ALPACA)
     if not raw:
         raise _fail("no_connection", 409)
     try:
@@ -240,6 +326,170 @@ def _credentials(desk_id: int | None) -> _Creds:
     except (ValueError, KeyError, TypeError):
         raise _fail("auth_failed", 401) from None
     return _Creds(key_id, secret, raw)
+
+
+# ---------------------------------------------------------------------------------------------- Schwab
+
+def _schwab_error(error: schwab_http.SchwabError) -> OptionsError:
+    """A failure of the Schwab door as the short code the dashboard translates (`options.err.schwab.*`). A session that
+    ended, none, or an app without access is `schwab.auth` (status 401, with an `options.` code so the client does not
+    close Hokma's own session); a limit is 429; anything else is 502."""
+    if error.code in (schwab_http.EXPIRED, schwab_http.NOT_CONNECTED, schwab_http.DENIED):
+        return OptionsError("schwab.auth", 401, _text("schwab.auth"))
+    if error.code == schwab_http.RATE_LIMITED:
+        return OptionsError("schwab.rate_limited", 429, _text("schwab.rate_limited"))
+    return OptionsError("schwab.upstream", 502, _text("schwab.upstream"))
+
+
+def _schwab_call(fn: Callable[[], Any], empty: Any = None) -> Any:
+    """Run a call of `hokma.schwab.endpoints`; `schwab.err.not_found` is no data (`empty`), the rest is an OptionsError."""
+    try:
+        return fn()
+    except schwab_http.SchwabError as error:
+        if error.code == schwab_http.NOT_FOUND:
+            return empty
+        raise _schwab_error(error) from None
+
+
+def _clean(value: Any) -> float | None:
+    """A number, or None for a non finite value and for Schwab's "no data" (-999 or less)."""
+    number = _num(value)
+    return None if number is None or number <= NO_DATA else number
+
+
+def _iv(value: Any) -> float | None:
+    """`volatility` of a contract as a fraction (the unit is `analytics.VOLATILITY_UNIT`, fixed with the first real
+    answer, T0)."""
+    from hokma.schwab import analytics
+
+    number = _clean(value)
+    if number is None:
+        return None
+    return round(number / 100.0, 6) if analytics.VOLATILITY_UNIT == "percent" else number
+
+
+def _whole_of(value: Any) -> int | None:
+    """`openInterest` and the sizes come as doubles: a whole number, or None."""
+    number = _clean(value)
+    return None if number is None else int(round(number))
+
+
+def _iso_ms(value: Any) -> str | None:
+    """`quoteTimeInLong` and the like: milliseconds as a 64 bit integer (the REF says int32 and is wrong) to a UTC text."""
+    number = _clean(value)
+    if number is None or number <= 0:
+        return None
+    try:
+        return _iso(int(number) / 1000.0)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _day_of(text: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(text)[:10])
+    except ValueError:
+        return None
+
+
+def _schwab_quote(item: dict) -> dict:
+    """One OptionContract (REF A.6) as the quote of 1.0.8: the same keys as `_quote`."""
+    bid, ask = _clean(item.get("bidPrice")), _clean(item.get("askPrice"))
+    both = bid is not None and ask is not None and bid > 0 and ask > 0
+    mid = round((bid + ask) / 2.0, 4) if both else None
+    return {"bid": bid, "ask": ask, "mid": mid, "spread_pct": round((ask - bid) / mid * 100.0, 2) if both else None,
+            "bid_exchange": None, "ask_exchange": None, "last": _clean(item.get("lastPrice")), "last_exchange": None,
+            "volume": _whole_of(item.get("totalVolume")), "delta": _clean(item.get("delta")),
+            "gamma": _clean(item.get("gamma")), "theta": _clean(item.get("theta")), "vega": _clean(item.get("vega")),
+            "iv": _iv(item.get("volatility")), "quote_time": _iso_ms(item.get("quoteTimeInLong"))}
+
+
+def _schwab_contracts(data: dict) -> list[tuple[dict, dict]]:
+    """Every contract of a chain as `(contract, quote)`: the contract in the form `_contract` gives for Alpaca (the open
+    interest date is None: Schwab does not say it, 12 point 18) and the quote of `_schwab_quote`. The expiration is the date
+    of the map key `yyyy-MM-dd:days`, else `expirationDate`, else `expiration`."""
+    found: list[tuple[dict, dict]] = []
+    for kind, name in (("call", "callExpDateMap"), ("put", "putExpDateMap")):
+        for key, strikes in (data.get(name) or {}).items():
+            if not isinstance(strikes, dict):
+                continue
+            for strike_key, items in strikes.items():
+                for item in items if isinstance(items, list) else [items]:
+                    if not isinstance(item, dict):
+                        continue
+                    day = (_day_of(str(key).split(":")[0]) or _day_of(item.get("expirationDate"))
+                           or _day_of(item.get("expiration")))
+                    strike = _clean(item.get("strikePrice"))
+                    if strike is None:
+                        strike = _clean(strike_key)
+                    symbol = item.get("symbol")
+                    if day is None or strike is None or not isinstance(symbol, str) or not symbol:
+                        continue
+                    put_call = str(item.get("putCall") or "").upper()
+                    contract = {"symbol": symbol, "type": {"CALL": "call", "PUT": "put"}.get(put_call, kind),
+                                "strike": strike, "expiration": day, "size": _whole_of(item.get("multiplier")) or DEFAULT_MULTIPLIER,
+                                "open_interest": _whole_of(item.get("openInterest")), "open_interest_date": None,
+                                "in_money": item.get("isInTheMoney") if isinstance(item.get("isInTheMoney"), bool) else None}
+                    found.append((contract, _schwab_quote(item)))
+    return found
+
+
+def _schwab_spot(data: dict) -> float | None:
+    """The price of the underlying from the chain: `underlying.last`, else its `mark`, else `underlyingPrice`."""
+    under = data.get("underlying") if isinstance(data.get("underlying"), dict) else {}
+    for value in (under.get("last"), under.get("mark"), data.get("underlyingPrice")):
+        number = _clean(value)
+        if number is not None and number > 0:
+            return number
+    return None
+
+
+def _schwab_delayed(data: dict) -> bool:
+    under = data.get("underlying") if isinstance(data.get("underlying"), dict) else {}
+    return data.get("isDelayed") is True or under.get("delayed") is True
+
+
+def _schwab_chain(symbol: str, **params: Any) -> dict:
+    """`GET /chains` for the symbol, as JSON (an empty one when Schwab has no chain for it), cached 30 seconds."""
+    key = ("schwab-chain", symbol, tuple(sorted((k, str(v)) for k, v in params.items())))
+
+    def build() -> dict:
+        data = _schwab_call(lambda: schwab_models.dump(schwab_endpoints.option_chain(symbol, **params)), {})
+        return data if isinstance(data, dict) else {}
+
+    return _cached(key, CHAIN_SECONDS, build)
+
+
+def _market_hours_open() -> bool | None:
+    """16.15: is the regular session open now, by `GET /markets` (options, else equity) with the holidays. None when Schwab
+    cannot say (no session, a failure, a payload without the product): the caller falls back to `market_open`."""
+    global _hours_failed_until
+    from hokma.schwab import analytics
+
+    now, today = _now(), _today().isoformat()
+    if _hours_failed_until > now:
+        return None
+    for market, product in (("option", "EQO"), ("equity", "EQ")):
+        try:
+            payload = _cached(("hours", market, today), HOURS_SECONDS,
+                              lambda m=market: schwab_models.dump(schwab_endpoints.market_hours(m, date=today)))
+        except Exception:                                   # noqa: BLE001  (a label: whatever fails, the plain clock answers)
+            _hours_failed_until = now + HOURS_FAILED_SECONDS
+            return None
+        section = payload.get(market) if isinstance(payload, dict) else None
+        if isinstance(section, dict) and product in section:
+            return bool(analytics.market_hours(payload, now, market, product)["is_open"])
+    return None
+
+
+def _is_open(providers: list[str]) -> bool:
+    """`market_open` of an answer: the hours of Schwab, holidays included, when Schwab is one of the sources in use (it is
+    connected and the desk uses it); the plain clock if not."""
+    if SCHWAB in providers:
+        known = _market_hours_open()
+        if known is not None:
+            return known
+    return market_open()
 
 
 # ---------------------------------------------------------------------------------------------- the requests
@@ -502,30 +752,55 @@ def options_chain(symbol: Any, expiration: Any = None, type: Any = None, min_day
     top_spread = _decimal(max_spread_pct, "max_spread_pct", 0, None, above=True)
     keep = _whole(limit, "limit", 1, MAX_LIMIT, DEFAULT_LIMIT)
 
-    creds = _credentials(desk_id)
+    providers = _providers(desk_id)
     today = _today()
-    window = ({"expiration_date": exact.isoformat()} if exact else
-              {"expiration_date_gte": (today + timedelta(days=low_days)).isoformat(),
-               "expiration_date_lte": (today + timedelta(days=high_days)).isoformat()})
-    params = {"status": "active", **window, "type": type}
-    key = ("chain", creds.ident, symbol, tuple(sorted((k, str(v)) for k, v in params.items())))
 
-    def build() -> dict:
-        contracts, cut_a = _contract_pages(creds, {"underlying_symbols": symbol, **params})
-        snaps, feed, cut_b = _snapshot_pages(creds, symbol, params)
-        return {"contracts": contracts, "snaps": snaps, "feed": feed, "truncated": cut_a or cut_b}
+    def from_schwab() -> dict:
+        window = ({"fromDate": exact.isoformat(), "toDate": exact.isoformat()} if exact else
+                  {"fromDate": (today + timedelta(days=low_days)).isoformat(),
+                   "toDate": (today + timedelta(days=high_days)).isoformat()})
+        data = _schwab_chain(symbol, contractType=(type or "all").upper(), strategy="SINGLE",
+                             includeUnderlyingQuote=True, **window)
+        rows = [{"symbol": c["symbol"], "type": c["type"], "strike": c["strike"],
+                 "expiration": c["expiration"].isoformat(), "days": (c["expiration"] - today).days, **q,
+                 "open_interest": c["open_interest"], "open_interest_date": c["open_interest_date"]}
+                for c, q in _schwab_contracts(data)]
+        spot = _schwab_spot(data)
+        return {"source": "Schwab", "price_feed": "schwab", "greeks": "provider", "note": None, "rows": rows,
+                "truncated": False, "spot": spot if spot is not None else _underlying_price(symbol, desk_id),
+                "as_of": (data.get("underlying") or {}).get("quoteTime"), "delayed": _schwab_delayed(data),
+                "market_open": _is_open(providers), "creds": None}
 
-    data = _cached(key, CHAIN_SECONDS, build)
-    price_feed, greeks, note = _label_feed(data["feed"])
-    rows = []
-    for contract in data["contracts"]:
-        snap = data["snaps"].get(contract["symbol"])
-        if snap is None:
-            continue                                            # a snapshot without contract is dropped; the reverse has no price
-        rows.append({"symbol": contract["symbol"], "type": contract["type"], "strike": contract["strike"],
-                     "expiration": contract["expiration"].isoformat(), "days": (contract["expiration"] - today).days,
-                     **_quote(snap), "open_interest": contract["open_interest"],
-                     "open_interest_date": contract["open_interest_date"]})
+    def from_alpaca() -> dict:
+        creds = _credentials(desk_id)
+        window = ({"expiration_date": exact.isoformat()} if exact else
+                  {"expiration_date_gte": (today + timedelta(days=low_days)).isoformat(),
+                   "expiration_date_lte": (today + timedelta(days=high_days)).isoformat()})
+        params = {"status": "active", **window, "type": type}
+        key = ("chain", creds.ident, symbol, tuple(sorted((k, str(v)) for k, v in params.items())))
+
+        def build() -> dict:
+            contracts, cut_a = _contract_pages(creds, {"underlying_symbols": symbol, **params})
+            snaps, feed, cut_b = _snapshot_pages(creds, symbol, params)
+            return {"contracts": contracts, "snaps": snaps, "feed": feed, "truncated": cut_a or cut_b}
+
+        data = _cached(key, CHAIN_SECONDS, build)
+        price_feed, greeks, note = _label_feed(data["feed"])
+        rows = []
+        for contract in data["contracts"]:
+            snap = data["snaps"].get(contract["symbol"])
+            if snap is None:
+                continue                                        # a snapshot without contract is dropped; the reverse has no price
+            rows.append({"symbol": contract["symbol"], "type": contract["type"], "strike": contract["strike"],
+                         "expiration": contract["expiration"].isoformat(), "days": (contract["expiration"] - today).days,
+                         **_quote(snap), "open_interest": contract["open_interest"],
+                         "open_interest_date": contract["open_interest_date"]})
+        return {"source": "Alpaca", "price_feed": price_feed, "greeks": greeks, "note": note, "rows": rows,
+                "truncated": data["truncated"], "spot": _underlying_price(symbol, desk_id), "as_of": None,
+                "market_open": _is_open(providers), "creds": creds}
+
+    got = _serve(providers, {SCHWAB: from_schwab, ALPACA: from_alpaca})
+    rows = got["rows"]
     rows.sort(key=lambda r: (r["expiration"], r["strike"], r["type"]))
 
     def passes(row: dict) -> bool:
@@ -541,35 +816,59 @@ def options_chain(symbol: Any, expiration: Any = None, type: Any = None, min_day
         return True
 
     matched = [r for r in rows if passes(r)]
-    notes = [t("options.note.truncated")] if data["truncated"] else []
+    notes = [t("options.note.truncated")] if got["truncated"] else []
     names = ("symbol", "type", "strike", "expiration", "days", "bid", "ask", "mid", "spread_pct", "last", "volume",
              "open_interest", "open_interest_date", "delta", "gamma", "theta", "vega", "iv", "quote_time")
-    out = {"underlying": symbol, "underlying_price": _underlying_price(symbol, desk_id), "source": "Alpaca",
-           "price_feed": price_feed, "greeks": greeks, "note": note, "market_open": market_open(),
-           "as_of": _latest([r["quote_time"] for r in rows]) or _iso(_now()), "scanned": len(rows),
-           "matched": len(matched), "notes": notes, "contracts": [{k: r[k] for k in names} for r in matched[:keep]]}
-    return _scrubbed(out, creds)
+    out = {"underlying": symbol, "underlying_price": got["spot"], "source": got["source"],
+           "price_feed": got["price_feed"], "greeks": got["greeks"], "note": got["note"],
+           "market_open": got["market_open"],
+           "as_of": _latest([r["quote_time"] for r in rows]) or _iso_ms(got["as_of"]) or _iso(_now()),
+           "scanned": len(rows), "matched": len(matched), "notes": notes,
+           "contracts": [{k: r[k] for k in names} for r in matched[:keep]]}
+    if got["source"] == "Schwab":
+        out["delayed"] = got["delayed"]                         # "Con retraso" (5.6): isDelayed or underlying.delayed
+    return _scrubbed(out, got["creds"]) if got["creds"] else out
 
 
 # ---------------------------------------------------------------------------------------------- dashboard: expirations
 
 def expirations(symbol: Any, desk_id: int | None = None) -> dict:
-    """The expirations of the next 400 days, from the contracts: date, days and multiplier."""
+    """The expirations of the next 400 days: date, days and multiplier (Schwab's `/expirationchain`, or the Alpaca contracts)."""
     symbol = _check_equity(symbol)
-    creds = _credentials(desk_id)
+    providers = _providers(desk_id)
     today = _today()
 
-    def build() -> dict:
-        contracts, _ = _contract_pages(creds, {
-            "underlying_symbols": symbol, "status": "active", "expiration_date_gte": today.isoformat(),
-            "expiration_date_lte": (today + timedelta(days=EXPIRATION_DAYS)).isoformat(), "type": "call"})
-        found: dict[date, int] = {}
-        for c in contracts:
-            found.setdefault(c["expiration"], c["size"])
-        return {"symbol": symbol, "source": "Alpaca", "expirations": [
-            {"date": d.isoformat(), "days": (d - today).days, "multiplier": found[d]} for d in sorted(found)]}
+    def from_schwab() -> dict:
+        def build() -> dict:
+            data = _schwab_call(lambda: schwab_models.dump(schwab_endpoints.expirations(symbol)), {})
+            found: dict[date, int] = {}
+            for item in (data.get("expirationList") if isinstance(data, dict) else None) or []:
+                if not isinstance(item, dict):
+                    continue
+                day = _day_of(item.get("expiration")) or _day_of(item.get("expirationDate"))     # the REF has both names
+                if day is not None and 0 <= (day - today).days <= EXPIRATION_DAYS:
+                    found.setdefault(day, DEFAULT_MULTIPLIER)
+            return {"symbol": symbol, "source": "Schwab", "expirations": [
+                {"date": d.isoformat(), "days": (d - today).days, "multiplier": found[d]} for d in sorted(found)]}
 
-    return _scrubbed(_cached(("expirations", creds.ident, symbol, today.isoformat()), CONTRACT_SECONDS, build), creds)
+        return _cached(("schwab-expirations", symbol, today.isoformat()), CONTRACT_SECONDS, build)
+
+    def from_alpaca() -> dict:
+        creds = _credentials(desk_id)
+
+        def build() -> dict:
+            contracts, _ = _contract_pages(creds, {
+                "underlying_symbols": symbol, "status": "active", "expiration_date_gte": today.isoformat(),
+                "expiration_date_lte": (today + timedelta(days=EXPIRATION_DAYS)).isoformat(), "type": "call"})
+            found: dict[date, int] = {}
+            for c in contracts:
+                found.setdefault(c["expiration"], c["size"])
+            return {"symbol": symbol, "source": "Alpaca", "expirations": [
+                {"date": d.isoformat(), "days": (d - today).days, "multiplier": found[d]} for d in sorted(found)]}
+
+        return _scrubbed(_cached(("expirations", creds.ident, symbol, today.isoformat()), CONTRACT_SECONDS, build), creds)
+
+    return _serve(providers, {SCHWAB: from_schwab, ALPACA: from_alpaca})
 
 
 # ---------------------------------------------------------------------------------------------- dashboard: chain
@@ -592,9 +891,9 @@ def _window(strikes: list[float], spot: float | None, count: int | None) -> list
     return sorted(below[:take_below] + above[:take_above])
 
 
-def _cell(contract: dict, snap: dict | None, spot: float | None, years: float) -> dict:
-    quote = _quote(snap) if snap else {}
-    itm = in_the_money(contract["type"], spot, contract["strike"])
+def _cell(contract: dict, quote: dict, spot: float | None, years: float) -> dict:
+    """One side of a strike. `quote` is `_quote(snapshot)` (Alpaca), `_schwab_quote(contract)` (Schwab) or empty (no price)."""
+    itm = in_the_money(contract["type"], spot, contract["strike"]) if spot is not None else bool(contract.get("in_money"))
     iv = quote.get("iv")
     return {"symbol": contract["symbol"], "itm": itm, "last": quote.get("last"),
             "last_exchange": quote.get("last_exchange"), "bid": quote.get("bid"),
@@ -642,13 +941,41 @@ def _one_expiration(creds: _Creds, symbol: str, day: date, count: int | None, sp
     by_strike: dict[float, dict] = {s: {"strike": s, "call": None, "put": None} for s in wanted}
     for c in contracts:
         if c["strike"] in by_strike:
-            by_strike[c["strike"]][c["type"]] = _cell(c, snaps.get(c["symbol"]), spot, years)
-    rows = [by_strike[s] for s in wanted]
+            snap = snaps.get(c["symbol"])
+            by_strike[c["strike"]][c["type"]] = _cell(c, _quote(snap) if snap else {}, spot, years)
+    return _group(day, today, contracts[0]["size"], [by_strike[s] for s in wanted], spot, years, feed, cut_a or cut_b)
+
+
+def _group(day: date, today: date, multiplier: int, rows: list[dict], spot: float | None, years: float,
+           feed: str | None, truncated: bool) -> dict:
+    """An expiration group of the chain: its rows, the IV of the strike nearest the price (the mean of its call and put)
+    and the expected move."""
     nearest = min(rows, key=lambda r: abs(r["strike"] - spot)) if spot is not None else rows[len(rows) // 2]
     ivs = [c["iv"] for c in (nearest["call"], nearest["put"]) if c and c["iv"] is not None]
     iv = round(sum(ivs) / len(ivs), 4) if ivs else None
-    return {"date": day.isoformat(), "days": (day - today).days, "multiplier": contracts[0]["size"], "iv": iv,
-            "expected_move": expected_move(spot, iv, years), "rows": rows, "feed": feed, "truncated": cut_a or cut_b}
+    return {"date": day.isoformat(), "days": (day - today).days, "multiplier": multiplier, "iv": iv,
+            "expected_move": expected_move(spot, iv, years), "rows": rows, "feed": feed, "truncated": truncated}
+
+
+def _schwab_group(symbol: str, day: date, count: int | None, spot: float | None, today: date) -> tuple[dict, dict]:
+    """The group of one expiration from Schwab: ONE `/chains` call for that day (`strikeCount` strikes above and below
+    the money, then trimmed to `count` around the price). Returns the group and the chain JSON (for the underlying)."""
+    data = _schwab_chain(symbol, contractType="ALL", strategy="SINGLE", includeUnderlyingQuote=True,
+                         fromDate=day.isoformat(), toDate=day.isoformat(), strikeCount=count)
+    found = [(c, q) for c, q in _schwab_contracts(data) if c["expiration"] == day]
+    if not found:
+        return {"date": day.isoformat(), "days": (day - today).days, "multiplier": DEFAULT_MULTIPLIER, "iv": None,
+                "expected_move": None, "rows": [], "feed": None, "truncated": False}, data
+    own = _schwab_spot(data)
+    spot = own if own is not None else spot
+    wanted = _window([c["strike"] for c, _ in found], spot, count)
+    by_strike: dict[float, dict] = {s: {"strike": s, "call": None, "put": None} for s in wanted}
+    years = years_to_expiry(day)
+    for contract, quote in found:
+        if contract["strike"] in by_strike:
+            by_strike[contract["strike"]][contract["type"]] = _cell(contract, quote, spot, years)
+    group = _group(day, today, found[0][0]["size"], [by_strike[s] for s in wanted], spot, years, SCHWAB, False)
+    return group, data
 
 
 def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = None) -> dict:
@@ -659,20 +986,43 @@ def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = No
         raise _bad("expirations", f"from 1 to {MAX_EXPIRATIONS} dates as YYYY-MM-DD")
     parsed = [_date(x, "expirations") for x in days]
     count = _strike_count(strikes)
-    creds = _credentials(desk_id)
+    providers = _providers(desk_id)
     today = _today()
-    spot = _underlying_price(symbol, desk_id)
-    groups = [_one_expiration(creds, symbol, day, count, spot, today) for day in parsed]
-    feed = next((g["feed"] for g in groups if g["feed"]), None) or _feed_state(creds)
-    price_feed, greeks, _ = _label_feed(feed)
-    notes = [t("options.note.truncated")] if any(g.pop("truncated") for g in groups) else []
-    for g in groups:
-        g.pop("feed")
-    out = {"underlying": symbol, "underlying_price": spot, "source": "Alpaca", "price_feed": price_feed,
-           "greeks": greeks, "market_open": market_open(),
-           "as_of": _latest([c["quote_time"] for g in groups for r in g["rows"] for c in (r["call"], r["put"]) if c])
-           or _iso(_now()), "notes": notes, "expirations": groups}
-    return _scrubbed(out, creds)
+
+    def from_schwab() -> dict:
+        chart_spot = _underlying_price(symbol, desk_id)
+        groups, answers = [], []
+        for day in parsed:
+            group, data = _schwab_group(symbol, day, count, chart_spot, today)
+            groups.append(group)
+            answers.append(data)
+        spot = next((p for p in (_schwab_spot(d) for d in answers) if p is not None), chart_spot)
+        notes = [t("options.note.truncated")] if any(g.pop("truncated") for g in groups) else []
+        for g in groups:
+            g.pop("feed")
+        times = [c["quote_time"] for g in groups for r in g["rows"] for c in (r["call"], r["put"]) if c]
+        under_time = next((_iso_ms(d["underlying"].get("quoteTime")) for d in answers
+                           if isinstance(d.get("underlying"), dict) and d["underlying"].get("quoteTime")), None)
+        return {"underlying": symbol, "underlying_price": spot, "source": "Schwab", "price_feed": "schwab",
+                "greeks": "provider", "market_open": _is_open(providers), "as_of": _latest(times) or under_time or _iso(_now()),
+                "notes": notes, "delayed": any(_schwab_delayed(d) for d in answers), "expirations": groups}
+
+    def from_alpaca() -> dict:
+        creds = _credentials(desk_id)
+        spot = _underlying_price(symbol, desk_id)
+        groups = [_one_expiration(creds, symbol, day, count, spot, today) for day in parsed]
+        feed = next((g["feed"] for g in groups if g["feed"]), None) or _feed_state(creds)
+        price_feed, greeks, _ = _label_feed(feed)
+        notes = [t("options.note.truncated")] if any(g.pop("truncated") for g in groups) else []
+        for g in groups:
+            g.pop("feed")
+        out = {"underlying": symbol, "underlying_price": spot, "source": "Alpaca", "price_feed": price_feed,
+               "greeks": greeks, "market_open": _is_open(providers),
+               "as_of": _latest([c["quote_time"] for g in groups for r in g["rows"] for c in (r["call"], r["put"]) if c])
+               or _iso(_now()), "notes": notes, "expirations": groups}
+        return _scrubbed(out, creds)
+
+    return _serve(providers, {SCHWAB: from_schwab, ALPACA: from_alpaca})
 
 
 # ---------------------------------------------------------------------------------------------- dashboard: underlying
@@ -682,10 +1032,29 @@ def _is_iex(source: Any) -> bool:
     return isinstance(source, str) and source.strip().lower().startswith("alpaca")
 
 
+def _schwab_bar(symbol: str) -> dict:
+    """The bar above the chain from `GET /quotes` (the QuoteEquity of REF A.4): last, change, bid, ask, sizes, volume, open,
+    high and low, and `delayed` when Schwab says `realtime: false`."""
+    from hokma.market.adapters.schwab import map_quote
+
+    answer = _schwab_call(lambda: schwab_models.dump(schwab_endpoints.quotes(symbol, fields="quote")), {})
+    item = answer.get(symbol) if isinstance(answer, dict) else None
+    if not isinstance(item, dict):
+        raise OptionsError("schwab.upstream", 502, _text("schwab.upstream"))
+    q = map_quote(item)
+    stamp = q["quote_time"] or q["trade_time"]
+    return {"symbol": symbol, "last": _clean(q["last"]), "last_exchange": None, "net_change": _clean(q["change"]),
+            "bid": _clean(q["bid"]), "bid_exchange": None, "ask": _clean(q["ask"]), "ask_exchange": None,
+            "bid_size": _whole_of(q["bid_size"]), "ask_size": _whole_of(q["ask_size"]),
+            "volume": _whole_of(q["volume"]), "open": _clean(q["open"]), "high": _clean(q["high"]),
+            "low": _clean(q["low"]), "as_of": _iso_ms(stamp) or _iso(_now()), "delayed": q["delayed"]}
+
+
 def underlying(symbol: Any) -> dict:
-    """The bar above the chain: last, change, bid, ask, sizes, volume, open, high and low. The price, the change, the
-    volume, the high and the low are the chart's own (`market_tools.quote`); bid, ask, sizes and exchange letters
-    come from the Alpaca stock snapshot on the IEX feed and the open from its daily bar, when Alpaca is connected."""
+    """The bar above the chain: last, change, bid, ask, sizes, volume, open, high and low. From Schwab (`/quotes`) when it is
+    the source; with Alpaca, the price, the change, the volume, the high and the low are the chart's own
+    (`market_tools.quote`) and bid, ask, sizes and exchange letters come from the Alpaca stock snapshot on the IEX feed and
+    the open from its daily bar. A source that fails goes on to the next; with none the chart's own numbers stand."""
     from hokma.kit import market_tools
 
     symbol = _check_equity(symbol)
@@ -696,14 +1065,25 @@ def underlying(symbol: Any) -> dict:
     snap: dict = {}
     creds: _Creds | None = None
     try:
-        creds = _credentials(None)
-        status, text = _call(f"{DATA_HOST}/v2/stocks/{urllib.parse.quote(symbol, safe='')}/snapshot?feed=iex", creds)
-        if status == 200:
-            snap = _json(text)
-        elif status == 429:
-            raise _fail("rate_limited", 429)
+        last_error: OptionsError | None = None
+        for provider in _providers(None):
+            try:
+                if provider == SCHWAB:
+                    return _schwab_bar(symbol)
+                creds = _credentials(None)
+                status, text = _call(f"{DATA_HOST}/v2/stocks/{urllib.parse.quote(symbol, safe='')}/snapshot?feed=iex", creds)
+                if status == 200:
+                    snap = _json(text)
+                elif status == 429:
+                    raise _fail("rate_limited", 429)
+                last_error = None
+                break
+            except OptionsError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
     except OptionsError as exc:
-        if quote is None or exc.code == "rate_limited":
+        if quote is None or exc.code in RATE_CODES:
             raise
     if quote is None and not snap:
         raise _fail("upstream", 502)

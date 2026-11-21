@@ -1,5 +1,6 @@
-"""The simulated broker (task 3294, C7-5b): accounts with play money. Until orders (class 9) the balance is the
-initial capital. Costs live in the broker's config and are editable."""
+"""The internal broker of Hokma (task 3294, C7-5b): accounts whose money lives inside Hokma, with no orders. Its balance is the
+initial capital. Costs live in the broker's config and are editable. Orders with real money go through a broker that takes
+them (Schwab, SPEC-015 18)."""
 from __future__ import annotations
 
 from typing import Any, Mapping

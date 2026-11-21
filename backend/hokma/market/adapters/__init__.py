@@ -11,6 +11,7 @@ from hokma.market.adapters.alpaca import AlpacaSource
 from hokma.market.adapters.coinbase import CoinbaseSource
 from hokma.market.adapters.finnhub import FinnhubSource
 from hokma.market.adapters.polling import PollingLiveSource
+from hokma.market.adapters.schwab import SchwabSource
 from hokma.market.adapters.siomtrading_futures import SiomTradingFuturesSource
 from hokma.market.providers import ProviderSpec
 from hokma.market.stream import LiveSource
@@ -22,6 +23,7 @@ ADAPTERS: dict[str, AdapterFactory] = {
     "alpaca": lambda spec, secret, url: AlpacaSource(spec, json.loads(secret or "{}"), url),
     "finnhub": lambda spec, secret, url: FinnhubSource(spec, secret or "", url),
     "siomtrading_futures": lambda spec, secret, url: SiomTradingFuturesSource(spec, secret or "", url),
+    "schwab": lambda spec, secret, url: SchwabSource(spec),            # the session lives in hokma.schwab.auth, not here
 }
 
 
@@ -30,4 +32,4 @@ def register_adapter(provider_id: str, factory: AdapterFactory) -> None:
 
 
 __all__ = ["ADAPTERS", "AdapterFactory", "AlpacaSource", "CoinbaseSource", "FinnhubSource", "PollingLiveSource",
-           "SiomTradingFuturesSource", "register_adapter"]
+           "SchwabSource", "SiomTradingFuturesSource", "register_adapter"]

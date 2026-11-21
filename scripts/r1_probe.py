@@ -200,4 +200,7 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    from hokma.core import processguard
+
+    with processguard.allow(processguard.OWNER_CLI):      # the database package loads only inside Hokma's own programs
+        raise SystemExit(main(sys.argv[1:]))

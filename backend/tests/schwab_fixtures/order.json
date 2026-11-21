@@ -1,0 +1,248 @@
+{
+  "session": "NORMAL",
+  "duration": "DAY",
+  "cancelTime": "2026-11-20T15:30:00.000Z",
+  "complexOrderStrategyType": "NONE",
+  "quantity": 247.25,
+  "filledQuantity": 247.5,
+  "remainingQuantity": 247.75,
+  "destinationLinkName": "destinationLinkName-x",
+  "releaseTime": "2026-11-20T15:30:00.000Z",
+  "stopPrice": 248.0,
+  "stopPriceLinkBasis": "MANUAL",
+  "stopPriceLinkType": "VALUE",
+  "stopPriceOffset": 248.25,
+  "stopType": "STANDARD",
+  "priceLinkBasis": "MANUAL",
+  "priceLinkType": "VALUE",
+  "price": 248.5,
+  "taxLotMethod": "FIFO",
+  "orderLegCollection": [
+    {
+      "orderLegType": "EQUITY",
+      "legId": 1,
+      "instrument": {
+        "assetType": "EQUITY",
+        "cusip": "037833100",
+        "symbol": "FAKE",
+        "description": "AccountEquity description",
+        "instrumentId": 761,
+        "netChange": 175.5
+      },
+      "instruction": "BUY",
+      "positionEffect": "OPENING",
+      "quantity": 244.5,
+      "quantityType": "SHARES",
+      "divCapGains": "REINVEST",
+      "toSymbol": "FAKE2"
+    }
+  ],
+  "activationPrice": 248.75,
+  "specialInstruction": "ALL_OR_NONE",
+  "orderStrategyType": "SINGLE",
+  "orderId": 1000000001,
+  "cancelable": true,
+  "editable": false,
+  "status": "WORKING",
+  "enteredTime": "2026-11-20T15:30:00.000Z",
+  "closeTime": "2026-11-20T15:30:00.000Z",
+  "accountNumber": 12345678,
+  "orderActivityCollection": [
+    {
+      "activityType": "EXECUTION",
+      "executionType": "FILL",
+      "quantity": 246.75,
+      "orderRemainingQuantity": 247.0,
+      "executionLegs": [
+        {
+          "legId": 1,
+          "price": 244.75,
+          "quantity": 245.0,
+          "mismarkedQuantity": 245.25,
+          "instrumentId": 1042,
+          "time": "2026-11-20T15:30:00.000Z"
+        },
+        {
+          "legId": 1,
+          "price": 245.75,
+          "quantity": 246.0,
+          "mismarkedQuantity": 246.25,
+          "instrumentId": 1046,
+          "time": "2026-11-20T15:30:00.000Z"
+        }
+      ]
+    }
+  ],
+  "statusDescription": "statusDescription-x",
+  "orderType": "LIMIT",
+  "requestedDestination": "INET",
+  "tag": "TA_fake",
+  "replacingOrderCollection": [
+    {
+      "session": "NORMAL",
+      "duration": "DAY",
+      "cancelTime": "2026-11-20T15:30:00.000Z",
+      "complexOrderStrategyType": "NONE",
+      "quantity": 242.25,
+      "filledQuantity": 242.5,
+      "remainingQuantity": 242.75,
+      "destinationLinkName": "destinationLinkName-x",
+      "releaseTime": "2026-11-20T15:30:00.000Z",
+      "stopPrice": 243.0,
+      "stopPriceLinkBasis": "MANUAL",
+      "stopPriceLinkType": "VALUE",
+      "stopPriceOffset": 243.25,
+      "stopType": "STANDARD",
+      "priceLinkBasis": "MANUAL",
+      "priceLinkType": "VALUE",
+      "price": 243.5,
+      "taxLotMethod": "FIFO",
+      "orderLegCollection": [
+        {
+          "orderLegType": "EQUITY",
+          "legId": 1,
+          "instrument": {
+            "assetType": "EQUITY",
+            "cusip": "037833100",
+            "symbol": "FAKE",
+            "description": "AccountEquity description",
+            "instrumentId": 761,
+            "netChange": 175.5
+          },
+          "instruction": "BUY",
+          "positionEffect": "OPENING",
+          "quantity": 239.5,
+          "quantityType": "SHARES",
+          "divCapGains": "REINVEST",
+          "toSymbol": "FAKE2"
+        }
+      ],
+      "activationPrice": 243.75,
+      "specialInstruction": "ALL_OR_NONE",
+      "orderStrategyType": "SINGLE",
+      "orderId": 1000000012,
+      "cancelable": true,
+      "editable": false,
+      "status": "REPLACED",
+      "enteredTime": "2026-11-20T15:30:00.000Z",
+      "closeTime": "2026-11-20T15:30:00.000Z",
+      "accountNumber": 12345678,
+      "orderActivityCollection": [
+        {
+          "activityType": "EXECUTION",
+          "executionType": "FILL",
+          "quantity": 241.75,
+          "orderRemainingQuantity": 242.0,
+          "executionLegs": [
+            {
+              "legId": 1,
+              "price": 239.75,
+              "quantity": 240.0,
+              "mismarkedQuantity": 240.25,
+              "instrumentId": 1022,
+              "time": "2026-11-20T15:30:00.000Z"
+            },
+            {
+              "legId": 1,
+              "price": 240.75,
+              "quantity": 241.0,
+              "mismarkedQuantity": 241.25,
+              "instrumentId": 1026,
+              "time": "2026-11-20T15:30:00.000Z"
+            }
+          ]
+        }
+      ],
+      "statusDescription": "statusDescription-x",
+      "orderType": "MARKET",
+      "requestedDestination": "INET",
+      "tag": "TA_fake",
+      "replacingOrderCollection": [],
+      "childOrderStrategies": []
+    }
+  ],
+  "childOrderStrategies": [
+    {
+      "session": "NORMAL",
+      "duration": "DAY",
+      "cancelTime": "2026-11-20T15:30:00.000Z",
+      "complexOrderStrategyType": "NONE",
+      "quantity": 237.25,
+      "filledQuantity": 237.5,
+      "remainingQuantity": 237.75,
+      "destinationLinkName": "destinationLinkName-x",
+      "releaseTime": "2026-11-20T15:30:00.000Z",
+      "stopPrice": 238.0,
+      "stopPriceLinkBasis": "MANUAL",
+      "stopPriceLinkType": "VALUE",
+      "stopPriceOffset": 238.25,
+      "stopType": "STANDARD",
+      "priceLinkBasis": "MANUAL",
+      "priceLinkType": "VALUE",
+      "price": 238.5,
+      "taxLotMethod": "FIFO",
+      "orderLegCollection": [
+        {
+          "orderLegType": "EQUITY",
+          "legId": 1,
+          "instrument": {
+            "assetType": "EQUITY",
+            "cusip": "037833100",
+            "symbol": "FAKE",
+            "description": "AccountEquity description",
+            "instrumentId": 761,
+            "netChange": 175.5
+          },
+          "instruction": "BUY",
+          "positionEffect": "OPENING",
+          "quantity": 234.5,
+          "quantityType": "SHARES",
+          "divCapGains": "REINVEST",
+          "toSymbol": "FAKE2"
+        }
+      ],
+      "activationPrice": 238.75,
+      "specialInstruction": "ALL_OR_NONE",
+      "orderStrategyType": "OCO",
+      "orderId": 1000000011,
+      "cancelable": true,
+      "editable": false,
+      "status": "AWAITING_PARENT_ORDER",
+      "enteredTime": "2026-11-20T15:30:00.000Z",
+      "closeTime": "2026-11-20T15:30:00.000Z",
+      "accountNumber": 12345678,
+      "orderActivityCollection": [
+        {
+          "activityType": "EXECUTION",
+          "executionType": "FILL",
+          "quantity": 236.75,
+          "orderRemainingQuantity": 237.0,
+          "executionLegs": [
+            {
+              "legId": 1,
+              "price": 234.75,
+              "quantity": 235.0,
+              "mismarkedQuantity": 235.25,
+              "instrumentId": 1002,
+              "time": "2026-11-20T15:30:00.000Z"
+            },
+            {
+              "legId": 1,
+              "price": 235.75,
+              "quantity": 236.0,
+              "mismarkedQuantity": 236.25,
+              "instrumentId": 1006,
+              "time": "2026-11-20T15:30:00.000Z"
+            }
+          ]
+        }
+      ],
+      "statusDescription": "statusDescription-x",
+      "orderType": "MARKET",
+      "requestedDestination": "INET",
+      "tag": "TA_fake",
+      "replacingOrderCollection": [],
+      "childOrderStrategies": []
+    }
+  ]
+}

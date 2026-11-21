@@ -5,8 +5,12 @@ import { useI18n } from "@/i18n";
 import { connectionErrorText, mailApi } from "./api";
 import type { MailState } from "./api";
 
-/** The student's Gmail: address + app password, tested against Gmail by Hokma before it is kept. */
-export function MailCard() {
+/**
+ * The student's Gmail: address + app password, tested against Gmail by Hokma before it is kept. It lives in the "Add"
+ * dialog; `onChange` tells the screen when it connects or disconnects, so the Gmail row follows. `showHelp` is false
+ * when the guide next to it already shows the same text.
+ */
+export function MailCard({ onChange, showHelp = true }: { onChange?: () => void; showHelp?: boolean } = {}) {
   const { t } = useI18n();
   const formId = useId();
   const [mail, setMail] = useState<MailState | null>(null);
@@ -28,6 +32,7 @@ export function MailCard() {
       setEmail("");
       setPassword(""); // the password leaves the panel the moment it is saved
       load();
+      onChange?.();
     } catch (cause) {
       setError(connectionErrorText(cause));
     } finally {
@@ -68,7 +73,7 @@ export function MailCard() {
         </>
       ) : (
         <>
-          <p className="p">{t("mail.help")}</p>
+          {showHelp ? <p className="p">{t("mail.help")}</p> : null}
           {!storeOk ? (
             <p className="conn-error" role="alert">
               {t("connections.store.unavailable")}

@@ -87,10 +87,13 @@ def drain(db: Any) -> list[dict[str, Any]]:
                                                          task_id=task_id, at=row.get("ts"))
             except Exception:
                 continue                                    # the card is still shown; the row is a record
-            events.append({"type": "guard_block", "id": stored.id, "rule": row["rule"],
-                           "tool": str(row.get("tool") or ""), "target": target,
-                           "conversation_id": str(row.get("conversation_id") or "") or None,
-                           "at": stored.created_at})
+            event = {"type": "guard_block", "id": stored.id, "rule": row["rule"],
+                     "tool": str(row.get("tool") or ""), "target": target,
+                     "conversation_id": str(row.get("conversation_id") or "") or None,
+                     "at": stored.created_at}
+            if row.get("reason") == "dynamic_code":         # same rule, own text: only this known reason is passed on
+                event["reason"] = "dynamic_code"
+            events.append(event)
         _write_pos(pos + end + 1)
         return events
 

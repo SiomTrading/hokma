@@ -12,7 +12,7 @@ import { IntroNotice } from "./IntroNotice";
 import { TrashSection } from "./TrashSection";
 import { permissionErrorText } from "./api";
 import { resetModeStore } from "./store";
-import { RULES } from "./types";
+import { RULES, blockKey, ruleKey } from "./types";
 import { ShellProvider } from "@/shell/store";
 import { useShell } from "@/shell/useShell";
 
@@ -193,7 +193,7 @@ describe("permission pill", () => {
     await user.click(await screen.findByTestId("permission-pill"));
     await user.click(screen.getByRole("menuitem", { name: new RegExp(t("permissions.mode.auto")) }));
     const dialog = await screen.findByRole("dialog", { name: t("permissions.modal.title") });
-    expect(dialog).toHaveTextContent(t("permissions.modal.body"));
+    expect(dialog).toHaveTextContent(t("permissions.modal.body2"));
     expect(backend.sent("PUT", "/api/profile/permission-mode")).toHaveLength(0);
     await user.click(within(dialog).getByRole("button", { name: t("permissions.modal.confirm") }));
     await waitFor(() => expect(screen.getByTestId("permission-pill")).toHaveAttribute("data-mode", "auto"));
@@ -307,7 +307,7 @@ describe("Settings > General > Permissions", () => {
     );
     const list = await screen.findByTestId("protections");
     expect(within(list).getAllByRole("listitem")).toHaveLength(FIVE_RULES.length);
-    for (const id of RULE_IDS) expect(within(list).getByText(t(`protections.${id}`))).toBeInTheDocument();
+    for (const id of RULE_IDS) expect(within(list).getByText(t(`protections.${ruleKey(id)}`))).toBeInTheDocument();
     expect(within(list).queryByRole("switch")).not.toBeInTheDocument();
     expect(within(list).queryByRole("checkbox")).not.toBeInTheDocument();
     expect(within(list).queryByRole("button")).not.toBeInTheDocument();
@@ -383,6 +383,26 @@ describe("chat: pill and Blocked card", () => {
     expect(within(card).queryByRole("button", { name: t("block.viewTrash") })).toBeNull();
   });
 
+  it("a real_money block with reason dynamic_code shows its own text, in both languages", async () => {
+    await mount(stored);
+    server.emit({ type: "guard_block", ...base, id: 300, rule: "real_money", reason: "dynamic_code", tool: "Bash", target: "exec of a built string", at: "2026-11-05 12:00:00" });
+    server.emit({ type: "guard_block", ...base, id: 301, rule: "real_money", tool: "Bash", target: "python -m hokma.broker", at: "2026-11-05 12:00:00" });
+    const [dynamic, plain] = screen.getAllByTestId("block-card");
+    expect(dynamic).toHaveTextContent(t("block.title.dynamic_code"));
+    expect(dynamic).toHaveTextContent(t("block.why.dynamic_code"));
+    expect(dynamic).toHaveAttribute("data-rule", "real_money");
+    expect(plain).toHaveTextContent(t("block.why.real_money2"));
+    expect(plain).not.toHaveTextContent(t("block.why.dynamic_code"));
+    for (const locale of ["es", "en"] as const) {
+      setLocale(locale);
+      expect(t("block.why.dynamic_code")).not.toBe("block.why.dynamic_code");
+      expect(t("block.title.dynamic_code")).not.toBe("block.title.dynamic_code");
+    }
+    expect(blockKey("real_money", "dynamic_code")).toBe("dynamic_code");
+    expect(blockKey("delete", "dynamic_code")).toBe("delete");
+    expect(blockKey("real_money")).toBe("real_money2");
+  });
+
   it("every rule has its own title and reason, and only 'delete' offers the Trash", async () => {
     await mount(stored);
     RULE_IDS.forEach((rule, index) => server.emit({ type: "guard_block", ...base, id: 100 + index, rule, tool: "Bash", target: `target ${rule}`, at: "2026-11-05 12:00:00" }));
@@ -391,7 +411,7 @@ describe("chat: pill and Blocked card", () => {
     cards.forEach((card, index) => {
       const rule = RULE_IDS[index]!;
       expect(card).toHaveTextContent(t(`block.title.${rule}`));
-      expect(card).toHaveTextContent(rule === "delete" ? t("block.why.deleteBlocked") : t(`block.why.${rule}`));
+      expect(card).toHaveTextContent(rule === "delete" ? t("block.why.deleteBlocked") : t(`block.why.${ruleKey(rule)}`));
       expect(within(card).queryByRole("button", { name: t("block.viewTrash") })).toBeNull();
     });
   });
@@ -618,8 +638,8 @@ describe("error codes and catalog", () => {
       const catalog = getCatalog(locale);
       for (const rule of RULE_IDS) {
         expect(catalog[`block.title.${rule}`], `${locale} ${rule}`).toBeTruthy();
-        expect(catalog[`block.why.${rule}`], `${locale} ${rule}`).toBeTruthy();
-        expect(catalog[`protections.${rule}`], `${locale} ${rule}`).toBeTruthy();
+        expect(catalog[`block.why.${ruleKey(rule)}`], `${locale} ${rule}`).toBeTruthy();
+        expect(catalog[`protections.${ruleKey(rule)}`], `${locale} ${rule}`).toBeTruthy();
       }
       for (const [key, text] of Object.entries(catalog)) {
         if (/^(permissions|block|trash|points|protections)\./.test(key)) expect(text, key).not.toContain(String.fromCharCode(0x2014));

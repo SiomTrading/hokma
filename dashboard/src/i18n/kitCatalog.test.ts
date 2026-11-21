@@ -21,7 +21,7 @@ describe("kit agent descriptions", () => {
     const es = getCatalog("es");
     const en = getCatalog("en");
     for (const slug of kitSlugs()) {
-      const key = `agents.kit.${slug}.desc`;
+      const key = es[`agents.kit.${slug}.desc2`] ? `agents.kit.${slug}.desc2` : `agents.kit.${slug}.desc`;
       expect(es[key], `es ${key}`).toBeTruthy();
       expect(en[key], `en ${key}`).toBeTruthy();
     }
@@ -30,7 +30,7 @@ describe("kit agent descriptions", () => {
   it("the catalog has no description for an agent the kit does not ship", () => {
     const slugs = new Set(kitSlugs());
     for (const key of Object.keys(getCatalog("es"))) {
-      const match = /^agents\.kit\.(.+)\.desc$/.exec(key);
+      const match = /^agents\.kit\.(.+)\.desc2?$/.exec(key);
       if (match) expect(slugs.has(match[1]!), key).toBe(true);
     }
   });

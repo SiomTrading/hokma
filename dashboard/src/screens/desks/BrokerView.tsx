@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/api";
-import { Button, EmptyState, ErrorState, Field, Icon, Input, Loading, Modal, Pill } from "@/design";
+import { Button, EmptyState, ErrorState, Field, Icon, Input, Loading, Modal, Pill, Toggle } from "@/design";
 import { useI18n } from "@/i18n";
 import { accountsApi } from "./accountsApi";
+import { isRealBroker } from "./accountsApi";
 import type { Account, Broker } from "./accountsApi";
 import { AssignAccount } from "./AssignAccount";
 import { formatBalance, formatCapital } from "./format";
 import { NewAccountModal } from "./NewAccountModal";
+import { PendingOrders } from "./PendingOrders";
 import { refreshDesks, useDesks } from "./store";
 
 interface BrokerWithAccounts extends Broker {
@@ -146,6 +148,36 @@ function Costs({ broker, onSaved }: { broker: Broker; onSaved: () => void }) {
   );
 }
 
+/** Switch of the orders of a real broker (SPEC-015 18.2 point 13). Off unless the owner turns it on; one line of risk under it, no extra step. */
+function OrdersSwitch({ broker, onChanged }: { broker: Broker; onChanged: (next: Broker) => void }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const on = broker.orders_enabled === true;
+  const change = async (enabled: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await accountsApi.setOrdersEnabled(broker.id, enabled);
+      onChanged({ ...broker, ...updated, orders_enabled: updated.orders_enabled ?? enabled });
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : t("desks.accounts.error"));
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="brk-orders">
+      <div className="brk-orders-row">
+        <span className="lbl">{t("desks.broker.schwab.ordersToggle")}</span>
+        <Toggle checked={on} disabled={busy} label={t("desks.broker.schwab.ordersToggle")} onChange={(next) => void change(next)} />
+      </div>
+      <p className="brk-cost-note" data-testid="orders-risk">{t("desks.broker.schwab.ordersRisk")}</p>
+      {error ? <span className="err" role="alert">{error}</span> : null}
+    </div>
+  );
+}
+
 /** The Broker tab of the Fund: connected brokers with their costs, the way to connect others, and the accounts. */
 export function BrokerView() {
   const { t, locale } = useI18n();
@@ -173,11 +205,17 @@ export function BrokerView() {
 
   if (brokers === null && error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (brokers === null) return <Loading label={t("desks.accounts.loading")} />;
-  const first = brokers[0];
+  // Only a broker that makes its own accounts (the internal one) can take a new account; Schwab's come from its connection.
+  const first = brokers.find((b) => !isRealBroker(b));
   const freeDesks = desks.some((d) => !d.account);
+
+  // Desks whose account belongs to a broker with orders (Schwab): the only ones that can hold an order for the owner.
+  const orderDesks = brokers.filter(isRealBroker).flatMap((b) => b.accounts.filter((a) => a.desk_id !== null).map((a) => ({ id: a.desk_id as number, name: deskName(a.desk_id) ?? "", account: a })));
+  const orderKey = orderDesks.map((d) => d.id).join(",");
 
   return (
     <>
+      <PendingOrders key={orderKey} desks={orderDesks} />
       <div className="brk-grid">
         <section className="pane brk-card" aria-label={t("desks.broker.connected")}>
           <div className="brk-sec-hd"><span className="lbl">{t("desks.broker.connected")}</span><span className="today-meta">{brokers.length}</span></div>
@@ -185,20 +223,25 @@ export function BrokerView() {
             <p className="p">{t("desks.accounts.noBroker.text")}</p>
           ) : brokers.map((b) => {
             const capital = b.accounts.reduce((sum, a) => sum + a.initial_capital, 0);
+            const real = isRealBroker(b);
             return (
               <div key={b.id} className="brk-one">
                 <div className="brk-id">
                   <span className="brk-av"><Icon name="connections" size={20} /></span>
                   <div className="brk-id-txt">
                     <h2>{b.name}<Pill tone="ok">{t("desks.broker.connectedPill")}</Pill></h2>
-                    <span>{t("desks.broker.included")}</span>
+                    {real ? null : <span>{t("desks.broker.included")}</span>}
                   </div>
                 </div>
-                <p className="p">{t("desks.broker.about")}</p>
-                <Costs broker={b} onSaved={() => void load()} />
+                {real ? <OrdersSwitch broker={b} onChanged={(next) => setBrokers((list) => (list ?? []).map((x) => (x.id === next.id ? { ...x, ...next } : x)))} /> : (
+                  <>
+                    <p className="p">{t("desks.broker.about")}</p>
+                    <Costs broker={b} onSaved={() => void load()} />
+                  </>
+                )}
                 <div className="brk-stats">
                   <div><span className="lbl">{t("desks.broker.accounts")}</span><b className="mono">{b.accounts.length}</b></div>
-                  <div><span className="lbl">{t("desks.broker.capital")}</span><b className="mono">{formatCapital(capital, locale)}</b></div>
+                  {real ? null : <div><span className="lbl">{t("desks.broker.capital")}</span><b className="mono">{formatCapital(capital, locale)}</b></div>}
                   <div><span className="lbl">{t("desks.broker.inDesks")}</span><b className="mono">{t("desks.broker.of", { n: String(b.accounts.filter((a) => a.desk_id !== null).length), total: String(b.accounts.length) })}</b></div>
                 </div>
               </div>
@@ -208,7 +251,7 @@ export function BrokerView() {
         <section className="pane brk-connect" aria-labelledby="brk-connect-title">
           <span className="lbl">{t("desks.broker.connect")}</span>
           <h3 id="brk-connect-title">{t("desks.broker.external")}</h3>
-          <p className="p">{t("desks.broker.externalText")}</p>
+          <p className="p">{t("desks.broker.externalText2")}</p>
         </section>
       </div>
 
@@ -236,13 +279,13 @@ export function BrokerView() {
               <tbody>
                 {brokers.flatMap((b) => b.accounts).map((a) => (
                   <tr key={a.id}>
-                    <th scope="row">{a.name}</th>
+                    <th scope="row">{a.name}{a.mask && !a.name.includes(a.mask) ? <small className="mono"> {a.mask}</small> : null}</th>
                     <td>{a.broker}</td>
                     <td className="r mono">{formatCapital(a.initial_capital, locale)}</td>
                     <td className="r mono">{formatBalance(a.equity, locale, t("desks.accounts.unavailable"), a.currency)}</td>
                     <td>{deskName(a.desk_id) ?? t("desks.accounts.free")}</td>
                     <td className="desk-accounts-actions">
-                      <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "reset", account: a })}>{t("desks.accounts.reset")}</Button>
+                      {a.can_reset === false ? null : <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "reset", account: a })}>{t("desks.accounts.reset")}</Button>}
                       {a.desk_id === null && freeDesks ? <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "assign", account: a })}>{t("desks.accounts.assign")}</Button> : null}
                       {a.desk_id !== null ? <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "unassign", account: a })}>{t("desks.accounts.unassign")}</Button> : null}
                     </td>
@@ -254,7 +297,7 @@ export function BrokerView() {
         )}
         <p className="brk-ft">{t("desks.broker.footnote")}</p>
       </section>
-      {dialog?.kind === "account" ? <NewAccountModal brokers={brokers} onClose={() => setDialog(null)} onDone={reload} /> : null}
+      {dialog?.kind === "account" ? <NewAccountModal brokers={brokers.filter((b) => !isRealBroker(b))} onClose={() => setDialog(null)} onDone={reload} /> : null}
       {dialog?.kind === "reset" ? <ResetModal account={dialog.account} onClose={() => setDialog(null)} onDone={reload} /> : null}
       {dialog?.kind === "unassign" && dialog.account.desk_id !== null ? (
         <UnassignModal account={dialog.account} deskId={dialog.account.desk_id} deskName={deskName(dialog.account.desk_id) ?? ""} onClose={() => setDialog(null)} onDone={reload} />

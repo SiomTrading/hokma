@@ -5,7 +5,7 @@ import "./permissions.css";
 import { permissionErrorText, permissionsApi } from "./api";
 import { refreshMode } from "./store";
 import { useModeControl } from "./useModeControl";
-import { isRule } from "./types";
+import { isRule, ruleKey } from "./types";
 import type { Protection } from "./types";
 
 /** Read only. There is no switch for any of these: the list shows what Hokma refuses in both modes. */
@@ -39,7 +39,7 @@ export function ProtectionsList() {
         {rules.map((rule) => (
           <li key={rule.id} className="perm-protection">
             <Icon name="shield" size={14} />
-            <span className="p">{isRule(rule.id) ? t(`protections.${rule.id}`) : rule.title}</span>
+            <span className="p">{isRule(rule.id) ? t(`protections.${ruleKey(rule.id)}`) : rule.title}</span>
           </li>
         ))}
       </ul>

@@ -31,7 +31,8 @@ REFERENCE_TABLES = ("schema_version", "status_transitions")   # created and fill
 BATCH = 500
 APP_ROLE, AGENT_ROLE = "hokma_app", "hokma_agent"
 DESK_TABLES = ("desks", "desk_agents", "desk_assets", "desk_connections", "today_config")
-BROKER_TABLES = ("brokers", "broker_accounts", "account_ledger", "desk_accounts")
+BROKER_TABLES = ("brokers", "broker_accounts", "account_ledger", "desk_accounts", "broker_orders",
+                 "broker_external_accounts", "desk_limits")
 _CREATE_TABLE = re.compile(r"^CREATE TABLE (\w+)\s*\(", re.IGNORECASE)
 _REFERENCE = re.compile(r"^\s*(\w+)\s+.*?REFERENCES\s+(\w+)\s*\(", re.IGNORECASE)
 _ALTER_REFERENCE = re.compile(r"^ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)\b.*?REFERENCES\s+(\w+)\s*\(",

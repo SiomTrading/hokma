@@ -1,0 +1,79 @@
+{
+  "securitiesAccount": {
+    "type": "CASH",
+    "accountNumber": "87654321",
+    "roundTrips": 3,
+    "isDayTrader": false,
+    "isClosingOnlyRestricted": true,
+    "pfcbFlag": false,
+    "positions": [
+      {
+        "shortQuantity": 178.75,
+        "averagePrice": 179.0,
+        "currentDayProfitLoss": 179.25,
+        "currentDayProfitLossPercentage": 179.5,
+        "longQuantity": 179.75,
+        "settledLongQuantity": 180.0,
+        "settledShortQuantity": 180.25,
+        "agedQuantity": 180.5,
+        "instrument": {
+          "assetType": "EQUITY",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "AccountEquity description",
+          "instrumentId": 761,
+          "netChange": 175.5
+        },
+        "marketValue": 180.75,
+        "maintenanceRequirement": 181.0,
+        "averageLongPrice": 181.25,
+        "averageShortPrice": 181.5,
+        "taxLotAverageLongPrice": 181.75,
+        "taxLotAverageShortPrice": 182.0,
+        "longOpenProfitLoss": 182.25,
+        "shortOpenProfitLoss": 182.5,
+        "previousSessionLongQuantity": 182.75,
+        "previousSessionShortQuantity": 183.0,
+        "currentDayCost": 183.25
+      }
+    ],
+    "initialBalances": {
+      "accruedInterest": 226.5,
+      "cashAvailableForTrading": 226.75,
+      "cashAvailableForWithdrawal": 227.0,
+      "cashBalance": 227.25,
+      "bondValue": 227.5,
+      "cashReceipts": 227.75,
+      "liquidationValue": 228.0,
+      "longOptionMarketValue": 228.25,
+      "longStockValue": 228.5,
+      "moneyMarketFund": 228.75,
+      "mutualFundValue": 229.0,
+      "shortOptionMarketValue": 229.25,
+      "shortStockValue": 229.5,
+      "isInCall": false,
+      "unsettledCash": 230.0,
+      "cashDebitCallValue": 230.25,
+      "pendingDeposits": 230.5,
+      "accountValue": 230.75
+    },
+    "currentBalances": {
+      "cashAvailableForTrading": 231.0,
+      "cashAvailableForWithdrawal": 231.25,
+      "cashCall": 231.5,
+      "longNonMarginableMarketValue": 231.75,
+      "totalCash": 232.0,
+      "cashDebitCallValue": 232.25,
+      "unsettledCash": 232.5
+    },
+    "projectedBalances": {
+      "cashAvailableForTrading": 232.75,
+      "cashAvailableForWithdrawal": 233.0,
+      "cashCall": 233.25,
+      "longNonMarginableMarketValue": 233.5,
+      "totalCash": 233.75,
+      "cashDebitCallValue": 234.0,
+      "unsettledCash": 234.25
+    }
+  }
+}

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.9
+
+- Connections: one Add button. Pick a provider, enter its details, Hokma tests it and adds it. Below, the connected sources and the order of use for each kind of data. Everything you had connected stays as it was.
+- Schwab: sign in with your own Schwab app. Live stock and ETF prices, candles, option chain with Schwab greeks, and a read-only view of balances, positions and open orders. Hokma never sends, changes or cancels orders. The session lasts 7 days and Hokma tells you one day before.
+- Agents: every read endpoint of the Schwab API as read-only tools (quotes, option chains, expirations, price history, movers, market hours, instruments and fundamentals, accounts, orders, transactions, user preferences), plus historical volatility, portfolio greeks, day exposure and result, and account activity (fees and average fill price). `options_chain` uses Schwab when it is connected.
+- Connections: each provider has a short guide with what it gives, its cost, where to get the key and what to do if the test fails.
+- Changed: Hokma's built-in broker is called "Hokma". If you had it as "Hokma Simulated", it is renamed and keeps its costs and accounts.
+
 ## 1.0.8
 
 - Changed: Databento and Massive are no longer offered. Futures use SiomTrading Futures, with Yahoo as backup. A key saved for them is removed from your system credential store when Hokma starts.

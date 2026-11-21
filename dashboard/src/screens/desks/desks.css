@@ -332,6 +332,8 @@
 .brk-cost b { display: flex; align-items: baseline; gap: 4px; font: 500 20px "JetBrains Mono", monospace; letter-spacing: -0.03em; }
 .brk-cost b small { font: 600 11px Montserrat, sans-serif; color: var(--t3); }
 .brk-cost-note { font: 400 10.5px/1.4 Montserrat, sans-serif; color: var(--t3); }
+.brk-orders { display: flex; flex-direction: column; gap: 6px; }
+.brk-orders-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .brk-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border-top: 1px solid var(--border); padding-top: 14px; }
 .brk-stats b { display: block; margin-top: 5px; font-size: 15px; font-weight: 500; white-space: nowrap; }
 .brk-connect { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border-style: dashed; min-width: 0; }
@@ -345,3 +347,10 @@
   .brk-grid { grid-template-columns: minmax(0, 1fr); }
 }
 .desks-body > * { flex: none; }
+
+.brk-pending { padding: 14px 20px; display: flex; flex-direction: column; gap: 10px; flex: none; }
+.brk-pending-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.brk-pending-one { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 10px; }
+.brk-pending-hd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.brk-pending-order { font-size: 13px; }
+.brk-pending-out { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

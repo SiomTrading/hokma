@@ -148,9 +148,12 @@ def test_the_answer_is_cached_so_repeated_reads_make_one_request(tmp_path):
 
 def test_the_priority_of_connections_decides_and_a_switched_off_provider_is_not_asked(tmp_path):
     keys = {"alpaca": KEY, "finnhub": "finnhub-key-value-13579"}
-    source, _, _ = chain(tmp_path, keys, order={"equity": ["finnhub", "alpaca"]})
+    source, _, _ = chain(tmp_path, keys, order={"bars": ["finnhub", "alpaca"]})
     assert source.history("AAPL", "5m").source == "Finnhub"
-    source, _, _ = chain(tmp_path / "off", keys, off=("finnhub",), order={"equity": ["finnhub", "alpaca"]})
+    source, _, _ = chain(tmp_path / "off", keys, off=("finnhub",), order={"bars": ["finnhub", "alpaca"]})
+    assert source.history("AAPL", "5m").source == "Alpaca IEX"
+    # the order of the live price (equity) does not move the candles: they follow the use "bars" (SPEC-015 4.4)
+    source, _, _ = chain(tmp_path / "live", keys, order={"equity": ["finnhub", "alpaca"], "bars": ["alpaca", "finnhub"]})
     assert source.history("AAPL", "5m").source == "Alpaca IEX"
 
 

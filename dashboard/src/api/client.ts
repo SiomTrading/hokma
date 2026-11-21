@@ -81,13 +81,14 @@ async function readError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, code, message, reason, extra);
 }
 
-/** A 401 that is not about this panel's session: the data provider refused the key the student saved (`options.auth_failed`). */
+/** A 401 that is not about this panel's session: the data provider refused the key or the session the student saved
+ * (`options.*`, or `connections.*` such as `connections.schwab_expired`). */
 async function providerRefusal(res: Response): Promise<boolean> {
   try {
     const body: unknown = await res.clone().json();
     const detail = body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined;
     const code = detail && typeof detail === "object" ? (detail as { code?: unknown }).code : undefined;
-    return typeof code === "string" && code.startsWith("options.");
+    return typeof code === "string" && (code.startsWith("options.") || code.startsWith("connections."));
   } catch {
     return false;
   }

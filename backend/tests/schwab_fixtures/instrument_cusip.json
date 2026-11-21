@@ -1,0 +1,7 @@
+{
+  "cusip": "037833100",
+  "symbol": "AAPL",
+  "description": "InstrumentResponse description",
+  "exchange": "NASDAQ",
+  "assetType": "EQUITY"
+}

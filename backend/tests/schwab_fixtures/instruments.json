@@ -1,0 +1,18 @@
+{
+  "instruments": [
+    {
+      "cusip": "037833100",
+      "symbol": "AAPL",
+      "description": "InstrumentResponse description",
+      "exchange": "NASDAQ",
+      "assetType": "EQUITY"
+    },
+    {
+      "cusip": "060505104",
+      "symbol": "BAC",
+      "description": "InstrumentResponse description",
+      "exchange": "NASDAQ",
+      "assetType": "EQUITY"
+    }
+  ]
+}

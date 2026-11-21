@@ -58,6 +58,8 @@ export interface GuardBlock {
   tool: string;
   target: string;
   at: string;
+  /** Same rule, own text: "dynamic_code" is a real_money block for code assembled at run time. */
+  reason?: string;
 }
 
 export interface StoredAttachment {

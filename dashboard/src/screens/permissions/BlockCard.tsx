@@ -4,7 +4,7 @@ import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
 import "./permissions.css";
 import { permissionsApi } from "./api";
-import { isRule } from "./types";
+import { blockKey, isRule } from "./types";
 import type { TrashItem } from "./types";
 
 export interface BlockData {
@@ -13,6 +13,8 @@ export interface BlockData {
   tool: string;
   target: string;
   at?: string;
+  /** Same rule, own text ("dynamic_code": code assembled at run time). */
+  reason?: string;
 }
 
 /** How long after a block a Trash move still counts as the agent's follow-up to it. */
@@ -38,6 +40,7 @@ export function BlockCard({ block }: { block: BlockData }) {
   const { t } = useI18n();
   const shell = useShell();
   const rule = isRule(block.rule) ? block.rule : "other";
+  const textKey = block.reason === "dynamic_code" && rule === "real_money" ? "dynamic_code" : rule;
   const [inTrash, setInTrash] = useState(false);
   useEffect(() => {
     if (block.rule !== "delete") return;
@@ -50,15 +53,15 @@ export function BlockCard({ block }: { block: BlockData }) {
       alive = false;
     };
   }, [block.rule, block.at]);
-  const why = block.rule === "delete" && !inTrash ? t("block.why.deleteBlocked") : t(`block.why.${rule}`);
+  const why = block.rule === "delete" && !inTrash ? t("block.why.deleteBlocked") : t(`block.why.${blockKey(rule, block.reason)}`);
   return (
-    <Bubble from="assistant" className="chat-perm perm-block" role="group" aria-label={t(`block.title.${rule}`)} data-testid="block-card" data-rule={block.rule}>
+    <Bubble from="assistant" className="chat-perm perm-block" role="group" aria-label={t(`block.title.${textKey}`)} data-testid="block-card" data-rule={block.rule}>
       <div className="perm-block-head">
         <Pill tone="bad">
           <Icon name="shield" size={12} strokeWidth={2} />
           {t("block.badge")}
         </Pill>
-        <span className="h2">{t(`block.title.${rule}`)}</span>
+        <span className="h2">{t(`block.title.${textKey}`)}</span>
       </div>
       {block.target ? (
         <span className="p perm-block-target" data-testid="block-target">

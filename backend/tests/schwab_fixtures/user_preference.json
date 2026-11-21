@@ -1,0 +1,39 @@
+[
+  {
+    "accounts": [
+      {
+        "accountNumber": "12345678",
+        "type": "BROKERAGE",
+        "nickName": "Cuenta de prueba",
+        "displayAcctId": "ACCT-DISPLAY",
+        "primaryAccount": true,
+        "accountColor": "Green",
+        "autoPositionEffect": true
+      },
+      {
+        "accountNumber": "87654321",
+        "type": "IRA",
+        "nickName": "Cuenta de prueba",
+        "displayAcctId": "ACCT-DISPLAY",
+        "primaryAccount": false,
+        "accountColor": "Green",
+        "autoPositionEffect": false
+      }
+    ],
+    "streamerInfo": [
+      {
+        "streamerSocketUrl": "wss://fake-streamer.example/ws",
+        "schwabClientCustomerId": "fake-customer-id",
+        "schwabClientCorrelId": "fake-correl-id",
+        "schwabClientChannel": "fake-channel",
+        "schwabClientFunctionId": "fake-function-id"
+      }
+    ],
+    "offers": [
+      {
+        "level2Permissions": true,
+        "mktDataPermission": "NP"
+      }
+    ]
+  }
+]

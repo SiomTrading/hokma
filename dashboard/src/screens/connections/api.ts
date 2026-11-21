@@ -1,25 +1,41 @@
 import { api, ApiError } from "@/api";
 import { t } from "@/i18n";
-import type { AssetClass, ConnectionCard, ConnectionsList, TestResult } from "./types";
+import type { AddAnswer, ConnectionCard, ConnectionsList, FinishAnswer, SchwabAccountPanel, TestResult, UseKey } from "./types";
 
 const enc = encodeURIComponent;
 const base = (id: string) => "/api/connections/" + enc(id);
+const SCHWAB = "/api/connections/schwab";
 
+/** The secret fields of a key: `key`, `key_id` + `secret` (Alpaca) or `client_id` + `client_secret` (Schwab). */
 export interface KeyPayload {
   key?: string;
   key_id?: string;
   secret?: string;
+  client_id?: string;
+  client_secret?: string;
 }
 
 /** The only place of the panel that talks to the keys and the provider switches. */
 export const connectionsApi = {
   list: () => api.get<ConnectionsList>("/api/connections"),
   saveKey: (id: string, body: KeyPayload) => api.put<{ id: string; key_state: string }>(base(id) + "/key", body),
-  removeKey: (id: string) => api.delete<{ id: string; key_state: string }>(base(id) + "/key"),
+  /** Saves the key, switches the provider on and tests it. A failed test drops the new key (the old one stays). */
+  add: (id: string, body: KeyPayload) => api.post<AddAnswer>(base(id) + "/add", body, { timeoutMs: 30_000 }),
+  remove: (id: string) => api.post<ConnectionCard>(base(id) + "/remove", {}),
   setEnabled: (id: string, enabled: boolean) => api.put<ConnectionCard>(base(id) + "/enabled", { enabled }),
-  setPriority: (assetClass: AssetClass, order: string[]) =>
-    api.put<{ groups: ConnectionsList["groups"] }>("/api/connections/priority", { asset_class: assetClass, order }),
+  /** `asset_class` is the name of the field for every use (`bars`, `options` and `news` too). `order` has every provider of the use. */
+  setPriority: (use: UseKey, order: string[]) =>
+    api.put<{ groups?: ConnectionsList["groups"]; uses?: ConnectionsList["uses"] }>("/api/connections/priority", { asset_class: use, order }),
   test: (id: string) => api.post<TestResult>(base(id) + "/test", {}, { timeoutMs: 20_000 }),
+};
+
+/** The sign-in of Schwab (5.3) and its account panel (5.7). The address that comes back is pasted by the student. */
+export const schwabApi = {
+  loginStart: () => api.post<{ auth_url: string }>(SCHWAB + "/login/start", {}),
+  /** The desktop window cannot open a browser tab by itself: the engine opens the system browser. */
+  loginOpen: (url: string) => api.post<{ opened: boolean }>(SCHWAB + "/login/open", { url }),
+  loginFinish: (redirectUrl: string) => api.post<FinishAnswer>(SCHWAB + "/login/finish", { redirect_url: redirectUrl }, { timeoutMs: 30_000 }),
+  account: () => api.get<SchwabAccountPanel>(SCHWAB + "/account"),
 };
 
 /** Catalog text of a `connections.*` or `market.*` code in the active language; the server text when the code is new. */
@@ -38,6 +54,11 @@ export function connectionErrorText(cause: unknown): string {
 
 export function isStoreUnavailable(cause: unknown): boolean {
   return cause instanceof ApiError && cause.code === "connections.store_unavailable";
+}
+
+/** True inside the desktop app, whose window cannot open a browser tab by itself. */
+export function inDesktopApp(): boolean {
+  return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 }
 
 export interface MailState {

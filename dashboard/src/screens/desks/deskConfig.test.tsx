@@ -132,6 +132,18 @@ describe("Settings: objective and capital", () => {
     await waitFor(() => expect(sent(server, "GET", "/api/desks").length).toBeGreaterThan(1));
   });
 
+  it("says, next to the capital, that raising it or loosening a limit from the chat always asks the owner", async () => {
+    stubServer();
+    open("config");
+    await screen.findByLabelText(t("desks.field.capital"));
+    expect(screen.getByText(t("desks.cfg.moneyAsk"))).toBeInTheDocument();
+    for (const locale of ["es", "en"] as const) {
+      const text = getCatalog(locale)["desks.cfg.moneyAsk"];
+      expect(text).toBeTruthy();
+      expect(text).not.toMatch(/\u2014/);
+    }
+  });
+
   it("sets and clears the weekly token cap with the same Save button", async () => {
     const server = stubServer();
     open("config");
@@ -244,7 +256,7 @@ describe("Settings: connections and empty sections", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Memoria y mesas conectadas/ }));
     expect(screen.queryByText(/paso \d/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Cuentas de trading/ }));
-    expect(screen.getByText(/Todo lo que toque dinero real sigue bloqueado/)).toBeInTheDocument();
+    expect(screen.getByText(/dinero real solo salen por las herramientas/)).toBeInTheDocument();
   });
 });
 

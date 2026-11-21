@@ -1,11 +1,13 @@
 """`hokma` command: start, doctor, version, update, ext and the installer helpers."""
 import argparse
+import contextlib
 import json
 import os
 import sys
 from pathlib import Path
 
 from hokma import __version__
+from hokma.core import processguard
 from hokma.core.config import DEFAULT_PORT, LAST_PORT
 from hokma.i18n import t
 
@@ -169,10 +171,7 @@ def cmd_engine(args: argparse.Namespace) -> int:
     """The engine, started by the supervisor. The token arrives on standard input."""
     from hokma.core.engine_main import main as engine_main
 
-    code = _migrate_db()
-    if code:
-        return code
-    return engine_main(args.port)
+    return engine_main(args.port, prepare=_migrate_db)      # the migration runs after the launch proof, with the mark on
 
 
 def cmd_doctor(_: argparse.Namespace) -> int:
@@ -542,11 +541,15 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("post-update", help="Kit sync + settings after an update").set_defaults(fn=cmd_post_update)
 
     args = p.parse_args(argv)
-    if args.cmd not in NO_INTEGRITY_GATE:
-        code = _integrity_gate()
-        if code:
-            return code
-    return args.fn(args)
+    # The runtime limit (core/processguard.py): the sensitive modules load only while one of Hokma's own commands
+    # runs, and the mark is gone when it ends, so importing this module from an agent's script gains nothing.
+    # `engine` is NOT marked here: engine_main marks it only after the supervisor's launch proof checks out.
+    with (contextlib.nullcontext() if args.cmd == "engine" else processguard.allow(processguard.OWNER_CLI)):
+        if args.cmd not in NO_INTEGRITY_GATE:
+            code = _integrity_gate()
+            if code:
+                return code
+        return args.fn(args)
 
 
 if __name__ == "__main__":

@@ -51,7 +51,7 @@ def test_every_route_needs_the_token(client):
 
 def test_the_simulated_broker_is_listed_with_its_costs_and_no_orders(client):
     b = sim(client)
-    assert b["name"] == "Hokma Simulated" and b["slippage_bps"] == 2.0 and b["commission"]["type"] == "bps"
+    assert b["name"] == "Hokma" and b["slippage_bps"] == 2.0 and b["commission"]["type"] == "bps"
     assert b["capabilities"]["orders"] is False
 
 
@@ -121,7 +121,7 @@ def test_assign_puts_the_balance_in_the_desks_and_unassign_takes_it_out(client):
     res = client.put(f"/api/desks/{d['id']}/account", json={"account_id": a["id"]})
     assert res.status_code == 200
     shown = client.get(f"/api/desks/{d['id']}").json()["account"]
-    assert shown == {"id": a["id"], "name": "Swing", "broker": "Hokma Simulated", "as_of": shown["as_of"],
+    assert shown == {"id": a["id"], "name": "Swing", "broker": "Hokma", "as_of": shown["as_of"],
                      "initial_capital": 25000, "balance": {"cash": 25000, "equity": 25000, "currency": "USD"}}
     assert client.get("/api/desks").json()["desks"][0]["account"]["balance"]["cash"] == 25000
     assert client.get(f"/api/accounts/{a['id']}").json()["desk_id"] == d["id"]

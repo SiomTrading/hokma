@@ -35,11 +35,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from hokma.connections.store import KeyStore  # noqa: E402
-from hokma.market import symbols as symbol_map  # noqa: E402
-from hokma.market.adapters import ADAPTERS  # noqa: E402
-from hokma.market.providers import get_catalog  # noqa: E402
-from hokma.market.stream import BarUpdate, SourceStatus, Tick  # noqa: E402
+from hokma.core import processguard  # noqa: E402
+
+with processguard.allow(processguard.OWNER_CLI):          # the keys package loads only inside Hokma's own programs
+    from hokma.connections.store import KeyStore
+    from hokma.market import symbols as symbol_map
+    from hokma.market.adapters import ADAPTERS
+    from hokma.market.providers import get_catalog
+    from hokma.market.stream import BarUpdate, SourceStatus, Tick
 
 DEFAULT_SYMBOL = {"coinbase": "BTC-USD", "alpaca": "SPY", "finnhub": "AAPL"}
 
@@ -111,4 +114,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    with processguard.allow(processguard.OWNER_CLI):
+        raise SystemExit(main())

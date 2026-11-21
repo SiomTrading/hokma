@@ -51,7 +51,8 @@ def test_the_first_start_removes_the_retired_keys_and_cleans_the_file(live):
     assert "databento" not in saved["enabled"] and "massive" not in saved["enabled"]
     assert saved["enabled"] == {"alpaca": True, "coinbase": False}
     assert all("databento" not in order and "massive" not in order for order in saved["priority"].values())
-    assert saved["priority"] == {"future": ["siomtrading_futures"], "equity": ["alpaca", "finnhub"]}
+    assert saved["priority"] == {"future": ["siomtrading_futures"], "equity": ["alpaca", "finnhub"],
+                                 "bars": ["alpaca", "finnhub"]}      # 1.0.9: the candles keep following the saved equity order
     assert service.order("future") == ["siomtrading_futures"]
     assert service.has_key("alpaca") and service.has_key("finnhub")
 

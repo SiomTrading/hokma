@@ -37,6 +37,9 @@ def to_provider(provider_id: str, symbol: str, asset_class: str | None, today: d
         return symbol if asset_class == "crypto" else None
     if provider_id == "alpaca":
         return symbol.replace("-", ".") if asset_class == "equity" and EQUITY.match(symbol) else None
+    if provider_id == "schwab":
+        # Class shares are written with a slash ("BRK/B"); the REF gives no example, T0 confirms it with a real answer.
+        return symbol.replace("-", "/") if asset_class == "equity" and EQUITY.match(symbol) else None
     if provider_id == "finnhub":
         return _finnhub(symbol, asset_class)
     if provider_id == "siomtrading_futures":

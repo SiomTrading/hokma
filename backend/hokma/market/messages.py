@@ -30,6 +30,12 @@ CONNECTION_CODES: dict[str, Callable[[], str]] = {
     "connections.access_revoked": lambda: t("connections.error.access_revoked"),
     "connections.other_device": lambda: t("connections.error.other_device"),
     "connections.bad_request": lambda: t("connections.error.bad_request"),
+    "connections.schwab_url": lambda: t("connections.error.schwab_url"),
+    "connections.schwab_state": lambda: t("connections.error.schwab_state"),
+    "connections.schwab_code": lambda: t("connections.error.schwab_code"),
+    "connections.schwab_expired": lambda: t("connections.error.schwab_expired"),
+    "connections.schwab_denied": lambda: t("connections.error.schwab_denied"),
+    "connections.no_login": lambda: t("connections.error.no_login"),
 }
 
 # What an adapter reports in `SourceStatus.code` when it stops for good, as a catalog code.

@@ -64,14 +64,14 @@ export interface ExpirationGroup {
   rows: OptionRow[];
 }
 
-export type PriceFeed = "indicative" | "opra";
+export type PriceFeed = "indicative" | "opra" | "schwab";
 
 export interface ChainResponse {
   underlying: string;
   underlying_price: number | null;
   source: string;
   price_feed: PriceFeed;
-  greeks: "estimated" | "calculated";
+  greeks: "estimated" | "calculated" | "provider";
   market_open: boolean;
   as_of: string;
   notes: string[];

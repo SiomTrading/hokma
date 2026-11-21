@@ -1,8 +1,10 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setLocale, t } from "@/i18n";
-import { renderShell } from "@/test/utils";
+import { getCatalog, setLocale, t } from "@/i18n";
+import { ACCOUNT_PANEL } from "@/test/connectionsBackend";
+import { renderShell, renderWithApp } from "@/test/utils";
+import { SchwabAccount } from "@/screens/connections/SchwabAccount";
 import type { Account } from "./accountsApi";
 import { resetDesksStore } from "./store";
 import { TODAY_EMPTY } from "./todayFixture";
@@ -39,7 +41,18 @@ function stubApi(state: { desks: DeskSummary[]; accounts: Account[]; brokers?: u
       if (url === "/api/desks") return json({ desks: state.desks });
       if (url === "/api/today") return json(TODAY_EMPTY);
       if (url === "/api/brokers") return json({ brokers });
-      if (/^\/api\/brokers\/1\/accounts$/.test(url) && method === "GET") return json({ accounts: state.accounts });
+      const listed = /^\/api\/brokers\/(\d+)\/accounts$/.exec(url);
+      if (listed && method === "GET") return json({ accounts: state.accounts.filter((a) => a.broker_id === Number(listed[1])) });
+      const switched = /^\/api\/brokers\/(\d+)\/orders-enabled$/.exec(url);
+      if (switched && method === "PUT") {
+        const found = (brokers as Array<{ id: number; orders_enabled?: boolean }>).find((b) => b.id === Number(switched[1]))!;
+        found.orders_enabled = (body as { enabled: boolean }).enabled;
+        return json(found);
+      }
+      if (url === "/api/connections/schwab/account") {
+        const schwab = (brokers as Array<{ kind: string; orders_enabled?: boolean }>).find((b) => b.kind === "schwab");
+        return json({ ...ACCOUNT_PANEL, orders_enabled: schwab?.orders_enabled ?? false });
+      }
       if (/^\/api\/brokers\/1\/accounts$/.test(url) && method === "POST") {
         const made = account({ id: 50 + state.accounts.length, name: (body as { name: string }).name, initial_capital: (body as { capital: number }).capital });
         state.accounts.push(made);
@@ -97,7 +110,7 @@ describe("Broker tab", () => {
     expect(await screen.findByText(t("desks.broker.connected"))).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Hokma Simulated/ })).toBeInTheDocument();
     const connect = screen.getByRole("region", { name: t("desks.broker.external") });
-    expect(connect).toHaveTextContent(t("desks.broker.externalText"));
+    expect(connect).toHaveTextContent(t("desks.broker.externalText2"));
     expect(within(connect).queryByRole("button")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: t("desks.broker.editCosts") }));
     const fee = screen.getByLabelText(t("desks.accounts.commission"));
@@ -217,6 +230,107 @@ describe("Broker tab", () => {
     const dialog = await screen.findByRole("dialog");
     await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.assign.save") }));
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")).toMatchObject({ url: "/api/desks/7/account", body: { account_id: 1 } }));
+  });
+});
+
+const SIM = { id: 1, kind: "sim", name: "Hokma Simulated", commission: { type: "bps", value: 1, min: 0 }, slippage_bps: 2, capabilities: { accounts: true, reset: true, orders: true, positions: true }, orders_enabled: false };
+const schwabBroker = (patch: Record<string, unknown> = {}) => ({
+  id: 2, kind: "schwab", name: "Schwab", commission: { type: "bps", value: 0, min: 0 }, slippage_bps: 0,
+  capabilities: { accounts: true, reset: false, orders: true, positions: true }, orders_enabled: false, ...patch,
+});
+const schwabAccount = (patch: Partial<Account> = {}) => account({ id: 9, broker_id: 2, broker: "Schwab", name: "Schwab ••••1234", mask: "••••1234", can_reset: false, ...patch });
+
+describe("Schwab in the Broker tab (SPEC-015 18.2)", () => {
+  it("shows the Schwab card with the orders switch off and one line of risk under it", async () => {
+    stubApi({ desks: [], accounts: [account({}), schwabAccount()], brokers: [SIM, schwabBroker()] });
+    renderShell();
+    await openBroker();
+    const heading = await screen.findByRole("heading", { name: /Schwab/ });
+    const card = heading.closest(".brk-one") as HTMLElement;
+    const toggle = within(card).getByRole("switch", { name: t("desks.broker.schwab.ordersToggle") });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    const risk = within(card).getByTestId("orders-risk");
+    expect(risk).toHaveTextContent(t("desks.broker.schwab.ordersRisk"));
+    expect(risk.textContent).not.toContain("\n");
+    // The internal broker has no such switch.
+    const sim = screen.getByRole("heading", { name: /Hokma Simulated/ }).closest(".brk-one") as HTMLElement;
+    expect(within(sim).queryByRole("switch")).toBeNull();
+    expect(screen.getAllByRole("switch")).toHaveLength(1);
+  });
+
+  it("turning the switch on calls the route with enabled true and the line of View account becomes the trading one", async () => {
+    const calls = stubApi({ desks: [], accounts: [schwabAccount()], brokers: [SIM, schwabBroker()] });
+    renderShell();
+    await openBroker();
+    await userEvent.click(await screen.findByRole("switch", { name: t("desks.broker.schwab.ordersToggle") }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT" && c.url === "/api/brokers/2/orders-enabled")?.body).toEqual({ enabled: true }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: t("desks.broker.schwab.ordersToggle") })).toHaveAttribute("aria-checked", "true"));
+    cleanup();
+    renderWithApp(<SchwabAccount />);
+    expect(await screen.findByTestId("schwab-readonly")).toHaveTextContent(t("connections.schwab.trading"));
+  });
+
+  it("with the switch off, View account shows the line of orders off", async () => {
+    stubApi({ desks: [], accounts: [schwabAccount()], brokers: [SIM, schwabBroker()] });
+    renderWithApp(<SchwabAccount />);
+    expect(await screen.findByTestId("schwab-readonly")).toHaveTextContent(t("connections.schwab.readOnly"));
+  });
+
+  it("turns it off again and shows the server's message when the change fails", async () => {
+    const calls = stubApi({ desks: [], accounts: [schwabAccount()], brokers: [SIM, schwabBroker({ orders_enabled: true })] });
+    renderShell();
+    await openBroker();
+    const toggle = await screen.findByRole("switch", { name: t("desks.broker.schwab.ordersToggle") });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(toggle);
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT" && c.url === "/api/brokers/2/orders-enabled")?.body).toEqual({ enabled: false }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: t("desks.broker.schwab.ordersToggle") })).toHaveAttribute("aria-checked", "false"));
+  });
+
+  it("Schwab accounts show their mask and have no Reiniciar; the internal ones keep it", async () => {
+    stubApi({ desks: [desk({})], accounts: [account({}), schwabAccount()], brokers: [SIM, schwabBroker()] });
+    renderShell();
+    await openBroker();
+    const row = await screen.findByRole("row", { name: /Schwab ••••1234/ });
+    expect(row).toHaveTextContent("••••1234");
+    expect(within(row).queryByRole("button", { name: t("desks.accounts.reset") })).toBeNull();
+    expect(within(screen.getByRole("row", { name: /Cuenta A/ })).getByRole("button", { name: t("desks.accounts.reset") })).toBeInTheDocument();
+  });
+
+  it("'Asignar a mesa' works the same for a Schwab account", async () => {
+    const calls = stubApi({ desks: [desk({ id: 7 })], accounts: [schwabAccount()], brokers: [SIM, schwabBroker()] });
+    renderShell();
+    await openBroker();
+    const row = await screen.findByRole("row", { name: /Schwab ••••1234/ });
+    await userEvent.click(within(row).getByRole("button", { name: t("desks.accounts.assign") }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.assign.save") }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT" && c.url === "/api/desks/7/account")?.body).toEqual({ account_id: 9 }));
+  });
+
+  it("new accounts are offered only for the internal broker", async () => {
+    stubApi({ desks: [], accounts: [account({})], brokers: [schwabBroker(), SIM] });
+    renderShell();
+    await openBroker();
+    await userEvent.click(await screen.findByRole("button", { name: t("desks.accounts.newAccount") }));
+    const dialog = await screen.findByRole("dialog", { name: t("desks.accounts.newAccount.title") });
+    expect(within(dialog).queryByRole("option", { name: "Schwab" })).toBeNull();
+    expect(within(dialog).getByRole("option", { name: "Hokma Simulated" })).toBeInTheDocument();
+  });
+
+  it("the texts of orders exist in es and en, with no dash and no 'simulated' wording", () => {
+    for (const locale of ["es", "en"] as const) {
+      const catalog = getCatalog(locale);
+      for (const key of ["desks.broker.schwab.ordersToggle", "desks.broker.schwab.ordersRisk", "desks.broker.externalText2", "connections.schwab.trading", "connections.schwab.readOnly", "agents.kit.desk-chief.desc2", "permissions.firstrun.body2", "permissions.modal.body2", "protections.real_money2", "block.why.real_money2"]) {
+        const text = catalog[key] ?? "";
+        expect(text, `${locale} ${key}`).toBeTruthy();
+        expect(text, `${locale} ${key}`).not.toContain(String.fromCharCode(0x2014));
+        expect(text, `${locale} ${key}`).not.toMatch(/simulad|did.ctic|juguete|simulat|toy|play money/i);
+      }
+      for (const old of ["desks.broker.externalText", "permissions.firstrun.body", "permissions.modal.body", "protections.real_money", "block.why.real_money", "agents.kit.desk-chief.desc"]) {
+        expect(catalog[old], `${locale} ${old} is retired`).toBeUndefined();
+      }
+    }
   });
 });
 

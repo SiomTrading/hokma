@@ -15,6 +15,8 @@ import json
 import os
 import sys
 
+from hokma.core import processguard
+
 SERVER_NAME = "hokma"
 DEFAULT_PROTOCOL = "2025-06-18"
 TOOL = {
@@ -107,6 +109,13 @@ def handle(message: dict, data: str, roots: list[str], protect: list[str]) -> di
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Claude starts this server as a child of the agent's engine, so it cannot get a secret from Hokma: it marks ITSELF
+    # for the time it serves (core/processguard.py). The tools it offers are the only way in; the mark ends with main().
+    with processguard.allow(processguard.MCP):
+        return _serve(argv)
+
+
+def _serve(argv: list[str] | None) -> int:
     args = sys.argv[1:] if argv is None else argv
     data = (arguments(args, "--data") or [""])[0]
     if not data:

@@ -235,7 +235,7 @@ def test_hokma_entry_points_set_utf8_before_reading(monkeypatch):
 
     assert "utf8_stdio()" in inspect.getsource(guard.main)
     assert "guard.utf8_stdio()" in inspect.getsource(hardblock.main)
-    assert "reconfigure" in inspect.getsource(trash_mcp.main)
+    assert "reconfigure" in inspect.getsource(trash_mcp._serve)           # main() only sets the process mark and calls it
 
 
 if __name__ == "__main__":                                   # pragma: no cover

@@ -245,13 +245,13 @@ def test_without_a_saved_key_the_error_says_what_is_missing_and_where_to_connect
     with pytest.raises(OptionsError) as error:
         chain()
     assert error.value.code == "no_connection" and error.value.status == 409
-    assert str(error.value) == "The option chain needs Alpaca IEX: save its key and turn it on in Connections."
+    assert str(error.value) == "The option chain needs Schwab or Alpaca IEX: connect one of them in Connections."
     assert fake.calls == []
 
 
 def test_with_alpaca_switched_off_nothing_is_asked(monkeypatch):
     fake = install(monkeypatch, off=("alpaca",))
-    with pytest.raises(OptionsError, match="needs Alpaca IEX"):
+    with pytest.raises(OptionsError, match="needs Schwab or Alpaca IEX"):
         chain()
     assert fake.calls == []
 
@@ -315,6 +315,36 @@ def test_the_underlying_price_is_null_when_the_chart_has_none_and_the_chain_stil
     install(monkeypatch, quote=None)
     out = chain(limit=1)
     assert out["underlying_price"] is None and out["contracts"]
+
+
+# ------------------------------------------------------------------------------------------ Schwab as a source (SPEC-015 5.6)
+# The chain of Schwab itself is read in test_schwab_market.py; here, what the order of the use "options" changes.
+
+def test_the_default_order_puts_schwab_first_but_without_a_session_alpaca_answers(alpaca):
+    assert alpaca.connections.order("options") == ["schwab", "alpaca"]
+    alpaca.connections.keys["schwab"] = "{}"
+    alpaca.connections.signed = False                                  # Client ID and Secret saved, no sign-in
+    out = chain(limit=1)
+    assert out["source"] == "Alpaca" and out["greeks"] == "estimated" and out["price_feed"] == "indicative"
+
+
+def test_a_desk_that_does_not_use_schwab_is_served_by_alpaca(monkeypatch):
+    fake = install(monkeypatch, allowed={"alpaca"})
+    fake.connections.keys["schwab"] = "{}"
+    out = chain(limit=1, desk_id=7)
+    assert out["source"] == "Alpaca" and fake.calls
+
+
+def test_alpaca_still_says_estimated_greeks_and_has_no_delayed_flag(alpaca):
+    out = chain(limit=1)
+    assert out["greeks"] == "estimated" and out["note"] and "delayed" not in out
+
+
+def test_the_order_of_the_use_options_can_put_alpaca_first_and_schwab_is_then_the_second_source(monkeypatch):
+    fake = install(monkeypatch)
+    fake.connections.keys["schwab"] = "{}"
+    fake.connections.options = ("alpaca", "schwab")
+    assert chain(limit=1)["source"] == "Alpaca"
 
 
 # ------------------------------------------------------------------------------------------ Hokma's own numbers

@@ -137,6 +137,6 @@ def test_engine_key_as_a_bare_word_is_blocked_in_every_form(box, bctx):
     commands = ("python -m hokma.kit.engine_key --conn 2", "python /x/engine_key* --conn 2",
                 "python -c \"import hokma.kit.engine_key as k; k.main(['--conn','2'])\"")
     for command in commands:
-        assert check("Bash", {"command": command}, cwd=str(box.work), ctx=bctx).rule in ("secrets", "hokma_internal"), command
+        assert check("Bash", {"command": command}, cwd=str(box.work), ctx=bctx).rule in ("secrets", "hokma_internal", "real_money"), command
     bctx.shell = "PowerShell"
     assert check("run_command", {"command": "python -m hokma.kit.engine_key --conn 2"}, cwd=str(box.work), ctx=bctx).rule == "secrets"

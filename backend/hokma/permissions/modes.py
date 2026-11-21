@@ -14,7 +14,14 @@ from typing import Any
 
 MODES = ("ask", "auto")
 DEFAULT_MODE = "ask"
-ALWAYS_ASK = ("mcp__hokma__gmail_send",)       # what leaves the computer on the owner's behalf: asked in `auto` too
+# What leaves the computer on the owner's behalf, and what moves the envelope of the money: asked in `auto` too. The owner fixes the
+# envelope and the agents operate inside it (SPEC-015 bug 1220): raising the capital of a desk, loosening or turning off a limit
+# or adding an asset under `assets_only` (desk_money_set), and assigning or taking off the account of a desk. Lowering the
+# capital or tightening a limit is done with desk_configure, which refuses anything that loosens (the service compares with the
+# saved value inside the transaction), so the permission does not need to read the arguments. No tool turns the orders of a
+# broker on: that is the owner's switch in the app.
+ALWAYS_ASK = ("mcp__hokma__gmail_send", "mcp__hokma__desk_money_set", "mcp__hokma__desk_assign_account",
+              "mcp__hokma__desk_unassign_account")
 FLAG = {"ask": "default", "auto": "bypassPermissions"}
 
 

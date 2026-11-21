@@ -127,16 +127,16 @@ def two(desks_db):
 
 def test_desk_configure_changes_only_the_desk_and_fields_given(two):
     first, second = two
-    changed, err = call("desk_configure", {"desk_id": first["id"], "name": "Alpha 2", "capital": 20000,
+    changed, err = call("desk_configure", {"desk_id": first["id"], "name": "Alpha 2", "capital": 8000,
                                            "assets": ["ES=F", "NQ=F"], "mandate": "New", "token_budget": 500})
     assert not err
     assert (changed["name"], changed["capital"], changed["assets"], changed["mandate"]) == (
-        "Alpha 2", 20000, ["ES=F", "NQ=F"], "New")
+        "Alpha 2", 8000, ["ES=F", "NQ=F"], "New")
     assert changed["budget"]["token_budget"] == 500 and changed["template"] == "standard"
     other, _ = call("desk_show", {"desk_id": second["id"]})
     assert (other["name"], other["capital"], other["mandate"], other["assets"]) == ("Beta", 5000, "Beta mandate", [])
-    only, err = call("desk_configure", {"desk_id": first["id"], "capital": 30000})
-    assert not err and only["capital"] == 30000 and only["name"] == "Alpha 2" and only["mandate"] == "New"
+    only, err = call("desk_configure", {"desk_id": first["id"], "capital": 6000})     # the capital only goes down here
+    assert not err and only["capital"] == 6000 and only["name"] == "Alpha 2" and only["mandate"] == "New"
 
 
 def test_desk_configure_changes_the_model_of_one_agent_of_that_desk(two):
@@ -185,7 +185,7 @@ def test_a_chief_without_a_desk_project_is_refused(two):
 
 def test_hokma_changes_any_desk_from_outside_a_desk(two):
     _, second = two
-    assert not call("desk_configure", {"desk_id": second["id"], "capital": 7000}, agent="hokma")[1]
+    assert not call("desk_configure", {"desk_id": second["id"], "capital": 4000}, agent="hokma")[1]
 
 
 # ------------------------------------------------------------------------------------------ the permission

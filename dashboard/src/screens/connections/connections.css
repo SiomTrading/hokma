@@ -1,33 +1,64 @@
 /* Connections screen. Glass tokens only. */
 .conn-page { display: flex; flex-direction: column; gap: 22px; padding: 22px 24px 32px; max-width: 1180px; width: 100%; margin: 0 auto; box-sizing: border-box; }
 .conn-intro { display: flex; flex-direction: column; gap: 6px; }
+.conn-header { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .conn-banner { margin: 0; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--warn); background: var(--warn-sub); color: var(--t1); font: 500 13px/1.5 Montserrat, sans-serif; }
+.conn-session { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
-.conn-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 14px; align-items: start; }
-.conn-group { display: flex; flex-direction: column; gap: 10px; }
-.conn-group.wide { grid-column: 1 / -1; }
+.conn-section { display: flex; flex-direction: column; gap: 10px; }
 .conn-group-title { padding: 0; }
-.conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; align-items: start; }
-
-.conn-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-.conn-card.focus, .conn-priority.focus { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc), inset 0 1px 0 var(--hl); }
-.conn-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.conn-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.conn-row { position: relative; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--glass-subtle); }
+.conn-row.focus, .conn-use[data-focus="true"] { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc), inset 0 1px 0 var(--hl); }
+.conn-row-fixed { opacity: 0.85; }
+.conn-row-main { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 2px; }
+.conn-row-wide { flex-basis: 100%; }
+.conn-what { font-size: 12px; }
+.conn-dot-off { width: 7px; height: 7px; border-radius: 50%; background: var(--t3); display: inline-block; }
 .conn-pills { display: flex; gap: 6px; flex-wrap: wrap; }
-.conn-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.conn-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.conn-notes .p { font-size: 12px; }
-.conn-key { display: flex; flex-direction: column; gap: 8px; }
-.conn-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
-.conn-keystate { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.conn-menu-wrap { position: relative; }
+.conn-menu { top: 100%; bottom: auto; right: 0; left: auto; width: 220px; margin-top: 4px; }
+.conn-note { font-size: 12px; }
+
+.conn-use { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--glass-subtle); }
+.conn-use-label { min-width: 200px; }
+.conn-use-items { list-style: none; margin: 0; padding: 0; display: flex; gap: 14px; flex-wrap: wrap; flex: 1; font: 500 13px Montserrat, sans-serif; color: var(--t1); }
+
+.conn-dialog { width: min(680px, 100%); flex-direction: column; }
+.conn-confirm { width: min(440px, 100%); flex-direction: column; }
+.conn-dialog-body { display: flex; flex-direction: column; gap: 14px; padding: 20px 22px; overflow: auto; min-height: 0; }
+.conn-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.conn-steps, .conn-key { display: flex; flex-direction: column; gap: 10px; }
+.conn-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.conn-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .conn-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.conn-end { justify-content: flex-end; }
+.conn-failure { display: flex; flex-direction: column; gap: 6px; }
 .conn-error { margin: 0; font: 500 12px/1.5 Montserrat, sans-serif; color: var(--bad); overflow-wrap: anywhere; }
 .conn-result { margin: 0; font: 500 12px/1.5 Montserrat, sans-serif; overflow-wrap: anywhere; }
 .conn-result.ok { color: var(--ok); }
 .conn-result.bad { color: var(--bad); }
 
-.conn-priority { padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--glass-subtle); display: flex; flex-direction: column; gap: 8px; }
+.conn-guide { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--glass-subtle); }
+.conn-guide-fold { display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: var(--t1); cursor: pointer; text-align: left; }
+.conn-guide-body { display: flex; flex-direction: column; gap: 6px; }
+.conn-guide-body[hidden] { display: none; }
+.conn-guide-steps { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.conn-guide-fail { margin: 0; }
+
 .conn-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.conn-priority { flex: 1; min-width: 240px; padding: 8px 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--glass-subtle); display: flex; flex-direction: column; gap: 8px; }
+.conn-priority.focus { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc), inset 0 1px 0 var(--hl); }
 .conn-order-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--glass); cursor: grab; }
 .conn-order-item.over { border-color: var(--acc); }
 .conn-order-name { flex: 1; min-width: 0; }
-.conn-rank { color: var(--t3); font-size: 11px; width: 14px; }
+.conn-rank { color: var(--t3); font-size: 11px; min-width: 14px; display: inline-block; }
+
+.conn-account { display: flex; flex-direction: column; gap: 14px; }
+.conn-account-card { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--glass-subtle); }
+.conn-balances { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.conn-balance { display: flex; flex-direction: column; gap: 2px; }
+.conn-balance dd { margin: 0; font-size: 16px; }
+.conn-table-wrap { overflow-x: auto; }
+.conn-table { width: 100%; border-collapse: collapse; font: 500 12px Montserrat, sans-serif; color: var(--t1); }
+.conn-table th, .conn-table td { padding: 4px 8px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }

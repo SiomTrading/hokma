@@ -40,7 +40,7 @@ export default defineMessages({
     "desks.cfg.memory.title": "Memoria y mesas conectadas",
     "desks.cfg.memory.text": "Aquí verás qué lecciones guarda esta mesa y de qué otras mesas puede leer.",
     "desks.cfg.accounts.title": "Cuentas de trading",
-    "desks.cfg.accounts.text": "La cuenta de esta mesa se asigna desde la pestaña Bróker del fondo. Todo lo que toque dinero real sigue bloqueado.",
+    "desks.cfg.accounts.text": "La cuenta de esta mesa se asigna desde la pestaña Bróker del fondo. Las órdenes con dinero real solo salen por las herramientas de órdenes de Hokma, con las reglas de la mesa.",
   },
   en: {
     "desks.bar.pick": "Switch desk",
@@ -80,6 +80,6 @@ export default defineMessages({
     "desks.cfg.memory.title": "Memory and linked desks",
     "desks.cfg.memory.text": "Here you will see which lessons this desk keeps and which other desks it can read from.",
     "desks.cfg.accounts.title": "Trading accounts",
-    "desks.cfg.accounts.text": "The account of this desk is assigned from the Broker tab of the Fund. Anything that touches real money stays blocked.",
+    "desks.cfg.accounts.text": "The account of this desk is assigned from the Broker tab of the Fund. Real-money orders go out only through Hokma's order tools, with the desk rules.",
   },
 });

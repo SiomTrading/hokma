@@ -108,9 +108,11 @@ def allows(**over):
 
 def test_the_shipped_exception_is_one_get_on_one_path_for_one_consumer():
     rules = hardblock.load_brokers()["read_exceptions"]
-    assert rules == [{"host": "api.alpaca.markets", "method": "GET", "path": "/v2/options/contracts",
-                      "match": "exact_path_query_allowed", "consumer": "hokma_backend",
-                      "reason": "Option contracts and open interest, read only (SPEC-014)"}]
+    assert [r for r in rules if r["host"] == "api.alpaca.markets"] == [
+        {"host": "api.alpaca.markets", "method": "GET", "path": "/v2/options/contracts",
+         "match": "exact_path_query_allowed", "consumer": "hokma_backend",
+         "reason": "Option contracts and open interest, read only (SPEC-014)"}]
+    assert {r["host"] for r in rules} == {"api.alpaca.markets", "api.schwabapi.com"}      # SPEC-015 added Schwab's reads
     assert "api.alpaca.markets" in hardblock.load_brokers()["hosts"]          # still a locked host
 
 

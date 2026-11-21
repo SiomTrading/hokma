@@ -55,7 +55,7 @@ export function useModeControl(): ModeControl {
         <Icon name="shield" size={22} />
         <h2 className="h1">{t("permissions.modal.title")}</h2>
       </div>
-      <p className="p">{t("permissions.modal.body")}</p>
+      <p className="p">{t("permissions.modal.body2")}</p>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <Button variant="ghost" onClick={() => setAsking(false)}>
           {t("permissions.modal.cancel")}

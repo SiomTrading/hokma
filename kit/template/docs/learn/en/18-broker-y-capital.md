@@ -1,7 +1,6 @@
 # Broker and capital
 
-In the **Broker** tab of the Fund you manage the accounts. Each desk works with one account, and that account gives it its capital. The broker included with Hokma uses the real prices of your connections and charges commission and slippage on every trade. Orders arrive in a later version.
-
+In the **Broker** tab of the Fund you manage the accounts. Each desk works with one account, and that account gives it its capital. The broker included with Hokma uses the real prices of your connections and charges commission and slippage on every trade.
 ## See the broker and its costs
 
 1. In **Money desks**, open the **Broker** tab.
@@ -55,4 +54,4 @@ The Fund's **Capital** is the sum of the accounts assigned to desks. An account 
 - **"No broker is connected".** Restart Hokma to get the Hokma broker back.
 - **"There are no free accounts".** Create a new account in **Broker**.
 - **"Every desk already has an account".** Create a desk or remove an account from another.
-- **Connecting an external broker.** The **Connect broker** button exists, but the connection arrives with orders. The accounts of an external broker will be assigned just like these.
+- **Connecting Schwab.** Connect it in Connections: its accounts appear in this tab with their number masked and without **Reset**, and you assign them to your desks the same way. Its card has the switch **Agents can trade in this account**, off until you turn it on. With it on, the desk agents send real-money orders to your Schwab account and you can lose money.

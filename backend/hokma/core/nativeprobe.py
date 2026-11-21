@@ -283,4 +283,7 @@ def summary() -> dict[str, Any]:
 
 
 if __name__ == "__main__":                                # the probe child: `python -I -m hokma.core.nativeprobe <part>`
-    _exercise(sys.argv[1])
+    from hokma.core import processguard
+
+    with processguard.allow(processguard.PROBE):          # a new process: it has no mark of its own (core/processguard.py)
+        _exercise(sys.argv[1])

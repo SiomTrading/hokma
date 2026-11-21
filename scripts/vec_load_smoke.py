@@ -8,11 +8,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from hokma.db.vecext import check_support  # noqa: E402
+from hokma.core import processguard  # noqa: E402
 
 
 def main() -> int:
-    support = check_support()
+    with processguard.allow(processguard.OWNER_CLI):      # the database package loads only inside Hokma's own programs
+        from hokma.db.vecext import check_support
+
+        support = check_support()
     where = f"{sys.implementation.name} {sys.version.split()[0]} at {sys.executable}"
     if not support.ok:
         print(f"sqlite-vec cannot be used with {where}: {support.code}: {support.detail}", file=sys.stderr)

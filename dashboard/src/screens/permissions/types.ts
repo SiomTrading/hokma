@@ -9,6 +9,16 @@ export function isRule(value: unknown): value is RuleId {
   return typeof value === "string" && (RULES as readonly string[]).includes(value);
 }
 
+/** Suffix of the catalog keys `protections.*` and `block.why.*`: the real-money texts were rewritten when orders arrived (SPEC-015 7.5). */
+export function ruleKey(rule: string): string {
+  return rule === "real_money" ? "real_money2" : rule;
+}
+
+/** Suffix of `block.title.*` and `block.why.*` for one block: the same rule can carry its own text (`dynamic_code`, a real_money block). */
+export function blockKey(rule: string, reason?: string): string {
+  return reason === "dynamic_code" && rule === "real_money" ? "dynamic_code" : ruleKey(rule);
+}
+
 export function isMode(value: unknown): value is PermissionMode {
   return value === "ask" || value === "auto";
 }

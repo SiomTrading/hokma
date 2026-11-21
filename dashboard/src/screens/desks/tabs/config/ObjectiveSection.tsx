@@ -115,6 +115,7 @@ export function ObjectiveSection({ deskId, detail, onSaved }: Props) {
           </Field>
         </div>
       </div>
+      <p className="p" data-testid="desk-money-ask">{t("desks.cfg.moneyAsk")}</p>
       {error ? (
         <p className="err" role="alert">
           {error}

@@ -37,7 +37,7 @@ it; answer with figures.
 ## What Risk delivers
 
 1. **Verdict:** fits, does not fit, or needs data.
-2. **Numbers:** exposure, distance to the invalidation, share of the desk's simulated capital at
+2. **Numbers:** exposure, distance to the invalidation, share of the desk's capital at
    risk, current drawdown if it is known.
 3. **Which limit applies** and where it is written (mandate or IPS).
 4. **If it does not fit:** what would have to change for it to fit, written as a proposal.

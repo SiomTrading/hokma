@@ -1,0 +1,312 @@
+[
+  {
+    "activityId": 777001,
+    "time": "2026-11-20T15:30:00.000Z",
+    "user": {
+      "cdDomainId": "FAKE_DOMAIN",
+      "login": "fake-login",
+      "type": "CLIENT_USER",
+      "userId": 424242,
+      "systemUserName": "fake-system-user",
+      "firstName": "Ana",
+      "lastName": "Prueba",
+      "brokerRepCode": "FAKEREP"
+    },
+    "description": "Transaction description",
+    "accountNumber": "12345678",
+    "type": "TRADE",
+    "status": "VALID",
+    "subAccount": "CASH",
+    "tradeDate": "2026-11-20T15:30:00.000Z",
+    "settlementDate": "2026-11-20T15:30:00.000Z",
+    "positionId": 555001,
+    "orderId": 1000000001,
+    "netAmount": 282.25,
+    "activityType": "EXECUTION",
+    "transferItems": [
+      {
+        "instrument": {
+          "assetType": "EQUITY",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "TransactionEquity description",
+          "instrumentId": 1118,
+          "netChange": 264.75,
+          "type": "COMMON_STOCK"
+        },
+        "amount": 274.0,
+        "cost": 274.25,
+        "price": 274.5,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "OPTION",
+          "cusip": "037833100",
+          "symbol": "FAKE  261218C00100000",
+          "description": "TransactionOption description",
+          "instrumentId": 1125,
+          "netChange": 266.5,
+          "expirationDate": "2026-12-18",
+          "optionDeliverables": [
+            {
+              "rootSymbol": "FAKE",
+              "strikePercent": 100,
+              "deliverableNumber": 1,
+              "deliverableUnits": 265.5,
+              "deliverable": {
+                "assetType": "EQUITY",
+                "cusip": "037833100",
+                "symbol": "FAKE",
+                "description": "TransactionEquity description",
+                "instrumentId": 1120,
+                "netChange": 265.25,
+                "type": "COMMON_STOCK"
+              },
+              "assetType": "EQUITY"
+            }
+          ],
+          "optionPremiumMultiplier": 100,
+          "putCall": "CALL",
+          "strikePrice": 266.75,
+          "underlyingSymbol": "FAKE",
+          "underlyingCusip": "037833100",
+          "deliverable": {
+            "assetType": "EQUITY",
+            "cusip": "037833100",
+            "symbol": "FAKE",
+            "description": "TransactionEquity description",
+            "instrumentId": 1123,
+            "netChange": 266.0,
+            "type": "COMMON_STOCK"
+          },
+          "type": "VANILLA"
+        },
+        "amount": 274.75,
+        "cost": 275.0,
+        "price": 275.25,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "FIXED_INCOME",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "TransactionFixedIncome description",
+          "instrumentId": 1128,
+          "netChange": 267.25,
+          "maturityDate": "2026-11-20T15:30:00.000Z",
+          "factor": 267.5,
+          "multiplier": 267.75,
+          "variableRate": 268.0,
+          "type": "US_TREASURY_BILL"
+        },
+        "amount": 275.5,
+        "cost": 275.75,
+        "price": 276.0,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "MUTUAL_FUND",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "TransactionMutualFund description",
+          "instrumentId": 1133,
+          "netChange": 268.5,
+          "fundFamilyName": "Fake Family",
+          "fundFamilySymbol": "FAKEX",
+          "fundGroup": "Fake Group",
+          "exchangeCutoffTime": "2026-11-20T15:30:00.000Z",
+          "purchaseCutoffTime": "2026-11-20T15:30:00.000Z",
+          "redemptionCutoffTime": "2026-11-20T15:30:00.000Z",
+          "type": "NO_LOAD_TAXABLE"
+        },
+        "amount": 276.25,
+        "cost": 276.5,
+        "price": 276.75,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "CASH_EQUIVALENT",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "TransactionCashEquivalent description",
+          "instrumentId": 1135,
+          "netChange": 269.0,
+          "type": "SWEEP_VEHICLE"
+        },
+        "amount": 277.0,
+        "cost": 277.25,
+        "price": 277.5,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "COLLECTIVE_INVESTMENT",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "CollectiveInvestment description",
+          "instrumentId": 1137,
+          "netChange": 269.5,
+          "type": "EXCHANGE_TRADED_FUND"
+        },
+        "amount": 277.75,
+        "cost": 278.0,
+        "price": 278.25,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "CURRENCY",
+          "cusip": "037833100",
+          "symbol": "USD",
+          "description": "Currency description",
+          "instrumentId": 1139,
+          "netChange": 270.0
+        },
+        "amount": 278.5,
+        "cost": 278.75,
+        "price": 279.0,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "FOREX",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "Forex description",
+          "instrumentId": 1145,
+          "netChange": 271.5,
+          "baseCurrency": {
+            "assetType": "CURRENCY",
+            "cusip": "037833100",
+            "symbol": "AUD",
+            "description": "Currency description",
+            "instrumentId": 1141,
+            "netChange": 270.5
+          },
+          "counterCurrency": {
+            "assetType": "CURRENCY",
+            "cusip": "037833100",
+            "symbol": "CAD",
+            "description": "Currency description",
+            "instrumentId": 1143,
+            "netChange": 271.0
+          },
+          "type": "STANDARD"
+        },
+        "amount": 279.25,
+        "cost": 279.5,
+        "price": 279.75,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "FUTURE",
+          "cusip": "037833100",
+          "symbol": "/ESZ26",
+          "description": "Future description",
+          "instrumentId": 1147,
+          "netChange": 272.0,
+          "activeContract": false,
+          "expirationDate": "2026-12-18",
+          "lastTradingDate": "2026-11-20T15:30:00.000Z",
+          "firstNoticeDate": "2026-11-20T15:30:00.000Z",
+          "multiplier": 272.5,
+          "type": "STANDARD"
+        },
+        "amount": 280.0,
+        "cost": 280.25,
+        "price": 280.5,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "INDEX",
+          "cusip": "037833100",
+          "symbol": "$FAKE",
+          "description": "Index description",
+          "instrumentId": 1151,
+          "netChange": 273.0,
+          "activeContract": false,
+          "type": "BROAD_BASED"
+        },
+        "amount": 280.75,
+        "cost": 281.0,
+        "price": 281.25,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "PRODUCT",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "Product description",
+          "instrumentId": 1154,
+          "netChange": 273.75,
+          "type": "TBD"
+        },
+        "amount": 281.5,
+        "cost": 281.75,
+        "price": 282.0,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      }
+    ]
+  },
+  {
+    "activityId": 777002,
+    "time": "2026-11-20T15:30:00.000Z",
+    "user": {
+      "cdDomainId": "FAKE_DOMAIN",
+      "login": "fake-login",
+      "type": "CLIENT_USER",
+      "userId": 424242,
+      "systemUserName": "fake-system-user",
+      "firstName": "Ana",
+      "lastName": "Prueba",
+      "brokerRepCode": "FAKEREP"
+    },
+    "description": "Transaction description",
+    "accountNumber": "12345678",
+    "type": "DIVIDEND_OR_INTEREST",
+    "status": "VALID",
+    "subAccount": "CASH",
+    "tradeDate": "2026-11-20T15:30:00.000Z",
+    "settlementDate": "2026-11-20T15:30:00.000Z",
+    "positionId": 555001,
+    "orderId": 1000000001,
+    "netAmount": 282.5,
+    "activityType": "EXECUTION",
+    "transferItems": [
+      {
+        "instrument": {
+          "assetType": "EQUITY",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "TransactionEquity description",
+          "instrumentId": 1118,
+          "netChange": 264.75,
+          "type": "COMMON_STOCK"
+        },
+        "amount": 274.0,
+        "cost": 274.25,
+        "price": 274.5,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      }
+    ]
+  }
+]

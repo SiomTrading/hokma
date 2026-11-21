@@ -114,9 +114,18 @@ class ConnectionSettings:
         self._enabled = {k: v for k, v in enabled.items() if isinstance(v, bool)} if isinstance(enabled, dict) else {}
         self._priority = ({k: [x for x in v if isinstance(x, str)] for k, v in priority.items()
                            if isinstance(v, list)} if isinstance(priority, dict) else {})
+        # 1.0.9: the candles of stocks and ETFs follow their own order (`bars`). A file written by 1.0.8 has none, so it
+        # gets the saved `equity` order once, in memory, so the candles keep coming from the same source. The file is
+        # not rewritten here: the copy is saved the next time anything is saved.
+        if "bars" not in self._priority and "equity" in self._priority:
+            self._priority["bars"] = list(self._priority["equity"])
 
     def enabled(self, provider_id: str, default: bool) -> bool:
         return self._enabled.get(provider_id, default)
+
+    def explicit_enabled(self, provider_id: str) -> bool | None:
+        """The switch the owner saved for a provider, or None when the file says nothing about it."""
+        return self._enabled.get(provider_id)
 
     def order(self, asset_class: str, default: tuple[str, ...]) -> list[str]:
         """The saved order, completed with any provider the saved list does not mention (a new provider goes last)."""
@@ -140,8 +149,25 @@ class ConnectionSettings:
         self._enabled[provider_id] = value
         self._save()
 
+    def restore_enabled(self, provider_id: str, value: bool | None) -> None:
+        """Put the switch back as it was (None: the file did not mention the provider)."""
+        if value is None:
+            self._enabled.pop(provider_id, None)
+            self._save()
+        else:
+            self.set_enabled(provider_id, value)
+
     def set_order(self, asset_class: str, order: list[str]) -> None:
         self._priority[asset_class] = list(order)
+        self._save()
+
+    def move_first(self, uses: tuple[str, ...], provider_id: str, defaults: dict[str, tuple[str, ...]]) -> None:
+        """Put `provider_id` at the head of each use that lists it, in one save."""
+        for use in uses:
+            default = defaults.get(use, ())
+            if provider_id in default:
+                current = self.order(use, default)
+                self._priority[use] = [provider_id] + [p for p in current if p != provider_id]
         self._save()
 
     def _save(self) -> None:

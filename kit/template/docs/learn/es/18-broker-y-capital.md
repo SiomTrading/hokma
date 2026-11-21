@@ -1,7 +1,6 @@
 # Bróker y capital
 
-En la pestaña **Bróker** del Fondo manejas las cuentas. Cada mesa trabaja con una cuenta, y esa cuenta le da su capital. El bróker incluido con Hokma usa los precios reales de tus conexiones y cobra comisión y deslizamiento en cada operación. Las órdenes llegan en una versión posterior.
-
+En la pestaña **Bróker** del Fondo manejas las cuentas. Cada mesa trabaja con una cuenta, y esa cuenta le da su capital. El bróker incluido con Hokma usa los precios reales de tus conexiones y cobra comisión y deslizamiento en cada operación.
 ## Ver el bróker y sus costos
 
 1. En **Mesas de dinero**, abre la pestaña **Bróker**.
@@ -55,4 +54,4 @@ El **Capital** del Fondo es la suma de las cuentas asignadas a mesas. Una cuenta
 - **"No hay ningún bróker conectado".** Reinicia Hokma para recuperar el bróker de Hokma.
 - **"No hay cuentas libres".** Crea una cuenta nueva en **Bróker**.
 - **"Todas las mesas ya tienen cuenta".** Crea una mesa o quita una cuenta de otra.
-- **Conectar un bróker externo.** El botón **Conectar bróker** existe, pero la conexión llega con las órdenes. Las cuentas de un bróker externo se asignarán igual que estas.
+- **Conectar Schwab.** Conéctalo en Conexiones: sus cuentas aparecen en esta pestaña con el número enmascarado y sin **Reiniciar**, y las asignas a tus mesas de la misma forma. Su tarjeta tiene el interruptor **Los agentes pueden operar en esta cuenta**, apagado hasta que lo enciendas. Con él encendido, los agentes de la mesa envían órdenes con dinero real a tu cuenta de Schwab y puedes perder dinero.

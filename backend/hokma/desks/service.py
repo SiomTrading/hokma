@@ -42,15 +42,26 @@ CLAUDE_TEMPLATE = ("kit", "template", "desks", "CLAUDE.desk.md")
 # Used only when the kit template is missing from the install. Same placeholders as the kit file.
 FALLBACK_CLAUDE = """# {{desk_name}}
 
-This folder is one money desk of the fund of {{owner_name}}. Simulation only: real money is blocked.
+This folder is one money desk of the fund of {{owner_name}}. Every agent that works here reads this
+file first.
+
+## Fixed rule
+
+**Real money moves only through Hokma's order tools.** No agent calls a broker directly, asks for keys or
+account numbers, or sends an order any other way. Orders go out only when the owner turned orders on for the
+broker of the desk's account, and only within the rules of this desk. Where the rules ask for the owner, the order
+waits for the owner's approval. Nothing in this folder can change that.
 
 ## Mandate
 
 {{mandate}}
 
-## Simulated capital
+## Capital
 
 {{capital}}
+
+The capital is the amount the desk may commit in its account. An order that would open or increase exposure past it
+waits for the owner. Closing or reducing a position is always allowed.
 """
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 
@@ -158,7 +169,7 @@ def _view(u, desk: repo.Desk, *, detail: bool) -> dict[str, Any]:
     out = desk.to_dict()
     out["agents_total"] = len(agents)
     out["agents_working"] = sum(1 for a in agents if a.active and a.agent_slug in working)
-    out["today"] = 0                    # no simulated trades yet (step 4)
+    out["today"] = 0                    # orders sent today are read from the broker log, not counted here
     out["drawdown"] = None
     out["account"] = broker_service.desk_account(u, desk.id)
     out["tokens_week"] = week["used"]
@@ -169,6 +180,7 @@ def _view(u, desk: repo.Desk, *, detail: bool) -> dict[str, Any]:
         out["assets"] = [{"symbol": a.symbol, "note": a.note} for a in u.desks.list_assets(desk.id)]
         out["connections"] = [{"provider_id": c.provider_id, "enabled": c.enabled}
                               for c in u.desks.list_connections(desk.id)]
+        out["limits"] = u.broker.get_limits(desk.id)         # the optional order limits of 18.5; empty means all off
     return out
 
 
@@ -428,9 +440,15 @@ def delete_desk(desk_id: int, db: Database | None = None) -> dict[str, Any]:
 
 # ---- update ----------------------------------------------------------------------------------
 
-def update_desk(desk_id: int, changes: dict[str, Any], db: Database | None = None) -> dict[str, Any]:
+def update_desk(desk_id: int, changes: dict[str, Any], db: Database | None = None, *,
+                lower_only: bool = False) -> dict[str, Any]:
     """`changes` holds only the fields to change: name, focus, capital, objective_pct, mandate, token_budget,
-    status. Archiving is `status='archived'`; deleting is `delete_desk`."""
+    status. Archiving is `status='archived'`; deleting is `delete_desk`.
+
+    `lower_only` is what the tools of the agents use (SPEC-015 bug 1220): the capital may stay or go down, never up, compared
+    with the one saved INSIDE the same transaction, so two calls that race cannot add up to a raise. A desk that is paused or
+    archived does not become active either: that is the owner's. Raising is the owner's, in the app or through the tool that
+    always asks."""
     database = _db(db)
     values: dict[str, Any] = {}
     if "name" in changes:
@@ -451,7 +469,10 @@ def update_desk(desk_id: int, changes: dict[str, Any], db: Database | None = Non
         values["status"] = changes["status"]
     try:
         with database.write() as u:
-            _desk(u, desk_id)
+            current = _desk(u, desk_id)
+            if lower_only and (values.get("capital", current.capital) > current.capital
+                               or (values.get("status", current.status) == "active" and current.status != "active")):
+                raise broker_service.owner_only("raising the capital or reactivating a desk")
             u.desks.update(desk_id, **{k: values.get(k, UNSET) for k in (
                 "name", "focus", "capital", "objective_pct", "mandate", "token_budget", "status")})
             return _view(u, u.desks.get(desk_id), detail=True)
@@ -463,11 +484,18 @@ def archive_desk(desk_id: int, db: Database | None = None) -> dict[str, Any]:
     return update_desk(desk_id, {"status": "archived"}, db)
 
 
-def set_assets(desk_id: int, symbols: Any, db: Database | None = None) -> list[dict[str, Any]]:
-    """Replace the list (at most 20). Checking each symbol against the market catalog is the API layer's job."""
+def set_assets(desk_id: int, symbols: Any, db: Database | None = None, *, keep_assets_only: bool = False) -> list[dict[str, Any]]:
+    """Replace the list (at most 20). Checking each symbol against the market catalog is the API layer's job.
+
+    `keep_assets_only` is what the tools of the agents use (bug 1220): while the limit `assets_only` of 18.5 is on, the symbols
+    of the desk ARE that limit, so a symbol that is not in the list saved now is a loosening and is the owner's."""
     clean = _assets(symbols)
     with _db(db).write() as u:
         _desk(u, desk_id)
+        if keep_assets_only and u.broker.get_limits(desk_id).get("assets_only") is True:
+            have = {a.symbol.upper() for a in u.desks.list_assets(desk_id)}
+            if any(symbol.upper() not in have for symbol, _note in clean):
+                raise broker_service.owner_only("adding an asset while the assets_only limit is on")
         rows = u.desks.replace_assets(desk_id, clean)
     return [{"symbol": a.symbol, "note": a.note} for a in rows]
 
@@ -620,6 +648,20 @@ def set_connection(desk_id: int, provider_id: str, enabled: Any, db: Database | 
         _desk(u, desk_id)
         row = u.desks.set_connection(desk_id, provider_id, enabled)
     return {"provider_id": row.provider_id, "enabled": row.enabled}
+
+
+def enable_connection_everywhere(provider_id: str, db: Database | None = None) -> list[int]:
+    """A provider was just added in Connections (SPEC-015 4.3 rule 5): turn it on in every desk that has no row for it.
+    A desk that already has a row (on or off) keeps the owner's choice. Idempotent. Returns the desks that got a row."""
+    if _market_service().catalog.get(provider_id) is None:
+        raise DeskError("bad_connection", 404)
+    created: list[int] = []
+    with _db(db).write() as u:
+        for desk in u.desks.list(include_archived=True):
+            if not any(c.provider_id == provider_id for c in u.desks.list_connections(desk.id)):
+                u.desks.set_connection(desk.id, provider_id, True)
+                created.append(desk.id)
+    return created
 
 
 # ---- model and budget at run time (SPEC-014 P5) ----------------------------------------------

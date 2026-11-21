@@ -1,0 +1,27 @@
+{
+  "candles": [
+    {
+      "close": 119.0,
+      "high": 119.25,
+      "low": 119.5,
+      "open": 119.75,
+      "volume": 540,
+      "datetime": 1763652600441,
+      "datetimeISO8601": "2026-11-20"
+    },
+    {
+      "close": 120.5,
+      "high": 120.75,
+      "low": 121.0,
+      "open": 121.25,
+      "volume": 546,
+      "datetime": 1763652600447,
+      "datetimeISO8601": "2026-11-20"
+    }
+  ],
+  "empty": false,
+  "previousClose": 122.0,
+  "previousCloseDate": 1763652600449,
+  "previousCloseDateISO8601": "2026-11-20",
+  "symbol": "AAPL"
+}

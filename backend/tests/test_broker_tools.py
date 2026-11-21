@@ -35,7 +35,7 @@ def test_the_request_shows_the_owner_what_will_change():
 def test_create_an_account_of_25000_assign_it_to_the_desk_and_list_it(db):
     desk = desks.create_desk("Swing", 10000, template="minimal")
     made, err = call("account_create", {"name": "Cuenta 25k", "capital": 25000})
-    assert not err and made["cash"] == 25000 and made["broker"] == "Hokma Simulated"
+    assert not err and made["cash"] == 25000 and made["broker"] == "Hokma"
     got, err = call("desk_assign_account", {"desk_id": desk["id"], "account_id": made["id"]})
     assert not err and got["balance"]["cash"] == 25000 and got["name"] == "Cuenta 25k"
     listed, err = call("broker_list", {})

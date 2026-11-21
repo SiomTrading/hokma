@@ -337,6 +337,21 @@ describe("the labels under the bar", () => {
     expect(screen.getByTestId("options-feed")).toHaveTextContent("OPRA price · greeks calculated by Alpaca");
   });
 
+  it("says Schwab price and greeks, Prob.ITM calculated by Hokma, and nothing about estimated greeks", async () => {
+    const schwab = () => ({ chain: (dates: string[]) => ({ ...feed({ source: "Schwab", price_feed: "schwab", greeks: "provider" }), expirations: dates.map((d) => group(d, 0)) }) });
+    install(schwab());
+    await open("en");
+    expect(screen.getByTestId("options-feed")).toHaveTextContent("Schwab price and greeks · Prob.ITM calculated by Hokma");
+    expect(screen.getByTestId("options-feed").textContent).not.toMatch(/estimated|indicative|Alpaca/i);
+  });
+
+  it("says it in Spanish with the Prob. ITM wording of Hokma", async () => {
+    install({ chain: (dates) => ({ ...feed({ source: "Schwab", price_feed: "schwab", greeks: "provider" }), expirations: dates.map((d) => group(d, 0)) }) });
+    await open("es");
+    expect(screen.getByTestId("options-feed")).toHaveTextContent("Precio y griegas de Schwab · Prob. ITM calculada por Hokma");
+    expect(screen.getByTestId("options-feed").textContent).not.toContain("estimadas");
+  });
+
   it("says the market is closed with the time of the last quote in New York", async () => {
     install({ chain: (dates) => ({ ...feed({ market_open: false, as_of: "2026-11-20T20:59:58Z" }), expirations: dates.map((d) => group(d, 0)) }) });
     await open("en");
@@ -454,7 +469,8 @@ describe("states", () => {
       }),
     );
     mount();
-    expect(await screen.findByText("Connect Alpaca IEX in Connections to see the option chain.")).toBeInTheDocument();
+    expect(await screen.findByText("Connect Schwab or Alpaca IEX in Connections to see the option chain.")).toBeInTheDocument();
+    expect(screen.queryByText("Connect Alpaca IEX in Connections to see the option chain.")).toBeNull();
     expect(screen.getByRole("button", { name: "Open Connections" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("options-underlying").textContent).toContain("32.52"));
     expect(screen.queryByRole("table")).toBeNull();
@@ -466,6 +482,9 @@ describe("states", () => {
     ["upstream", 502, "The option chain could not be loaded from Alpaca. Try again later."],
     ["not_equity", 422, "Options are available for US stocks and ETFs."],
     ["bad_request", 422, "That request is not valid."],
+    ["schwab.auth", 401, "Your Schwab session ended or is not valid. Sign in again in Connections."],
+    ["schwab.rate_limited", 429, "Schwab is limiting requests. Wait a minute and try again."],
+    ["schwab.upstream", 502, "The Schwab option chain could not be loaded. Try again later."],
   ])("says what %s means when the expirations cannot be read", async (code, status, text) => {
     vi.stubGlobal(
       "fetch",

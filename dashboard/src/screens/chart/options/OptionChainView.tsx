@@ -11,7 +11,7 @@ import { FilterPanel } from "./FilterPanel";
 import { decimal, groupDate, percent, priced, quoteMoment, whole } from "./format";
 import { optionsErrorText } from "./optionsApi";
 import { DEFAULT_STRIKES, STRIKE_CHOICES } from "./types";
-import type { ExpirationGroup, ExpirationItem, OptionCell, StrikeChoice } from "./types";
+import type { ExpirationGroup, ExpirationItem, OptionCell, PriceFeed, StrikeChoice } from "./types";
 import { UnderlyingBar } from "./UnderlyingBar";
 import { useOptionChain } from "./useOptionChain";
 import type { GroupState } from "./useOptionChain";
@@ -37,6 +37,13 @@ function store(key: string, value: string): void {
 }
 
 type Side = "call" | "put";
+
+/** The line under the bar for each price feed. Schwab sends its own greeks; Hokma calculates only Prob.ITM. */
+const FEED_KEY: Record<PriceFeed, string> = {
+  indicative: "options.feed.indicative",
+  opra: "options.feed.opra",
+  schwab: "options.feed.schwab",
+};
 
 interface Tr {
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -100,7 +107,7 @@ export function OptionChainView({ symbol }: { symbol: string }) {
   const span = columns.calls.length + columns.puts.length + 2;
   const items = visibleGroups(state.expirations.items, filter);
   const meta = state.meta;
-  const feedText = meta ? t(meta.price_feed === "opra" ? "options.feed.opra" : "options.feed.indicative") : "";
+  const feedText = meta ? t(FEED_KEY[meta.price_feed] ?? "options.feed.indicative") : "";
   const closedText = meta && !meta.market_open ? t("options.closed", { when: quoteMoment(meta.as_of, locale) }) : "";
   const failure = state.expirations.status === "error" ? (state.expirations.error ?? "upstream") : null;
 
@@ -196,7 +203,7 @@ export function OptionChainView({ symbol }: { symbol: string }) {
           </div>
         ) : failure === "no_connection" ? (
           <div className="opt-center" data-testid="options-no-connection">
-            <p className="p">{t("options.noConnection")}</p>
+            <p className="p">{t("options.noConnection.any")}</p>
             <Button size="sm" variant="primary" onClick={openConnections}>
               {t("options.openConnections")}
             </Button>

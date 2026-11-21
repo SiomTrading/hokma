@@ -1,4 +1,8 @@
 """Hokma database layer."""
+from hokma.core import processguard
+
+processguard.require(__name__)          # runtime limit: only the Hokma server loads this package (core/processguard.py)
+
 from hokma.db.database import Database, Unit, get_database, open_database
 from hokma.db.errors import (Conflict, DbError, IntegrityViolation, MigrationError, NotFound, RuleViolation,
                              ValidationError)

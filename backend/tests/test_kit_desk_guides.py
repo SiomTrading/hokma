@@ -9,7 +9,7 @@ EM_DASH = chr(0x2014)
 DESK_SLUGS = ["desk-chief", "signals", "risk", "bull-case", "bear-case", "judge"]
 # Spanish words built from code points so this file stays free of handwritten Spanish.
 ES_SETTINGS = "Configuraci" + chr(0xF3) + "n"
-ES_NO_ORDERS = "no env" + chr(0xED) + "a " + chr(0xF3) + "rdenes desde las mesas"
+ES_ORDERS_ON = "las " + chr(0xF3) + "rdenes encendidas en la pesta" + chr(0xF1) + "a"
 NON_ENGLISH = re.compile("[" + "".join(chr(c) for c in (0xE1, 0xE9, 0xED, 0xF3, 0xFA, 0xF1, 0xBF, 0xA1)) + "]")
 
 
@@ -45,7 +45,7 @@ def test_guide_covers_the_whole_class(language):
         ("Terminal", "Agentes", "Operaciones", "Reglas", ES_SETTINGS)
     for word in budgets + tabs + ("80%", "100%"):
         assert word in text
-    assert ("does not send orders from the desks yet" if english else ES_NO_ORDERS) in text
+    assert ("orders turned on in the Broker tab" if english else ES_ORDERS_ON) in text
 
 
 def test_english_guide_is_english():

@@ -1,0 +1,94 @@
+[
+  {
+    "activityId": 777001,
+    "time": "2026-11-20T15:30:00.000Z",
+    "user": {
+      "cdDomainId": "FAKE_DOMAIN",
+      "login": "fake-login",
+      "type": "CLIENT_USER",
+      "userId": 424242,
+      "systemUserName": "fake-system-user",
+      "firstName": "Ana",
+      "lastName": "Prueba",
+      "brokerRepCode": "FAKEREP"
+    },
+    "description": "Transaction description",
+    "accountNumber": "12345678",
+    "type": "TRADE",
+    "status": "VALID",
+    "subAccount": "CASH",
+    "tradeDate": "2026-11-20T15:30:00.000Z",
+    "settlementDate": "2026-11-20T15:30:00.000Z",
+    "positionId": 555001,
+    "orderId": 1000000001,
+    "netAmount": 282.75,
+    "activityType": "EXECUTION",
+    "transferItems": [
+      {
+        "instrument": {
+          "assetType": "EQUITY",
+          "cusip": "037833100",
+          "symbol": "FAKE",
+          "description": "TransactionEquity description",
+          "instrumentId": 1118,
+          "netChange": 264.75,
+          "type": "COMMON_STOCK"
+        },
+        "amount": 274.0,
+        "cost": 274.25,
+        "price": 274.5,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      },
+      {
+        "instrument": {
+          "assetType": "OPTION",
+          "cusip": "037833100",
+          "symbol": "FAKE  261218C00100000",
+          "description": "TransactionOption description",
+          "instrumentId": 1125,
+          "netChange": 266.5,
+          "expirationDate": "2026-12-18",
+          "optionDeliverables": [
+            {
+              "rootSymbol": "FAKE",
+              "strikePercent": 100,
+              "deliverableNumber": 1,
+              "deliverableUnits": 265.5,
+              "deliverable": {
+                "assetType": "EQUITY",
+                "cusip": "037833100",
+                "symbol": "FAKE",
+                "description": "TransactionEquity description",
+                "instrumentId": 1120,
+                "netChange": 265.25,
+                "type": "COMMON_STOCK"
+              },
+              "assetType": "EQUITY"
+            }
+          ],
+          "optionPremiumMultiplier": 100,
+          "putCall": "CALL",
+          "strikePrice": 266.75,
+          "underlyingSymbol": "FAKE",
+          "underlyingCusip": "037833100",
+          "deliverable": {
+            "assetType": "EQUITY",
+            "cusip": "037833100",
+            "symbol": "FAKE",
+            "description": "TransactionEquity description",
+            "instrumentId": 1123,
+            "netChange": 266.0,
+            "type": "COMMON_STOCK"
+          },
+          "type": "VANILLA"
+        },
+        "amount": 274.75,
+        "cost": 275.0,
+        "price": 275.25,
+        "feeType": "COMMISSION",
+        "positionEffect": "OPENING"
+      }
+    ]
+  }
+]

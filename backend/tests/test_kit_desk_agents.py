@@ -94,7 +94,7 @@ def test_the_desk_folder_template_has_its_markers_and_the_fixed_rule():
     text = (TEMPLATE / "desks" / "CLAUDE.desk.md").read_text(encoding="utf-8")
     for marker in ("{{desk_name}}", "{{mandate}}", "{{capital}}", "{{owner_name}}"):
         assert marker in text
-    assert "Simulation only. Real money is blocked." in text
+    assert "Real money moves only through Hokma's order tools." in text
 
 
 def test_no_new_file_has_a_long_dash_or_origin_wording():

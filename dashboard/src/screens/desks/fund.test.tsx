@@ -257,7 +257,7 @@ describe("creating a desk", () => {
     expect(within(dialog).getByText("Create it with Hokma")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: new RegExp(`^${t("desks.start.template.name")}`) }));
     expect(await screen.findByLabelText("Desk name")).toBeInTheDocument();
-    expect(screen.getByText("It does not send orders yet. Real money stays blocked.")).toBeInTheDocument();
+    expect(screen.getByText("If you assign it an account of a broker with orders turned on, the desk trades with real money following its rules.")).toBeInTheDocument();
   });
 });
 

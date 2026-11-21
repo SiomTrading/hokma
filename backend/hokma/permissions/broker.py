@@ -19,7 +19,8 @@ from hokma.kit.hardblock import Block, Ctx, norm_text, short
 
 # Names a request can use, mapped to the tool the rules know.
 _ALIASES = {"read_file": "Read", "write_file": "Write", "edit_file": "Edit", "glob": "Glob", "grep": "Grep",
-            "list_dir": "Glob", "run_command": "Bash"}
+            "list_dir": "Glob", "run_command": "Bash",
+            "webfetch": "web_fetch"}                 # Claude Code spells it WebFetch: a URL tool, not an unknown tool (C8)
 
 
 @dataclass
@@ -27,6 +28,7 @@ class Verdict:
     allowed: bool
     rule: str = ""
     target: str = ""
+    reason: str = ""             # "dynamic_code": the same `real_money` block with its own text
 
     @property
     def text(self) -> str:
@@ -50,11 +52,19 @@ class BrokerCtx:
                    task_id=self.task_id)
 
 
-def _text_rule(text: str, ctx: Ctx) -> Block | None:
-    """Free text (a URL, MCP arguments): secrets stores and real-money broker hosts."""
+def _text_rule(text: str, ctx: Ctx, *, code: bool = False) -> Block | None:
+    """Free text (a URL, MCP arguments): secrets stores, real-money broker hosts, and what reaches Hokma's order code:
+    an import of the package, its modules, its database, its folders on the import path, its runtime interpreter. `code`:
+    the text may carry python (MCP arguments), so a name or code built at run time is refused too."""
     low = norm_text(text)
+    try:
+        hardblock.check_hokma_code(text, ctx, python=code)     # SPEC-015 18.7: the same rule as the hook, one function, first
+    except Block as block:
+        return Block(block.rule, short(text), block.reason)
     if hardblock.SECRET_RE.search(low) or hardblock.data_secret_in_text(low, ctx):
         return Block("secrets", short(text))
+    if hardblock.names_hokma_module(norm_text(text)):
+        return Block("real_money", short(text))
     if (ctx.host_re and ctx.host_re.search(low)) or (ctx.url_re and ctx.url_re.search(low)):
         return Block("real_money", short(text))
     return None
@@ -104,6 +114,7 @@ def _mcp_name(tool: str, tool_input: dict[str, Any]) -> str | None:
 
 
 def _evaluate(tool: str, tool_input: dict[str, Any], cwd: str, bctx: BrokerCtx) -> Verdict:
+    given = tool.strip() if isinstance(tool, str) else ""          # the name as the engine wrote it (`_canonical` lowercases MCP names)
     tool = _canonical(tool)
     if tool == "Bash" and bctx.shell == "PowerShell":
         tool = "PowerShell"
@@ -125,15 +136,18 @@ def _evaluate(tool: str, tool_input: dict[str, Any], cwd: str, bctx: BrokerCtx) 
             return Verdict(False, "hokma_internal", "mcp")
         parts: list[str] = [name]
         _flatten(tool_input, parts)
+        listed = hardblock.is_hokma_order_tool(name if tool == "mcp" else given, ctx.brokers)    # SPEC-015 18.7: exact names
+        if not listed and hardblock.is_hokma_order_tool(name, ctx.brokers):
+            return Verdict(False, "real_money", short(given))      # `mcp__Hokma__order_place`: only the exact spelling is Hokma's
         block = hardblock.evaluate({"tool_name": name, "tool_input": {}}, ctx)
-        if block is None:
+        if block is None and not listed:
             hit = next((x for x in parts if hardblock.ORDER_TOOL.search(x)), None)
             if hit is not None:
                 block = Block("real_money", short(hit))
-        block = block or _text_rule("\n".join(parts), ctx)
+        block = block or _text_rule("\n".join(parts), ctx, code=True)
     else:
         block = hardblock.evaluate(payload, ctx)
-    return Verdict(False, block.rule, block.target) if block else ALLOW
+    return Verdict(False, block.rule, block.target, block.reason) if block else ALLOW
 
 
 def check(tool: str, tool_input: dict[str, Any], *, cwd: str, ctx: BrokerCtx) -> Verdict:
@@ -145,7 +159,7 @@ def check(tool: str, tool_input: dict[str, Any], *, cwd: str, ctx: BrokerCtx) ->
         cwd = cwd if isinstance(cwd, str) and os.path.isabs(cwd) else (ctx.roots[0] if ctx.roots else os.getcwd())
         verdict = _evaluate(tool, tool_input, cwd, ctx)
         if not verdict.allowed:
-            hardblock.log_block(ctx.hardblock_ctx(cwd), tool, Block(verdict.rule, verdict.target))
+            hardblock.log_block(ctx.hardblock_ctx(cwd), tool, Block(verdict.rule, verdict.target, verdict.reason))
         return verdict
     except Exception as exc:                                   # closed on failure
         try:

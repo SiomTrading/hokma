@@ -1,6 +1,6 @@
 [project]
 name = "hokma"
-version = "1.0.8"
+version = "1.0.9"
 description = "Hokma: installable harness by SiomTrading"
 readme = "README.md"
 requires-python = ">=3.12"

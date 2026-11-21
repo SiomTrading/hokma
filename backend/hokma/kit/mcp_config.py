@@ -20,7 +20,10 @@ from hokma.i18n import t
 from hokma.kit.guard import under_any
 from hokma.kit.writable import agent_writable_roots
 
-SERVER_NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+RESERVED_SERVER = "hokma"          # Hokma's own server; a server of another origin cannot take this name (SPEC-015 18.7)
+# The lookahead refuses `hokma` in any case, so every caller that checks a name with SERVER_NAME (extensions, requests)
+# rejects it without a change of its own.
+SERVER_NAME = re.compile(r"^(?!(?i:" + RESERVED_SERVER + r")$)[A-Za-z0-9._-]{1,64}$")
 HTTPS_URL = re.compile(r"^https://[^\s]+$")
 ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 URL_LIKE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
@@ -34,8 +37,21 @@ CODE_FILE_EXTENSIONS = (".js", ".mjs", ".cjs", ".ts", ".py", ".sh", ".rb", ".pl"
                         ".jar")
 
 
-def validate_mcp(config: object) -> dict:
-    """Shape check only; returns a clean copy. See the module docstring for why there is no content denylist."""
+def is_reserved(name: object) -> bool:
+    """True for the server name `hokma` in any case: the name of Hokma's own MCP server, built by `kit/launch.py` and never
+    registered through the extensions file or an agent's request. The permission broker lowercases MCP names, so
+    `Hokma` would otherwise read as `hokma`."""
+    return isinstance(name, str) and name.strip().lower() == RESERVED_SERVER
+
+
+def validate_mcp(config: object, name: str | None = None) -> dict:
+    """Shape check only; returns a clean copy. See the module docstring for why there is no content denylist.
+
+    `name` is the server name the definition will be registered under (pass it whenever it is known): a definition for the
+    reserved name `hokma` is refused. The four order tools of Hokma's server (SPEC-015 18.7) are let through the
+    `real_money` rule by their exact name `mcp__hokma__order_*`, so no server of another origin may carry that name."""
+    if name is not None and is_reserved(name):
+        raise ValueError(t("ext.server_name"))
     if not isinstance(config, dict):
         raise ValueError(t("mcp.not_object"))
     kind = config.get("type", "stdio")

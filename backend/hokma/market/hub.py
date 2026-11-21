@@ -35,9 +35,9 @@ from hokma.market.adapters.polling import PROVIDER_ID as POLLING_ID
 from hokma.market.aggregator import BarAggregator
 from hokma.market.errors import INTERVAL_UNAVAILABLE, SECONDS_NEED_TICKS, UNKNOWN_SYMBOL, MarketError
 from hokma.market.intervals import Interval, IntervalError, RangeInterval, parse, visible_bars
-from hokma.market.messages import DOWN_CODES, connection_message, interval_message, market_message
+from hokma.market.messages import CONNECTION_CODES, DOWN_CODES, connection_message, interval_message, market_message
 from hokma.market.models import Candle, ChartData, OpeningRange
-from hokma.market.providers import ProviderCatalog, ProviderSpec
+from hokma.market.providers import ASSET_CLASSES, USES, ProviderCatalog, ProviderSpec
 from hokma.market.rangebars import RangeBar, RangeBarBuilder, approximate_from_minutes, build_from_ticks, splice
 from hokma.market.service import build_chart
 from hokma.market.source import MarketDataSource
@@ -51,6 +51,7 @@ MIN_INTERVAL = 0.25                 # seconds between live messages of one subsc
 MAX_SUBS_PER_CLIENT = 100
 POLLING_MAX_SYMBOLS = 20
 TEST_TIMEOUT = 10.0
+MAINTAIN_SECONDS = 60.0              # how often the Schwab session is checked for renewal and the 24 h notice (5.3)
 UNREACHABLE_AFTER = 3              # failed connection attempts that end a test before its 10 seconds
 ACK_GRACE = 2.0                     # a subscription acknowledged but silent (market closed) still counts as connected
 OUTBOX_LIMIT = 2000
@@ -431,6 +432,8 @@ class MarketHub:
         spec, runtime = self.catalog.get(provider_id), self._runtimes.get(provider_id)
         if spec is None or runtime is None or provider_id not in ADAPTERS or runtime.state == "error":
             return False
+        if spec.auth == "oauth" and not getattr(self.config, "signed_in", lambda _id: True)(provider_id):
+            return False                                       # keys saved but no session: nothing to connect yet
         return self.config.is_enabled(provider_id) and (not spec.needs_key or self.config.has_key(provider_id))
 
     def _candidates(self, symbol: str, asset: str | None, exclude: frozenset[str]) -> list[tuple[ProviderRuntime, str]]:
@@ -460,7 +463,7 @@ class MarketHub:
     def live_classes(self) -> list[str]:
         """Asset classes with a provider that is switched on, has its key and gives live data."""
         out = []
-        for asset in self.catalog.default_priority:
+        for asset in ASSET_CLASSES:
             for provider_id in self.config.order(asset):
                 spec, runtime = self.catalog.get(provider_id), self._runtimes.get(provider_id)
                 if spec and runtime and asset in spec.asset_classes and self._eligible(provider_id) and runtime.data_state == "live":
@@ -922,7 +925,7 @@ class MarketHub:
     def card(self, provider_id: str) -> dict:
         spec, runtime = self.catalog.providers[provider_id], self._runtimes[provider_id]
         priority = {c: self.config.order(c).index(provider_id) for c in spec.asset_classes}
-        return {
+        card = {
             "id": provider_id, "name": spec.name, "asset_classes": list(spec.asset_classes),
             "needs_key": spec.needs_key, "key_fields": list(spec.key_fields),
             "key_state": self._key_state(spec), "enabled": self.config.is_enabled(provider_id),
@@ -930,13 +933,38 @@ class MarketHub:
             "error_message": connection_message(runtime.error_code), "symbols_in_use": len(runtime.feeds),
             "max_symbols": spec.max_symbols, "priority": priority,
             "available": provider_id in ADAPTERS,
+            "added": self._added(spec), "auth": spec.auth, "uses": self.catalog.uses_of(provider_id),
         }
+        if spec.auth == "oauth":
+            card["session"] = self._session()
+        return card
+
+    def _added(self, spec: ProviderSpec) -> bool:
+        """"Connected" as the Connections screen means it (4.3 rule 1), whatever the switch says."""
+        said = getattr(self.config, "is_added", None)
+        if said is not None:
+            return bool(said(spec.id))
+        return self.config.has_key(spec.id) if spec.needs_key else self.config.is_enabled(spec.id)
+
+    @staticmethod
+    def _session() -> dict:
+        """The Schwab sign-in as the card shows it: state, expiry and the masked accounts. Nothing secret."""
+        try:
+            from hokma.schwab import auth
+
+            return auth.session_card()
+        except Exception:                                    # noqa: BLE001  (no auth yet, or it cannot say)
+            return {"state": "signed_out", "session_expires_at": None, "accounts": []}
 
     def cards(self) -> list[dict]:
         return [self.card(pid) for pid in self.catalog.providers]
 
     def groups(self) -> dict[str, list[str]]:
-        return {c: self.config.order(c) for c in self.catalog.default_priority}
+        """The order of each asset class (what 1.0.8 sent). `uses()` has all the rows of "Order of use"."""
+        return {c: self.config.order(c) for c in ASSET_CLASSES}
+
+    def uses(self) -> dict[str, list[str]]:
+        return {u: self.config.order(u) for u in USES}
 
     async def ensure_started(self) -> None:
         """Warm the providers that are ready, once: they connect in the background, never in the caller's way."""
@@ -947,6 +975,25 @@ class MarketHub:
         for provider_id in self.catalog.providers:
             if self._eligible(provider_id):
                 self._spawn(self.refresh(provider_id))
+        if any(spec.auth == "oauth" for spec in self.catalog.providers.values()):
+            self._spawn(self._maintain_sessions())
+
+    async def _maintain_sessions(self) -> None:
+        """Every `MAINTAIN_SECONDS`: renew the Schwab token when it is due and send the 24 h notice, in a thread. It
+        only runs when there is a session, and it ends with the hub (`close` cancels it)."""
+        while True:
+            await asyncio.sleep(MAINTAIN_SECONDS)
+            try:
+                await asyncio.to_thread(self._maintain_once)
+            except Exception as exc:                         # noqa: BLE001  (one bad round never stops the next)
+                log.warning("session maintenance failed: %s", type(exc).__name__)
+
+    @staticmethod
+    def _maintain_once() -> None:
+        from hokma.schwab import auth
+
+        if auth.is_connected():
+            auth.maintain()
 
     async def refresh(self, provider_id: str, restart: bool = False) -> None:
         """The owner changed something about a provider: reconnect it, or move its subscriptions away."""
@@ -979,6 +1026,8 @@ class MarketHub:
         self._bind()
         timeout = TEST_TIMEOUT if timeout is None else timeout
         spec, runtime = self.catalog.providers[provider_id], self._runtimes[provider_id]
+        if spec.auth == "oauth":
+            return await self._test_oauth(runtime, spec)
         if provider_id not in ADAPTERS:
             return self._test_failure(runtime, "connections.unavailable")
         if spec.needs_key and not self.config.has_key(provider_id):
@@ -987,8 +1036,11 @@ class MarketHub:
         upstream = symbol_map.to_provider(provider_id, spec.test_symbol, asset, self._today())
         if upstream is None:
             return self._test_failure(runtime, "connections.unavailable")
-        runtime.reset_error()
         assert self._lock is not None
+        if runtime.state == "error" and runtime.source is not None:
+            async with self._lock:                             # the provider already refused this source for good: it is
+                await self._close_source(runtime)              # dead, so the test opens a new one and gets the real answer
+        runtime.reset_error()
         started = time.monotonic()
         probe = _Probe(upstream)
         runtime.probes.append(probe)
@@ -1021,6 +1073,24 @@ class MarketHub:
                 await runtime.source.unsubscribe([upstream])
             if runtime.source is not None and not self.config.is_enabled(provider_id) and not runtime.feeds:
                 await self._close_source(runtime)
+            self._broadcast_connection(runtime)
+
+    async def _test_oauth(self, runtime: ProviderRuntime, spec: ProviderSpec) -> dict:
+        """Schwab has no stream to open here: its test is a real call with the session (`auth.run_test`, in a thread),
+        and it answers in the same shape as any other provider."""
+        from hokma.schwab.http import SchwabError
+
+        try:
+            from hokma.schwab import auth
+        except ImportError:
+            return self._test_failure(runtime, "connections.unavailable")
+        runtime.reset_error()
+        try:
+            return await asyncio.to_thread(auth.run_test)
+        except SchwabError as error:
+            code = "connections.no_login" if error.code == "schwab.err.not_connected" else error.code
+            return self._test_failure(runtime, code if code in CONNECTION_CODES else "connections.unreachable")
+        finally:
             self._broadcast_connection(runtime)
 
     def _test_success(self, runtime: ProviderRuntime, spec: ProviderSpec, seconds: float, first_data: bool) -> dict:

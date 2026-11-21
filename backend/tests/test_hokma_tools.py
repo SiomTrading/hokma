@@ -35,11 +35,18 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "journal_write", "journal_search", "ips_read", "decision_propose", "decision_list", "schedule_create",
                 "schedule_list", "extension_request", "agents_list", "agent_save", "skill_save", "skill_install", "bug_report",
                 "bug_update", "bug_list", "docs_search", "docs_list", "notify_owner",
-                "desk_list", "desk_show", "desk_create", "desk_configure", "trash_move", "market_quote",
+                "desk_list", "desk_show", "desk_create", "desk_configure", "desk_money_set", "trash_move", "market_quote",
                 "market_candles", "options_chain", "company_profile", "company_news", "earnings_calendar", "earnings_surprises",
                 "basic_financials", "economic_calendar", "market_news", "watchlist_all", "today_show", "today_configure",
                 "broker_list", "account_create", "account_reset", "desk_assign_account", "desk_unassign_account",
-                "gmail_search", "gmail_read", "gmail_send"}
+                "gmail_search", "gmail_read", "gmail_send",
+                "schwab_quotes", "schwab_quote", "schwab_option_chain", "schwab_expirations", "schwab_price_history",
+                "schwab_movers", "schwab_market_hours", "schwab_instruments", "schwab_instrument_by_cusip",
+                "schwab_account_list", "schwab_accounts", "schwab_orders", "schwab_order", "schwab_transactions",
+                "schwab_transaction", "schwab_user_preference", "volatility_history",
+                "portfolio_greeks", "account_activity",
+                "order_preview", "order_place", "order_replace", "order_cancel", "order_status", "order_list",
+                "position_list", "order_log"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]
     assert all(t["inputSchema"]["additionalProperties"] is False for t in listed)
@@ -635,7 +642,7 @@ def test_desk_tools_are_declared_with_strict_schemas():
     assert listed["desk_list"]["inputSchema"]["properties"] == {}
     assert listed["desk_show"]["inputSchema"]["required"] == []
     assert {n for n in hokma_tools.TOOLS if n.startswith("desk_") and hokma_tools.TOOLS[n][4]} == {
-        "desk_create", "desk_configure", "desk_assign_account", "desk_unassign_account"}
+        "desk_create", "desk_configure", "desk_money_set", "desk_assign_account", "desk_unassign_account"}
 
 
 def test_desk_list_gives_id_name_and_status_and_leaves_archived_out(two_desks, db):
@@ -761,8 +768,9 @@ def test_options_chain_is_a_read_only_tool_without_unit_and_pre_allowed():
     assert listed["inputSchema"]["required"] == ["symbol"]
     assert set(listed["inputSchema"]["properties"]) == {"symbol", "expiration", "type", "min_days", "max_days", "min_delta",
                                                          "max_delta", "min_open_interest", "max_spread_pct", "limit"}
-    assert listed["description"] == ("Option chain of one US stock or ETF, read only, from the Alpaca key saved in "
-                                     "Connections: strike, expiration, days, type, bid, ask, mid, spread percent, last, "
+    assert listed["description"] == ("Option chain of one US stock or ETF, read only, from Schwab when it is connected and "
+                                     "first in Options, otherwise from the Alpaca IEX key saved in Connections: "
+                                     "strike, expiration, days, type, bid, ask, mid, spread percent, last, "
                                      "volume, open interest, delta, gamma, theta, vega and IV. Filters by days to "
                                      "expiration, absolute delta, minimum open interest and maximum spread. On the free "
                                      "Alpaca plan prices are indicative and greeks are estimated; the answer says which. "

@@ -2,8 +2,9 @@
 
 Tools: `company_profile`, `company_news`, `earnings_calendar`, `earnings_surprises` and `basic_financials`.
 
-Finnhub is asked first. When the student has no Finnhub (or switched it off, or the desk does not use it, or the plan
-refuses that data), the next connected provider that has it is asked (Alpaca has news). When none can, the error says
+The providers are asked in the order of the use "news" of Connections (Finnhub first by default). When the student has
+no Finnhub (or switched it off, or the desk does not use it, or the plan refuses that data), the next connected provider
+that has it is asked (Alpaca has news). When none can, the error says
 which connection is missing and where it is connected. The saved key is read from the system store only to make the
 request, goes in a request header, is never part of an answer or an error, and every answer is scrubbed of it.
 
@@ -59,7 +60,6 @@ PROVIDERS = {
                             "basic_financials", "economic_calendar", "market_news")),
     "alpaca": ("Alpaca", ("company_news", "market_news")),
 }
-ORDER = ("finnhub", "alpaca")
 
 
 def _what(tool: str) -> str:
@@ -379,10 +379,10 @@ def _ask(tool: str, args: dict, desk_id: int | None) -> dict:
     allowed = _allowed(desk_id)
     reasons: list[str] = []
     secrets: list[str] = []
-    for provider in ORDER:
-        name, tools = PROVIDERS[provider]
-        if tool not in tools:
+    for provider in service.order("news"):                   # the order of the use "news" of Connections (SPEC-015 4.4)
+        if provider not in PROVIDERS or tool not in PROVIDERS[provider][1]:
             continue
+        name = PROVIDERS[provider][0]
         now = _clock()
         if not service.is_enabled(provider) or not service.has_key(provider):
             continue

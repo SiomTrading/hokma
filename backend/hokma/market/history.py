@@ -20,6 +20,7 @@ from pathlib import Path
 
 from hokma.core import tls
 from hokma.market import symbols as symbol_map
+from hokma.market.aggregator import BarAggregator
 from hokma.market.cache import DiskCache, RateLimiter
 from hokma.market.errors import BAD_RESPONSE, NETWORK, RATE_LIMITED, UNKNOWN_SYMBOL, UPSTREAM, MarketError
 from hokma.market.models import TIMEFRAME_SECONDS, Candle, Series, SessionPeriod
@@ -44,22 +45,25 @@ HISTORY_CLASSES = {
     "alpaca": ("equity", "crypto"),
     "coinbase": ("crypto",),
     "finnhub": ("equity", "forex", "crypto"),
+    "schwab": ("equity",),
 }
 # Providers that serve bars but are not in the order of Connections for the class, by class, in the order they go last.
-EXTRA_ORDER = {"crypto": ("alpaca",), "equity": ("alpaca",)}
+# The bars of stocks follow the use `bars` of Connections (4.4), so they need no entry here.
+EXTRA_ORDER = {"crypto": ("alpaca",)}
+BARS_USE = {"equity": "bars"}                 # the use of Connections whose order decides the bars of an asset class
 
 HttpGet = Callable[[str, dict], tuple[int, str]]
 Allowed = Callable[[str], bool] | None
 
 
 class _KeepKeysOnHost(urllib.request.HTTPRedirectHandler):
-    """A redirect to another host does not carry the provider's key headers (APCA-*)."""
+    """A redirect to another host does not carry the provider's key headers (APCA-*, Authorization)."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new is not None and urllib.parse.urlsplit(newurl).hostname != urllib.parse.urlsplit(req.full_url).hostname:
             for store in (new.headers, new.unredirected_hdrs):
-                for name in [n for n in store if n.lower().startswith("apca-")]:
+                for name in [n for n in store if n.lower().startswith("apca-") or n.lower() == "authorization"]:
                     del store[name]
         return new
 
@@ -235,7 +239,64 @@ def _finnhub(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, no
     return _regular_hours(out, base) if asset == "equity" else out
 
 
-FETCHERS = {"alpaca": _alpaca, "coinbase": _coinbase, "finnhub": _finnhub}
+SCHWAB_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 30}          # Schwab has no 60 minute bar: 1h is 30 minutes folded in two
+_HOUR_ANCHOR = BarAggregator(NEW_YORK, "equity", ())
+
+
+def _fold_to_hours(candles: list[Candle]) -> list[Candle]:
+    """30 minute bars of the regular session into hours counted from the 09:30 open (the grid of the chart)."""
+    out: dict[int, Candle] = {}
+    for candle in candles:
+        start = _HOUR_ANCHOR.bounds(candle.t, "1h")[0]
+        held = out.get(start)
+        out[start] = (Candle(start, candle.o, candle.h, candle.l, candle.c, candle.v) if held is None else
+                      Candle(start, held.o, max(held.h, candle.h), min(held.l, candle.l), candle.c, held.v + candle.v))
+    return list(out.values())
+
+
+def _schwab(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, now: float) -> list[Candle]:
+    """`GET /marketdata/v1/pricehistory` through `hokma.schwab.endpoints` (SPEC-015 5.5): the span of `SPAN_DAYS` by
+    `startDate` and `endDate` in ms, regular hours only, `empty: true` is no bars and not an error. `fetch` and
+    `secret` are unused: the session and the host belong to `hokma.schwab`."""
+    from hokma.schwab import endpoints, http, models
+
+    mapped = symbol_map.to_provider("schwab", symbol, asset)
+    if mapped is None:
+        raise MarketError(UNKNOWN_SYMBOL, 404)
+    window = {"startDate": int((now - SPAN_DAYS[base] * 86400) * 1000), "endDate": int(now * 1000),
+              "needExtendedHoursData": False}
+    if base == "1D":
+        window.update(periodType="year", frequencyType="daily", frequency=1)
+    else:
+        window.update(frequencyType="minute", frequency=SCHWAB_MINUTES[base])
+    try:
+        data = models.dump(endpoints.price_history(mapped, **window))
+    except http.SchwabError as error:
+        if error.code == http.DENIED:
+            raise Denied from None
+        if error.code == http.RATE_LIMITED:
+            raise MarketError(RATE_LIMITED, 429) from None
+        if error.code == http.NOT_FOUND:
+            raise MarketError(UNKNOWN_SYMBOL, 404) from None
+        raise MarketError(UPSTREAM, 502) from None          # no session, refused, unreachable, server: skipped for a while
+    if not isinstance(data, dict) or not isinstance(data.get("candles", []), list):
+        raise MarketError(BAD_RESPONSE, 502)
+    if data.get("empty") is True:
+        return []
+    out = []
+    for row in data.get("candles") or []:
+        if not isinstance(row, dict) or not isinstance(row.get("datetime"), (int, float)):
+            continue
+        item = _candle(int(row["datetime"]) // 1000, row.get("open"), row.get("high"), row.get("low"), row.get("close"),
+                       row.get("volume"))
+        if item:
+            out.append(item)
+    out.sort(key=lambda candle: candle.t)
+    out = _regular_hours(out, base)
+    return _fold_to_hours(out) if base == "1h" else out
+
+
+FETCHERS = {"alpaca": _alpaca, "coinbase": _coinbase, "finnhub": _finnhub, "schwab": _schwab}
 
 
 # ---------- the series around the bars ----------
@@ -272,7 +333,7 @@ class ConnectedSource:
         self._fetch = fetch
         self._fetchers = fetchers if fetchers is not None else FETCHERS
         self._limiters = {pid: RateLimiter(limit=limit, window=60.0) for pid, limit in
-                          {"alpaca": 150, "coinbase": 240, "finnhub": 50}.items()}
+                          {"alpaca": 150, "coinbase": 240, "finnhub": 50, "schwab": 100}.items()}
         self._memory: dict[tuple, float] = {}              # (provider, symbol, base) -> epoch until which it is skipped
         self._denied: dict[str, float] = {}                # provider -> epoch until which its refusal is remembered
 
@@ -283,7 +344,7 @@ class ConnectedSource:
         asset = symbol_map.classify(symbol)
         if asset is None:
             return []
-        order = [p for p in self._config.order(asset) if p in self._fetchers]
+        order = [p for p in self._config.order(BARS_USE.get(asset, asset)) if p in self._fetchers]
         order += [p for p in EXTRA_ORDER.get(asset, ()) if p in self._fetchers and p not in order]
         order += [p for p in self._fetchers if asset in HISTORY_CLASSES.get(p, ()) and p not in order]
         out = []
@@ -293,8 +354,11 @@ class ConnectedSource:
                 continue
             if allowed is not None and not allowed(pid):
                 continue
-            if self._config.is_enabled(pid) and (not spec.needs_key or self._config.has_key(pid)):
-                out.append(pid)
+            if not self._config.is_enabled(pid) or (spec.needs_key and not self._config.has_key(pid)):
+                continue
+            if spec.auth == "oauth" and not getattr(self._config, "signed_in", lambda _id: True)(pid):
+                continue                                   # keys saved but no session: nothing to ask
+            out.append(pid)
         return out
 
     def for_desk(self, allowed: Iterable[str] | None) -> "MarketDataSource":
@@ -352,7 +416,8 @@ class ConnectedSource:
     def _download(self, pid: str, symbol: str, asset: str, base: str, now: int) -> list[Candle]:
         if not self._limiters[pid].allow():
             raise MarketError(RATE_LIMITED, 429)
-        secret = self._config.read_secret(pid) if self._catalog.get(pid).needs_key else ""
+        spec = self._catalog.get(pid)
+        secret = self._config.read_secret(pid) if spec.needs_key and spec.auth != "oauth" else ""
         if secret is None:
             raise Denied
         return self._fetchers[pid](self._fetch, secret, symbol, asset, base, now)

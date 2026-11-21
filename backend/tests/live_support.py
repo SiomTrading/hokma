@@ -70,9 +70,10 @@ class FakeWs:
     """A WebSocket server. `handler(ws, fake)` is the provider's side of the conversation; `received` collects what
     the client sent as `(path, json)`."""
 
-    def __init__(self, handler, reject_token: str | None = None) -> None:
+    def __init__(self, handler, reject_token: str | None = None, hold: threading.Event | None = None) -> None:
         self.handler = handler
         self.reject_token = reject_token                     # Finnhub style: a wrong `?token=` is an HTTP 401
+        self.hold = hold                                     # when given, every handshake waits until the test sets it
         self.received: list[tuple[str, object]] = []
         self.paths: list[str] = []
         self.clients: set = set()
@@ -101,6 +102,8 @@ class FakeWs:
                 self.clients.discard(ws)
 
         async def process(connection, request):
+            if self.hold is not None:                        # an event decides when the server answers, never a delay
+                await asyncio.get_running_loop().run_in_executor(None, self.hold.wait, 30)
             if self.reject_token is not None and f"token={self.reject_token}" not in request.path:
                 return connection.respond(HTTPStatus.UNAUTHORIZED, "invalid token\n")
             return None

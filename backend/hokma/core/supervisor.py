@@ -1,6 +1,8 @@
 """`hokma start`: a light supervisor that keeps the Hokma engine running.
 
-- The supervisor creates the session token once and writes it to the engine's standard input. The token is never
+- The supervisor creates the session token once and writes it to the engine's standard input, with a one-time launch
+  proof that makes the engine a server (`hokma.core.launchproof`: a `hokma engine` started by anyone else does not
+  serve). The token is never
   an argument, never in the environment and never in a file, and a relaunched engine gets the same one.
 - Exit code 75 means "I updated myself, start me again": the engine is relaunched at once from the slot that
   `current` names, on the same port and with the same token.
@@ -38,7 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TextIO
 
-from hokma.core import config, control, enginelock, nativeprobe
+from hokma.core import config, control, enginelock, launchproof, nativeprobe
 from hokma.core.proc import spawn_kwargs
 from hokma.core.session import OWNER_MARKER, new_channel_key, new_owner_secret, new_token, parse_owner_note, secret_hash
 from hokma.i18n import t
@@ -137,11 +139,14 @@ def slot_changed() -> bool:
     return mine is not None and current is not None and mine != current
 
 
-def handoff_payload(token: str, owner_hash: str, owner_secret_hash: str = "", channel_key: str = "") -> bytes:
+def handoff_payload(token: str, owner_hash: str, owner_secret_hash: str = "", channel_key: str = "",
+                    launch_proof: str = "") -> bytes:
     """Four lines: the session token, the owner confirmation hash (empty when none yet), the hash of the one-time
     secret still waiting for its registration (empty when consumed) and the key that signs the engine's note
-    (empty in a hand over: the new supervisor makes its own for each engine)."""
-    return "\n".join((token, owner_hash, owner_secret_hash, channel_key)).encode("ascii") + b"\n"
+    (empty in a hand over: the new supervisor makes its own for each engine). An engine launch adds a fifth line, the
+    launch proof (`hokma.core.launchproof`); without one the payload keeps its four lines."""
+    lines = (token, owner_hash, owner_secret_hash, channel_key) + ((launch_proof,) if launch_proof else ())
+    return "\n".join(lines).encode("ascii") + b"\n"
 
 
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
@@ -243,8 +248,10 @@ class Supervisor:
                  job: object | None = None, owner_hash: str = "", owner_secret_hash: str = "",
                  kill_group: Callable[[], None] | None = None, before_force: Callable[[], None] | None = None,
                  safe_mode: Callable[[], bool] = nativeprobe.safe_mode,
-                 enter_safe_mode: Callable[[], None] = nativeprobe.set_safe_mode) -> None:
+                 enter_safe_mode: Callable[[], None] = nativeprobe.set_safe_mode,
+                 authority: launchproof.Authority | None = None) -> None:
         self.port, self.token = port, token
+        self.authority = authority            # issues the launch proof each engine needs (None: no proof line, tests)
         self._safe_mode, self._enter_safe_mode = safe_mode, enter_safe_mode
         self.owner_hash = owner_hash          # SHA-256 of the owner confirmation the tab registered; memory only
         self.owner_secret_hash = owner_secret_hash    # SHA-256 of the one-time secret; dropped when it is consumed
@@ -401,7 +408,8 @@ class Supervisor:
         try:
             if self._job is not None:
                 self._job.assign(proc._handle)           # Windows only: the engine dies with the supervisor
-            proc.stdin.write(handoff_payload(self.token, self.owner_hash, self.owner_secret_hash, key))
+            proof = self.authority.issue() if self.authority is not None else ""     # one per engine, one use
+            proc.stdin.write(handoff_payload(self.token, self.owner_hash, self.owner_secret_hash, key, proof))
             proc.stdin.flush()                           # stdin stays open: it is the engine's lifeline
         except (OSError, ValueError):
             pass                                         # the engine already ended; its exit code says why
@@ -540,9 +548,10 @@ def run_supervisor(*, port: int | None, token: str | None = None, print_url: boo
                 server.close()
             enginelock.release()
 
-        sup = Supervisor(port=port, token=token, job=job, owner_hash=owner_hash, before_force=release,
+        authority = launchproof.Authority()
+        sup = Supervisor(port=port, token=token, job=job, owner_hash=owner_hash, before_force=release, authority=authority,
                          owner_secret_hash=owner_secret_hash or (secret_hash(once) if once else ""))
-        server = control.ControlServer(sup.status, sup.request_shutdown, sup.open_browser)
+        server = control.ControlServer(sup.status, sup.request_shutdown, sup.open_browser, authority.redeem)
         try:
             server.start()
         except OSError as exc:

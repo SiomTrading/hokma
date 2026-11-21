@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { IconButton } from "@/design";
 import { useI18n } from "@/i18n";
-import type { AssetClass, ConnectionCard } from "./types";
+import type { ConnectionCard, UseKey } from "./types";
 
 interface Props {
-  assetClass: AssetClass;
+  use: UseKey;
+  /** The connected sources of the use, in the order they are tried. */
   order: string[];
   cards: Map<string, ConnectionCard>;
   focused: boolean;
-  onReorder: (assetClass: AssetClass, order: string[]) => void;
+  onReorder: (use: UseKey, order: string[]) => void;
 }
 
 function move(order: string[], from: number, to: number): string[] {
@@ -19,16 +20,15 @@ function move(order: string[], from: number, to: number): string[] {
   return next;
 }
 
-/** The providers of one asset class in the order they are tried. Drag a row, or use the arrow buttons. */
-export function PriorityList({ assetClass, order, cards, focused, onReorder }: Props) {
+/** The connected providers of one use in the order they are tried. Drag a row, or use the arrow buttons. */
+export function PriorityList({ use, order, cards, focused, onReorder }: Props) {
   const { t } = useI18n();
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
-  const title = t("connections.class." + assetClass);
+  const title = t("connections.use." + use);
 
   return (
-    <section className={"conn-priority" + (focused ? " focus" : "")} aria-label={t("connections.priority.for", { class: title })} data-testid={"priority-" + assetClass} data-focus={focused ? "true" : undefined}>
-      <span className="lbl">{title}</span>
+    <section className={"conn-priority" + (focused ? " focus" : "")} aria-label={t("connections.priority.for", { class: title })} data-testid={"priority-" + use} data-focus={focused ? "true" : undefined}>
       <ol className="conn-order">
         {order.map((id, index) => {
           const name = cards.get(id)?.name ?? id;
@@ -51,7 +51,7 @@ export function PriorityList({ assetClass, order, cards, focused, onReorder }: P
               onDragLeave={() => setOver((current) => (current === index ? null : current))}
               onDrop={(event) => {
                 event.preventDefault();
-                if (dragging !== null) onReorder(assetClass, move(order, dragging, index));
+                if (dragging !== null) onReorder(use, move(order, dragging, index));
                 setDragging(null);
                 setOver(null);
               }}
@@ -62,8 +62,8 @@ export function PriorityList({ assetClass, order, cards, focused, onReorder }: P
             >
               <span className="mono conn-rank">{index + 1}</span>
               <span className="p conn-order-name">{name}</span>
-              <IconButton icon="chevronUp" size={14} label={t("connections.priority.up", { name })} disabled={index === 0} onClick={() => onReorder(assetClass, move(order, index, index - 1))} />
-              <IconButton icon="chevronDown" size={14} label={t("connections.priority.down", { name })} disabled={index === order.length - 1} onClick={() => onReorder(assetClass, move(order, index, index + 1))} />
+              <IconButton icon="chevronUp" size={14} label={t("connections.priority.up", { name })} disabled={index === 0} onClick={() => onReorder(use, move(order, index, index - 1))} />
+              <IconButton icon="chevronDown" size={14} label={t("connections.priority.down", { name })} disabled={index === order.length - 1} onClick={() => onReorder(use, move(order, index, index + 1))} />
             </li>
           );
         })}

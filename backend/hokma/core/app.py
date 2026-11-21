@@ -34,6 +34,7 @@ from hokma.desks.api import router as desks_router
 from hokma.projects.api import router as projects_router
 from hokma.today.api import router as today_router
 from hokma.rpc.ws import router as rpc_router
+from hokma.schwab.routes import router as schwab_router
 from hokma.setup import router as setup_router
 from hokma.status.api import oauth_router, router as status_router
 from hokma.terminal.api import router as terminal_router
@@ -143,6 +144,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     app.include_router(market_router)
     app.include_router(market_ws_router)
     app.include_router(connections_router)
+    app.include_router(schwab_router)
     app.include_router(agents_router)
     app.include_router(permissions_router)
     features_0031.attach(app, agent_working)
