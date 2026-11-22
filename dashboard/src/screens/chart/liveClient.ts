@@ -1,5 +1,5 @@
 import { clearToken, getToken, socketUrl } from "@/api";
-import { applyBar, applyLast, applySnapshot, applyStatus, errorOf, initialState } from "./liveState";
+import { applyBar, applyBrokerAlert, applyLast, applySnapshot, applyStatus, errorOf, initialState } from "./liveState";
 import type { LiveState, SubMessage } from "./liveState";
 import type { Timeframe } from "./types";
 
@@ -55,6 +55,7 @@ export class LiveChartClient {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private deadTimer: ReturnType<typeof setTimeout> | null = null;
+  private alertTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: LiveClientOptions) {
     this.state = initialState(options.symbol, options.timeframe);
@@ -88,7 +89,8 @@ export class LiveChartClient {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.deadTimer) clearTimeout(this.deadTimer);
-    this.retryTimer = this.pingTimer = this.deadTimer = null;
+    if (this.alertTimer) clearTimeout(this.alertTimer);
+    this.retryTimer = this.pingTimer = this.deadTimer = this.alertTimer = null;
   }
 
   private detach(): void {
@@ -191,6 +193,19 @@ export class LiveChartClient {
 
     if (message.type === "pong" || message.type === "connection_status") {
       if (epochChanged) this.resubscribe(); // its subscriptions are gone with the old run
+      return;
+    }
+    if (message.type === "broker_alert") {
+      // for every chart: the red band stays until the broker is back; the green one goes after 5 seconds
+      if (this.alertTimer) clearTimeout(this.alertTimer);
+      this.alertTimer = null;
+      this.update(applyBrokerAlert(this.state, message));
+      if (message.state !== "lost") {
+        this.alertTimer = setTimeout(() => {
+          this.alertTimer = null;
+          this.update({ ...this.state, brokerAlert: null });
+        }, 5000);
+      }
       return;
     }
     if (message.sub !== this.sub) return; // another subscription, or an old one

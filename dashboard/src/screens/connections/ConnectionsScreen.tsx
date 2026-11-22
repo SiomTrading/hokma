@@ -8,13 +8,15 @@ import type { MailState } from "./api";
 import { ConnectedList } from "./ConnectedList";
 import "./connections.css";
 import { requestFocus, takeLogin, useFocus } from "./focus";
+import { DataSourcePicker } from "./DataSourcePicker";
 import { SchwabAccountDialog } from "./SchwabAccount";
+import { SchwabDiagnosticDialog } from "./SchwabDiagnostic";
 import { SchwabBand } from "./SchwabBand";
 import type { UseKey } from "./types";
 import { UseOrder } from "./UseOrder";
 import { useConnections } from "./useConnections";
 
-type Dialog = { kind: "add"; start: DialogView; nonce: number } | { kind: "account" } | null;
+type Dialog = { kind: "add"; start: DialogView; nonce: number } | { kind: "account" } | { kind: "diagnostic" } | null;
 
 /** Connections: the "Add" button, what is connected, and the order of use of each kind of data. */
 export function ConnectionsScreen() {
@@ -112,12 +114,14 @@ export function ConnectionsScreen() {
               onStoreMissing={() => state.setStoreAvailable(false)}
               onOpen={open}
               onViewAccount={() => setDialog({ kind: "account" })}
+              onDiagnostic={() => setDialog({ kind: "diagnostic" })}
             />
             {priorityError ? (
               <p className="conn-error" role="alert" data-testid="priority-error">
                 {priorityError}
               </p>
             ) : null}
+            <DataSourcePicker cards={cards} chosen={state.dataSource} onChosen={state.setDataSource} onReload={reload} />
             <UseOrder uses={uses} cards={byId} focusUse={focusClass} onReorder={reorder} />
           </>
         )}
@@ -137,6 +141,7 @@ export function ConnectionsScreen() {
         />
       ) : null}
       {dialog?.kind === "account" ? <SchwabAccountDialog onClose={close} /> : null}
+      {dialog?.kind === "diagnostic" ? <SchwabDiagnosticDialog onClose={close} /> : null}
     </Pane>
   );
 }

@@ -118,7 +118,7 @@ def test_range_without_ticks_does_not_resend_the_snapshot_while_the_minute_bars_
     with live.app() as client, live.connect(client) as ws:
         c = Collector(ws)
         subscribe(c, "r", "NQ=F", "10r")
-        time.sleep(1.2)                                       # six polls of the fallback at the test interval
+        time.sleep(1.2)                                       # a negative wait: only a slower machine sees fewer polls, never a false failure
         assert len(c.of("snapshot", "r")) == 1
 
 
@@ -229,12 +229,12 @@ def test_t9_changing_interval_and_coming_back_keeps_the_tape_and_does_not_reconn
             server.tick("NQ", 28300.0 + n, T0 + 3000 + n * 100)
         assert wait_until(lambda: len(feed_of("NQ=F").tape) == 6)
         c.send({"op": "unsubscribe", "sub": "a"})
-        time.sleep(0.3)
+        assert wait_until(lambda: not feed_of("NQ=F").subs)            # released, inside the linger: no pause to guess
         ranged = subscribe(c, "b", "NQ=F", "r:10t")                  # inside the linger: a new interval of the same symbol
         assert ranged["exact_from"] == (T0 + 3000) // 1000
         assert len(feed_of("NQ=F").tape) == 6
         c.send({"op": "unsubscribe", "sub": "b"})
-        time.sleep(0.3)
+        assert wait_until(lambda: not feed_of("NQ=F").subs)
         back = subscribe(c, "c", "NQ=F", "7m")
         assert back["type"] == "snapshot" and len(feed_of("NQ=F").tape) == 6
         assert len(server.messages("subscribe")) == subscribes            # the provider was not asked again
@@ -245,14 +245,14 @@ def test_t9_after_the_linger_the_tape_is_dropped_and_the_provider_is_told(live, 
     live.use({"siomtrading_futures": server.url})
     with live.app() as client, live.connect(client) as ws:
         save_token(client)
-        runtime.get_hub().linger_seconds = 0.5
+        runtime.get_hub().linger_seconds = 1.5
         c = Collector(ws)
         subscribe(c, "a", "NQ=F", "7m")
         assert wait_until(lambda: server.symbols() == {"NQ"})
         server.tick("NQ", 28300.0, T0 + 3000)
         assert wait_until(lambda: len(feed_of("NQ=F").tape) == 1)
         c.send({"op": "unsubscribe", "sub": "a"})
-        time.sleep(0.2)
+        assert wait_until(lambda: not feed_of("NQ=F").subs)              # the sub is gone and the feed waits out its linger
         assert "NQ=F" in runtime.get_hub()._feeds and not server.messages("unsubscribe")
         assert wait_until(lambda: server.messages("unsubscribe"), timeout=3)
         assert wait_until(lambda: "NQ=F" not in runtime.get_hub()._feeds)

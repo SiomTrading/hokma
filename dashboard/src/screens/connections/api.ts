@@ -1,6 +1,6 @@
 import { api, ApiError } from "@/api";
 import { t } from "@/i18n";
-import type { AddAnswer, ConnectionCard, ConnectionsList, FinishAnswer, SchwabAccountPanel, TestResult, UseKey } from "./types";
+import type { AddAnswer, ConnectionCard, ConnectionsList, DiagnosticAnswer, FinishAnswer, SchwabAccountPanel, TestResult, UseKey } from "./types";
 
 const enc = encodeURIComponent;
 const base = (id: string) => "/api/connections/" + enc(id);
@@ -21,6 +21,8 @@ export const connectionsApi = {
   saveKey: (id: string, body: KeyPayload) => api.put<{ id: string; key_state: string }>(base(id) + "/key", body),
   /** Saves the key, switches the provider on and tests it. A failed test drops the new key (the old one stays). */
   add: (id: string, body: KeyPayload) => api.post<AddAnswer>(base(id) + "/add", body, { timeoutMs: 30_000 }),
+  /** The broker that gives the live data when two are connected (SPEC-016 3.6). */
+  setDataSource: (provider: string) => api.put<{ data_source: string }>("/api/connections/data-source", { provider }),
   remove: (id: string) => api.post<ConnectionCard>(base(id) + "/remove", {}),
   setEnabled: (id: string, enabled: boolean) => api.put<ConnectionCard>(base(id) + "/enabled", { enabled }),
   /** `asset_class` is the name of the field for every use (`bars`, `options` and `news` too). `order` has every provider of the use. */
@@ -36,6 +38,9 @@ export const schwabApi = {
   loginOpen: (url: string) => api.post<{ opened: boolean }>(SCHWAB + "/login/open", { url }),
   loginFinish: (redirectUrl: string) => api.post<FinishAnswer>(SCHWAB + "/login/finish", { redirect_url: redirectUrl }, { timeoutMs: 30_000 }),
   account: () => api.get<SchwabAccountPanel>(SCHWAB + "/account"),
+  /** One measuring run of the data Schwab sends (reads only, no orders): it listens for about `seconds` seconds and saves a file. */
+  diagnostic: (seconds: number) =>
+    api.post<DiagnosticAnswer>("/api/schwab/diagnostic/streaming", { symbol: "QQQ", seconds }, { timeoutMs: (seconds + 90) * 1000 }),
 };
 
 /** Catalog text of a `connections.*` or `market.*` code in the active language; the server text when the code is new. */

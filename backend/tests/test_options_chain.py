@@ -41,16 +41,20 @@ def test_the_chain_joins_contracts_and_snapshots_with_every_field(alpaca):
     assert keys == sorted(keys)
 
 
-def test_the_free_plan_is_labeled_indicative_and_estimated(alpaca):
+def test_the_free_plan_is_labeled_indicative_and_estimated_with_no_fixed_note(alpaca):
     out = chain(limit=1)
     assert (out["price_feed"], out["greeks"]) == ("indicative", "estimated")
-    assert out["note"] == "Indicative prices and estimated greeks (free Alpaca plan)."
-    assert out["market_open"] is True and out["notes"] == []
+    assert out["note"] is None                                            # decision 226: no permanent text about the free plan
+    assert out["market_open"] is None and out["notes"] == []             # Alpaca did not say (no clock in the fake): unknown, never a guess
 
 
-def test_the_spanish_note_follows_the_language(alpaca, monkeypatch):
-    monkeypatch.setenv("HOKMA_LANG", "es")
-    assert chain(limit=1)["note"] == "Precios indicativos y griegas estimadas (plan gratis de Alpaca)."
+def test_the_open_flag_is_the_phase_of_the_clock_of_alpaca(alpaca, monkeypatch):
+    from hokma.market import alpaca_hours
+
+    for phase, expected in (("core", True), ("closed", False), ("pre", False), ("post", False), (None, None)):
+        options.forget_cache()
+        monkeypatch.setattr(alpaca_hours, "phase", lambda *a, _p=phase, **k: _p)
+        assert chain(limit=1)["market_open"] is expected, phase
 
 
 def test_a_snapshot_without_contract_is_dropped_and_a_contract_without_snapshot_has_no_price(alpaca):
@@ -245,13 +249,13 @@ def test_without_a_saved_key_the_error_says_what_is_missing_and_where_to_connect
     with pytest.raises(OptionsError) as error:
         chain()
     assert error.value.code == "no_connection" and error.value.status == 409
-    assert str(error.value) == "The option chain needs Schwab or Alpaca IEX: connect one of them in Connections."
+    assert str(error.value) == "The option chain needs Schwab or Alpaca Trading: connect one of them in Connections."
     assert fake.calls == []
 
 
 def test_with_alpaca_switched_off_nothing_is_asked(monkeypatch):
     fake = install(monkeypatch, off=("alpaca",))
-    with pytest.raises(OptionsError, match="needs Schwab or Alpaca IEX"):
+    with pytest.raises(OptionsError, match="needs Schwab or Alpaca Trading"):
         chain()
     assert fake.calls == []
 
@@ -260,7 +264,7 @@ def test_a_desk_that_does_not_use_alpaca_gets_no_data(monkeypatch):
     fake = install(monkeypatch, allowed={"finnhub"})
     with pytest.raises(OptionsError) as error:
         chain(desk_id=7)
-    assert str(error.value) == "This desk does not use Alpaca IEX. Turn it on in the desk's connections."
+    assert str(error.value) == "This desk does not use Alpaca Trading. Turn it on in the desk's connections."
     assert fake.calls == []
     fake = install(monkeypatch, allowed={"alpaca", "finnhub"})
     assert chain(desk_id=7, limit=1)["contracts"]
@@ -337,7 +341,7 @@ def test_a_desk_that_does_not_use_schwab_is_served_by_alpaca(monkeypatch):
 
 def test_alpaca_still_says_estimated_greeks_and_has_no_delayed_flag(alpaca):
     out = chain(limit=1)
-    assert out["greeks"] == "estimated" and out["note"] and "delayed" not in out
+    assert out["greeks"] == "estimated" and "delayed" not in out
 
 
 def test_the_order_of_the_use_options_can_put_alpaca_first_and_schwab_is_then_the_second_source(monkeypatch):
@@ -388,9 +392,6 @@ def test_years_to_expiry_counts_minutes_to_the_close_of_new_york(monkeypatch):
     assert options.years_to_expiry(date(2026, 11, 19)) < 0
 
 
-def test_market_open_follows_the_regular_session_of_new_york():
-    from datetime import datetime, timezone
-    at = lambda *a: datetime(*a, tzinfo=timezone.utc).timestamp()
-    assert options.market_open(at(2026, 11, 20, 14, 30)) and options.market_open(at(2026, 11, 20, 20, 59))
-    assert not options.market_open(at(2026, 11, 20, 14, 29)) and not options.market_open(at(2026, 11, 20, 21, 0))
-    assert not options.market_open(at(2026, 11, 21, 16, 0)) and not options.market_open(at(2026, 11, 22, 16, 0))
+def test_hokma_has_no_fixed_session_hours_for_the_options():
+    """SPEC-016 3.4: open or closed comes from the provider (Schwab /markets, Alpaca /v3/clock); a fixed 09:30 to 16:00 is gone."""
+    assert not hasattr(options, "market_open")

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
+from hokma.connections import runtime
 from live_fixtures import AUTH, WS_URL, Collector, live  # noqa: F401  (fixture)
 from live_support import (FakeWs, alpaca_script, coinbase_script, finnhub_script, trade_alpaca, trade_coinbase,
                           wait_until)
@@ -95,7 +96,7 @@ def test_m2_two_tabs_on_one_symbol_are_one_subscription_upstream(live, coinbase)
             assert wait_until(lambda: ticks_of(coinbase))
             assert len(ticks_of(coinbase)) == 1
             a.send({"op": "unsubscribe", "sub": "c1"})
-            time.sleep(0.4)
+            assert wait_until(lambda: len(runtime.get_hub()._feeds["BTC-USD"].subs) == 1)     # a is out, b stays
             assert not [m for m in coinbase.messages() if m.get("type") == "unsubscribe"]
             b.send({"op": "unsubscribe", "sub": "c1"})
             assert wait_until(lambda: any(m.get("type") == "unsubscribe" and "BTC-USD" in m["product_ids"]
@@ -111,7 +112,7 @@ def test_m2_closing_the_socket_releases_the_subscription(live, coinbase):
         assert wait_until(lambda: any(m.get("type") == "unsubscribe" for m in coinbase.messages()))
 
 
-def test_m5_a_hundred_ticks_a_second_reach_the_panel_at_four_messages_a_second_with_the_last_value(live, coinbase):
+def test_m5_a_hundred_ticks_a_second_reach_the_panel_at_twenty_messages_a_second_with_the_last_value(live, coinbase):
     live.use({"coinbase": coinbase.url})
     with live.app() as client, live.connect(client) as ws:
         c = Collector(ws)
@@ -126,9 +127,9 @@ def test_m5_a_hundred_ticks_a_second_reach_the_panel_at_four_messages_a_second_w
         c.drain(0.6)
         live_messages = [m for m in c.all[start:] if m["type"] in ("bar", "last")]
         assert live_messages[-1]["price"] == 81299                       # the last value always arrives
-        for i in range(len(live_messages) - 4):
-            assert live_messages[i + 4]["_at"] - live_messages[i]["_at"] >= 0.96     # never 5 inside one second
-        assert len(live_messages) <= 4 * 5 + 2
+        for i in range(len(live_messages) - 20):
+            assert live_messages[i + 20]["_at"] - live_messages[i]["_at"] >= 0.96    # never 21 inside one second (50 ms, SPEC-016 3.5)
+        assert len(live_messages) <= 20 * 4 + 2
 
 
 # ------------------------------------------------------------------ M3, M4
@@ -254,14 +255,14 @@ def test_m10_routing_and_labels(live, coinbase):
             c.send({"op": "unsubscribe", "sub": "c2"})
             c.send({"op": "unsubscribe", "sub": "c4"})
             c.send({"op": "unsubscribe", "sub": "c5"})
-            time.sleep(0.3)
+            assert wait_until(lambda: "AAPL" not in runtime.get_hub()._feeds)         # the fallback feed of AAPL is gone
             stock = subscribe(c, "c6", "AAPL", "5m")
-            assert (stock["source"], stock["data_state"], stock["fallback"]) == ("Alpaca IEX", "live", False)
+            assert (stock["source"], stock["data_state"], stock["fallback"]) == ("Alpaca Trading", "live", False)
             assert wait_until(lambda: any(m.get("action") == "subscribe" and m.get("trades") == ["AAPL"]
                                           for m in alpaca.messages()))
             alpaca.send_all(trade_alpaca("AAPL", 351.25, iso(int(RECORDED_AT * 1000) + 1000)))
             bar = c.next(lambda m: m["type"] == "bar" and m.get("sub") == "c6")
-            assert bar["data_state"] == "live" and bar["source"] == "Alpaca IEX"
+            assert bar["data_state"] == "live" and bar["source"] == "Alpaca Trading"
             # nothing labelled delayed is ever labelled live: every message carries its own pair
             assert all(m.get("data_state") in ("live", "delayed") and m.get("source") for m in c.all
                        if m["type"] != "pong")
@@ -305,7 +306,7 @@ def test_m11_the_31st_stock_on_alpaca_is_a_limit_error_and_the_other_30_keep_wor
             c = Collector(ws)
             results = [subscribe(c, f"s{i}", symbol, "5m") for i, symbol in enumerate(symbols)]
             assert [r["type"] for r in results[:30]] == ["snapshot"] * 30
-            assert all(r["source"] == "Alpaca IEX" for r in results[:30])
+            assert all(r["source"] == "Alpaca Trading" for r in results[:30])
             assert results[30]["type"] == "error" and results[30]["code"] == "market.limit"
             card = next(x for x in client.get("/api/connections", headers=AUTH).json()["connections"]
                         if x["id"] == "alpaca")
@@ -316,36 +317,36 @@ def test_m11_the_31st_stock_on_alpaca_is_a_limit_error_and_the_other_30_keep_wor
         alpaca.stop()
 
 
-def test_m13_priority_decides_the_provider_and_changes_apply_to_the_next_subscription(live):
+def test_m13_a_finnhub_key_does_not_serve_stocks_and_the_order_of_stocks_has_no_finnhub(live):
+    """SPEC-016 3.6 rule 3: Finnhub is for forex and news. Stocks come from Alpaca (no broker) whatever else is saved."""
     alpaca = FakeWs(alpaca_script(KEY_ID, SECRET)).start()
     finnhub = FakeWs(finnhub_script, reject_token=FINNHUB_KEY).start()
     try:
-        serve_every_stock_like_aapl(live, ["MSFT"])
         live.use({"alpaca": alpaca.url, "finnhub": finnhub.url})
         with live.app() as client, live.connect(client) as ws:
             save_alpaca(client)
             save_finnhub(client)
             c = Collector(ws)
-            assert subscribe(c, "a", "AAPL", "5m")["source"] == "Alpaca IEX"
-            response = client.put("/api/connections/priority", headers=AUTH,
-                                  json={"asset_class": "equity", "order": ["finnhub", "alpaca", "schwab"]})
-            assert response.status_code == 200 and response.json()["groups"]["equity"][0] == "finnhub"
-            second = subscribe(c, "b", "MSFT", "5m")
-            assert second["source"] == "Finnhub"
-            assert wait_until(lambda: any(m.get("type") == "subscribe" and m.get("symbol") == "MSFT"
-                                          for m in finnhub.messages()))
-            first = [m for m in c.all if m.get("sub") == "a" and m["type"] == "snapshot"][0]
-            assert first["source"] == "Alpaca IEX"                            # the open subscription did not move
+            assert subscribe(c, "a", "AAPL", "5m")["source"] == "Alpaca Trading"
+            refused = client.put("/api/connections/priority", headers=AUTH,
+                                 json={"asset_class": "equity", "order": ["finnhub", "alpaca", "schwab"]})
+            assert refused.status_code == 422 and refused.json()["detail"]["code"] == "connections.bad_priority"
+            assert not any(m.get("symbol") == "AAPL" for m in finnhub.messages())
     finally:
         alpaca.stop()
         finnhub.stop()
 
 
+def many_pairs(count: int) -> list[str]:
+    codes = ["".join(p) for p in itertools.product("ABCDEFGH", repeat=3)]
+    return [f"{codes[i]}{codes[i + 1]}=X" for i in range(count)]
+
+
 def test_m14_finnhub_limit_is_50_and_its_data_state_comes_from_the_providers_file(live):
-    """The packaged file declares Finnhub live (its free trade stream is real time); the history is Yahoo, delayed."""
+    """The packaged file declares Finnhub live (its trade stream is real time) and it serves forex; the history is Yahoo, delayed."""
     finnhub = FakeWs(finnhub_script, reject_token=FINNHUB_KEY).start()
     try:
-        symbols = many_symbols(51)
+        symbols = many_pairs(51)
         serve_every_stock_like_aapl(live, symbols)
         live.use({"finnhub": finnhub.url})
         with live.app() as client, live.connect(client) as ws:
@@ -356,7 +357,7 @@ def test_m14_finnhub_limit_is_50_and_its_data_state_comes_from_the_providers_fil
             assert results[50]["type"] == "error" and results[50]["code"] == "market.limit"
             assert results[0]["data_state"] == "live" and results[0]["source"] == "Finnhub"
             assert results[0]["delay_seconds"] == 0
-            assert results[0]["history"] == {"source": "Yahoo Finance", "delay_seconds": 900}
+            assert results[0]["history"] == {"source": "Yahoo Finance", "delay_seconds": 0}        # forex has no delay at Yahoo
     finally:
         finnhub.stop()
 
@@ -368,10 +369,11 @@ def test_m14_the_data_state_is_editable_without_code(live):
         with live.app() as client, live.connect(client) as ws:
             save_finnhub(client)
             c = Collector(ws)
-            snapshot = subscribe(c, "a", "AAPL", "5m")
+            serve_every_stock_like_aapl(live, ["EURUSD=X"])
+            snapshot = subscribe(c, "a", "EURUSD=X", "5m")
             assert (snapshot["source"], snapshot["data_state"], snapshot["delay_seconds"]) == ("Finnhub", "delayed", 900)
             finnhub.send_all(json.dumps({"type": "trade", "data": [
-                {"p": 352.5, "s": "AAPL", "t": int(RECORDED_AT * 1000) + 2000, "v": 5}]}))
+                {"p": 1.0852, "s": "OANDA:EUR_USD", "t": int(RECORDED_AT * 1000) + 2000, "v": 5}]}))
             bar = c.next(lambda m: m["type"] == "bar")
             assert bar["data_state"] == "delayed"
     finally:
@@ -388,7 +390,7 @@ def test_removing_a_key_moves_its_open_subscriptions_to_the_delayed_fallback(liv
         with live.app() as client, live.connect(client) as ws:
             save_alpaca(client)
             c = Collector(ws)
-            assert subscribe(c, "a", "AAPL", "5m")["source"] == "Alpaca IEX"
+            assert subscribe(c, "a", "AAPL", "5m")["source"] == "Alpaca Trading"
             assert client.delete("/api/connections/alpaca/key", headers=AUTH).status_code == 200
             moved = c.find(lambda m: m["type"] == "snapshot" and m.get("sub") == "a" and m["seq"] > 2)
             assert (moved["source"], moved["data_state"], moved["fallback"]) == ("Yahoo Finance", "delayed", True)
@@ -404,7 +406,7 @@ def test_a_provider_that_refuses_the_key_after_connecting_hands_its_symbols_to_t
             save_alpaca(client)
             c = Collector(ws)
             first = subscribe(c, "a", "AAPL", "5m")
-            assert first["source"] in ("Alpaca IEX", "Yahoo Finance")
+            assert first["source"] in ("Alpaca Trading", "Yahoo Finance")
             status = c.find(lambda m: m["type"] == "connection_status" and m["provider"] == "alpaca"
                             and m["state"] == "error")
             assert status["error_code"] == "connections.auth_failed"

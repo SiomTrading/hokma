@@ -31,14 +31,15 @@ def test_the_symbol_each_provider_expects(provider, symbol, asset, expected):
 
 def test_the_shipped_catalog_has_the_five_providers_in_the_default_order():
     catalog = get_catalog()
-    assert list(catalog.providers) == ["coinbase", "alpaca", "finnhub", "siomtrading_futures", "schwab"]
-    assert catalog.default_priority == {"equity": ("schwab", "alpaca", "finnhub"), "bars": ("schwab", "alpaca", "finnhub"),
-                                        "options": ("schwab", "alpaca"), "crypto": ("coinbase", "finnhub"),
-                                        "forex": ("finnhub",), "future": ("siomtrading_futures",),
+    assert list(catalog.providers) == ["coinbase", "alpaca", "finnhub", "siomtrading_futures", "schwab", "ibkr"]
+    assert catalog.default_priority == {"equity": ("schwab", "ibkr", "alpaca"), "bars": ("schwab", "ibkr", "alpaca"),
+                                        "options": ("schwab", "ibkr", "alpaca"), "crypto": ("coinbase",),
+                                        "forex": ("finnhub",), "future": ("schwab", "siomtrading_futures"),
                                         "news": ("finnhub", "alpaca")}
     assert catalog.providers["schwab"].auth == "oauth" and catalog.providers["schwab"].key_fields == (
         "client_id", "client_secret")
-    assert all(p.auth == "key" for p in catalog.providers.values() if p.id != "schwab")
+    assert all(p.auth == "key" for p in catalog.providers.values() if p.id not in ("schwab", "ibkr"))
+    assert catalog.providers["ibkr"].auth == "gateway"
     assert catalog.providers["finnhub"].data_state == "live" and catalog.providers["finnhub"].max_symbols == 50
     assert catalog.providers["alpaca"].max_symbols == 30 and catalog.providers["coinbase"].needs_key is False
     assert catalog.providers["siomtrading_futures"].url.startswith("wss://")
@@ -49,7 +50,7 @@ def test_a_provider_missing_from_the_default_order_goes_last_and_a_bad_file_is_r
     raw = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
     raw["default_priority"]["equity"] = ["finnhub"]
     assert parse_catalog(raw).default_priority["equity"][0] == "finnhub"
-    assert set(parse_catalog(raw).default_priority["equity"]) == {"finnhub", "alpaca", "schwab"}
+    assert set(parse_catalog(raw).default_priority["equity"]) == {"finnhub", "alpaca", "schwab", "ibkr"}
     assert parse_catalog(raw).default_priority["news"] == ("finnhub", "alpaca")    # not an asset class: only what the file lists
     raw["providers"]["schwab"]["auth"] = "password"
     with pytest.raises(ValueError):

@@ -196,9 +196,14 @@ function KeyForm({ card, onBack, onClose, onCard, onReload, onStoreMissing }: Fo
           </Pill>
         </p>
         <p className="p">{t("connections.add.added", { name: card.name })}</p>
+        {card.id === "alpaca" ? (
+          <p className="p" role="alert" data-testid="alpaca-notice">
+            {t("connections.alpaca.notice")}
+          </p>
+        ) : null}
         <div className="conn-actions conn-end">
           <Button variant="primary" onClick={onClose}>
-            {t("connections.add.done")}
+            {card.id === "alpaca" ? t("connections.alpaca.ok") : t("connections.add.done")}
           </Button>
         </div>
       </div>

@@ -17,16 +17,53 @@ import type { DeskSummary } from "./types";
 /** The long dash, built by code so this file stays free of it. */
 const DASH = String.fromCharCode(0x2014);
 
-/** Opens the socket of the chart on screen and answers its last subscription with a snapshot of `symbol`. */
-async function connect(symbol: string, tf = "5m") {
-  const socket = await waitFor(() => FakeSocket.last());
-  act(() => socket.serverOpen());
-  const sub = (socket.ops("subscribe").at(-1) as { sub: string }).sub;
+const sockets = () => FakeSocket.of("/ws/market");
+/** A subscription of the chart (ids `c1`...) or of the list of prices (ids `q1`...): the list and the chart share the engine, each with its own socket. */
+const chartSubs = () => sockets().flatMap((s) => s.ops("subscribe").filter((o) => String(o.sub).startsWith("c")).map((op) => ({ socket: s, op })));
+const quoteSubs = () => sockets().flatMap((s) => s.ops("subscribe").filter((o) => String(o.sub).startsWith("q")).map((op) => ({ socket: s, op })));
+const answered = new Set<string>();
+
+/** The engine answers each price subscription of the list with a snapshot of the symbol (or an error for a symbol it refuses). */
+function answerQuotes(server: Server) {
+  for (const { socket, op } of quoteSubs()) {
+    const id = String(sockets().indexOf(socket)) + ":" + String(op.sub);
+    if (answered.has(id)) continue;
+    answered.add(id);
+    const symbol = String(op.symbol);
+    if (server.quoteFails.has(symbol)) {
+      act(() => socket.serverSend({ type: "error", sub: op.sub, seq: 1, epoch: "e1", code: "market.down", message: "down", source: "none", data_state: "delayed" }));
+      continue;
+    }
+    const last = server.last[symbol] ?? 1;
+    act(() => socket.serverSend(snapshot(String(op.sub), 1, { symbol, tf: "1D", bars: [], last, previous_close: last - 10, change: 10, change_pct: symbol === "NQ=F" ? 0.5 : -0.25 })));
+  }
+}
+
+/** Opens every socket that is waiting, answers the prices of the list and answers the last subscription of the chart with a snapshot of `symbol`. */
+async function settleQuotes() {
+  await waitFor(() => expect(sockets().length).toBeGreaterThan(0));
+  for (const socket of sockets().filter((s) => s.readyState === 0)) act(() => socket.serverOpen());
+  await waitFor(() => {
+    answerQuotes(currentServer!);
+    expect(quoteSubs().length).toBeGreaterThan(0);
+  });
+}
+
+async function connect(symbol: string, tf = "5m", server?: Server) {
+  await waitFor(() => expect(chartSubs().length + sockets().filter((s) => s.readyState === 0).length).toBeGreaterThan(0));
+  for (const socket of sockets().filter((s) => s.readyState === 0)) act(() => socket.serverOpen());
+  answerQuotes(server ?? currentServer!);
+  const { socket, op } = await waitFor(() => {
+    const found = chartSubs().at(-1);
+    if (!found) throw new Error("no chart subscription yet");
+    return found;
+  });
+  const sub = (op as { sub: string }).sub;
   act(() => socket.serverSend(snapshot(sub, 1, { symbol, tf, bars: bars(12) })));
   return { socket, sub };
 }
 
-const subscribed = () => FakeSocket.instances.flatMap((s) => s.ops("subscribe"));
+const subscribed = () => chartSubs().map((c) => c.op);
 
 function desk(patch: Partial<DeskSummary> = {}): DeskSummary {
   return {
@@ -45,8 +82,11 @@ interface Server {
   last: Record<string, number>;
 }
 
+let currentServer: Server | null = null;
+
 function stubServer(over: Partial<Server> = {}): Server {
   const server: Server = { urls: [], assets: ["NQ=F", "ES=F"], detailFails: false, quoteFails: new Set(), last: { "NQ=F": 21430.25, "ES=F": 6120.5 }, ...over };
+  currentServer = server;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
@@ -69,7 +109,6 @@ function stubServer(over: Partial<Server> = {}): Server {
   return server;
 }
 
-const candleCalls = (server: Server, symbol: string) => server.urls.filter((u) => u.startsWith("/api/market/candles") && u.includes(encodeURIComponent(symbol)));
 
 function open() {
   setToken(TEST_TOKEN);
@@ -79,6 +118,7 @@ function open() {
 beforeEach(() => {
   setLocale("es");
   resetDesksStore();
+  answered.clear();
   localStorage.clear();
   useFakeCharts(); // jsdom has no canvas
   installFakeSockets();
@@ -185,17 +225,17 @@ describe("terminal of the desk", () => {
   });
 
   it("changes the interval of the chart without touching the list", async () => {
-    const server = stubServer();
+    stubServer();
     open();
     const user = userEvent.setup();
     await connect("NQ=F");
     await screen.findByText("21.430,25", { selector: "td" });
-    const before = candleCalls(server, "NQ=F").length;
+    const before = quoteSubs().length;
     await user.click(screen.getByRole("button", { name: "15m" }));
     await connect("NQ=F", "15m");
     expect(subscribed().at(-1)).toMatchObject({ symbol: "NQ=F", tf: "15m" });
     expect(screen.getByText("NQ=F · 15m")).toBeInTheDocument();
-    expect(candleCalls(server, "NQ=F")).toHaveLength(before);
+    expect(quoteSubs()).toHaveLength(before);                              // the list was not asked again
   });
 
   it("offers every timeframe of the Chart screen, takes typed ones, and remembers each asset's own", async () => {
@@ -240,23 +280,27 @@ describe("terminal of the desk", () => {
     expect(subscribed()).toHaveLength(before);
   });
 
-  it("reads the quotes again every 60 seconds", async () => {
+  it("paints the prices as the engine sends them: a snapshot, then each change, with no request for candles and no timer", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const server = stubServer();
     open();
+    await settleQuotes();
     await screen.findByText("21.430,25", { selector: "td" });
-    expect(candleCalls(server, "NQ=F")).toHaveLength(1);
-    server.last["NQ=F"] = 21500;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-    });
-    expect(candleCalls(server, "NQ=F")).toHaveLength(2);
+    const sub = quoteSubs().find((q) => q.op.symbol === "NQ=F")!;
+    act(() => sub.socket.serverSend({ type: "last", sub: sub.op.sub, seq: 2, epoch: "epoch-aaaa", source: "Schwab", data_state: "live", price: 21500, ts_ms: 1, change: 80, change_pct: 0.9 }));
     expect(await screen.findByText("21.500,00", { selector: "td" })).toBeInTheDocument();
+    expect(screen.getByText("+0,90%")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(180_000);                       // three minutes of nothing: nobody asks again
+    });
+    expect(server.urls.filter((u) => u.startsWith("/api/market/candles"))).toHaveLength(0);
+    expect(quoteSubs().filter((q) => q.op.symbol === "NQ=F")).toHaveLength(1);
   });
 
   it("shows a dash for an asset whose quote failed and keeps the rest", async () => {
     stubServer({ quoteFails: new Set(["ES=F"]) });
     open();
+    await settleQuotes();
     await screen.findByText("21.430,25", { selector: "td" });
     const row = screen.getByRole("button", { name: "ES=F" }).closest("tr")!;
     await waitFor(() => expect(within(row).getAllByText("-")).toHaveLength(2));

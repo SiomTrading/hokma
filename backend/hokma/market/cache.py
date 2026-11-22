@@ -37,6 +37,12 @@ class DiskCache:
         except OSError:
             pass  # a cache that cannot be written is only a slower app
 
+    def drop(self, key: str) -> None:
+        try:
+            self._file(key).unlink()
+        except OSError:
+            pass
+
     def _prune(self) -> None:
         files = [p for p in self.folder.glob("*.json")]
         if len(files) <= MAX_ENTRIES:

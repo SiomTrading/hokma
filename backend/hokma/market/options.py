@@ -76,6 +76,7 @@ NO_FALLBACK = ("bad_request", "not_equity", "desk")       # the next source woul
 RATE_CODES = ("rate_limited", "schwab.rate_limited")
 HOURS_SECONDS = 300
 HOURS_FAILED_SECONDS = 60
+PHASE_SECONDS = 60
 DEFAULT_MULTIPLIER = 100
 NO_DATA = -999.0                                         # Schwab's "no data" is this or less (SPEC-015 12, point 9)
 
@@ -151,13 +152,6 @@ def _now() -> float:
 
 def _today() -> date:
     return datetime.fromtimestamp(_now(), NEW_YORK).date()
-
-
-def market_open(now: float | None = None) -> bool:
-    """The regular session of US stocks: Monday to Friday, 09:30 to 16:00 in New York (holidays are not known here)."""
-    local = datetime.fromtimestamp(_now() if now is None else now, NEW_YORK)
-    minutes = local.hour * 60 + local.minute
-    return local.weekday() < 5 and 9 * 60 + 30 <= minutes < 16 * 60
 
 
 def _iso(seconds: float) -> str:
@@ -457,12 +451,12 @@ def _schwab_chain(symbol: str, **params: Any) -> dict:
         data = _schwab_call(lambda: schwab_models.dump(schwab_endpoints.option_chain(symbol, **params)), {})
         return data if isinstance(data, dict) else {}
 
-    return _cached(key, CHAIN_SECONDS, build)
+    return _cached(key, 0, build)                        # SPEC-016 4.3: the structure is asked each time, no 30 second memory
 
 
 def _market_hours_open() -> bool | None:
     """16.15: is the regular session open now, by `GET /markets` (options, else equity) with the holidays. None when Schwab
-    cannot say (no session, a failure, a payload without the product): the caller falls back to `market_open`."""
+    cannot say (no session, a failure, a payload without the product): the answer is then "unknown" (None), never a fixed 09:30 to 16:00."""
     global _hours_failed_until
     from hokma.schwab import analytics
 
@@ -482,14 +476,18 @@ def _market_hours_open() -> bool | None:
     return None
 
 
-def _is_open(providers: list[str]) -> bool:
-    """`market_open` of an answer: the hours of Schwab, holidays included, when Schwab is one of the sources in use (it is
-    connected and the desk uses it); the plain clock if not."""
-    if SCHWAB in providers:
-        known = _market_hours_open()
-        if known is not None:
-            return known
-    return market_open()
+def _alpaca_open(creds: "_Creds") -> bool | None:
+    """Is the regular session open now, by Alpaca's own clock (`phase` of `/v3/clock`): `core` is open, `closed`, `pre` and `post` are not. None when
+    Alpaca does not say. Hokma has no hours of its own, so an answer that is not there is "unknown" and never a guess."""
+    from hokma.market import alpaca_hours
+
+    def build() -> str | None:
+        return alpaca_hours.phase(_fetch, creds.headers, creds.hosts())
+
+    phase = _cached(("alpaca-phase", creds.ident), PHASE_SECONDS, build)
+    if phase is None:
+        return None
+    return phase == "core"
 
 
 # ---------------------------------------------------------------------------------------------- the requests
@@ -670,11 +668,9 @@ def _quote(snap: dict) -> dict:
             "quote_time": quote.get("t") or None}
 
 
-def _label_feed(feed: str) -> tuple[str, str, str]:
-    """(price_feed, greeks, note) of a feed."""
-    if feed == "opra":
-        return "opra", "calculated", t("options.note.opra")
-    return "indicative", "estimated", t("options.note.indicative")
+def _label_feed(feed: str) -> tuple[str, str]:
+    """(price_feed, greeks) of a feed."""
+    return ("opra", "calculated") if feed == "opra" else ("indicative", "estimated")
 
 
 def _latest(times: list[str | None]) -> str | None:
@@ -691,9 +687,31 @@ def _check_equity(symbol: Any) -> str:
     return text
 
 
+def _hub_quote(symbol: str):
+    try:
+        from hokma.connections import runtime
+
+        return runtime.get_hub().quote_sync(symbol)
+    except Exception:                                    # noqa: BLE001  (no hub or no live source: the REST quote answers)
+        return None
+
+
+def _hub_spot(symbol: str) -> float | None:
+    """The last price of the underlying that the live source of the hub has (the same Quote the chart shows), or None."""
+    try:
+        from hokma.connections import runtime
+
+        return runtime.get_hub().spot_sync(symbol)
+    except Exception:                                    # noqa: BLE001  (no hub or no live source: the chart's own price answers)
+        return None
+
+
 def _underlying_price(symbol: str, desk_id: int | None) -> float | None:
     from hokma.kit import market_tools
 
+    live = _hub_spot(symbol)
+    if live is not None:
+        return live
     try:
         return _num(market_tools.quote(symbol, desk_id).get("last"))
     except (LookupError, ValueError):
@@ -769,7 +787,7 @@ def options_chain(symbol: Any, expiration: Any = None, type: Any = None, min_day
         return {"source": "Schwab", "price_feed": "schwab", "greeks": "provider", "note": None, "rows": rows,
                 "truncated": False, "spot": spot if spot is not None else _underlying_price(symbol, desk_id),
                 "as_of": (data.get("underlying") or {}).get("quoteTime"), "delayed": _schwab_delayed(data),
-                "market_open": _is_open(providers), "creds": None}
+                "market_open": _market_hours_open(), "creds": None}
 
     def from_alpaca() -> dict:
         creds = _credentials(desk_id)
@@ -785,7 +803,8 @@ def options_chain(symbol: Any, expiration: Any = None, type: Any = None, min_day
             return {"contracts": contracts, "snaps": snaps, "feed": feed, "truncated": cut_a or cut_b}
 
         data = _cached(key, CHAIN_SECONDS, build)
-        price_feed, greeks, note = _label_feed(data["feed"])
+        price_feed, greeks = _label_feed(data["feed"])
+        note = t("options.note.opra") if price_feed == "opra" else None          # no fixed text for the free plan (decision 226)
         rows = []
         for contract in data["contracts"]:
             snap = data["snaps"].get(contract["symbol"])
@@ -797,7 +816,7 @@ def options_chain(symbol: Any, expiration: Any = None, type: Any = None, min_day
                          "open_interest_date": contract["open_interest_date"]})
         return {"source": "Alpaca", "price_feed": price_feed, "greeks": greeks, "note": note, "rows": rows,
                 "truncated": data["truncated"], "spot": _underlying_price(symbol, desk_id), "as_of": None,
-                "market_open": _is_open(providers), "creds": creds}
+                "market_open": _alpaca_open(creds), "creds": creds}
 
     got = _serve(providers, {SCHWAB: from_schwab, ALPACA: from_alpaca})
     rows = got["rows"]
@@ -961,13 +980,12 @@ def _schwab_group(symbol: str, day: date, count: int | None, spot: float | None,
     """The group of one expiration from Schwab: ONE `/chains` call for that day (`strikeCount` strikes above and below
     the money, then trimmed to `count` around the price). Returns the group and the chain JSON (for the underlying)."""
     data = _schwab_chain(symbol, contractType="ALL", strategy="SINGLE", includeUnderlyingQuote=True,
-                         fromDate=day.isoformat(), toDate=day.isoformat(), strikeCount=count)
+                         fromDate=day.isoformat(), toDate=day.isoformat())          # no strikeCount: every strike Schwab has (SPEC-016 4.3)
     found = [(c, q) for c, q in _schwab_contracts(data) if c["expiration"] == day]
     if not found:
         return {"date": day.isoformat(), "days": (day - today).days, "multiplier": DEFAULT_MULTIPLIER, "iv": None,
                 "expected_move": None, "rows": [], "feed": None, "truncated": False}, data
-    own = _schwab_spot(data)
-    spot = own if own is not None else spot
+    spot = spot if spot is not None else _schwab_spot(data)      # the centre is the underlying price of the stream, then the answer's own
     wanted = _window([c["strike"] for c, _ in found], spot, count)
     by_strike: dict[float, dict] = {s: {"strike": s, "call": None, "put": None} for s in wanted}
     years = years_to_expiry(day)
@@ -976,6 +994,28 @@ def _schwab_group(symbol: str, day: date, count: int | None, spot: float | None,
             by_strike[contract["strike"]][contract["type"]] = _cell(contract, quote, spot, years)
     group = _group(day, today, found[0][0]["size"], [by_strike[s] for s in wanted], spot, years, SCHWAB, False)
     return group, data
+
+
+def structure(symbol: Any, dates: Any, spot: float | None = None, provider: str = SCHWAB) -> dict:
+    """The whole structure of up to 4 expirations of a stock or ETF from Schwab, every strike, for the live chain (SPEC-016 4.3): the groups
+    with their rows and the first values of `/chains`. Prices move afterwards by the Streamer, not by asking again."""
+    symbol = _check_equity(symbol)
+    days = [x.strip() for x in dates.split(",") if x.strip()] if isinstance(dates, str) else list(dates or [])
+    if not days or len(days) > MAX_EXPIRATIONS:
+        raise _bad("expirations", f"from 1 to {MAX_EXPIRATIONS} dates as YYYY-MM-DD")
+    today = _today()
+    groups, delayed = [], False
+    creds = _credentials(None) if provider == ALPACA else None
+    for day in [_date(x, "expirations") for x in days]:
+        if provider == ALPACA:                                  # every strike of the day, with the first prices of the snapshot (indicative on the free plan)
+            group, data = _one_expiration(creds, symbol, day, None, spot, today), {}
+        else:
+            group, data = _schwab_group(symbol, day, None, spot, today)
+        group.pop("truncated", None)
+        group.pop("feed", None)
+        groups.append(group)
+        delayed = delayed or _schwab_delayed(data)
+    return {"underlying": symbol, "groups": groups, "delayed": delayed, "today": today.isoformat()}
 
 
 def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = None) -> dict:
@@ -990,13 +1030,15 @@ def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = No
     today = _today()
 
     def from_schwab() -> dict:
-        chart_spot = _underlying_price(symbol, desk_id)
+        live_spot = _hub_spot(symbol)                       # the centre is the price of the stream; without one, the answer's own
         groups, answers = [], []
         for day in parsed:
-            group, data = _schwab_group(symbol, day, count, chart_spot, today)
+            group, data = _schwab_group(symbol, day, count, live_spot, today)
             groups.append(group)
             answers.append(data)
-        spot = next((p for p in (_schwab_spot(d) for d in answers) if p is not None), chart_spot)
+        spot = live_spot if live_spot is not None else next((p for p in (_schwab_spot(d) for d in answers) if p is not None), None)
+        if spot is None:
+            spot = _underlying_price(symbol, desk_id)
         notes = [t("options.note.truncated")] if any(g.pop("truncated") for g in groups) else []
         for g in groups:
             g.pop("feed")
@@ -1004,7 +1046,7 @@ def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = No
         under_time = next((_iso_ms(d["underlying"].get("quoteTime")) for d in answers
                            if isinstance(d.get("underlying"), dict) and d["underlying"].get("quoteTime")), None)
         return {"underlying": symbol, "underlying_price": spot, "source": "Schwab", "price_feed": "schwab",
-                "greeks": "provider", "market_open": _is_open(providers), "as_of": _latest(times) or under_time or _iso(_now()),
+                "greeks": "provider", "market_open": _market_hours_open(), "as_of": _latest(times) or under_time or _iso(_now()),
                 "notes": notes, "delayed": any(_schwab_delayed(d) for d in answers), "expirations": groups}
 
     def from_alpaca() -> dict:
@@ -1012,12 +1054,12 @@ def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = No
         spot = _underlying_price(symbol, desk_id)
         groups = [_one_expiration(creds, symbol, day, count, spot, today) for day in parsed]
         feed = next((g["feed"] for g in groups if g["feed"]), None) or _feed_state(creds)
-        price_feed, greeks, _ = _label_feed(feed)
+        price_feed, greeks = _label_feed(feed)
         notes = [t("options.note.truncated")] if any(g.pop("truncated") for g in groups) else []
         for g in groups:
             g.pop("feed")
         out = {"underlying": symbol, "underlying_price": spot, "source": "Alpaca", "price_feed": price_feed,
-               "greeks": greeks, "market_open": _is_open(providers),
+               "greeks": greeks, "market_open": _alpaca_open(creds),
                "as_of": _latest([c["quote_time"] for g in groups for r in g["rows"] for c in (r["call"], r["put"]) if c])
                or _iso(_now()), "notes": notes, "expirations": groups}
         return _scrubbed(out, creds)
@@ -1037,6 +1079,13 @@ def _schwab_bar(symbol: str) -> dict:
     high and low, and `delayed` when Schwab says `realtime: false`."""
     from hokma.market.adapters.schwab import map_quote
 
+    streamed = _hub_quote(symbol)
+    if streamed is not None and streamed.last is not None:          # the quote of the stream, the same one the chart shows (SPEC-016 5.7)
+        net = streamed.last - streamed.prev_close if streamed.prev_close else None
+        return {"symbol": symbol, "last": streamed.last, "last_exchange": None, "net_change": net, "bid": streamed.bid, "bid_exchange": None,
+                "ask": streamed.ask, "ask_exchange": None, "bid_size": _whole_of(streamed.bid_size), "ask_size": _whole_of(streamed.ask_size),
+                "volume": _whole_of(streamed.volume), "open": streamed.open, "high": streamed.high, "low": streamed.low,
+                "as_of": _iso(streamed.ts_ms / 1000), "delayed": streamed.delayed}
     answer = _schwab_call(lambda: schwab_models.dump(schwab_endpoints.quotes(symbol, fields="quote")), {})
     item = answer.get(symbol) if isinstance(answer, dict) else None
     if not isinstance(item, dict):

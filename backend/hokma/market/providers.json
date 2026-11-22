@@ -1,19 +1,48 @@
 {
   "version": 1,
-  "asset_classes": ["equity", "crypto", "forex", "future"],
+  "asset_classes": [
+    "equity",
+    "crypto",
+    "forex",
+    "future"
+  ],
   "default_priority": {
-    "equity": ["schwab", "alpaca", "finnhub"],
-    "bars": ["schwab", "alpaca", "finnhub"],
-    "options": ["schwab", "alpaca"],
-    "crypto": ["coinbase", "finnhub"],
-    "forex": ["finnhub"],
-    "future": ["siomtrading_futures"],
-    "news": ["finnhub", "alpaca"]
+    "equity": [
+      "schwab",
+      "ibkr",
+      "alpaca"
+    ],
+    "bars": [
+      "schwab",
+      "ibkr",
+      "alpaca"
+    ],
+    "options": [
+      "schwab",
+      "ibkr",
+      "alpaca"
+    ],
+    "crypto": [
+      "coinbase"
+    ],
+    "forex": [
+      "finnhub"
+    ],
+    "future": [
+      "schwab",
+      "siomtrading_futures"
+    ],
+    "news": [
+      "finnhub",
+      "alpaca"
+    ]
   },
   "providers": {
     "coinbase": {
       "name": "Coinbase",
-      "asset_classes": ["crypto"],
+      "asset_classes": [
+        "crypto"
+      ],
       "needs_key": false,
       "key_fields": [],
       "enabled_by_default": true,
@@ -21,60 +50,132 @@
       "delay_seconds": 0,
       "max_symbols": 100,
       "url": "wss://ws-feed.exchange.coinbase.com",
-      "test_symbol": "BTC-USD"
+      "test_symbol": "BTC-USD",
+      "stream": {
+        "reconcile_closed": true,
+        "reconcile_delay_seconds": 3
+      }
     },
     "alpaca": {
-      "name": "Alpaca IEX",
-      "asset_classes": ["equity"],
+      "name": "Alpaca Trading",
+      "asset_classes": [
+        "equity"
+      ],
       "needs_key": true,
-      "key_fields": ["key_id", "secret"],
+      "key_fields": [
+        "key_id",
+        "secret"
+      ],
       "enabled_by_default": true,
       "data_state": "live",
       "delay_seconds": 0,
       "max_symbols": 30,
       "url": "wss://stream.data.alpaca.markets/v2/iex",
-      "test_symbol": "SPY"
+      "test_symbol": "SPY",
+      "role": "free",
+      "stream": {
+        "options_url": "wss://stream.data.alpaca.markets/v1beta1/indicative"
+      }
     },
     "finnhub": {
       "name": "Finnhub",
-      "asset_classes": ["equity", "forex", "crypto"],
+      "asset_classes": [
+        "forex"
+      ],
       "needs_key": true,
-      "key_fields": ["key"],
+      "key_fields": [
+        "key"
+      ],
       "enabled_by_default": true,
       "data_state": "live",
       "delay_seconds": 0,
       "max_symbols": 50,
       "url": "wss://ws.finnhub.io",
-      "test_symbol": "BTC-USD"
+      "test_symbol": "EURUSD=X",
+      "stream": {
+        "reconcile_closed": true,
+        "reconcile_delay_seconds": 3
+      }
     },
     "siomtrading_futures": {
       "name": "SiomTrading Futures",
-      "asset_classes": ["future"],
+      "asset_classes": [
+        "future"
+      ],
       "needs_key": true,
-      "key_fields": ["key"],
+      "key_fields": [
+        "key"
+      ],
       "enabled_by_default": true,
       "data_state": "live",
       "delay_seconds": 0,
       "max_symbols": 20,
       "url": "wss://stream.siomtrading.com/v1/stream/futures",
-      "test_symbol": "NQ=F"
+      "test_symbol": "NQ=F",
+      "role": "free"
     },
     "schwab": {
       "name": "Schwab",
-      "asset_classes": ["equity"],
+      "asset_classes": [
+        "equity",
+        "future"
+      ],
       "needs_key": true,
-      "key_fields": ["client_id", "client_secret"],
+      "key_fields": [
+        "client_id",
+        "client_secret"
+      ],
       "auth": "oauth",
       "enabled_by_default": true,
       "data_state": "live",
       "delay_seconds": 0,
       "max_symbols": 100,
+      "test_symbol": "SPY",
+      "stream": {
+        "login_timeout_seconds": 10,
+        "command_timeout_seconds": 10,
+        "idle_timeout_seconds": 120,
+        "idle_logout_seconds": 300,
+        "other_session_wait_seconds": 30,
+        "rate_pause_seconds": 60,
+        "chunk": 100,
+        "reconcile_margin_seconds": 1000,
+        "measured_in_t1": false,
+        "pending_t1": [
+          "max symbols (code 19)",
+          "heartbeat interval (idle_timeout = interval plus margin)",
+          "CHART_* in progress or closed only",
+          "token expiry on an open session"
+        ]
+      },
+      "role": "broker"
+    },
+    "ibkr": {
+      "name": "Interactive Brokers",
+      "asset_classes": [
+        "equity"
+      ],
+      "needs_key": false,
+      "key_fields": [],
+      "auth": "gateway",
+      "role": "broker",
+      "enabled_by_default": false,
+      "data_state": "live",
+      "delay_seconds": 0,
+      "max_symbols": 100,
+      "host": "127.0.0.1",
       "test_symbol": "SPY"
     }
   },
   "polling": {
     "name": "Yahoo Finance",
     "interval_seconds": 20,
-    "delay_seconds": {"future": 600, "equity": 900, "forex": 0, "crypto": 0, "index": 900}
+    "delay_seconds": {
+      "future": 600,
+      "equity": 900,
+      "forex": 0,
+      "crypto": 0,
+      "index": 900
+    }
   }
 }

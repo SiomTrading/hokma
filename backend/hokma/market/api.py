@@ -142,7 +142,7 @@ class ChartOut(BaseModel):
     previous_close: float | None
     change: float | None
     change_pct: float | None
-    market_open: bool
+    market_open: bool | None
     last_trade_at: int | None
     data_age_seconds: int | None
     delayed: bool

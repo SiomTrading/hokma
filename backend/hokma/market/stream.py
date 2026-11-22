@@ -30,6 +30,72 @@ class SourceCapabilities:
     max_symbols: int
     asset_classes: tuple[str, ...]
     delay_seconds: int | None = 0
+    ticks: bool = True              # the source reports trade by trade; False: no seconds or range bars from it (SPEC-016 3.3)
+    clock_aligned: bool = False     # it sends every session as it comes: the hub folds the intervals it does not give on the clock
+    provider_days: bool = False     # it gives the day candle itself (Quote fields of the day): days and weeks are never folded from minutes
+    live_options: bool = False      # it streams option contracts (`subscribe_options`): the chain moves cell by cell
+
+
+@dataclass(frozen=True)
+class Quote:
+    """Level 1 of a symbol (SPEC-016 3.2), whole: the source's last value of every field, never a partial message.
+    What the source does not give is None; nothing is calculated here except `mark` when the source has none and has
+    bid and ask (then `mark_calculated`). `regular_last` is the last price of the regular session, as the source gives it.
+    `session`: `regular` when the source says the last trade was a regular one, `extended` when it says it was not, None
+    when it says nothing. Pre and post are told apart only by the hours of the provider (`market_hours`), never here."""
+    symbol: str
+    ts_ms: int
+    bid: float | None = None
+    ask: float | None = None
+    last: float | None = None
+    mark: float | None = None
+    bid_size: float | None = None
+    ask_size: float | None = None
+    last_size: float | None = None
+    volume: float | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    prev_close: float | None = None
+    regular_last: float | None = None
+    session: str | None = None
+    status: str | None = None
+    delayed: bool = False
+    mark_calculated: bool = False
+    regular_ts_ms: int | None = None          # time of the last regular-session trade: the day the open, high and low belong to
+
+
+@dataclass(frozen=True)
+class OptionQuote:
+    """Level 1 of an option contract (SPEC-016 4.3), whole: the last value of every field the source sent. `symbol` is the key of the source
+    as it came; the greeks, the IV and the theoretical value are the source's, never calculated here."""
+    symbol: str
+    ts_ms: int
+    bid: float | None = None
+    ask: float | None = None
+    last: float | None = None
+    mark: float | None = None
+    bid_size: float | None = None
+    ask_size: float | None = None
+    volume: float | None = None
+    open_interest: float | None = None
+    iv: float | None = None
+    delta: float | None = None
+    gamma: float | None = None
+    theta: float | None = None
+    vega: float | None = None
+    rho: float | None = None
+    theoretical: float | None = None
+    underlying_price: float | None = None
+    status: str | None = None
+    delayed: bool = False
+
+
+@dataclass(frozen=True)
+class LimitReached:
+    """The source's limit of symbols answered a subscription: these `symbols` did not enter and are not asked again (SPEC-016 4.4)."""
+    kind: str                     # "options" | "equity" | ...
+    symbols: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -79,7 +145,7 @@ class Rollover:
     at_ms: int
 
 
-MarketEvent = Tick | BarUpdate | SourceStatus | SymbolError | Rollover
+MarketEvent = Tick | Quote | OptionQuote | LimitReached | BarUpdate | SourceStatus | SymbolError | Rollover
 
 
 class LiveMarketSource(Protocol):

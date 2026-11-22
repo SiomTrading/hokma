@@ -18,12 +18,13 @@ from hokma.market import options
 from hokma.market.adapters import ADAPTERS
 from hokma.market.adapters import schwab as feed
 from hokma.market.cache import RateLimiter
+from hokma.market.errors import MarketError
 from hokma.market.history import ConnectedSource
 from hokma.market.messages import DOWN_CODES, connection_message
 from hokma.market.models import Candle, Series
 from hokma.market.options import OptionsError
 from hokma.market.providers import get_catalog
-from hokma.market.stream import SourceStatus, SymbolError, TerminalError, Tick, classify_error
+from hokma.market.stream import SourceStatus, SymbolError, TerminalError, Tick, classify_error  # noqa: F401
 from hokma.rpc.ws import SESSION_TOKEN
 from hokma.schwab import endpoints, http
 
@@ -79,19 +80,6 @@ def quote_item(symbol: str, last: float = 100.0, volume: int = 1000, trade: int 
                       "netPercentChange": 0.5, "mark": last,
                       "quoteTime": trade + 5, "tradeTime": trade},
             "reference": {"description": symbol + " test", "exchangeName": "NASDAQ"}}
-
-
-def live_source() -> feed.SchwabSource:
-    source = feed.SchwabSource(get_catalog().get("schwab"), interval=0.05)
-    source._queue = asyncio.Queue(200)
-    return source
-
-
-def drain(source) -> list:
-    out = []
-    while not source._queue.empty():
-        out.append(source._queue.get_nowait())
-    return out
 
 
 def test_the_adapter_is_registered_so_the_card_of_schwab_is_available():
@@ -159,199 +147,6 @@ def test_map_quote_takes_the_fields_of_the_spec_and_marks_a_false_realtime_as_de
     assert feed.map_quote(quote_item("AAPL", realtime=False))["delayed"] is True
     assert feed.map_quote({"symbol": "X", "quote": {"lastPrice": "n/a", "bidPrice": float("nan")}})["last"] is None
     assert feed.map_quote({"symbol": "X"})["delayed"] is False and feed.map_quote({"symbol": "X"})["last"] is None
-
-
-def test_one_call_per_poll_with_the_symbols_and_the_fields_and_a_tick_per_new_trade(schwab):
-    schwab.on("GET", QUOTES, lambda call: {s: quote_item(s, 100 + i, 1000 + i)
-                                           for i, s in enumerate(call.query["symbols"].split(","))})
-
-    async def go():
-        source = live_source()
-        source._symbols = {"SPY", "AAPL"}
-        await source._poll_once()
-        return source, drain(source)
-
-    source, events = asyncio.run(go())
-    assert len(schwab.calls) == 1
-    call = schwab.calls[0]
-    assert call.method == "GET" and call.path == QUOTES
-    assert call.query == {"symbols": "AAPL,SPY", "fields": "quote,reference"}
-    assert call.headers["authorization"] == "Bearer " + schwab.token
-    ticks = {e.symbol: e for e in events if isinstance(e, Tick)}
-    assert ticks["AAPL"] == Tick("AAPL", QUOTE_MS, 100.0, None) and ticks["SPY"].price == 101.0
-    assert SourceStatus("live", "polled") in events
-    assert source.last_quotes["AAPL"]["bid"] == 99.99 and source.data_state == "live"
-
-
-def test_an_unchanged_trade_is_no_tick_and_a_new_one_carries_the_growth_of_the_volume(schwab):
-    answers = iter([quote_item("AAPL", 100, 1000, QUOTE_MS), quote_item("AAPL", 100, 1000, QUOTE_MS),
-                    quote_item("AAPL", 100.5, 1040, QUOTE_MS + 2000), quote_item("AAPL", 100.5, 900, QUOTE_MS + 4000)])
-    schwab.on("GET", QUOTES, lambda call: {"AAPL": next(answers)})
-
-    async def go():
-        source = live_source()
-        source._symbols = {"AAPL"}
-        sizes = []
-        for _ in range(4):
-            await source._poll_once()
-            sizes.append([e for e in drain(source) if isinstance(e, Tick)])
-        return sizes
-
-    first, same, grown, shrunk = asyncio.run(go())
-    assert [(t.price, t.size) for t in first] == [(100.0, None)]
-    assert same == []
-    assert [(t.ts_ms, t.price, t.size) for t in grown] == [(QUOTE_MS + 2000, 100.5, 40.0)]
-    assert [t.size for t in shrunk] == [0.0]                          # a correction never gives a negative size
-
-
-def test_realtime_false_makes_the_source_delayed_and_true_makes_it_live_again(schwab):
-    state = {"realtime": False}
-    schwab.on("GET", QUOTES, lambda call: {"AAPL": quote_item("AAPL", realtime=state["realtime"])})
-
-    async def go():
-        source = live_source()
-        source._symbols = {"AAPL"}
-        await source._poll_once()
-        first = [e for e in drain(source) if isinstance(e, SourceStatus)]
-        state["realtime"] = True
-        await source._poll_once()
-        return first, [e for e in drain(source) if isinstance(e, SourceStatus)]
-
-    first, second = asyncio.run(go())
-    assert first[0] == SourceStatus("delayed", "polling") and first[-1] == SourceStatus("delayed", "polled")
-    assert second == [SourceStatus("live", "polled")]
-
-
-def test_more_than_100_symbols_go_in_calls_of_100(schwab):
-    schwab.on("GET", QUOTES, lambda call: {s: quote_item(s) for s in call.query["symbols"].split(",")})
-    names = [f"S{i:03d}" for i in range(101)]
-
-    async def go():
-        source = live_source()
-        source._symbols = set(names)
-        await source._poll_once()
-        return [e for e in drain(source) if isinstance(e, Tick)]
-
-    ticks = asyncio.run(go())
-    assert [len(c.query["symbols"].split(",")) for c in schwab.calls] == [100, 1] and len(ticks) == 101
-
-
-def test_a_400_for_the_size_splits_the_list_in_two_and_asks_again(schwab):
-    def answer(call):
-        symbols = call.query["symbols"].split(",")
-        if len(symbols) > 3:
-            return 400, {"errors": [{"status": "400", "title": "Bad Request"}]}
-        return {s: quote_item(s) for s in symbols}
-
-    schwab.on("GET", QUOTES, answer)
-
-    async def go():
-        source = live_source()
-        source._symbols = {f"S{i}" for i in range(8)}
-        await source._poll_once()
-        return [e for e in drain(source) if isinstance(e, Tick)]
-
-    ticks = asyncio.run(go())
-    sizes = [len(c.query["symbols"].split(",")) for c in schwab.calls]
-    assert sizes == [8, 4, 2, 2, 4, 2, 2] and len(ticks) == 8
-
-
-def test_a_symbol_that_schwab_lists_as_invalid_is_rejected_and_the_rest_goes_on(schwab):
-    schwab.on("GET", QUOTES, {"AAPL": quote_item("AAPL"), "errors": {"invalidSymbols": ["ZZZZ"]}})
-
-    async def go():
-        source = live_source()
-        source._symbols = {"AAPL", "ZZZZ"}
-        await source._poll_once()
-        return source, drain(source)
-
-    source, events = asyncio.run(go())
-    assert SymbolError("ZZZZ", "market.unknown_symbol") in events and any(isinstance(e, Tick) for e in events)
-    assert source._symbols == {"AAPL"}
-
-
-def test_a_429_waits_60_seconds_and_is_not_asked_again_meanwhile(schwab):
-    schwab.on("GET", QUOTES, (429, {"errors": [{"status": "429", "title": "Too Many Requests"}]}))
-
-    async def go():
-        source = live_source()
-        source._symbols = {"AAPL"}
-        with pytest.raises(feed._RateLimited):
-            await source._poll_once()
-        assert source._retry_delay == 60.0 and classify_error(feed._RateLimited()) == "rate_limited"
-        with pytest.raises(feed._RateLimited):                        # the door keeps its own pause: no second request
-            await source._poll_once()
-
-    asyncio.run(go())
-    assert len(schwab.calls) == 1
-
-
-def test_the_run_loop_shows_a_429_as_reconnecting_and_sleeps_the_pause(schwab):
-    schwab.on("GET", QUOTES, (429, {}))
-
-    async def go():
-        source = live_source()
-        await source.connect()
-        await source.subscribe(["AAPL"])
-        first = await asyncio.wait_for(source._queue.get(), 3)
-        delay = source._retry_delay
-        await source.close()
-        return first, delay
-
-    first, delay = asyncio.run(go())
-    assert first == SourceStatus("reconnecting", "rate_limited")
-    assert delay is None or delay == 60.0                              # taken by the loop when it starts to sleep
-
-
-@pytest.mark.parametrize("status,code", [(401, "connections.schwab_expired"), (403, "connections.schwab_denied")])
-def test_a_session_that_cannot_be_renewed_or_a_refusal_ends_the_source_with_its_connections_code(schwab, status, code):
-    schwab.on("GET", QUOTES, (status, {"errors": [{"status": str(status)}]}))
-
-    async def go():
-        source = live_source()
-        source._symbols = {"AAPL"}
-        with pytest.raises(TerminalError) as error:
-            await source._poll_once()
-        return error.value.code
-
-    assert asyncio.run(go()) == code
-    assert DOWN_CODES.get(code, code if code.startswith("connections.") else None) == code     # what the hub stores
-    assert connection_message(code)                                                              # and the row says why
-    if status == 401:
-        assert len(schwab.calls) == 2                                  # the door renewed the token once and asked again
-
-
-def test_without_a_session_the_source_ends_with_no_login(monkeypatch, schwab):
-    from hokma.schwab import http as door
-
-    def refuse():
-        raise door.SchwabError(door.NOT_CONNECTED, 401)
-
-    door.set_token_provider(refuse)
-
-    async def go():
-        source = live_source()
-        source._symbols = {"AAPL"}
-        with pytest.raises(TerminalError) as error:
-            await source._poll_once()
-        return error.value.code
-
-    try:
-        assert asyncio.run(go()) == "connections.no_login" and schwab.calls == []
-    finally:
-        door.set_token_provider(lambda: schwab.token, lambda: schwab.token)
-
-
-def test_a_server_error_drops_the_connection_to_retry_and_never_ends_the_source(schwab):
-    schwab.on("GET", QUOTES, (500, {}))
-
-    async def go():
-        source = live_source()
-        source._symbols = {"AAPL"}
-        with pytest.raises(OSError):
-            await source._poll_once()
-
-    asyncio.run(go())
 
 
 # ------------------------------------------------------------------------------------------ 5.5 the candles
@@ -429,7 +224,7 @@ def test_the_candles_of_each_base_ask_the_combination_of_the_ref_with_the_span_i
     assert series.source == "Schwab" and yahoo.calls == []
     assert schwab.calls[0].method == "GET" and schwab.calls[0].path == HISTORY
     assert schwab.calls[0].query == {"symbol": "AAPL", **query, "startDate": str((NOW - SPAN_DAYS[base] * 86400) * 1000),
-                                     "endDate": str(NOW * 1000), "needExtendedHoursData": "false"}
+                                     "endDate": str(NOW * 1000), "needExtendedHoursData": "true"}
 
 
 def test_five_minute_bars_are_read_as_they_come_in_seconds_and_in_order(tmp_path, schwab):
@@ -439,21 +234,35 @@ def test_five_minute_bars_are_read_as_they_come_in_seconds_and_in_order(tmp_path
     assert source.history("AAPL", "5m").candles == [Candle(OPEN_930, 10, 12, 9, 11, 100), Candle(OPEN_930 + 300, 11, 13, 10, 12, 50)]
 
 
-def test_the_hour_is_made_of_two_30_minute_bars_from_the_open_and_pre_market_is_dropped(tmp_path, schwab):
-    rows = [bar(OPEN_930 - 5400, 1, 1, 1, 1, 1),                              # 08:00, pre-market: never in the chart
+def test_the_hour_is_folded_from_30_minute_bars_on_the_clock_and_pre_market_is_kept(tmp_path, schwab):
+    """SPEC-016 3.3 and 3.4: Schwab gives no 60 minute bar, so it is folded every hour on the hour. Nothing is dropped:
+    pre-market (08:00 here) is a bar like any other. The 09:30 bar falls in the 09:00 hour, as the clock says."""
+    rows = [bar(OPEN_930 - 5400, 1, 1, 1, 1, 1),                              # 08:00
             bar(OPEN_930, 10, 12, 9, 11, 100), bar(OPEN_930 + 1800, 11, 15, 10, 14, 200),
             bar(OPEN_930 + 3600, 14, 16, 13, 15, 300), bar(OPEN_930 + 5400, 15, 15.5, 12, 13, 400)]
     schwab.on("GET", HISTORY, {**SCHWAB_BARS, "candles": rows})
     source, _ = history_chain(tmp_path)
     series = source.history("AAPL", "1h")
-    assert series.candles == [Candle(OPEN_930, 10, 15, 9, 14, 300), Candle(OPEN_930 + 3600, 14, 16, 12, 13, 700)]
+    h08, h09, h10, h11 = OPEN_930 - 5400, OPEN_930 - 1800, OPEN_930 + 1800, OPEN_930 + 5400
+    assert series.candles == [Candle(h08, 1, 1, 1, 1, 1), Candle(h09, 10, 12, 9, 11, 100), Candle(h10, 11, 16, 10, 15, 500),
+                              Candle(h11, 15, 15.5, 12, 13, 400)]
+    assert series.clock_aligned is True
+
+
+def test_the_daily_candle_of_schwab_is_returned_as_it_comes(tmp_path, schwab):
+    """SPEC-016 3.4 point 2: date, open, high, low, close and volume of `pricehistory` daily are not touched."""
+    row = bar(OPEN_930 - 14 * 3600 + 5 * 3600, 10.01, 12.02, 9.03, 11.04, 123456)       # a time of day nobody normalizes
+    schwab.on("GET", HISTORY, {**SCHWAB_BARS, "candles": [row]})
+    source, _ = history_chain(tmp_path)
+    assert source.history("AAPL", "1D").candles == [Candle(row["datetime"] // 1000, 10.01, 12.02, 9.03, 11.04, 123456)]
 
 
 def test_empty_true_is_no_data_and_not_an_error_so_the_next_source_answers(tmp_path, schwab):
     schwab.on("GET", HISTORY, {"symbol": "AAPL", "empty": True, "candles": []})
     source, yahoo = history_chain(tmp_path)
-    assert source.history("AAPL", "5m").source == "Yahoo Finance" and ("AAPL", "5m") in yahoo.calls
-    assert len(schwab.calls) == 1
+    with pytest.raises(MarketError):                                  # the broker is the only source: no Yahoo (SPEC-016 3.7)
+        source.history("AAPL", "5m")
+    assert yahoo.calls == [] and len(schwab.calls) == 1
 
 
 @pytest.mark.parametrize("status", [401, 403, 429, 500, 404])
@@ -461,7 +270,9 @@ def test_a_failure_of_schwab_is_skipped_without_an_error_and_remembered(tmp_path
     schwab.on("GET", HISTORY, (status, {"errors": [{"status": str(status)}]}))
     source, yahoo = history_chain(tmp_path)
     for _ in range(3):
-        assert source.history("AAPL", "5m").source == "Yahoo Finance"
+        with pytest.raises(MarketError):                               # a connected broker that fails is not replaced by another source
+            source.history("AAPL", "5m")
+    assert yahoo.calls == []
     assert len([c for c in schwab.calls if c.path == HISTORY]) <= (2 if status == 401 else 1)     # a 401 is asked twice: renewed once
 
 
@@ -478,9 +289,10 @@ def test_the_bars_follow_the_use_bars_and_not_the_order_of_the_live_price(tmp_pa
         return ConnectedSource(Yahoo(), Config(keys=keys, order=order), get_catalog(), tmp_path / name, fetch=alpaca,
                                clock=lambda: NOW)
 
+    # SPEC-016 3.6: with a broker connected it is the only source of the candles, whatever the old order of use says
     assert build({"equity": ["alpaca", "schwab"], "bars": ["schwab", "alpaca"]}, "a").history("AAPL", "5m").source == "Schwab"
-    assert build({"equity": ["schwab", "alpaca"], "bars": ["alpaca", "schwab"]}, "b").history("AAPL", "5m").source == "Alpaca IEX"
-    assert build({"bars": ["alpaca", "schwab"]}, "c").providers_for("AAPL") == ["alpaca", "schwab"]
+    assert build({"equity": ["schwab", "alpaca"], "bars": ["alpaca", "schwab"]}, "b").history("AAPL", "5m").source == "Schwab"
+    assert build({"bars": ["alpaca", "schwab"]}, "c").providers_for("AAPL") == ["schwab"]
 
 
 def test_schwab_is_not_asked_without_a_session_or_when_it_is_switched_off(tmp_path, schwab):
@@ -549,7 +361,7 @@ def test_the_tool_reads_a_chain_of_schwab_with_the_names_of_ref_a6(monkeypatch, 
                           "fromDate": "2026-12-18", "toDate": "2026-12-18"}
     assert (out["source"], out["price_feed"], out["greeks"], out["note"]) == ("Schwab", "schwab", "provider", None)
     assert out["underlying"] == "AAPL" and out["underlying_price"] == 228.5 and out["delayed"] is False
-    assert out["scanned"] == out["matched"] == 4 and out["as_of"] == QUOTE_TEXT and out["market_open"] is True
+    assert out["scanned"] == out["matched"] == 4 and out["as_of"] == QUOTE_TEXT and out["market_open"] is None
     rows = {(c["type"], c["strike"]): c for c in out["contracts"]}
     first = rows[("call", 220.0)]
     assert list(first) == ["symbol", "type", "strike", "expiration", "days", "bid", "ask", "mid", "spread_pct", "last",
@@ -642,7 +454,7 @@ def test_the_dashboard_chain_trims_the_strikes_around_the_price_and_labels_schwa
     schwab.on("GET", CHAINS, chain_body())
     out = options.chain("AAPL", "2026-12-18", "14")
     query = paths(schwab, CHAINS)[0].query
-    assert query["strikeCount"] == "14" and query["fromDate"] == query["toDate"] == "2026-12-18"
+    assert "strikeCount" not in query and query["fromDate"] == query["toDate"] == "2026-12-18"        # every strike of Schwab, cut here (SPEC-016 4.3)
     assert (out["source"], out["price_feed"], out["greeks"], out["delayed"]) == ("Schwab", "schwab", "provider", False)
     assert out["underlying_price"] == 228.5 and out["as_of"] == QUOTE_TEXT and out["notes"] == []
     group = out["expirations"][0]
@@ -668,22 +480,21 @@ def test_the_dashboard_chain_cuts_to_the_number_of_strikes_asked(monkeypatch, sc
     schwab.on("GET", CHAINS, chain_body(callExpDateMap={"2026-12-18:28": calls}, putExpDateMap={"2026-12-18:28": puts}))
     rows = options.chain("AAPL", "2026-12-18", "6")["expirations"][0]["rows"]
     assert [r["strike"] for r in rows] == [215.0, 220.0, 225.0, 230.0, 235.0, 240.0]            # three below, three from the price up
-    assert paths(schwab, CHAINS)[0].query["strikeCount"] == "6"
+    assert "strikeCount" not in paths(schwab, CHAINS)[0].query                                 # the list is whole; the cut is made here
     options.forget_cache()
     every = options.chain("AAPL", "2026-12-18", "all")["expirations"][0]["rows"]
     assert len(every) == 12 and "strikeCount" not in paths(schwab, CHAINS)[1].query
 
 
-def test_the_dashboard_chain_asks_once_per_expiration_and_caches_for_30_seconds(monkeypatch, schwab):
-    fake = connect_schwab(monkeypatch)
+def test_the_dashboard_chain_asks_once_per_expiration_and_keeps_no_30_second_memory(monkeypatch, schwab):
+    """SPEC-016 4.3: the structure is asked when the chain opens, when an expiration changes and on the refresh button; the prices
+    do not come from a memory of 30 seconds."""
+    connect_schwab(monkeypatch)
     schwab.on("GET", CHAINS, chain_body())
     options.chain("AAPL", "2026-12-18,2027-01-15", "14")
     assert [c.query["fromDate"] for c in paths(schwab, CHAINS)] == ["2026-12-18", "2027-01-15"]
     options.chain("AAPL", "2026-12-18,2027-01-15", "14")
-    assert len(paths(schwab, CHAINS)) == 2
-    fake.now += 31
-    options.chain("AAPL", "2026-12-18", "14")
-    assert len(paths(schwab, CHAINS)) == 3
+    assert len(paths(schwab, CHAINS)) == 4
 
 
 def test_the_underlying_bar_comes_from_the_quote_of_schwab(monkeypatch, schwab):
@@ -784,7 +595,7 @@ def test_without_any_source_the_code_is_no_connection_with_the_new_text(monkeypa
     with pytest.raises(OptionsError) as error:
         options.options_chain("AAPL")
     assert error.value.code == "no_connection" and error.value.status == 409
-    assert str(error.value) == "The option chain needs Schwab or Alpaca IEX: connect one of them in Connections."
+    assert str(error.value) == "The option chain needs Schwab or Alpaca Trading: connect one of them in Connections."
     assert schwab.calls == []
 
 
@@ -838,7 +649,6 @@ def hours(day: str, *, is_open: bool, offset: str = "-05:00") -> dict:
 
 def test_a_holiday_on_a_weekday_is_market_closed_by_the_hours_of_schwab(monkeypatch, schwab):
     connect_schwab(monkeypatch, now=THANKSGIVING)
-    assert options.market_open(THANKSGIVING) is True                  # the plain clock does not know holidays
     schwab.on("GET", HOURS_OPTION, hours("2026-11-26", is_open=False))
     schwab.on("GET", CHAINS, chain_body())
     out = options.options_chain("AAPL", expiration="2026-12-18")
@@ -858,11 +668,11 @@ def test_a_regular_day_is_open_inside_the_session_and_closed_outside_it(monkeypa
     assert options.options_chain("AAPL", expiration="2026-12-18")["market_open"] is False
 
 
-def test_the_hours_are_asked_once_per_day_and_a_failure_falls_back_to_the_plain_clock(monkeypatch, schwab):
+def test_the_hours_are_asked_once_per_day_and_a_failure_is_unknown_not_a_guess(monkeypatch, schwab):
     fake = connect_schwab(monkeypatch)
     schwab.on("GET", CHAINS, chain_body())
     schwab.on("GET", HOURS_OPTION, (500, {}))
-    assert options.options_chain("AAPL", expiration="2026-12-18")["market_open"] is True        # Friday 11:00: the plain rule
+    assert options.options_chain("AAPL", expiration="2026-12-18")["market_open"] is None        # Schwab failed: unknown (no fixed 09:30 to 16:00)
     options.forget_cache()
     options.options_chain("AAPL", expiration="2026-12-18")
     assert len(paths(schwab, HOURS_OPTION)) == 1                                                 # the failure is remembered a minute
@@ -874,9 +684,14 @@ def test_the_hours_are_asked_once_per_day_and_a_failure_falls_back_to_the_plain_
     assert len(paths(schwab, HOURS_OPTION)) == 2 and len(paths(schwab, CHAINS)) == 4
 
 
-def test_without_schwab_the_market_state_is_the_plain_clock(monkeypatch, schwab):
+def test_without_schwab_the_market_state_is_what_alpaca_says_and_unknown_without_it(monkeypatch, schwab):
+    from hokma.market import alpaca_hours
+
     install(monkeypatch)
-    assert options.options_chain("AAPL", limit=1)["market_open"] is True and paths(schwab, HOURS_OPTION) == []
+    assert options.options_chain("AAPL", limit=1)["market_open"] is None and paths(schwab, HOURS_OPTION) == []
+    options.forget_cache()
+    monkeypatch.setattr(alpaca_hours, "phase", lambda *a, **k: "core")
+    assert options.options_chain("AAPL", limit=1)["market_open"] is True
 
 
 def test_the_tool_never_leaks_a_token_a_key_or_an_account_number(monkeypatch, schwab):

@@ -54,6 +54,8 @@ export interface PriceChartProps {
   axis?: "time" | "index";
   /** High of the opening range: dashed line and its pill. Drawn only when its session is among the bars. */
   opening?: OpeningRange | null;
+  /** The pieces of the day the provider named: each one is a background band (pre, regular, post, night). Only on the time axis. */
+  sessions?: Array<{ name: string; start: number; end: number }> | null;
   /** Accessible name of the chart. */
   label: string;
   /**
@@ -142,7 +144,7 @@ interface Hover {
  * click on the time axis fits all bars again.
  */
 export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function PriceChart(
-  { bars, timeframe, timezone, axis = "time", opening = null, label, initialView = null, onViewChange },
+  { bars, timeframe, timezone, axis = "time", opening = null, sessions = null, label, initialView = null, onViewChange },
   ref,
 ) {
   const { t, locale } = useI18n();
@@ -151,6 +153,8 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
   const seriesRef = useRef<ISeriesApi<"Custom", Time, CandleData | WhitespaceData<Time>, CandleSeriesOptions, DeepPartial<CandleSeriesOptions & SeriesOptionsCommon>> | null>(null);
   const lineRef = useRef<IPriceLine | null>(null);
   const shownRef = useRef<PriceBar[]>([]);
+  const barsRef = useRef<PriceBar[]>([]);
+  const sessionsRef = useRef<Array<{ name: string; start: number; end: number }> | null>(null);
   const byKeyRef = useRef(new Map<number, PriceBar>());
   const [hover, setHover] = useState<Hover | null>(null);
   const [pill, setPill] = useState<{ top: number; right: number } | null>(null);
@@ -257,6 +261,30 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
     setPill((old) => (old && old.top === top && old.right === right ? old : { top, right }));
   }, []);
 
+  // The shading by pieces of the day, as the provider named them (SPEC-016 3.4): never a schedule of ours.
+  const [bands, setBands] = useState<Array<{ name: string; left: number; width: number }>>([]);
+  const placeBands = useCallback(() => {
+    const chart = chartRef.current;
+    const list = sessionsRef.current;
+    const first = barsRef.current[0]?.t;
+    const last = barsRef.current[barsRef.current.length - 1]?.t;
+    const scale = chart?.timeScale();
+    if (!chart || !scale || !list || list.length === 0 || first === undefined || last === undefined || typeof scale.timeToCoordinate !== "function") {
+      setBands((old) => (old.length === 0 ? old : []));
+      return;
+    }
+    const width = scale.width();
+    const next: Array<{ name: string; left: number; width: number }> = [];
+    for (const s of list) {
+      if (s.end < first || s.start > last) continue;
+      const a = s.start <= first ? 0 : scale.timeToCoordinate(s.start as unknown as Time);
+      const b = s.end >= last ? width : scale.timeToCoordinate(s.end as unknown as Time);
+      if (a === null || b === null || b <= a) continue;
+      next.push({ name: s.name, left: Math.max(0, a), width: Math.min(width, b) - Math.max(0, a) });
+    }
+    setBands((old) => (JSON.stringify(old) === JSON.stringify(next) ? old : next));
+  }, []);
+
   // The chart lives as long as the component.
   useEffect(() => {
     const host = hostRef.current;
@@ -323,6 +351,7 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
     chart.subscribeCrosshairMove(onMove);
     const onRange = () => {
       placePill();
+      placeBands();
       if (programmatic.current) return;
       publishView();
       // Scrolling goes on after the pointer is up (kinetic scroll): the activity window covers it.
@@ -330,6 +359,7 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
     chart.timeScale().subscribeSizeChange(placePill);
+    chart.timeScale().subscribeSizeChange(placeBands);
 
     // The library takes the new width on its next frame: wait until its time scale has one before placing the view.
     const placeDeferred = (tries: number) => {
@@ -381,13 +411,21 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
       chart.unsubscribeCrosshairMove(onMove);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
       chart.timeScale().unsubscribeSizeChange(placePill);
+      chart.timeScale().unsubscribeSizeChange(placeBands);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
       lineRef.current = null;
       shownRef.current = [];
     };
-  }, [placePill, realTime, publishView, emitView]);
+  }, [placePill, placeBands, realTime, publishView, emitView]);
+
+  // The pieces of the day change (a new day, a reconnection) or the bars move: place the bands again.
+  useEffect(() => {
+    sessionsRef.current = axis === "time" ? (sessions ?? null) : null;
+    barsRef.current = bars;
+    placeBands();
+  }, [sessions, bars, axis, placeBands]);
 
   // Locale changes reach the price axis.
   useEffect(() => {
@@ -525,6 +563,13 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
         emitView();
       }}
     >
+      {bands.length > 0 ? (
+        <div data-testid="session-bands" aria-hidden="true" style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: PRICE_AXIS, pointerEvents: "none", overflow: "hidden" }}>
+          {bands.map((band, index) => (
+            <div key={band.name + index} className="session-band" data-session={band.name} style={{ position: "absolute", top: 0, bottom: 0, left: band.left, width: band.width }} />
+          ))}
+        </div>
+      ) : null}
       <div ref={hostRef} data-testid="price-chart" role="img" aria-label={label} style={{ position: "absolute", inset: 0 }} />
       {showOpening && pill ? (
         <span

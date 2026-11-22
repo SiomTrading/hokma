@@ -282,12 +282,12 @@ describe("the notice and the sign-in step", () => {
     expect(within(rowOf("schwab")).getByTestId("conn-error")).toHaveTextContent("Your Schwab session ended. Sign in again.");
   });
 
-  it("the menu of the Schwab row adds Sign in with Schwab and View account", async () => {
+  it("the menu of the Schwab row adds Sign in with Schwab, View account and Check Schwab data", async () => {
     Object.assign(backend.find("schwab"), { added: true, key_state: "saved", state: "connected", session: session("signed_in", 5 * 86400) });
     await show();
     await userEvent.click(screen.getByRole("button", { name: t("connections.row.menu", { name: "Schwab" }) }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      t("connections.test"), t("connections.row.pause"), t("connections.row.changeKey"), t("connections.schwab.login"), t("connections.schwab.viewAccount"), t("connections.row.guide"), t("connections.row.remove"),
+      t("connections.test"), t("connections.row.pause"), t("connections.row.changeKey"), t("connections.schwab.login"), t("connections.schwab.viewAccount"), t("connections.schwab.diagnostic"), t("connections.row.guide"), t("connections.row.remove"),
     ]);
   });
 

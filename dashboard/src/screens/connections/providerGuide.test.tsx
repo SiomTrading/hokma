@@ -14,7 +14,7 @@ let backend: FakeConnections;
 /** The guide of each provider (7.4): how many steps it has, and which parts it shows. Gmail reuses mail.help; SiomTrading Futures waits for its cost and steps. */
 const GUIDES = [
   { id: "schwab", name: "Schwab", steps: 8, cost: true, fail: true },
-  { id: "alpaca", name: "Alpaca IEX", steps: 3, cost: true, fail: true },
+  { id: "alpaca", name: "Alpaca Trading", steps: 3, cost: true, fail: true },
   { id: "finnhub", name: "Finnhub", steps: 3, cost: true, fail: true },
   { id: "siomtrading_futures", name: "SiomTrading Futures", steps: 1, cost: true, fail: true },
   { id: "coinbase", name: "Coinbase", steps: 1, cost: true, fail: true },
@@ -124,7 +124,7 @@ describe("the guide of Schwab names what the student sees on the site", () => {
 describe("where the guide is opened from", () => {
   it("the fold opens the first time and can be folded and opened again", async () => {
     await show().catch(() => undefined);
-    await pick("Alpaca IEX");
+    await pick("Alpaca Trading");
     const fold = screen.getByRole("button", { name: t("connections.guide.title") });
     expect(fold).toHaveAttribute("aria-expanded", "true");
     await userEvent.click(fold);
@@ -156,7 +156,7 @@ describe("where the guide is opened from", () => {
   it("If the test fails appears under the error of Test and add, as well as in the guide", async () => {
     backend.failAdd.set("alpaca", BAD_KEY_TEST);
     await show().catch(() => undefined);
-    await pick("Alpaca IEX");
+    await pick("Alpaca Trading");
     expect(screen.queryByTestId("guide-fail")).toBeNull(); // only the one inside the guide block before the error
     await userEvent.type(screen.getByLabelText(t("connections.field.keyId")), "AKID-1234567890");
     await userEvent.type(screen.getByLabelText(t("connections.field.secret")), SECRET);

@@ -47,7 +47,7 @@ def test_m9_a_saved_key_is_nowhere_but_the_system_store(live, caplog, capfd):
             c = Collector(ws)
             http.put("/api/connections/alpaca/key", json={"key_id": KEY_ID, "secret": SECRET}, headers=AUTH)
             http.put("/api/connections/finnhub/key", json={"key": FINNHUB}, headers=AUTH)
-            assert subscribe(c, "a", "AAPL", "5m")["source"] == "Alpaca IEX"
+            assert subscribe(c, "a", "AAPL", "5m")["source"] == "Alpaca Trading"
             alpaca.send_all([{"T": "t", "S": "AAPL", "p": 351.0, "s": 5, "t": iso(int(RECORDED_AT * 1000) + 1000)}])
             c.find(lambda m: m["type"] == "bar")
             for provider in ("alpaca", "finnhub"):

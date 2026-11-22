@@ -11,7 +11,7 @@ from hokma.core.config import hokma_data_dir
 from live_fixtures import AUTH, live  # noqa: F401  (fixture)
 from test_live_market import FINNHUB_KEY, KEY_ID, SECRET
 
-DEFAULT_BARS = ["schwab", "alpaca", "finnhub"]
+DEFAULT_BARS = ["schwab", "ibkr", "alpaca"]                 # Finnhub left stocks and crypto (SPEC-016 3.6)
 FILE_108 = {"version": 2,
             "enabled": {"alpaca": True, "finnhub": False, "siomtrading_futures": True, "coinbase": True},
             "priority": {"equity": ["finnhub", "alpaca"], "crypto": ["finnhub", "coinbase"]}}
@@ -51,13 +51,13 @@ def test_equity_is_the_same_and_bars_is_a_copy_of_it(live):
     write_108(live)
     with live.app() as client:
         body = listing(client)
-        assert body["uses"]["equity"] == ["finnhub", "alpaca", "schwab"]       # the saved order, the new provider last
+        assert body["uses"]["equity"] == ["alpaca", "schwab", "ibkr"]                  # the saved order without Finnhub (it left stocks), the new provider last
         assert body["uses"]["bars"] == body["uses"]["equity"]
         assert body["groups"]["equity"] == body["uses"]["equity"]
-        assert body["groups"]["crypto"] == ["finnhub", "coinbase"]
+        assert body["groups"]["crypto"] == ["coinbase"]                        # crypto is always Coinbase
         assert "bars" not in body["groups"]                                    # groups keeps its 1.0.8 keys
-        assert body["uses"]["options"] == ["schwab", "alpaca"] and body["uses"]["news"] == ["finnhub", "alpaca"]
-        assert body["uses"]["future"] == ["siomtrading_futures"]
+        assert body["uses"]["options"] == ["schwab", "ibkr", "alpaca"] and body["uses"]["news"] == ["finnhub", "alpaca"]
+        assert body["uses"]["future"] == ["schwab", "siomtrading_futures"]
 
 
 def test_reading_does_not_rewrite_the_file_and_it_stays_in_version_2(live):
@@ -78,12 +78,12 @@ def test_the_first_change_saves_the_copy_and_still_writes_version_2(live):
     write_108(live)
     with live.app() as client:
         assert client.put("/api/connections/priority", headers=AUTH,
-                          json={"asset_class": "future", "order": ["siomtrading_futures"]}).status_code == 200
+                          json={"asset_class": "future", "order": ["schwab", "siomtrading_futures"]}).status_code == 200
     saved = json.loads((hokma_data_dir() / "connections.json").read_text())
     assert saved["version"] == 2
     assert saved["priority"]["equity"] == ["finnhub", "alpaca"] and saved["priority"]["bars"] == ["finnhub", "alpaca"]
     with live.app() as again:
-        assert listing(again)["uses"]["bars"] == ["finnhub", "alpaca", "schwab"]
+        assert listing(again)["uses"]["bars"] == ["alpaca", "schwab", "ibkr"]
 
 
 def test_a_file_that_already_has_bars_is_not_overwritten_by_equity(live):
@@ -91,7 +91,7 @@ def test_a_file_that_already_has_bars_is_not_overwritten_by_equity(live):
     write_108(live, body)
     with live.app() as client:
         uses = listing(client)["uses"]
-        assert uses["equity"] == ["finnhub", "alpaca", "schwab"] and uses["bars"] == ["alpaca", "finnhub", "schwab"]
+        assert uses["equity"] == ["alpaca", "schwab", "ibkr"] and uses["bars"] == ["alpaca", "schwab", "ibkr"]
 
 
 def test_without_a_saved_equity_order_bars_takes_the_catalog_default(live):
@@ -107,8 +107,8 @@ def test_adding_schwab_to_an_install_of_108_moves_only_schwab(live):
         listing(client)
         connections_runtime.get_service().mark_added("schwab")
         uses = listing(client)["uses"]
-        assert uses["equity"] == ["schwab", "finnhub", "alpaca"] and uses["bars"] == ["schwab", "finnhub", "alpaca"]
-        assert uses["options"] == ["schwab", "alpaca"]
-        assert uses["crypto"] == ["finnhub", "coinbase"] and uses["news"] == ["finnhub", "alpaca"]
+        assert uses["equity"] == ["schwab", "alpaca", "ibkr"] and uses["bars"] == ["schwab", "alpaca", "ibkr"]
+        assert uses["options"] == ["schwab", "ibkr", "alpaca"]
+        assert uses["crypto"] == ["coinbase"] and uses["news"] == ["finnhub", "alpaca"]
         cards = {c["id"]: c for c in listing(client)["connections"]}
         assert cards["finnhub"]["enabled"] is False and cards["alpaca"]["enabled"] is True   # nobody else changed

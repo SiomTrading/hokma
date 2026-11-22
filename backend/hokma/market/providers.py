@@ -15,7 +15,7 @@ ASSET_CLASSES = ("equity", "crypto", "forex", "future")
 # The keys `priority` accepts in connections.json: the asset classes plus the uses that are not an asset class
 # (candles of stocks, options, news and company data). The order here is the order of the rows of "Order of use".
 USES = ("equity", "bars", "options", "future", "crypto", "forex", "news")
-AUTH_KINDS = ("key", "oauth")
+AUTH_KINDS = ("key", "oauth", "gateway")      # gateway: a program on the user's PC (IB's TWS or Gateway), no key in Hokma
 DATA_STATES = ("live", "delayed")
 
 
@@ -35,6 +35,8 @@ class ProviderSpec:
     host: str | None = None
     port: int | None = None
     auth: str = "key"                                  # "key" (a pasted key) or "oauth" (Schwab: keys plus a sign-in)
+    stream: dict = field(default_factory=dict)         # the measured values of a streamer session (SPEC-016 2.2, T1)
+    role: str | None = None                            # "broker" (Schwab, IB) or "free" (Alpaca): who serves a user's data (SPEC-016 3.6)
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,8 @@ def parse_catalog(raw: dict) -> ProviderCatalog:
         classes = tuple(item["asset_classes"])
         if not classes or any(c not in ASSET_CLASSES for c in classes):
             raise ValueError(f"{provider_id}: unknown asset class")
+        if item.get("role") not in (None, "broker", "free"):
+            raise ValueError(f"{provider_id}: role must be broker or free")
         auth = item.get("auth", "key")
         if auth not in AUTH_KINDS:
             raise ValueError(f"{provider_id}: auth must be one of {AUTH_KINDS}")
@@ -75,7 +79,8 @@ def parse_catalog(raw: dict) -> ProviderCatalog:
             key_fields=tuple(item.get("key_fields", ())), enabled_by_default=bool(item["enabled_by_default"]),
             data_state=state, delay_seconds=item.get("delay_seconds"), max_symbols=int(item["max_symbols"]),
             test_symbol=item["test_symbol"], url=item.get("url"),
-            host=item.get("host"), port=item.get("port"), auth=auth,
+            host=item.get("host"), port=item.get("port"), auth=auth, stream=dict(item.get("stream", {})),
+            role=item.get("role"),
         )
     priority: dict[str, tuple[str, ...]] = {}
     for use in USES:

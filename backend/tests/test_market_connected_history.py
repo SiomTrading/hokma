@@ -105,7 +105,7 @@ def chain(tmp_path, keys=None, off=(), order=None):
 def test_with_alpaca_connected_the_candles_come_from_alpaca_and_the_chart_says_so(tmp_path):
     source, yahoo, net = chain(tmp_path, {"alpaca": KEY})
     chart = build_chart(source, "AAPL", "5m", lambda: NOW)
-    assert chart.source == "Alpaca IEX" and len(chart.candles) == 6 and chart.candles[0].o == 10
+    assert chart.source == "Alpaca Trading" and len(chart.candles) == 6 and chart.candles[0].o == 10
     assert yahoo.calls == [] and all(u.startswith("https://data.alpaca.markets/v2/stocks/AAPL/bars") for u in net.urls)
     assert chart.last_price == 16 and chart.market_open is True
     assert "AKTESTKEYID12345" not in " ".join(net.urls)                     # keys travel in headers, never in the URL
@@ -118,24 +118,22 @@ def test_without_connections_the_candles_come_from_yahoo(tmp_path):
     assert ("AAPL", "5m") in yahoo.calls
 
 
-def test_a_provider_that_fails_falls_to_the_next_and_finally_to_yahoo(tmp_path):
+def test_a_provider_that_fails_falls_to_yahoo_and_a_finnhub_key_does_not_serve_stocks(tmp_path):
+    """Without a broker the free source is Alpaca. When it fails the candles come from Yahoo as in 1.0.9 (SPEC-016 5.5): a Finnhub key
+    saved next to it is not asked for a stock."""
     keys = {"alpaca": KEY, "finnhub": "finnhub-key-value-13579"}
     source, yahoo, net = chain(tmp_path, keys)
     net.status["data.alpaca.markets"] = -1                                  # no network to Alpaca
     chart = build_chart(source, "AAPL", "5m", lambda: NOW)
-    assert chart.source == "Finnhub" and len(chart.candles) == 2             # next provider of the order of equities
-    net.status["finnhub.io"] = 403                                          # a plan without candles: skipped, no error
-    other, yahoo, net2 = chain(tmp_path / "b", keys)
-    net2.status.update({"data.alpaca.markets": 500, "finnhub.io": 403})
-    again = build_chart(other, "AAPL", "5m", lambda: NOW)
-    assert again.source == "Yahoo Finance" and ("AAPL", "5m") in yahoo.calls
+    assert chart.source == "Yahoo Finance" and ("AAPL", "5m") in yahoo.calls
+    assert not any("finnhub.io" in url for url in net.urls)
 
 
 def test_a_refused_plan_is_not_asked_again_on_every_poll(tmp_path):
     source, yahoo, net = chain(tmp_path, {"finnhub": "finnhub-key-value-13579"}, off=("alpaca",))
     net.status["finnhub.io"] = 403
     for _ in range(5):
-        assert source.history("AAPL", "1m").source == "Yahoo Finance"
+        assert source.history("EURUSD=X", "1m").source == "Yahoo Finance"      # Finnhub serves forex
     assert len(net.urls) == 1
 
 
@@ -146,22 +144,19 @@ def test_the_answer_is_cached_so_repeated_reads_make_one_request(tmp_path):
     assert len(net.urls) == 1
 
 
-def test_the_priority_of_connections_decides_and_a_switched_off_provider_is_not_asked(tmp_path):
+def test_a_switched_off_provider_is_not_asked(tmp_path):
     keys = {"alpaca": KEY, "finnhub": "finnhub-key-value-13579"}
-    source, _, _ = chain(tmp_path, keys, order={"bars": ["finnhub", "alpaca"]})
-    assert source.history("AAPL", "5m").source == "Finnhub"
-    source, _, _ = chain(tmp_path / "off", keys, off=("finnhub",), order={"bars": ["finnhub", "alpaca"]})
-    assert source.history("AAPL", "5m").source == "Alpaca IEX"
-    # the order of the live price (equity) does not move the candles: they follow the use "bars" (SPEC-015 4.4)
-    source, _, _ = chain(tmp_path / "live", keys, order={"equity": ["finnhub", "alpaca"], "bars": ["alpaca", "finnhub"]})
-    assert source.history("AAPL", "5m").source == "Alpaca IEX"
+    source, _, _ = chain(tmp_path, keys)
+    assert source.history("AAPL", "5m").source == "Alpaca Trading"
+    source, yahoo, net = chain(tmp_path / "off", keys, off=("alpaca",))
+    assert source.history("AAPL", "5m").source == "Yahoo Finance" and net.urls == []
 
 
 def test_the_finnhub_key_travels_in_a_header_and_never_in_the_url(tmp_path):
     seen = []
     source, _, net = chain(tmp_path, {"finnhub": "finnhub-key-value-13579"}, off=("alpaca",))
     source._fetch = lambda url, headers, body=None: seen.append((url, headers)) or net(url, headers, body)
-    assert source.history("AAPL", "5m").source == "Finnhub"
+    assert source.history("EURUSD=X", "5m").source == "Finnhub"
     url, headers = seen[0]
     assert headers == {"X-Finnhub-Token": "finnhub-key-value-13579"}
     assert "token" not in url and "finnhub-key-value-13579" not in url
@@ -173,7 +168,7 @@ def test_crypto_uses_coinbase_candles_and_without_it_alpaca_bars(tmp_path):
     assert series.source == "Coinbase" and [c.t for c in series.candles] == [OPEN, OPEN + 300, OPEN + 600]
     assert series.kind == "crypto" and series.candles[0].o == 100 and series.candles[0].l == 99
     source, _, net = chain(tmp_path / "off", {"alpaca": KEY}, off=("coinbase",))
-    assert source.history("BTC-USD", "5m").source == "Alpaca IEX"
+    assert source.history("BTC-USD", "5m").source == "Alpaca Trading"
     assert "/v1beta3/crypto/us/bars" in net.urls[0] and "BTC%2FUSD" in net.urls[0]
 
 
@@ -192,7 +187,8 @@ def test_a_desk_with_only_coinbase_active_uses_coinbase_for_btc_and_yahoo_for_st
     assert source.for_desk(None) is source
 
 
-def test_a_stock_series_keeps_only_regular_hours(tmp_path):
+def test_a_stock_series_keeps_every_session_the_source_sends(tmp_path):
+    """SPEC-016 3.4: the data is painted as the source sends it, pre-market included. No hour of ours cuts it."""
     class Wide(Net):
         def __call__(self, url, headers, body=None):
             self.urls.append(url)
@@ -202,7 +198,9 @@ def test_a_stock_series_keeps_only_regular_hours(tmp_path):
             return 200, json.dumps({"bars": bars})
 
     source = ConnectedSource(Yahoo(), Config({"alpaca": KEY}), get_catalog(), tmp_path / "c", fetch=Wide(), clock=lambda: NOW)
-    assert [c.t for c in source.history("AAPL", "5m").candles] == [OPEN]
+    series = source.history("AAPL", "5m")
+    assert [c.t for c in series.candles] == [int(datetime(2024, 11, 6, 12, 0, tzinfo=timezone.utc).timestamp()), OPEN]
+    assert series.clock_aligned is True
 
 
 def test_market_candles_and_quote_use_the_same_chain(tmp_path):
@@ -211,10 +209,11 @@ def test_market_candles_and_quote_use_the_same_chain(tmp_path):
     api.set_clock(lambda: NOW)
     try:
         out = market_tools.candles("AAPL", "5m", 3)
-        assert out["source"] == "Alpaca IEX" and out["count"] == 3
-        assert market_tools.quote("AAPL")["source"] == "Alpaca IEX"
+        assert out["source"] == "Alpaca Trading" and out["count"] == 3
+        assert market_tools.quote("AAPL")["source"] == "Alpaca Trading"
+        assert market_tools.quote("AAPL")["quality"] == "practice"                        # SPEC-016 3.9: not the price of an execution
         desk = market_tools.candles("BTC-USD", "5m", 2, desk_id=None)
-        assert desk["source"] == "Coinbase"
+        assert desk["source"] == "Coinbase" and desk["quality"] == "real"
         assert yahoo.calls == []
     finally:
         api.set_source(None)
@@ -224,7 +223,7 @@ def test_market_candles_and_quote_use_the_same_chain(tmp_path):
 def test_the_snapshot_reports_the_real_source_of_the_history():
     hub = MarketHub(get_catalog(), Config(), lambda: Yahoo(), clock=lambda: NOW)
     live = hub._runtimes["alpaca"]
-    assert hub._history_info(live, "equity", "Alpaca IEX") == {"source": "Alpaca IEX", "delay_seconds": 0}
+    assert hub._history_info(live, "equity", "Alpaca Trading") == {"source": "Alpaca Trading", "delay_seconds": 0}
     assert hub._history_info(live, "equity", "Yahoo Finance") == {"source": "Yahoo Finance", "delay_seconds": 900}
     assert hub._history_info(hub._fallback, "equity", "Yahoo Finance") == {"source": "Yahoo Finance", "delay_seconds": 0}
 

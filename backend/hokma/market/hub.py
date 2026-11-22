@@ -14,7 +14,9 @@
   it, and the tape and the upstream subscription outlive the last panel subscription by `LINGER_SECONDS`, so changing
   the interval of a chart and coming back does not lose what was gathered. Range bars before the first tick of the
   tape are approximate: they come from the 1-minute bars of the history source (`rangebars.py`).
-- Each panel subscription gets at most one live message every 250 ms (4 per second), always with the latest value.
+- Each panel subscription gets at most one live message every 50 ms (20 per second), always with the latest value.
+- Only a source with streaming serves live data (SPEC-016 3.1): an adapter that says `streaming = False` is refused and gives
+  no data. The delayed fallback of Yahoo is the one exception, kept as in 1.0.9 (SPEC-016 5.5).
 
 Every message to the panel carries `source` and `data_state`; a delayed value is never labelled live.
 """
@@ -41,13 +43,17 @@ from hokma.market.providers import ASSET_CLASSES, USES, ProviderCatalog, Provide
 from hokma.market.rangebars import RangeBar, RangeBarBuilder, approximate_from_minutes, build_from_ticks, splice
 from hokma.market.service import build_chart
 from hokma.market.source import MarketDataSource
-from hokma.market.stream import BarUpdate, LiveSource, Rollover, SourceStatus, SymbolError, Tick
+from hokma.market.sessions import clock_session
+from hokma.market.stream import BarUpdate, LimitReached, LiveSource, OptionQuote, Quote, Rollover, SourceStatus, SymbolError, Tick
 from hokma.market.tape import TickTape
-from hokma.market.tz import zone
+from hokma.market.hours import ProviderHours
+from hokma.market.option_subs import OptionSubs
+from hokma.market.tz import NEW_YORK, zone
+from hokma.market.watch import BrokerWatch
 
 log = logging.getLogger("hokma.market")
 
-MIN_INTERVAL = 0.25                 # seconds between live messages of one subscription: 4 per second
+MIN_INTERVAL = 0.05                 # seconds between live messages of one subscription: 20 per second (SPEC-016 3.5)
 MAX_SUBS_PER_CLIENT = 100
 POLLING_MAX_SYMBOLS = 20
 TEST_TIMEOUT = 10.0
@@ -142,6 +148,12 @@ class SymbolFeed:
     tick_size: float | None = None
     linger: asyncio.TimerHandle | None = None
     refreshing: bool = False
+    quote: Quote | None = None                           # the last level 1 the source sent, whole
+    hours: ProviderHours | None = None                   # the hours of its market as the provider said them today (SPEC-016 3.4)
+    hours_day: str | None = None                         # the day those hours were asked for: once a day and after a reconnection
+    hours_timer: asyncio.TimerHandle | None = None       # the end-of-day reconciliation with the source's own candles
+    new_day: bool = False
+    closing_refresh: bool = False                        # a read of the closed candle of the source is already on its way
 
 
 @dataclass
@@ -187,6 +199,10 @@ class MarketHub:
         self._tasks: set[asyncio.Task] = set()
         self._started = False
         self.linger_seconds = LINGER_SECONDS
+        self._quotes: dict[tuple[str, str], Quote] = {}   # (provider, symbol of the provider) -> its last Quote, with or without a chart
+        self.options = OptionSubs(self, MIN_INTERVAL)
+        self.watch = BrokerWatch(self)                    # the loss of the broker that is the source: banner, notice, recovery (SPEC-016 3.8)
+        self.reconcile_diffs = 0                         # candles the end-of-day reconciliation corrected: a counter, never prices
 
     # ------------------------------------------------------------------ clients
 
@@ -200,6 +216,8 @@ class MarketHub:
         self._clients.add(client)
         for runtime in self._runtimes.values():
             client.push(self._connection_message(runtime))
+        for alert in self.watch.current():
+            client.push(alert)
 
     def detach_client(self, client: PanelClient) -> "asyncio.Task":
         """Release everything the socket held. It runs as a task of the hub, so a socket that is torn down in the
@@ -210,6 +228,53 @@ class MarketHub:
     async def _release_client(self, client: PanelClient) -> None:
         for sub_id in list(client.subs):
             await self.unsubscribe(client, sub_id)
+
+    # ------------------------------------------------------------------ the live option chain (SPEC-016 4.3)
+
+    async def subscribe_options(self, client: PanelClient, sub_id: str, symbol: str, dates: list[str], strikes, desk_id: int | None = None) -> None:
+        self._bind()
+        try:
+            await self.options.attach(client, sub_id, symbol, dates, strikes, desk_id)
+        except HubError as error:
+            client.push(self.error_message(error.code, sub_id, error.params, error.message))
+
+    async def options_window(self, client: PanelClient, sub_id: str, strikes, offset) -> None:
+        try:
+            await self.options.window(client, sub_id, strikes, offset)
+        except HubError as error:
+            client.push(self.error_message(error.code, sub_id, error.params, error.message))
+
+    async def provider_source(self, provider_id: str):
+        """The source of a provider that is connected, opened if it is not (ONE per provider: the measuring run records from it, it never opens a
+        second Streamer). None when the provider is not connected."""
+        self._bind()
+        runtime = self._runtimes.get(provider_id)
+        if runtime is None or not self._connected(provider_id):
+            return None
+        assert self._lock is not None
+        async with self._lock:
+            await self._ensure_source(runtime)
+        return runtime.source
+
+    def quote_sync(self, symbol: str) -> Quote | None:
+        """The last whole Quote the live source has for a stock (the same one the chart shows), for code that runs in a thread."""
+        feed = self._feeds.get(symbol)
+        if feed is not None and feed.quote is not None:
+            return feed.quote
+        return next((q for (_, upstream), q in list(self._quotes.items()) if upstream == symbol), None)
+
+    def spot_sync(self, symbol: str, timeout: float = 3.0) -> float | None:
+        """The price of a stock the live source has, for code that runs in a thread (the REST chain). None when no live source serves it."""
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return None
+        feed = self._feeds.get(symbol)
+        if feed is not None and feed.quote is not None and feed.quote.last is not None:
+            return feed.quote.last
+        for (provider, upstream), quote in list(self._quotes.items()):
+            if upstream == symbol and quote.last is not None:
+                return quote.last
+        return None
 
     def error_message(self, code: str, sub: str | None = None, params: dict | None = None,
                       message: str | None = None) -> dict:
@@ -256,6 +321,8 @@ class MarketHub:
         sub = client.subs.pop(sub_id, None)
         if sub is None:
             return
+        if await self.options.release(client, sub_id):
+            return
         await self._release(sub)
 
     async def _release(self, sub: Sub, linger: bool = True) -> None:
@@ -294,6 +361,9 @@ class MarketHub:
         if feed.linger is not None:
             feed.linger.cancel()
             feed.linger = None
+        if feed.hours_timer is not None:
+            feed.hours_timer.cancel()
+            feed.hours_timer = None
         runtime = feed.runtime
         if self._feeds.get(feed.symbol) is feed:
             del self._feeds[feed.symbol]
@@ -312,8 +382,6 @@ class MarketHub:
         asset = symbol_map.classify(sub.symbol, chart.kind)
         sub.tick_size = self._tick_size(sub.symbol, asset)
         interval = sub.interval
-        if isinstance(interval, RangeInterval) and interval.unit == "t" and sub.tick_size is None:
-            raise HubError("market.bad_request", message=t("market.error.range_ticks_unknown"))
         seconds = not isinstance(interval, RangeInterval) and interval is not None and interval.unit == "s"
         assert self._lock is not None
         async with self._lock:
@@ -324,6 +392,10 @@ class MarketHub:
                 feed.linger = None
             if feed is not None and seconds and feed.runtime is self._fallback:
                 raise HubError("market.seconds_need_ticks")
+            if feed is not None and self._refuses_ticks(feed.runtime, interval):
+                raise HubError("market.seconds_need_ticks")
+            if feed is not None:
+                self._need_tick_size(sub, interval)
             if feed is None:
                 runtime, upstream = self._route(sub.symbol, asset, exclude)
                 if seconds and runtime is self._fallback:
@@ -337,6 +409,14 @@ class MarketHub:
                 try:
                     await self._ensure_source(runtime)
                     assert runtime.source is not None
+                    if self._refuses_ticks(runtime, interval):
+                        raise HubError("market.seconds_need_ticks")           # a source without trades draws no seconds or ranges
+                    self._need_tick_size(sub, interval)                       # asked only after the source said it has trades
+                    if runtime.source.capabilities.clock_aligned:
+                        # it sends every session as it comes and gives its own days: fold on the clock, never by an anchor of ours
+                        tz = feed.aggregator.tz
+                        feed.aggregator = BarAggregator(tz, feed.aggregator.kind, (), session=clock_session(tz),
+                                                    provider_daily=runtime.source.capabilities.provider_days)
                     await runtime.source.subscribe([upstream])
                 except BaseException as error:
                     self._feeds.pop(sub.symbol, None)
@@ -360,8 +440,100 @@ class MarketHub:
             self._ensure_range(feed, sub, interval)
         else:
             feed.aggregator.add_interval(sub.tf)
+        await self._ensure_hours(feed)
+        if sub.feed is not feed or sub.client.subs.get(sub.id) is not sub:
+            return          # while the hours were asked, the sub was released: an unsubscribe, or a failover that attaches it again and sends its own snapshot
         self._send_snapshot(sub, chart)
         self._broadcast_connection(feed.runtime)
+
+    # ------------------------------------------------------------------ the hours of the provider (SPEC-016 3.4)
+
+    def _day(self) -> str:
+        return datetime.fromtimestamp(self._clock(), NEW_YORK).date().isoformat()      # only the key of the cache: no schedule
+
+    async def _ensure_hours(self, feed: SymbolFeed) -> None:
+        """The hours of the market of this feed, once a day and again after a reconnection, from the SOURCE that serves it. A source
+        that has none (`market_hours` missing) or cannot say leaves `hours` empty: the chart is not shaded and `market_open` is unknown."""
+        asker = getattr(feed.runtime.source, "market_hours", None)
+        if asker is None or feed.asset_class is None or feed.hours_day == self._day():
+            return
+        feed.hours_day = self._day()
+        feed.hours = await asker(feed.asset_class)
+        self._arm_reconcile(feed)
+
+    def _arm_reconcile(self, feed: SymbolFeed) -> None:
+        """When the last piece of the day ends, plus the margin of `providers.json`, the day is asked once from the source's own candles."""
+        if feed.hours_timer is not None:
+            feed.hours_timer.cancel()
+            feed.hours_timer = None
+        end = feed.hours.last_end() if feed.hours is not None else None
+        if end is None or self._loop is None:
+            return
+        spec = feed.runtime.spec
+        margin = float((spec.stream if spec else {}).get("reconcile_margin_seconds", 1000))
+        delay = end + margin - self._clock()
+        if delay > 0:
+            feed.hours_timer = self._loop.call_later(delay, self._reconcile_due, feed)
+
+    def _reconcile_due(self, feed: SymbolFeed) -> None:
+        feed.hours_timer = None
+        if self._feeds.get(feed.symbol) is feed:
+            self._spawn(self._reconcile_day(feed))
+
+    async def _reconcile_day(self, feed: SymbolFeed) -> None:
+        """End of the day: every candle on screen is checked against the candles of the source (`pricehistory`) and the source wins. How
+        many candles differed is only counted; no price goes to the log."""
+        before = {key: {c.t: c for c in sub.candles} for key, sub in feed.subs.items()}
+        await self._resnapshot(feed)
+        diffs = 0
+        for key, sub in feed.subs.items():
+            held = before.get(key, {})
+            diffs += sum(1 for c in sub.candles if c.t in held and held[c.t] != c)
+        self.reconcile_diffs += diffs
+        log.info("end of day reconciliation: %d candles corrected", diffs)
+
+    def _closed_candle(self, feed: SymbolFeed, sub: Sub) -> None:
+        """A candle that Hokma built from trades (Coinbase, Finnhub) just closed: ONE read of the source's own candle replaces it (SPEC-016 3.3). It
+        is a read per closed candle, not a poll. Sources that give their own candles (Schwab, SiomTrading Futures) need none."""
+        spec = feed.runtime.spec
+        if spec is None or not spec.stream.get("reconcile_closed") or feed.closing_refresh or sub.interval is None:
+            return
+        if isinstance(sub.interval, RangeInterval) or sub.interval.seconds < 60 or sub.interval.seconds > 3600:
+            return
+        feed.closing_refresh = True
+        self._spawn(self._refresh_closed(feed, float(spec.stream.get("reconcile_delay_seconds", 3))))
+
+    async def _refresh_closed(self, feed: SymbolFeed, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+            drop = getattr(self._history(), "drop_cached", None)
+            if drop is not None:
+                await asyncio.to_thread(drop, feed.symbol)
+            before = {key: {c.t: c for c in sub.candles} for key, sub in feed.subs.items()}
+            await self._resnapshot(feed)
+            self.reconcile_diffs += sum(1 for key, sub in feed.subs.items() for c in sub.candles if c.t in before.get(key, {}) and before[key][c.t] != c)
+        finally:
+            feed.closing_refresh = False
+
+    async def _new_day(self, feed: SymbolFeed) -> None:
+        try:
+            await self._ensure_hours(feed)
+            await self._resnapshot(feed)
+        finally:
+            feed.new_day = False
+
+    @staticmethod
+    def _need_tick_size(sub: Sub, interval: Interval | None) -> None:
+        if isinstance(interval, RangeInterval) and interval.unit == "t" and sub.tick_size is None:
+            raise HubError("market.bad_request", message=t("market.error.range_ticks_unknown"))
+
+    @staticmethod
+    def _refuses_ticks(runtime: "ProviderRuntime", interval: Interval | None) -> bool:
+        """Seconds and range charts need trade by trade; a source that says it has none (Schwab) cannot draw them."""
+        if not (isinstance(interval, RangeInterval) or (interval is not None and interval.unit == "s")):
+            return False
+        capabilities = getattr(runtime.source, "capabilities", None)
+        return capabilities is not None and not capabilities.ticks
 
     def _tick_size(self, symbol: str, asset: str | None) -> float | None:
         """The tick size of the instrument: the packaged table, or what a connected provider announced for a futures
@@ -428,10 +600,35 @@ class MarketHub:
     def _today(self):
         return datetime.fromtimestamp(self._clock(), timezone.utc).date()
 
+    def _connected(self, provider_id: str) -> bool:
+        """The owner has this provider connected and switched on (keys and session), whatever its connection is doing now."""
+        spec = self.catalog.get(provider_id)
+        if spec is None or provider_id not in ADAPTERS:
+            return False
+        if spec.auth == "oauth" and not getattr(self.config, "signed_in", lambda _id: True)(provider_id):
+            return False
+        return self.config.is_enabled(provider_id) and (not spec.needs_key or self.config.has_key(provider_id))
+
+    def _active_broker(self, asset: str | None) -> str | None:
+        """The broker that gives the live data of this asset class (SPEC-016 3.6): the one the user chose among those connected, else the
+        first. None when no broker is connected. A broker in error is still THE source: nothing else answers for it (3.7)."""
+        if asset is None:
+            return None
+        brokers = [pid for pid, spec in self.catalog.providers.items()
+                   if spec.role == "broker" and asset in spec.asset_classes and self._connected(pid)]
+        if not brokers:
+            return None
+        chosen = getattr(self.config, "data_source", lambda: None)()
+        return chosen if chosen in brokers else brokers[0]
+
     def _eligible(self, provider_id: str) -> bool:
         spec, runtime = self.catalog.get(provider_id), self._runtimes.get(provider_id)
         if spec is None or runtime is None or provider_id not in ADAPTERS or runtime.state == "error":
             return False
+        if spec.role == "free" and any(self._active_broker(c) for c in spec.asset_classes):   # Alpaca with a broker, SiomTrading Futures with Schwab futures
+            return False                                       # with a broker connected the free source gets no subscription and no call
+        if spec.role == "broker" and any(self._active_broker(c) not in (None, provider_id) for c in spec.asset_classes):
+            return False                                       # two brokers: only the one the user chose serves
         if spec.auth == "oauth" and not getattr(self.config, "signed_in", lambda _id: True)(provider_id):
             return False                                       # keys saved but no session: nothing to connect yet
         return self.config.is_enabled(provider_id) and (not spec.needs_key or self.config.has_key(provider_id))
@@ -487,6 +684,8 @@ class MarketHub:
                 return runtime, upstream
         if candidates:
             raise HubError("market.limit")
+        if self._active_broker(asset) is not None:
+            raise HubError("market.down")                      # the broker is the source and it is not serving: no other source answers (3.7)
         if len(self._fallback.feeds) >= POLLING_MAX_SYMBOLS and symbol not in self._fallback.feeds:
             raise HubError("market.limit")
         return self._fallback, symbol
@@ -509,6 +708,9 @@ class MarketHub:
             except Exception:
                 log.warning("adapter %s could not be created", spec.id)
                 raise HubError("market.down") from None
+        if runtime is not self._fallback and not source.capabilities.streaming:
+            log.warning("market source refused: code=market.source_not_streaming provider=%s", runtime.id)
+            raise HubError("market.down")                       # a source that is not a stream gives no live data (SPEC-016 3.1)
         runtime.source = source
         await source.connect()
         runtime.consumer = self._spawn(self._consume(runtime, source))
@@ -541,8 +743,70 @@ class MarketHub:
             except Exception:
                 log.exception("market event failed")
 
+    def _on_quote(self, runtime: ProviderRuntime, quote: Quote) -> None:
+        """Level 1 of a symbol (SPEC-016 4.2): the price and its quote of every subscription, and the day candle in progress
+        with the fields of the day exactly as the source gives them. Nothing is fabricated from it: no Tick."""
+        now = time.monotonic()
+        for probe in runtime.probes:
+            if probe.upstream == quote.symbol and probe.data_at is None:
+                probe.data_at = now
+        self._quotes[(runtime.id, quote.symbol)] = quote
+        self.options.on_spot(runtime, quote.symbol, quote.last)
+        feed = runtime.by_upstream.get(quote.symbol)
+        if feed is None:
+            return
+        if feed.hours_day is not None and feed.hours_day != self._day() and not feed.new_day:
+            feed.new_day = True                                # the day changed: today's hours, and the candles of the source again
+            self._spawn(self._new_day(feed))
+        changed = quote != feed.quote
+        feed.quote = quote
+        changes: list = []
+        daily = next((sub for sub in feed.subs.values() if sub.tf == "1D"), None)
+        if daily is not None:
+            candle = self._daily_from_quote(daily, quote)
+            if candle is not None:
+                changes.append(("1D", candle, False))
+        if changes:
+            self._apply(feed, changes, None, quote.ts_ms)
+        if not changed:
+            return
+        for sub in list(feed.subs.values()):
+            if quote.prev_close:
+                sub.prev_close = quote.prev_close              # the source's own previous close: the change is the one it shows
+            if quote.last is not None:
+                sub.last_price, sub.last_ts_ms = quote.last, quote.ts_ms
+            sub.price_dirty = True
+            self._schedule(sub)
+
+    @staticmethod
+    def _daily_from_quote(sub: Sub, quote: Quote) -> Candle | None:
+        """The day candle in progress from the fields of the day of level 1: open, high, low and volume as the source gives them,
+        and the last price of the REGULAR session as the close (a day candle is the regular session; a trade after hours does not
+        move it). The day is the one of the last regular trade, read in the zone of the chart; the time of day of the candle is the
+        one the source's own daily candles carry. Zeros (the source resets them early in the morning) are no data."""
+        close = quote.regular_last or quote.last
+        if not (quote.open and quote.high and quote.low and close):
+            return None
+        tz = zone(sub.tz_name, 0)
+        day = datetime.fromtimestamp((quote.regular_ts_ms or quote.ts_ms) / 1000, tz).date()
+        held = sub.candles[-1] if sub.candles else None
+        if held is None:
+            moment = datetime(day.year, day.month, day.day, tzinfo=tz)
+        else:
+            held_at = datetime.fromtimestamp(held.t, tz)
+            if held_at.date() > day:
+                return None                                  # older than the newest day candle: nothing to draw
+            moment = datetime.combine(day, held_at.timetz())
+        return Candle(int(moment.timestamp()), quote.open, quote.high, quote.low, close, quote.volume or 0.0)
+
     def _on_event(self, runtime: ProviderRuntime, event) -> None:
-        if isinstance(event, (Tick, BarUpdate)):
+        if isinstance(event, Quote):
+            self._on_quote(runtime, event)
+        elif isinstance(event, OptionQuote):
+            self.options.on_quote(runtime, event)
+        elif isinstance(event, LimitReached):
+            self.options.on_limit(runtime, event)
+        elif isinstance(event, (Tick, BarUpdate)):
             now = time.monotonic()
             for probe in runtime.probes:
                 if probe.upstream == event.symbol and probe.data_at is None:
@@ -611,6 +875,13 @@ class MarketHub:
                                                 else "connections.unreachable")
         if before != (runtime.state, runtime.data_state, runtime.error_code):
             self._broadcast_connection(runtime)
+        if runtime.spec is not None and runtime.spec.role == "broker":
+            if event.state in ("reconnecting", "down"):
+                self.watch.lost(runtime, runtime.error_code or event.code)
+            elif event.state in ("live", "delayed") and event.code not in ("subscribed", "data"):
+                self.watch.recovered(runtime)
+        if event.state in ("reconnecting", "down") or (event.state in ("live", "delayed") and previous_state == "reconnecting"):
+            self.options.on_state(runtime, "reconnecting" if event.state == "reconnecting" else "down" if event.state == "down" else "live", event.code)
         if runtime.feeds:
             self._tell_subs(runtime, event, previous_state)
             if (event.state in ("live", "delayed") and runtime.data_state != previous_data
@@ -620,12 +891,19 @@ class MarketHub:
 
     def _tell_subs(self, runtime: ProviderRuntime, event: SourceStatus, previous_state: str) -> None:
         if event.state == "down":
+            if runtime.spec is not None and runtime.spec.role == "broker" and self._active_broker(next(iter(runtime.spec.asset_classes), None)) == runtime.id:
+                for feed in list(runtime.feeds.values()):          # the broker is the source: the symbols stay, stopped, with its name (3.7)
+                    for sub in list(feed.subs.values()):
+                        sub.state = "down"
+                        sub.client.push(self._envelope(sub, "status", state="down", code=runtime.error_code or event.code or "network"))
+                return
             self._spawn(self._failover(runtime))
             return
         if event.state == "reconnecting":
             state, code = "reconnecting", event.code or "network"
         elif previous_state == "reconnecting":
             for feed in runtime.feeds.values():
+                feed.hours_day = None                          # after a reconnection the hours are asked again
                 self._spawn(self._resnapshot(feed))
             return
         else:
@@ -657,6 +935,7 @@ class MarketHub:
     async def _resnapshot(self, feed: SymbolFeed, own_bars: bool = False, only_if_changed: bool = False) -> None:
         """A new snapshot for every subscription of the feed. `own_bars`: only those of range and seconds charts.
         `only_if_changed`: not for a range chart whose 1-minute bars are the same as in its last snapshot."""
+        await self._ensure_hours(feed)
         for sub in list(feed.subs.values()):
             if own_bars and not self._builds_own_bars(sub):
                 continue
@@ -697,6 +976,8 @@ class MarketHub:
             for timeframe, candle, final in changes:
                 if timeframe != sub.tf:
                     continue
+                if final:
+                    self._closed_candle(feed, sub)
                 start, end = feed.aggregator.bounds(candle.t, timeframe)
                 merged = self._merge(sub, candle, start, end)
                 if final:
@@ -812,8 +1093,14 @@ class MarketHub:
         if price is not None and sub.prev_close:
             change = price - sub.prev_close
             change_pct = change / sub.prev_close * 100
-        return {"price": price, "ts_ms": sub.last_ts_ms or int(self._clock() * 1000), "change": change,
-                "change_pct": change_pct}
+        fields = {"price": price, "ts_ms": sub.last_ts_ms or int(self._clock() * 1000), "change": change,
+                  "change_pct": change_pct}
+        quote = sub.feed.quote if sub.feed is not None else None
+        if quote is not None:
+            fields["quote"] = {"bid": quote.bid, "ask": quote.ask, "mark": quote.mark, "bid_size": quote.bid_size,
+                               "ask_size": quote.ask_size, "volume": quote.volume, "session": quote.session,
+                               "delayed": quote.delayed, "mark_calculated": quote.mark_calculated}
+        return fields
 
     # ------------------------------------------------------------------ messages
 
@@ -841,6 +1128,20 @@ class MarketHub:
             return {"source": source, "delay_seconds": 0 if connected.data_state == "live" else connected.delay_seconds or 0}
         delay = 0 if runtime is self._fallback else self.catalog.polling.delay_seconds.get(asset or "index", 900)
         return {"source": source or self.catalog.polling.name, "delay_seconds": delay}
+
+    def _market_open(self, feed: SymbolFeed, chart: ChartData) -> bool | None:
+        """Open or closed as the provider says it. A source that gives its own hours answers from them, and with none the answer is
+        unknown (None); the other sources keep the answer of 1.0.9."""
+        if not hasattr(feed.runtime.source, "market_hours"):
+            return chart.market_open
+        return feed.hours.open_at(self._clock()) if feed.hours is not None else None
+
+    @staticmethod
+    def _session_fields(feed: SymbolFeed) -> dict:
+        """The pieces of today that the provider named, for the shading of the chart. Only for a source that gives hours."""
+        if not hasattr(feed.runtime.source, "market_hours"):
+            return {}
+        return {"sessions": feed.hours.to_wire() if feed.hours is not None else None}
 
     def _send_snapshot(self, sub: Sub, chart: ChartData) -> None:
         feed = sub.feed
@@ -897,7 +1198,8 @@ class MarketHub:
             bars=[self._wire(c) for c in shown],
             last=price["price"], previous_close=chart.previous_close, change=price["change"],
             change_pct=price["change_pct"], opening_range=asdict(sub.opening) if sub.opening else None,
-            market_open=chart.market_open, delay_seconds=self._delay_seconds(runtime, feed.asset_class)))
+            market_open=self._market_open(feed, chart), delay_seconds=self._delay_seconds(runtime, feed.asset_class),
+            **self._session_fields(feed)))
         sub.client.push(self._envelope(sub, "status", state=sub.state,
                                        code="market.closed" if sub.state == "closed" else "ok"))
 
@@ -933,7 +1235,7 @@ class MarketHub:
             "error_message": connection_message(runtime.error_code), "symbols_in_use": len(runtime.feeds),
             "max_symbols": spec.max_symbols, "priority": priority,
             "available": provider_id in ADAPTERS,
-            "added": self._added(spec), "auth": spec.auth, "uses": self.catalog.uses_of(provider_id),
+            "added": self._added(spec), "auth": spec.auth, "uses": self.catalog.uses_of(provider_id), "role": spec.role,
         }
         if spec.auth == "oauth":
             card["session"] = self._session()
@@ -995,8 +1297,9 @@ class MarketHub:
         if auth.is_connected():
             auth.maintain()
 
-    async def refresh(self, provider_id: str, restart: bool = False) -> None:
-        """The owner changed something about a provider: reconnect it, or move its subscriptions away."""
+    async def refresh(self, provider_id: str, restart: bool = False, cascade: bool = True) -> None:
+        """The owner changed something about a provider: reconnect it, or move its subscriptions away. A broker that comes or goes changes who
+        serves everybody else (3.6): the other providers of a role are looked at again, so each open chart gets a snapshot of the new source."""
         self._bind()
         runtime = self._runtimes[provider_id]
         assert self._lock is not None
@@ -1014,6 +1317,11 @@ class MarketHub:
             await self._failover(runtime)
             runtime.reset_error()
         self._broadcast_connection(runtime)
+        spec = self.catalog.get(provider_id)
+        if cascade and spec is not None and spec.role is not None:
+            for other_id, other in self.catalog.providers.items():
+                if other_id != provider_id and other.role is not None:
+                    await self.refresh(other_id, cascade=False)
 
     def forget_error(self, provider_id: str) -> None:
         self._runtimes[provider_id].reset_error()
@@ -1107,6 +1415,9 @@ class MarketHub:
 
     async def close(self) -> None:
         for feed in list(self._feeds.values()):
+            if feed.hours_timer is not None:
+                feed.hours_timer.cancel()
+                feed.hours_timer = None
             if feed.linger is not None:
                 feed.linger.cancel()
                 feed.linger = None

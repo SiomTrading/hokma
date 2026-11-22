@@ -39,8 +39,7 @@ function store(key: string, value: string): void {
 type Side = "call" | "put";
 
 /** The line under the bar for each price feed. Schwab sends its own greeks; Hokma calculates only Prob.ITM. */
-const FEED_KEY: Record<PriceFeed, string> = {
-  indicative: "options.feed.indicative",
+const FEED_KEY: Partial<Record<PriceFeed, string>> = {
   opra: "options.feed.opra",
   schwab: "options.feed.schwab",
 };
@@ -107,8 +106,17 @@ export function OptionChainView({ symbol }: { symbol: string }) {
   const span = columns.calls.length + columns.puts.length + 2;
   const items = visibleGroups(state.expirations.items, filter);
   const meta = state.meta;
-  const feedText = meta ? t(FEED_KEY[meta.price_feed] ?? "options.feed.indicative") : "";
-  const closedText = meta && !meta.market_open ? t("options.closed", { when: quoteMoment(meta.as_of, locale) }) : "";
+  // No fixed text for a free source (decision 226): only a provider with its own prices and greeks says so
+  const feedKey = meta ? FEED_KEY[meta.price_feed] : undefined;
+  const feedText = feedKey ? t(feedKey) : "";
+  // Three values: open (nothing to say), closed (the time of the last quote) and unknown, which is neither open nor closed
+  const closedText = !meta ? "" : meta.market_open === false ? t("options.closed", { when: quoteMoment(meta.as_of, locale) }) : meta.market_open === null ? t("options.market.unknown") : "";
+  const stopped = state.live.link === "stopped";
+  const liveText = stopped
+    ? t("options.live.stopped", { time: new Intl.DateTimeFormat(locale, { timeStyle: "medium" }).format(state.live.stoppedAt ?? Date.now()) })
+    : state.live.limitOpen !== null
+      ? t("options.live.limit", { open: state.live.limitOpen })
+      : "";
   const failure = state.expirations.status === "error" ? (state.expirations.error ?? "upstream") : null;
 
   const openConnections = () => {
@@ -125,7 +133,7 @@ export function OptionChainView({ symbol }: { symbol: string }) {
   return (
     <div className="opt" data-testid="options-view">
       <UnderlyingBar bar={state.underlying} />
-      <section className="opt-chain" aria-label={t("options.chain.title")}>
+      <section className={"opt-chain" + (stopped ? " opt-stale" : "")} aria-label={t("options.chain.title")} data-stale={stopped ? "true" : "false"}>
         <div className="opt-bar">
           <div className="opt-pop-anchor">
             <Button
@@ -195,6 +203,9 @@ export function OptionChainView({ symbol }: { symbol: string }) {
         <div className="opt-status">
           <span data-testid="options-feed">{feedText}</span>
           <span data-testid="options-closed">{closedText}</span>
+          <span data-testid="options-live" role="status">
+            {liveText}
+          </span>
         </div>
 
         {state.expirations.status === "loading" ? (
@@ -273,7 +284,13 @@ function GroupRows({ item, group, open, filter, columns, span, symbol, tr, onTog
   const when = groupDate(item.date, locale);
   const rows = group?.data ? visibleRows(group.data, filter) : [];
   const cell = (column: ColumnId, value: OptionCell | null, side: Side) => (
-    <td key={side + column} className={"mono num" + (value?.itm ? " opt-itm" : "")} data-col={column} data-side={side}>
+    <td
+      key={side + column}
+      className={"mono num" + (value?.itm ? " opt-itm" : "") + (value?.live === false ? " opt-nolive" : "")}
+      data-col={column}
+      data-side={side}
+      data-live={value?.live === false ? "false" : undefined}
+    >
       {value ? cellText(column, value, tr) : ""}
     </td>
   );

@@ -40,3 +40,7 @@
 .opt-tabs button { border: 0; background: transparent; color: var(--t2); font: 600 12px Montserrat, sans-serif; padding: 4px 12px; border-radius: 999px; cursor: pointer; }
 .opt-tabs button[aria-selected="true"] { background: var(--acc-sub); color: var(--acc); }
 .opt-tabs button:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+
+/* The live chain (SPEC-016 4.3): the source dropped, the last values stay in grey; a contract past the symbol limit has no live data. */
+.opt-stale .opt-table td { opacity: 0.55; }
+.opt-table td.opt-nolive { opacity: 0.45; font-style: italic; }

@@ -319,16 +319,17 @@ describe("the table", () => {
 });
 
 describe("the labels under the bar", () => {
-  it("says indicative prices and estimated greeks and Prob.ITM on the free plan", async () => {
+  it("has no fixed text for the free plan (decision 226: only the message when Alpaca is connected)", async () => {
     install();
     await open("en");
-    expect(screen.getByTestId("options-feed")).toHaveTextContent("Estimated greeks and Prob.ITM · indicative price (free Alpaca plan)");
+    expect(screen.getByTestId("options-feed")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("options-feed").textContent).not.toMatch(/indicative|free|Alpaca/i);
   });
 
-  it("says it in Spanish", async () => {
+  it("has none in Spanish either", async () => {
     install();
     await open("es");
-    expect(screen.getByTestId("options-feed")).toHaveTextContent("Griegas y Prob. ITM estimadas · precio indicativo (plan gratis de Alpaca)");
+    expect(screen.getByTestId("options-feed")).toBeEmptyDOMElement();
   });
 
   it("says OPRA when the account has it", async () => {
@@ -469,8 +470,8 @@ describe("states", () => {
       }),
     );
     mount();
-    expect(await screen.findByText("Connect Schwab or Alpaca IEX in Connections to see the option chain.")).toBeInTheDocument();
-    expect(screen.queryByText("Connect Alpaca IEX in Connections to see the option chain.")).toBeNull();
+    expect(await screen.findByText("Connect Schwab or Alpaca Trading in Connections to see the option chain.")).toBeInTheDocument();
+    expect(screen.queryByText("Connect Alpaca Trading in Connections to see the option chain.")).toBeNull();
     expect(screen.getByRole("button", { name: "Open Connections" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("options-underlying").textContent).toContain("32.52"));
     expect(screen.queryByRole("table")).toBeNull();

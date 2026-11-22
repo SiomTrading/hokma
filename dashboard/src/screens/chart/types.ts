@@ -55,7 +55,9 @@ export interface ChartData {
   previous_close: number | null;
   change: number | null;
   change_pct: number | null;
-  market_open: boolean;
+  market_open: boolean | null;
+  /** The pieces of the day the provider named (pre, regular, post, night...), epoch seconds; null when the provider gave none. */
+  sessions?: Array<{ name: string; start: number; end: number }> | null;
   last_trade_at: number | null;
   data_age_seconds: number | null;
   delayed: boolean;

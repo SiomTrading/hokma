@@ -13,7 +13,7 @@ from hokma.market import opening
 from hokma.market.errors import BAD_RESPONSE, INTERVAL_UNAVAILABLE, SECONDS_NEED_TICKS, UPSTREAM, MarketError
 from hokma.market.intervals import IntervalError, TimeInterval, of_seconds, parse_time, visible_bars
 from hokma.market.models import Candle, ChartData, OpeningRange, Series
-from hokma.market.sessions import Session, session_for
+from hokma.market.sessions import Session, clock_session, session_for
 from hokma.market.source import MarketDataSource
 from hokma.market.tz import zone
 
@@ -97,7 +97,8 @@ def history_for(source: MarketDataSource, symbol: str, interval: TimeInterval) -
             raise
         if base == interval.canonical:
             return raw
-        session = session_for(raw.kind, zone(raw.timezone, raw.utc_offset_seconds))
+        tz = zone(raw.timezone, raw.utc_offset_seconds)
+        session = clock_session(tz) if raw.clock_aligned else session_for(raw.kind, tz)
         if base != "1D" and not _aligned(raw.candles, lengths[base], session):
             continue
         return replace(raw, candles=aggregate(raw.candles, interval, session))

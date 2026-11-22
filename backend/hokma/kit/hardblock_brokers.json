@@ -22,6 +22,10 @@
     "trading-api.kalshi.com"
   ],
   "order_exceptions_note": "The only order requests Hokma's broker service may make to Schwab (SPEC-015 18.7), consumer hokma_broker. Kept apart from read_exceptions: a rule of one list never authorizes a request of the other, and the hook reads neither (see hardblock.order_exception_allows).",
+  "stream_hosts_note": "The only hosts Hokma's Schwab Streamer session (hokma.schwab.stream) may open a WebSocket against, over wss only (SPEC-016 4.1). Data host, no order can be placed through it. A host the user's own userPreference names that is not here is refused: the token never leaves for it.",
+  "stream_hosts": [
+    "streamer-api.schwab.com"
+  ],
   "hokma_order_tools_note": "The exact MCP tool names of Hokma's own server that the real_money rule lets through its order-name pattern (SPEC-015 18.7). The host and secret checks still apply to them. The server name hokma is reserved (kit/mcp_config.py).",
   "hokma_order_tools": [
     "mcp__hokma__order_place",
@@ -78,6 +82,25 @@
     }
   ],
   "read_exceptions": [
+    {
+      "host": "api.alpaca.markets",
+      "method": "GET",
+      "path": "/v3/calendar/{market}",
+      "match": "path_template",
+      "consumer": "hokma_backend",
+      "reason": "Market calendar with pre, core and post of a day, read only (SPEC-016 A3)",
+      "params": {
+        "market": "NYSE|NASDAQ|XNYS|XNAS"
+      }
+    },
+    {
+      "host": "api.alpaca.markets",
+      "method": "GET",
+      "path": "/v3/clock",
+      "match": "exact_path_query_allowed",
+      "consumer": "hokma_backend",
+      "reason": "Market phase now (closed, pre, core, post), read only (SPEC-016 A3)"
+    },
     {
       "host": "api.alpaca.markets",
       "method": "GET",

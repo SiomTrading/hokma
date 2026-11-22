@@ -38,10 +38,12 @@ def _from_minutes(interval: TimeInterval) -> bool:
 
 
 class BarAggregator:
-    def __init__(self, tz: tzinfo, kind: str = "equity", intervals: tuple[str, ...] | list[str] = TIMEFRAMES) -> None:
+    def __init__(self, tz: tzinfo, kind: str = "equity", intervals: tuple[str, ...] | list[str] = TIMEFRAMES,
+                 session: Session | None = None, provider_daily: bool = False) -> None:
         self.tz = tz
         self.kind = kind
-        self.session: Session = session_for(kind, tz)
+        self.session: Session = session if session is not None else session_for(kind, tz)
+        self.provider_daily = provider_daily                      # days and weeks come from the source, never folded here
         self._intervals: dict[str, TimeInterval] = {}
         self._cur: dict[str, Candle] = {}
         self._minutes: dict[int, Candle] = {}
@@ -64,6 +66,8 @@ class BarAggregator:
         if parsed.canonical != interval:
             raise IntervalError("invalid")
         self._intervals[interval] = parsed
+        if self.provider_daily and parsed.is_session_based:
+            return True
         if _from_minutes(parsed) and self._last_minute:
             start, end = self.bounds(self._last_minute, parsed)
             self._cur[interval] = self._fold(start, end)
@@ -149,8 +153,8 @@ class BarAggregator:
         self._last_minute = max(self._last_minute, start_s)
         changes: list[Change] = []
         for name, interval in self._intervals.items():
-            if not _from_minutes(interval):
-                continue                               # seconds, or a length that is not whole minutes, need ticks
+            if not _from_minutes(interval) or (self.provider_daily and interval.is_session_based):
+                continue                               # seconds, or not whole minutes, need ticks; days come from the source
             start, end = self.bounds(start_s, interval)
             bar = minute if interval.seconds == 60 else self._fold(start, end)
             cur = self._cur.get(name)

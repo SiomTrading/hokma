@@ -47,6 +47,12 @@ export interface OptionCell {
   intrinsic: number | null;
   prob_itm: number | null;
   quote_time: string | null;
+  /** From the live chain (SPEC-016 4.3): false when the contract has no live data (the symbol limit of the source was reached). */
+  live?: boolean;
+  mark?: number | null;
+  gamma?: number | null;
+  vega?: number | null;
+  rho?: number | null;
 }
 
 export interface OptionRow {
@@ -72,7 +78,7 @@ export interface ChainResponse {
   source: string;
   price_feed: PriceFeed;
   greeks: "estimated" | "calculated" | "provider";
-  market_open: boolean;
+  market_open: boolean | null;
   as_of: string;
   notes: string[];
   expirations: ExpirationGroup[];

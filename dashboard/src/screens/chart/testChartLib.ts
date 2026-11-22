@@ -131,6 +131,8 @@ export function createChart(container: HTMLElement, options: Record<string, unkn
     applyOptions: applyTimeScaleOptions,
     setVisibleLogicalRange,
     logicalToCoordinate: (index: number) => index * view.spacing,
+    /** A bar of the time axis sits 10 pixels per minute from 08:59 New York, the first bar of the tests that draw bands (bars every minute). */
+    timeToCoordinate: (time: number) => (time - 1793800800) / 6,
     width: () => 800,
     subscribeVisibleLogicalRangeChange: (h: Handler) => range.add(h),
     unsubscribeVisibleLogicalRangeChange: (h: Handler) => range.delete(h),

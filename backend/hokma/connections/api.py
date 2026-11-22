@@ -87,6 +87,7 @@ async def _listing() -> dict:
     service = runtime.get_service()
     # In a thread: the Schwab card asks the sign-in module, which may read the system store.
     return {"connections": await asyncio.to_thread(hub.cards), "groups": hub.groups(), "uses": hub.uses(),
+            "data_source": service.data_source(),
             "store_available": await asyncio.to_thread(service.store_available)}
 
 
@@ -94,6 +95,25 @@ async def _listing() -> dict:
 async def list_connections(x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _guard(x_hokma_token, token)
     return await _listing()
+
+
+@router.put("/data-source", summary="The broker that gives the live data (SPEC-016 3.6)")
+async def set_data_source(request: Request, x_hokma_token: str = Header(default=""),
+                          token: str = Query(default="")) -> dict:
+    _guard(x_hokma_token, token)
+    body = await _json(request)
+    provider = body.get("provider")
+    if not isinstance(provider, str):
+        raise _fail(422, "connections.bad_data_source")
+    try:
+        runtime.get_service().set_data_source(provider)
+    except ServiceError as error:
+        raise _service_error(error) from None
+    hub = await runtime.prepare()
+    for other in hub.catalog.providers:                  # the open charts and chains get the snapshot of the new source
+        if hub.catalog.providers[other].role is not None:
+            await hub.refresh(other, cascade=False)
+    return {"data_source": provider}
 
 
 @router.put("/priority", summary="Order of the providers of one asset class")

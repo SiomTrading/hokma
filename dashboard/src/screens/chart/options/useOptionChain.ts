@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { optionsApi, optionsCode } from "./optionsApi";
+import { LiveOptionsClient, applyChanges } from "./optionsLive";
+import type { SocketLike } from "../liveClient";
 import { AUTO_OPEN, MAX_PER_CALL } from "./types";
 import type { ChainResponse, ExpirationGroup, ExpirationItem, PriceFeed, UnderlyingBar } from "./types";
 
@@ -11,11 +13,21 @@ export interface GroupState {
 
 export interface ChainMeta {
   price_feed: PriceFeed;
-  market_open: boolean;
+  market_open: boolean | null;
   as_of: string;
 }
 
+/** The live chain (SPEC-016 4.3): `idle` until the engine says it streams, `live`, or `stopped` (the source dropped; the values stay, grey). */
+export interface LiveInfo {
+  link: "idle" | "live" | "stopped";
+  stoppedAt: number | null;
+  limitOpen: number | null;
+  limited: ReadonlySet<string>;
+  price: number | null;
+}
+
 export interface OptionChainState {
+  live: LiveInfo;
   underlying: UnderlyingBar | null;
   /** The expirations list: loading, ready, or the code of what went wrong (`no_connection`, `auth_failed`...). */
   expirations: { status: "loading" | "ready" | "error"; items: ExpirationItem[]; error?: string };
@@ -24,7 +36,13 @@ export interface OptionChainState {
   meta: ChainMeta | null;
 }
 
-const EMPTY: OptionChainState = { underlying: null, expirations: { status: "loading", items: [] }, open: new Set(), groups: {}, meta: null };
+const NO_LIVE: LiveInfo = { link: "idle", stoppedAt: null, limitOpen: null, limited: new Set(), price: null };
+const EMPTY: OptionChainState = { live: NO_LIVE, underlying: null, expirations: { status: "loading", items: [] }, open: new Set(), groups: {}, meta: null };
+
+/** The bar of the underlying follows the price of the stream: its last price moves with each message of the live chain. */
+function movedBar(bar: UnderlyingBar | null, price: number | null): UnderlyingBar | null {
+  return bar && price !== null && bar.last !== price ? { ...bar, last: price } : bar;
+}
 
 function chunks<T>(list: readonly T[], size: number): T[][] {
   const out: T[][] = [];
@@ -37,7 +55,7 @@ function chunks<T>(list: readonly T[], size: number): T[][] {
  * first three groups open by themselves and load in one request; a folded group loads when it is opened; the strikes
  * and Refresh ask again for the open ones. Nothing refreshes by itself.
  */
-export function useOptionChain(symbol: string, strikes: string) {
+export function useOptionChain(symbol: string, strikes: string, createSocket?: (url: string) => SocketLike) {
   const [state, setState] = useState<OptionChainState>(EMPTY);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -148,6 +166,36 @@ export function useOptionChain(symbol: string, strikes: string) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new symbol starts over; the rest are stable callbacks of it
   }, [symbol]);
+
+  // The chain moves by itself: one subscription of /ws/market for the open expirations (at most 4). A free source has no streaming options: the engine
+  // says so and the chain stays the photo that Refresh renews. A change of the open groups or of the strikes opens a new subscription.
+  const openKey = state.expirations.status === "ready" ? [...state.open].sort().slice(0, MAX_PER_CALL).join(",") : "";
+  useEffect(() => {
+    if (openKey === "") return;
+    const client = new LiveOptionsClient({
+      symbol,
+      expirations: openKey.split(","),
+      strikes,
+      createSocket,
+      onSnapshot: (groups, price) =>
+        update((s) => ({
+          ...s,
+          groups: { ...s.groups, ...Object.fromEntries(groups.map((g) => [g.date, { status: "ready", data: g } as GroupState])) },
+          underlying: movedBar(s.underlying, price),
+          live: { ...s.live, price, limited: new Set(), limitOpen: null },
+        })),
+      onChanges: (changes, price) =>
+        update((s) => ({ ...s, groups: applyChanges(s.groups, changes), underlying: movedBar(s.underlying, price), live: { ...s.live, price } })),
+      onLimit: (symbols, open) =>
+        update((s) => ({ ...s, live: { ...s.live, limitOpen: open, limited: new Set([...s.live.limited, ...symbols]) } })),
+      onLink: (link) =>
+        update((s) => ({ ...s, live: { ...s.live, link, stoppedAt: link === "stopped" ? (s.live.stoppedAt ?? Date.now()) : null } })),
+      onNotLive: () => update((s) => ({ ...s, live: NO_LIVE })),
+    });
+    client.start();
+    return () => client.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a new symbol, other open groups or other strikes open a new subscription
+  }, [symbol, openKey, strikes]);
 
   /** Open or fold a group. Folding keeps what was loaded; opening a group that is not loaded asks for it. */
   const toggle = useCallback(

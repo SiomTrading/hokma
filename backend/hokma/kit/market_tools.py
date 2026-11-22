@@ -53,6 +53,12 @@ def _chart(symbol: str, interval: str, keep: int | None = None, desk_id: int | N
         raise LookupError(f"no market data for {symbol} ({interval}): {why} [{exc.code}]") from exc
 
 
+def quality_of(source: str) -> str:
+    """`practice` for a price of Alpaca (free feed, demo account): an agent must not take it as the price of an execution (SPEC-016 3.9). The
+    panel does not draw this field. Any other source is `real`."""
+    return "practice" if isinstance(source, str) and source.startswith("Alpaca") else "real"
+
+
 def quote(symbol: Any, desk_id: int | None = None) -> dict[str, Any]:
     """Last price, change, the day's high and low, volume, time and source of one symbol."""
     symbol = _symbol(symbol)
@@ -75,7 +81,7 @@ def quote(symbol: Any, desk_id: int | None = None) -> dict[str, Any]:
             "change_pct": chart.change_pct, "previous_close": chart.previous_close, "high": high, "low": low,
             "volume": volume, "range": span, "currency": chart.currency, "time": chart.last_trade_at,
             "market_open": chart.market_open, "delayed": chart.delayed, "stale": chart.stale,
-            "source": chart.source}
+            "source": chart.source, "quality": quality_of(chart.source)}
 
 
 def candles(symbol: Any, interval: Any = "5m", limit: Any = DEFAULT_CANDLES,
@@ -93,7 +99,7 @@ def candles(symbol: Any, interval: Any = "5m", limit: Any = DEFAULT_CANDLES,
     if not bars:
         raise LookupError(f"no market data for {symbol} ({interval}): the source returned no bars")
     return {"symbol": chart.symbol, "interval": chart.timeframe, "currency": chart.currency, "count": len(bars),
-            "source": chart.source, "stale": chart.stale, "candles": bars}
+            "source": chart.source, "quality": quality_of(chart.source), "stale": chart.stale, "candles": bars}
 
 
 def desk_prices(symbols: list[str], desk_id: int | None = None) -> list[dict[str, Any]]:
@@ -103,7 +109,7 @@ def desk_prices(symbols: list[str], desk_id: int | None = None) -> list[dict[str
         try:
             q = quote(symbol, desk_id)
             out.append({"symbol": symbol, "last": q["last"], "change_pct": q["change_pct"], "time": q["time"],
-                        "source": q["source"]})
+                        "source": q["source"], "quality": q["quality"]})
         except (LookupError, ValueError) as exc:
             out.append({"symbol": symbol, "last": None, "error": str(exc)})
     return out

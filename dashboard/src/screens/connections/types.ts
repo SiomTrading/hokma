@@ -43,6 +43,8 @@ export interface ConnectionCard {
   auth: AuthKind;
   /** The uses this provider can serve. */
   uses: UseKey[];
+  /** `broker` (a broker that gives the live data), `free` or null. */
+  role?: "broker" | "free" | null;
   session?: SchwabSession | null;
 }
 
@@ -54,6 +56,8 @@ export interface ConnectionsList {
   /** Order of every use, provider ids with the not connected ones too. Replaces `groups` on the screen. */
   uses: UseOrders;
   store_available: boolean;
+  /** The broker the user chose as the source of live data, or null (the first one connected serves). */
+  data_source?: string | null;
 }
 
 /** Answer of `POST /api/connections/{id}/test`. */
@@ -137,6 +141,19 @@ export interface SchwabAccountEntry {
   initialBalances?: SchwabMoney;
   positions?: SchwabPosition[];
   orders?: SchwabOrder[];
+}
+
+/** The answer of the Schwab data measuring run (SPEC-016 T1): where the file went and the points it measured. No secret in it. */
+export interface DiagnosticAnswer {
+  ok: boolean;
+  file: string;
+  messages: number;
+  summary: {
+    heartbeat_interval_ms: { samples: number; median: number | null; min: number | null; max: number | null };
+    chart_equity: { minutes_seen: number; mode: string };
+    futures_data: Record<string, number>;
+    status_codes: string[];
+  };
 }
 
 export interface SchwabAccountPanel {

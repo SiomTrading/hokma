@@ -45,6 +45,16 @@ class ConnectionService:
     def order(self, asset_class: str) -> list[str]:
         return self.settings.order(asset_class, self.catalog.default_priority.get(asset_class, ()))
 
+    def data_source(self) -> str | None:
+        """The broker the user chose as the source of live data, or None (the hub then takes the first one connected)."""
+        return self.settings.data_source()
+
+    def set_data_source(self, provider_id: str) -> None:
+        spec = self.spec(provider_id)
+        if spec.role != "broker" or not self.is_added(provider_id):
+            raise ServiceError("connections.bad_data_source", 422)
+        self.settings.set_data_source(provider_id)
+
     def read_secret(self, provider_id: str) -> str | None:
         """Blocking: asks the system store. Called from a thread, only when a connection is being opened."""
         return self.store.get(provider_id)
@@ -205,6 +215,10 @@ class ConnectionService:
             self.settings.move_first(tuple(self.catalog.uses_of(provider_id)), provider_id, self.catalog.default_priority)
         if first_time:
             self.settings.set_enabled(provider_id, True)
+        if spec.role == "broker" and first_time:
+            current = self.settings.data_source()
+            if current is None or not self.is_added(current):
+                self.settings.set_data_source(provider_id)      # the first broker that connects is the source, until the user picks another
         try:
             from hokma.desks import service as desks
 

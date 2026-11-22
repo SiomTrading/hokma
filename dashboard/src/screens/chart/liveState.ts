@@ -38,7 +38,31 @@ export interface LiveError {
  */
 export type ChartNotice = { kind: "seconds_start"; time: number } | { kind: "approx_before"; time: number } | { kind: "approx_all" };
 
+/** The loss of the broker that serves the data (SPEC-016 3.8): the red band, and the green one for five seconds when it comes back. */
+export interface BrokerAlert {
+  state: "lost" | "recovered";
+  message: string;
+  source: string;
+}
+
+export interface SessionBand {
+  name: string;
+  start: number;
+  end: number;
+}
+
+function sessionsOf(value: unknown): SessionBand[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: SessionBand[] = [];
+  for (const item of value) {
+    const s = item as Record<string, unknown> | null;
+    if (s && typeof s.name === "string" && typeof s.start === "number" && typeof s.end === "number" && s.end > s.start) out.push({ name: s.name, start: s.start, end: s.end });
+  }
+  return out.length > 0 ? out : null;
+}
+
 export interface LiveState {
+  brokerAlert: BrokerAlert | null;
   symbol: string;
   timeframe: Timeframe;
   /** True from the first snapshot on. */
@@ -65,7 +89,10 @@ export interface LiveState {
   change: number | null;
   changePct: number | null;
   openingRange: OpeningRange | null;
-  marketOpen: boolean;
+  /** Open or closed as the provider says it; null when it does not say (shown as "Unknown": not open, not closed, never a guess). */
+  marketOpen: boolean | null;
+  /** The pieces of the day the provider named (pre, regular, post, night...), epoch seconds, for the shading; null when it gave none. */
+  sessions: SessionBand[] | null;
   lastTsMs: number | null;
   /** What the engine builds; null until the snapshot says it. */
   interval: ProtocolInterval | null;
@@ -83,9 +110,9 @@ export const MAX_BARS = 2000;
 
 export function initialState(symbol: string, timeframe: Timeframe): LiveState {
   return {
-    symbol, timeframe, ready: false, link: false, bars: [], name: symbol, kind: "other", exchange: "", currency: "", timezone: "UTC",
+    brokerAlert: null, symbol, timeframe, ready: false, link: false, bars: [], name: symbol, kind: "other", exchange: "", currency: "", timezone: "UTC",
     assetClass: null, fallback: false, source: "", dataState: "delayed", status: "live", delaySeconds: null, history: null, price: null,
-    previousClose: null, change: null, changePct: null, openingRange: null, marketOpen: true, lastTsMs: null,
+    previousClose: null, change: null, changePct: null, openingRange: null, marketOpen: null, sessions: null, lastTsMs: null,
     interval: null, exactFrom: null, approxUntil: null, tickSize: null, notice: null, error: null,
   };
 }
@@ -161,7 +188,8 @@ export function applySnapshot(state: LiveState, m: SubMessage): LiveState {
     change: num(m.change),
     changePct: num(m.change_pct),
     openingRange: (m.opening_range as OpeningRange | null | undefined) ?? null,
-    marketOpen: m.market_open !== false,
+    marketOpen: m.market_open === true ? true : m.market_open === false ? false : null,
+    sessions: sessionsOf(m.sessions),
     lastTsMs: bars.length ? bars[bars.length - 1]!.t * 1000 : null,
     interval: intervalOf(m.interval),
     exactFrom: num(m.exact_from),
@@ -221,10 +249,17 @@ export function applyLast(state: LiveState, m: SubMessage): LiveState {
   return withPrice(state, m);
 }
 
+/** The broker alert of the engine (no `sub`: it is for every chart). */
+export function applyBrokerAlert(state: LiveState, m: SubMessage): LiveState {
+  const lost = m.state === "lost";
+  return { ...state, brokerAlert: { state: lost ? "lost" : "recovered", message: String(m.message ?? ""), source: String(m.source ?? "") } };
+}
+
 export function applyStatus(state: LiveState, m: SubMessage): LiveState {
   const code = m.state;
+  // "down": the broker that is the source stopped for good; the symbol stays, stopped, and the broker alert says why (SPEC-016 3.7)
   const status: SubStatus = code === "live" || code === "delayed" || code === "reconnecting" || code === "closed" ? code : "reconnecting";
-  return { ...state, status, dataState: dataStateOf(m.data_state), marketOpen: status !== "closed" };
+  return { ...state, status, dataState: dataStateOf(m.data_state), marketOpen: status === "closed" ? false : state.marketOpen };
 }
 
 /** The error of a subscription, with `params` when the engine sends them (it may not yet: then they are empty). */

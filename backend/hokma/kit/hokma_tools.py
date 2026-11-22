@@ -1172,11 +1172,11 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
         "interval": _s("1m, 5m (default), 15m, 1h or 1D.", enum=["1m", "5m", "15m", "1h", "1D"]),
         "limit": _i("How many of the newest bars, 1 to 300 (default 60).")}, ["symbol"], market_candles, False),
     "options_chain": ("Option chain of one US stock or ETF, read only, from Schwab when it is connected and first in Options, "
-                      "otherwise from the Alpaca IEX key saved in Connections: strike, "
+                      "otherwise from the Alpaca Trading key saved in Connections: strike, "
                       "expiration, days, type, bid, ask, mid, spread percent, last, volume, open interest, delta, gamma, "
                       "theta, vega and IV. Filters by days to expiration, absolute delta, minimum open interest and "
-                      "maximum spread. On the free Alpaca plan prices are indicative and greeks are estimated; the answer "
-                      "says which. Works with the market closed: it returns the last quotes.", {
+                      "maximum spread. Alpaca's free plan has limited data and is not optimal for options; an Alpaca price comes "
+                      "with quality \"practice\" and is never the price of an execution. Works with the market closed: it returns the last quotes.", {
         "symbol": _s("US stock or ETF symbol, e.g. AAPL."),
         "expiration": _s("One expiration, YYYY-MM-DD. When given, min_days and max_days are ignored."),
         "type": _s("call or put (default: both).", enum=["call", "put"]),

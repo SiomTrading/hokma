@@ -1,5 +1,5 @@
 """The internal API of the Schwab read endpoints (SPEC-015 5.10), prefix /api/schwab. Every route needs the per-boot
-session token (X-Hokma-Token or ?token=) and sits behind the same Host and Origin guard as the rest of the API, so no
+session token (the X-Hokma-Token header only, never the address) and sits behind the same Host and Origin guard as the rest of the API, so no
 agent can reach it. All of them are GET: there is no route that places, changes or cancels an order.
 
 Market Data (REF 2), the same parameters as the Schwab endpoint:
@@ -77,7 +77,7 @@ def _fail(error: SchwabError) -> HTTPException:
 
 
 def _guard(request: Request) -> None:
-    candidate = request.headers.get("x-hokma-token") or request.query_params.get("token") or ""
+    candidate = request.headers.get("x-hokma-token") or ""          # the header only: a token in an address is kept in logs and histories
     if not token_matches(candidate, SESSION_TOKEN):
         raise HTTPException(status_code=401, detail={"code": "unauthorized", "message": "unauthorized"})
 
@@ -87,8 +87,6 @@ def _params(request: Request, name: str, path: dict[str, str]) -> dict[str, Any]
     never ignored; an account is a reference, so a hash or a number in the path is refused by the read itself."""
     found: dict[str, Any] = {}
     for key, value in request.query_params.items():
-        if key == "token":
-            continue
         found[key] = value
     for key, value in request.path_params.items():
         if key in path:
@@ -109,6 +107,29 @@ def _handler(name: str, path: dict[str, str]):
 for _path, _name, _path_params in ROUTES:
     router.add_api_route(_path, _handler(_name, _path_params), methods=["GET"], name=f"schwab_{_name}",
                          summary=f"Schwab read: {_name}")
+
+
+@router.post("/diagnostic/streaming", summary="Measure the Streamer and the raw Schwab answers (SPEC-016 T1, read only)")
+async def streaming_diagnostic(request: Request) -> dict:
+    """One run of the measuring tool: it records from the session of the hub (never a second Streamer), it never sends an order, and the file it
+    writes carries no token, no account and no id. One run at a time. Body: `{"symbol": "QQQ", "seconds": 75}`."""
+    _guard(request)
+    from hokma.schwab import diagnostic
+
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    symbol, seconds = body.get("symbol", "QQQ"), body.get("seconds", 75)
+    if not isinstance(symbol, str) or isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        raise HTTPException(status_code=422, detail={"code": INVALID_PARAM, "message": "symbol and seconds are not valid"})
+    try:
+        return await diagnostic.run(symbol.upper()[:10], float(seconds))
+    except diagnostic.DiagnosticBusy:
+        raise HTTPException(status_code=409, detail={"code": "schwab.err.diagnostic_busy", "message": "a measuring run is already going"}) from None
+    except SchwabError as error:
+        raise _fail(error) from None
 
 
 @router.get("/analytics/{calc}", summary="A calculation over Schwab data")

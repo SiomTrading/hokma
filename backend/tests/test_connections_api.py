@@ -17,7 +17,7 @@ from live_support import (FakeWs, alpaca_script, coinbase_script, finnhub_script
 from test_live_market import FINNHUB_KEY, KEY_ID, SECRET, iso, save_alpaca, save_finnhub, subscribe
 from market_support import RECORDED_AT
 
-PROVIDERS = ["coinbase", "alpaca", "finnhub", "siomtrading_futures", "schwab"]
+PROVIDERS = ["coinbase", "alpaca", "finnhub", "siomtrading_futures", "schwab", "ibkr"]
 
 
 @pytest.fixture(autouse=True)
@@ -58,20 +58,21 @@ def test_the_cards_are_listed_with_their_fields(live):
         assert by_id["siomtrading_futures"]["needs_key"] is True and by_id["siomtrading_futures"]["available"] is True
         assert all("premium" not in c for c in body["connections"])
         assert all(c["key_state"] == "missing" for c in body["connections"] if c["needs_key"])
-        assert body["groups"] == {"equity": ["schwab", "alpaca", "finnhub"], "crypto": ["coinbase", "finnhub"],
-                                  "forex": ["finnhub"], "future": ["siomtrading_futures"]}
-        assert body["uses"] == {"equity": ["schwab", "alpaca", "finnhub"], "bars": ["schwab", "alpaca", "finnhub"],
-                                "options": ["schwab", "alpaca"], "future": ["siomtrading_futures"],
-                                "crypto": ["coinbase", "finnhub"], "forex": ["finnhub"], "news": ["finnhub", "alpaca"]}
+        assert body["groups"] == {"equity": ["schwab", "ibkr", "alpaca"], "crypto": ["coinbase"],
+                                  "forex": ["finnhub"], "future": ["schwab", "siomtrading_futures"]}
+        assert body["uses"] == {"equity": ["schwab", "ibkr", "alpaca"], "bars": ["schwab", "ibkr", "alpaca"],
+                                "options": ["schwab", "ibkr", "alpaca"], "future": ["schwab", "siomtrading_futures"],
+                                "crypto": ["coinbase"], "forex": ["finnhub"], "news": ["finnhub", "alpaca"]}
         assert body["store_available"] is True
-        assert by_id["finnhub"]["priority"] == {"equity": 2, "forex": 0, "crypto": 1}
+        assert by_id["finnhub"]["priority"] == {"forex": 0}                 # Finnhub gives forex and news only (SPEC-016 3.6)
         assert by_id["schwab"]["auth"] == "oauth" and by_id["schwab"]["key_fields"] == ["client_id", "client_secret"]
-        assert by_id["schwab"]["uses"] == ["equity", "bars", "options"] and by_id["schwab"]["max_symbols"] == 100
+        assert by_id["schwab"]["uses"] == ["equity", "bars", "options", "future"] and by_id["schwab"]["max_symbols"] == 100
         assert by_id["schwab"]["session"]["state"] == "signed_out" and by_id["schwab"]["added"] is False
-        assert all(c["auth"] == "key" for c in body["connections"] if c["id"] != "schwab")
+        assert all(c["auth"] == "key" for c in body["connections"] if c["id"] not in ("schwab", "ibkr"))
+        assert by_id["ibkr"]["auth"] == "gateway" and by_id["ibkr"]["role"] == "broker" and by_id["ibkr"]["available"] is False
         assert all("session" not in c for c in body["connections"] if c["id"] != "schwab")
         assert by_id["coinbase"]["added"] is True and by_id["alpaca"]["added"] is False
-        assert by_id["finnhub"]["uses"] == ["equity", "bars", "crypto", "forex", "news"]
+        assert by_id["finnhub"]["uses"] == ["forex", "news"]
 
 
 def test_every_route_needs_the_session_token(live):
@@ -208,20 +209,20 @@ def test_the_switch_and_the_priority_are_saved_without_any_key(live):
         assert card["enabled"] is False and card["id"] == "coinbase"
         assert client.put("/api/connections/coinbase/enabled", json={"enabled": "no"}, headers=AUTH).status_code == 422
         ok = client.put("/api/connections/priority", headers=AUTH,
-                        json={"asset_class": "equity", "order": ["finnhub", "alpaca", "schwab"]})
-        assert ok.status_code == 200 and ok.json()["groups"]["equity"][0] == "finnhub"
-        for bad in ({"asset_class": "equity", "order": ["finnhub"]},
-                    {"asset_class": "equity", "order": ["finnhub", "alpaca"]},
-                    {"asset_class": "equity", "order": ["finnhub", "finnhub", "alpaca", "schwab"]},
-                    {"asset_class": "equity", "order": ["alpaca", "finnhub", "siomtrading_futures"]},
+                        json={"asset_class": "equity", "order": ["alpaca", "schwab", "ibkr"]})
+        assert ok.status_code == 200 and ok.json()["groups"]["equity"][0] == "alpaca"
+        for bad in ({"asset_class": "equity", "order": ["alpaca"]},
+                    {"asset_class": "equity", "order": ["finnhub", "alpaca", "schwab", "ibkr"]},
+                    {"asset_class": "equity", "order": ["alpaca", "alpaca", "schwab", "ibkr"]},
+                    {"asset_class": "equity", "order": ["alpaca", "schwab", "ibkr", "siomtrading_futures"]},
                     {"asset_class": "nope", "order": []}, {"order": []}):
             response = client.put("/api/connections/priority", headers=AUTH, json=bad)
             assert response.status_code == 422 and response.json()["detail"]["code"] == "connections.bad_priority"
         saved = json.loads((hokma_data_dir() / "connections.json").read_text())
-        assert saved["enabled"]["coinbase"] is False and saved["priority"]["equity"][0] == "finnhub"
+        assert saved["enabled"]["coinbase"] is False and saved["priority"]["equity"][0] == "alpaca"
     with live.app() as again:                                           # it survives a new engine run
         assert cards(again)["coinbase"]["enabled"] is False
-        assert again.get("/api/connections", headers=AUTH).json()["groups"]["equity"][0] == "finnhub"
+        assert again.get("/api/connections", headers=AUTH).json()["groups"]["equity"][0] == "alpaca"
 
 
 # ------------------------------------------------------------------ test connection (C2)
@@ -317,8 +318,8 @@ def test_c2_finnhub_ok_when_a_trade_arrives_and_the_state_is_the_one_in_the_prov
             save_finnhub(client)
             result = client.post("/api/connections/finnhub/test", headers=AUTH).json()
             assert result["ok"] is True and result["first_data"] is True and result["data_state"] == "live"
-            assert result["symbol"] == "BTC-USD"
-            assert any(m.get("symbol") == "BINANCE:BTCUSDT" for m in finnhub.messages())
+            assert result["symbol"] == "EURUSD=X"
+            assert any(m.get("symbol") == "OANDA:EUR_USD" for m in finnhub.messages())
     finally:
         finnhub.stop()
 
@@ -625,8 +626,8 @@ def test_remove_schwab_works_while_the_sign_in_module_is_missing(live, monkeypat
 
 def test_priority_accepts_bars_options_and_news_and_refuses_an_unknown_use(live):
     with live.app() as client:
-        for use, order in (("bars", ["finnhub", "schwab", "alpaca"]), ("options", ["alpaca", "schwab"]),
-                           ("news", ["alpaca", "finnhub"]), ("future", ["siomtrading_futures"])):
+        for use, order in (("bars", ["alpaca", "schwab", "ibkr"]), ("options", ["alpaca", "schwab", "ibkr"]),
+                           ("news", ["alpaca", "finnhub"]), ("future", ["schwab", "siomtrading_futures"])):
             response = client.put("/api/connections/priority", json={"asset_class": use, "order": order}, headers=AUTH)
             assert response.status_code == 200, use
             assert response.json()["uses"][use] == order
@@ -634,36 +635,36 @@ def test_priority_accepts_bars_options_and_news_and_refuses_an_unknown_use(live)
         assert "bars" not in client.get("/api/connections", headers=AUTH).json()["groups"]
         for bad in ({"asset_class": "streaming", "order": ["alpaca"]},
                     {"asset_class": "options", "order": ["alpaca"]},               # must list every provider of the use
-                    {"asset_class": "news", "order": ["finnhub", "alpaca", "schwab"]},
-                    {"asset_class": "bars", "order": ["schwab", "schwab", "alpaca", "finnhub"]}):
+                    {"asset_class": "news", "order": ["finnhub", "alpaca", "schwab", "ibkr"]},
+                    {"asset_class": "bars", "order": ["schwab", "schwab", "alpaca", "ibkr"]}):
             response = client.put("/api/connections/priority", json=bad, headers=AUTH)
             assert response.status_code == 422 and response.json()["detail"]["code"] == "connections.bad_priority"
         saved = saved_file()["priority"]
-        assert saved["bars"] == ["finnhub", "schwab", "alpaca"] and saved["news"] == ["alpaca", "finnhub"]
+        assert saved["bars"] == ["alpaca", "schwab", "ibkr"] and saved["news"] == ["alpaca", "finnhub"]
     with live.app() as again:
         uses = again.get("/api/connections", headers=AUTH).json()["uses"]
-        assert uses["bars"] == ["finnhub", "schwab", "alpaca"] and uses["options"] == ["alpaca", "schwab"]
+        assert uses["bars"] == ["alpaca", "schwab", "ibkr"] and uses["options"] == ["alpaca", "schwab", "ibkr"]
 
 
 def test_schwab_goes_first_in_equity_bars_and_options_only_when_it_is_added(live, fake_auth):
     with live.app() as client:
-        for use, order in (("equity", ["finnhub", "alpaca", "schwab"]), ("bars", ["alpaca", "finnhub", "schwab"]),
-                           ("options", ["alpaca", "schwab"]), ("news", ["alpaca", "finnhub"])):
+        for use, order in (("equity", ["alpaca", "schwab", "ibkr"]), ("bars", ["alpaca", "schwab", "ibkr"]),
+                           ("options", ["alpaca", "schwab", "ibkr"]), ("news", ["alpaca", "finnhub"])):
             client.put("/api/connections/priority", json={"asset_class": use, "order": order}, headers=AUTH)
         client.put("/api/connections/schwab/key", json=SCHWAB_KEYS, headers=AUTH)
-        assert client.put("/api/connections/priority", json={"asset_class": "crypto", "order": ["finnhub", "coinbase"]},
+        assert client.put("/api/connections/priority", json={"asset_class": "crypto", "order": ["coinbase"]},
                           headers=AUTH).status_code == 200
         body = post(client, "schwab/add").json()                        # keys saved earlier, the test passes
         assert body["added"] is True
         uses = client.get("/api/connections", headers=AUTH).json()["uses"]
-        assert uses["equity"] == ["schwab", "finnhub", "alpaca"] and uses["bars"] == ["schwab", "alpaca", "finnhub"]
-        assert uses["options"] == ["schwab", "alpaca"]
-        assert uses["news"] == ["alpaca", "finnhub"] and uses["crypto"] == ["finnhub", "coinbase"]   # untouched
+        assert uses["equity"] == ["schwab", "alpaca", "ibkr"] and uses["bars"] == ["schwab", "alpaca", "ibkr"]     # the saved order, Schwab first
+        assert uses["options"] == ["schwab", "alpaca", "ibkr"]
+        assert uses["news"] == ["alpaca", "finnhub"] and uses["crypto"] == ["coinbase"]   # untouched
         assert saved_file()["enabled"]["schwab"] is True
-        client.put("/api/connections/priority", json={"asset_class": "equity", "order": ["finnhub", "alpaca", "schwab"]},
+        client.put("/api/connections/priority", json={"asset_class": "equity", "order": ["alpaca", "schwab", "ibkr"]},
                    headers=AUTH)
         assert post(client, "schwab/add").json()["added"] is True       # a second add moves nothing
-        assert client.get("/api/connections", headers=AUTH).json()["uses"]["equity"] == ["finnhub", "alpaca", "schwab"]
+        assert client.get("/api/connections", headers=AUTH).json()["uses"]["equity"] == ["alpaca", "schwab", "ibkr"]
 
 
 def test_schwab_add_without_a_sign_in_keeps_the_keys_and_says_so(live, fake_auth):

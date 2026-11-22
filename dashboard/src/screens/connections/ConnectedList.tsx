@@ -25,10 +25,11 @@ interface Props {
   onStoreMissing: () => void;
   onOpen: (view: DialogView) => void;
   onViewAccount: () => void;
+  onDiagnostic: () => void;
 }
 
 /** "Connected": one row per connected source, its menu, and Yahoo Finance fixed at the end. */
-export function ConnectedList({ cards, mail, focusClass, focusProvider, onCard, onReload, onStoreMissing, onOpen, onViewAccount }: Props) {
+export function ConnectedList({ cards, mail, focusClass, focusProvider, onCard, onReload, onStoreMissing, onOpen, onViewAccount, onDiagnostic }: Props) {
   const { t } = useI18n();
   const [removing, setRemoving] = useState<ConnectionCard | null>(null);
   const connected = cards.filter((card) => card.added && card.id !== FALLBACK_ID);
@@ -41,6 +42,7 @@ export function ConnectedList({ cards, mail, focusClass, focusProvider, onCard, 
       onStoreMissing={onStoreMissing}
       onOpen={onOpen}
       onViewAccount={onViewAccount}
+      onDiagnostic={onDiagnostic}
       onRemove={() => setRemoving(card)}
     />
   ));
@@ -87,6 +89,7 @@ interface RowProps {
   onStoreMissing: () => void;
   onOpen: (view: DialogView) => void;
   onViewAccount: () => void;
+  onDiagnostic: () => void;
   onRemove: () => void;
 }
 
@@ -107,7 +110,7 @@ function RowMenu({ name, children }: { name: string; children: (close: () => voi
   );
 }
 
-function ProviderRow({ card, focused, onCard, onStoreMissing, onOpen, onViewAccount, onRemove }: RowProps) {
+function ProviderRow({ card, focused, onCard, onStoreMissing, onOpen, onViewAccount, onDiagnostic, onRemove }: RowProps) {
   const { t } = useI18n();
   const [busy, setBusy] = useState<"test" | "toggle" | null>(null);
   const [test, setTest] = useState<TestResult | null>(null);
@@ -210,6 +213,7 @@ function ProviderRow({ card, focused, onCard, onStoreMissing, onOpen, onViewAcco
               <>
                 <MenuItem onClick={() => { close(); onOpen({ view: "form", id: card.id, mode: "change", step: 2 }); }}>{t("connections.schwab.login")}</MenuItem>
                 <MenuItem onClick={() => { close(); onViewAccount(); }}>{t("connections.schwab.viewAccount")}</MenuItem>
+                <MenuItem onClick={() => { close(); onDiagnostic(); }}>{t("connections.schwab.diagnostic")}</MenuItem>
               </>
             ) : null}
             <MenuItem onClick={() => { close(); onOpen({ view: "guide", id: card.id }); }}>{t("connections.row.guide")}</MenuItem>

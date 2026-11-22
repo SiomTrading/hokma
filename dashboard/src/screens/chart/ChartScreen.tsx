@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Button, Dot, EmptyState, Loading, Pane, Pill } from "@/design";
 import { useI18n } from "@/i18n";
-import { connectionsHref, requestFocus } from "@/screens/connections/focus";
 import type { ScreenProps } from "@/shell/registry";
 import { tabKeyFor } from "@/shell/store";
 import { useShell } from "@/shell/useShell";
@@ -16,6 +15,8 @@ import type { ChartViewState } from "./chartState";
 import { IntervalBar } from "./IntervalBar";
 import { intervalLabel } from "./intervals";
 import { OptionChainView } from "./options/OptionChainView";
+import { BrokerAlertBand } from "./BrokerAlertBand";
+import { ConnectLink } from "./ConnectLink";
 import { PriceChart } from "./PriceChart";
 import type { PriceChartHandle } from "./PriceChart";
 import "./live.css";
@@ -82,25 +83,6 @@ export function ChartScreen({ tabKey, params, active }: ScreenProps) {
   return <ChartView key={symbol} tabKey={tabKey} symbol={symbol} front={active} onSymbol={changeSymbol} />;
 }
 
-/** "Connect a live source": opens Connections with the group of the symbol's asset class in front. */
-function ConnectLink({ assetClass }: { assetClass: string | null }) {
-  const { t } = useI18n();
-  const shell = useShell();
-  return (
-    <a
-      className="live-link"
-      href={connectionsHref(assetClass)}
-      data-testid="connect-link"
-      onClick={(event) => {
-        event.preventDefault();
-        requestFocus(assetClass);
-        shell.openScreen("connections");
-      }}
-    >
-      {t("chart.live.connect")}
-    </a>
-  );
-}
 
 type Popup = { kind: "search" | "interval"; initial: string } | null;
 
@@ -257,6 +239,11 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
             </>
           ) : null}
           <div className="live-bar" role="status" data-testid="live-status" data-mode={mode} data-data-state={live.dataState}>
+            {live.ready && live.marketOpen === null ? (
+              <Pill style={NOWRAP} data-testid="market-unknown">
+                {t("chart.market.unknown")}
+              </Pill>
+            ) : null}
             <Pill tone={mode === "live" ? "ok" : mode === "closed" ? "default" : "warn"} style={NOWRAP} data-testid="market-state" title={lastData || undefined}>
               <Dot live={mode === "live"} />
               {label}
@@ -323,6 +310,8 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
 
         <div ref={bodyRef} style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
 
+        <BrokerAlertBand alert={live.brokerAlert} assetClass={live.assetClass} />
+
         {showOptions ? (
           <OptionChainView symbol={symbol} />
         ) : error ? (
@@ -355,6 +344,7 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
             timeframe={data.timeframe}
             timezone={data.timezone}
             opening={data.opening_range}
+            sessions={live.sessions}
             label={t("chart.aria", { symbol: data.symbol, tf: data.timeframe })}
           />
         ) : null}

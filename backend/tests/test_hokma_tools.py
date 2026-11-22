@@ -769,11 +769,12 @@ def test_options_chain_is_a_read_only_tool_without_unit_and_pre_allowed():
     assert set(listed["inputSchema"]["properties"]) == {"symbol", "expiration", "type", "min_days", "max_days", "min_delta",
                                                          "max_delta", "min_open_interest", "max_spread_pct", "limit"}
     assert listed["description"] == ("Option chain of one US stock or ETF, read only, from Schwab when it is connected and "
-                                     "first in Options, otherwise from the Alpaca IEX key saved in Connections: "
+                                     "first in Options, otherwise from the Alpaca Trading key saved in Connections: "
                                      "strike, expiration, days, type, bid, ask, mid, spread percent, last, "
                                      "volume, open interest, delta, gamma, theta, vega and IV. Filters by days to "
-                                     "expiration, absolute delta, minimum open interest and maximum spread. On the free "
-                                     "Alpaca plan prices are indicative and greeks are estimated; the answer says which. "
+                                     "expiration, absolute delta, minimum open interest and maximum spread. Alpaca's free "
+                                     "plan has limited data and is not optimal for options; an Alpaca price comes with quality "
+                                     "\"practice\" and is never the price of an execution. "
                                      "Works with the market closed: it returns the last quotes.")
     settings = Path(hokma_tools.__file__).parent / "templates" / "settings.base.json"
     assert "mcp__hokma__options_chain" in json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"]

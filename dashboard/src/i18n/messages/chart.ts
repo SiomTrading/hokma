@@ -25,6 +25,7 @@ export default defineMessages({
     "chart.kind.currency": "Divisa",
     "chart.kind.other": "Otro",
     "chart.market.closed": "Mercado cerrado",
+    "chart.market.unknown": "Mercado: desconocido",
     "chart.lastData": "Último dato: {when}",
     "chart.opening": "Máximo de apertura",
     "chart.opening.aria": "Máximo de apertura del {date}: {price}",
@@ -88,6 +89,7 @@ export default defineMessages({
     "chart.shortcuts.hint": "Escribe una letra para buscar un símbolo, un número para cambiar el intervalo, o Ctrl K para buscar",
     "market.err.interval_unavailable": "{interval} necesita barras de {base}, y {source} no las tiene para {symbol}",
     "market.err.seconds_need_ticks": "Esta fuente da como mucho barras de 1 minuto. Conecta una fuente en vivo para ver segundos",
+    "market.err.futures_not_enabled": "Tu cuenta Schwab no tiene datos de futuros habilitados. Pide a Schwab que habilite futuros y los acuerdos de datos de CME.",
   },
   en: {
     "chart.timeframe": "Timeframe",
@@ -113,6 +115,7 @@ export default defineMessages({
     "chart.kind.currency": "Currency",
     "chart.kind.other": "Other",
     "chart.market.closed": "Market closed",
+    "chart.market.unknown": "Market: unknown",
     "chart.lastData": "Last data: {when}",
     "chart.opening": "Opening high",
     "chart.opening.aria": "Opening high of {date}: {price}",
@@ -176,5 +179,6 @@ export default defineMessages({
     "chart.shortcuts.hint": "Type a letter to search a symbol, a number to change the interval, or Ctrl K to search",
     "market.err.interval_unavailable": "{interval} needs {base} bars, which {source} doesn't have for {symbol}",
     "market.err.seconds_need_ticks": "This source gives 1-minute bars at best. Connect a live source for seconds",
+    "market.err.futures_not_enabled": "Your Schwab account has no futures data enabled. Ask Schwab to enable futures and the CME data agreements.",
   },
 });

@@ -20,12 +20,12 @@ from pathlib import Path
 
 from hokma.core import tls
 from hokma.market import symbols as symbol_map
-from hokma.market.aggregator import BarAggregator
 from hokma.market.cache import DiskCache, RateLimiter
 from hokma.market.errors import BAD_RESPONSE, NETWORK, RATE_LIMITED, UNKNOWN_SYMBOL, UPSTREAM, MarketError
+from hokma.market.intervals import of_seconds
 from hokma.market.models import TIMEFRAME_SECONDS, Candle, Series, SessionPeriod
 from hokma.market.providers import ProviderCatalog
-from hokma.market.sessions import session_for
+from hokma.market.sessions import clock_session, session_for
 from hokma.market.source import MarketDataSource
 from hokma.market.tz import NEW_YORK
 
@@ -44,7 +44,7 @@ COINBASE_MAX_PAGES = 4                 # at most 1200 bars per answer: no storm 
 HISTORY_CLASSES = {
     "alpaca": ("equity", "crypto"),
     "coinbase": ("crypto",),
-    "finnhub": ("equity", "forex", "crypto"),
+    "finnhub": ("forex",),                 # Finnhub no longer serves stocks, ETFs or crypto (SPEC-016 3.6 rule 3 and 4)
     "schwab": ("equity",),
 }
 # Providers that serve bars but are not in the order of Connections for the class, by class, in the order they go last.
@@ -113,20 +113,6 @@ def _candle(t, o, h, l, c, v) -> Candle | None:
     return Candle(t, *values, _number(v) or 0.0)         # type: ignore[arg-type]
 
 
-def _regular_hours(candles: list[Candle], base: str) -> list[Candle]:
-    """Stock bars of the regular session only (09:30 to 16:00 New York), like Yahoo: the session grid of the chart
-    starts at the open, so pre and after market bars would fall in the wrong session."""
-    if base == "1D":
-        return candles
-    out = []
-    for candle in candles:
-        local = datetime.fromtimestamp(candle.t, NEW_YORK)
-        minute = local.hour * 60 + local.minute
-        if local.weekday() < 5 and 570 <= minute < 960:
-            out.append(candle)
-    return out
-
-
 # ---------- one request builder and one parser per provider ----------
 
 class Denied(Exception):
@@ -178,7 +164,7 @@ def _alpaca(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, now
         item = _candle(stamp, bar.get("o"), bar.get("h"), bar.get("l"), bar.get("c"), bar.get("v"))
         if item:
             out.append(item)
-    return _regular_hours(out, base) if asset == "equity" else out
+    return out
 
 
 COINBASE_GRANULARITY = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "1D": 86400}
@@ -236,18 +222,20 @@ def _finnhub(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, no
             continue
         if item:
             out.append(item)
-    return _regular_hours(out, base) if asset == "equity" else out
+    return out
 
 
 SCHWAB_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 30}          # Schwab has no 60 minute bar: 1h is 30 minutes folded in two
-_HOUR_ANCHOR = BarAggregator(NEW_YORK, "equity", ())
+CLOCK_ALIGNED = frozenset({"schwab", "alpaca"})                              # providers that send every session as it comes (SPEC-016 3.4)
+_HOUR_CLOCK = clock_session(NEW_YORK)
 
 
 def _fold_to_hours(candles: list[Candle]) -> list[Candle]:
-    """30 minute bars of the regular session into hours counted from the 09:30 open (the grid of the chart)."""
+    """30 minute bars into hours on the clock (every hour on the hour): the only interval Schwab does not give. No session
+    anchor of ours (SPEC-016 3.3)."""
     out: dict[int, Candle] = {}
     for candle in candles:
-        start = _HOUR_ANCHOR.bounds(candle.t, "1h")[0]
+        start = _HOUR_CLOCK.bounds(candle.t, of_seconds(3600))[0]
         held = out.get(start)
         out[start] = (Candle(start, candle.o, candle.h, candle.l, candle.c, candle.v) if held is None else
                       Candle(start, held.o, max(held.h, candle.h), min(held.l, candle.l), candle.c, held.v + candle.v))
@@ -256,7 +244,8 @@ def _fold_to_hours(candles: list[Candle]) -> list[Candle]:
 
 def _schwab(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, now: float) -> list[Candle]:
     """`GET /marketdata/v1/pricehistory` through `hokma.schwab.endpoints` (SPEC-015 5.5): the span of `SPAN_DAYS` by
-    `startDate` and `endDate` in ms, regular hours only, `empty: true` is no bars and not an error. `fetch` and
+    `startDate` and `endDate` in ms, with the extended hours (every session Schwab has, as it sends them), `empty: true` is no
+    bars and not an error. The daily bar is the one Schwab gives: date, open, high, low, close and volume are not touched. `fetch` and
     `secret` are unused: the session and the host belong to `hokma.schwab`."""
     from hokma.schwab import endpoints, http, models
 
@@ -264,7 +253,7 @@ def _schwab(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, now
     if mapped is None:
         raise MarketError(UNKNOWN_SYMBOL, 404)
     window = {"startDate": int((now - SPAN_DAYS[base] * 86400) * 1000), "endDate": int(now * 1000),
-              "needExtendedHoursData": False}
+              "needExtendedHoursData": True}
     if base == "1D":
         window.update(periodType="year", frequencyType="daily", frequency=1)
     else:
@@ -292,7 +281,6 @@ def _schwab(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, now
         if item:
             out.append(item)
     out.sort(key=lambda candle: candle.t)
-    out = _regular_hours(out, base)
     return _fold_to_hours(out) if base == "1h" else out
 
 
@@ -339,11 +327,34 @@ class ConnectedSource:
 
     # ---- what the chain is made of ----
 
+    def broker_for(self, asset: str | None) -> str | None:
+        """The broker that is the only source of the candles of this asset class while one is connected (SPEC-016 3.6 and 3.7): the one the
+        user chose among those connected and signed in, else the first. No other provider and no Yahoo answers for it."""
+        if asset is None:
+            return None
+        brokers = []
+        for pid in self._fetchers:
+            spec = self._catalog.get(pid)
+            if spec is None or spec.role != "broker" or asset not in HISTORY_CLASSES.get(pid, ()):
+                continue
+            if not self._config.is_enabled(pid) or (spec.needs_key and not self._config.has_key(pid)):
+                continue
+            if spec.auth == "oauth" and not getattr(self._config, "signed_in", lambda _id: True)(pid):
+                continue
+            brokers.append(pid)
+        if not brokers:
+            return None
+        chosen = getattr(self._config, "data_source", lambda: None)()
+        return chosen if chosen in brokers else brokers[0]
+
     def providers_for(self, symbol: str, allowed: Allowed = None) -> list[str]:
         """Ids of the providers that serve bars of `symbol` here, in the order they are asked."""
         asset = symbol_map.classify(symbol)
         if asset is None:
             return []
+        broker = self.broker_for(asset)
+        if broker is not None:
+            return [broker] if allowed is None or allowed(broker) else []
         order = [p for p in self._config.order(BARS_USE.get(asset, asset)) if p in self._fetchers]
         order += [p for p in EXTRA_ORDER.get(asset, ()) if p in self._fetchers and p not in order]
         order += [p for p in self._fetchers if asset in HISTORY_CLASSES.get(p, ()) and p not in order]
@@ -360,6 +371,14 @@ class ConnectedSource:
                 continue                                   # keys saved but no session: nothing to ask
             out.append(pid)
         return out
+
+    def drop_cached(self, symbol: str) -> None:
+        """Forget what the chain kept for a symbol, so the next read asks the provider again (the closed candle of the source, SPEC-016 3.3)."""
+        for pid in self._fetchers:
+            for base in FRESH_FOR:
+                self._cache.drop(f"{pid}|{symbol}|{base}")
+        for key in [k for k in self._memory if k[1] == symbol]:
+            del self._memory[key]
 
     def for_desk(self, allowed: Iterable[str] | None) -> "MarketDataSource":
         """The same chain restricted to the providers a desk uses; `None` is the whole chain."""
@@ -380,6 +399,8 @@ class ConnectedSource:
                 continue
             if series is not None:
                 return series
+        if self.broker_for(asset) is not None:
+            raise MarketError(UPSTREAM, 502)          # the broker is the source and gave nothing: no other source, not even Yahoo
         return self.fallback.history(symbol, timeframe)
 
     def _ready(self) -> None:
@@ -431,7 +452,8 @@ class ConnectedSource:
             symbol=symbol, name=symbol, kind=kind, exchange=spec.name, currency="USD",
             timezone="UTC" if kind == "crypto" else "America/New_York", utc_offset_seconds=0,
             candles=candles, previous_close=None, last_trade_at=min(now, last.t + TIMEFRAME_SECONDS[base]),
-            session=_session_period(kind, now), fetched_at=fetched_at, stale=stale, source=spec.name)
+            session=_session_period(kind, now), fetched_at=fetched_at, stale=stale, source=spec.name,
+            clock_aligned=pid in CLOCK_ALIGNED)
 
 
 def _load(body: str) -> list[Candle]:

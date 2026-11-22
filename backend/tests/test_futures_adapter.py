@@ -184,7 +184,7 @@ def test_the_shipped_card_is_available_and_first_for_futures(live):
     assert ADAPTERS["siomtrading_futures"] is not None
     with live.app() as client:
         assert card(client)["available"] is True
-        assert card(client)["priority"] == {"future": 0}
+        assert card(client)["priority"] == {"future": 1}        # Schwab is first for futures when it is connected (SPEC-016 3.10)
         assert card(client)["max_symbols"] == 20
 
 

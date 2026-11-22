@@ -124,7 +124,7 @@ describe("the Add dialog", () => {
     await show();
     const list = await openAdd();
     const names = [...list.querySelectorAll("[data-testid^='add-'] .h2")].map((e) => e.textContent);
-    expect(names).toEqual(["Schwab", "Alpaca IEX", "Finnhub", "SiomTrading Futures", t("mail.title"), "Coinbase"]);
+    expect(names).toEqual(["Schwab", "Alpaca Trading", "Finnhub", "SiomTrading Futures", t("mail.title"), "Coinbase"]);
     for (const id of ["schwab", "alpaca", "finnhub", "siomtrading_futures", "mail", "coinbase"]) {
       expect(within(screen.getByTestId("add-" + id)).getByText(t("connections.add.what." + id))).toBeInTheDocument();
     }
@@ -160,8 +160,8 @@ describe("the Add dialog", () => {
     expect(finnhubForm.querySelectorAll("input")).toHaveLength(1);
     expect(within(finnhubForm).getByLabelText(t("connections.field.key"))).toHaveAttribute("type", "password");
     await userEvent.click(screen.getByRole("button", { name: t("connections.add.back") }));
-    await userEvent.click(within(screen.getByTestId("add-list")).getByRole("button", { name: t("connections.add.choose"), description: "Alpaca IEX" }));
-    const alpacaForm = screen.getByRole("form", { name: t("connections.add.formTitle", { name: "Alpaca IEX" }) });
+    await userEvent.click(within(screen.getByTestId("add-list")).getByRole("button", { name: t("connections.add.choose"), description: "Alpaca Trading" }));
+    const alpacaForm = screen.getByRole("form", { name: t("connections.add.formTitle", { name: "Alpaca Trading" }) });
     expect(alpacaForm.querySelectorAll("input")).toHaveLength(2);
     expect(within(alpacaForm).getByLabelText(t("connections.field.keyId"))).toBeInTheDocument();
     expect(within(alpacaForm).getByLabelText(t("connections.field.secret"))).toBeInTheDocument();
@@ -193,7 +193,7 @@ describe("the Add dialog", () => {
 
   it("Alpaca sends Key ID and Secret together and keeps neither", async () => {
     await show();
-    await pick("Alpaca IEX");
+    await pick("Alpaca Trading");
     await userEvent.type(screen.getByLabelText(t("connections.field.keyId")), "AKID-1234567890");
     await userEvent.type(screen.getByLabelText(t("connections.field.secret")), SECRET);
     await userEvent.click(screen.getByRole("button", { name: t("connections.add.testAndAdd") }));
@@ -330,7 +330,7 @@ describe("the connected rows", () => {
   it("Test connection shows the catalog error when it fails", async () => {
     backend.testAnswer = BAD_KEY_TEST;
     await show();
-    await openMenu("Alpaca IEX");
+    await openMenu("Alpaca Trading");
     await userEvent.click(screen.getByRole("menuitem", { name: t("connections.test") }));
     const result = await within(rowOf("alpaca")).findByTestId("conn-test-result");
     expect(result).toHaveAttribute("data-ok", "false");
@@ -363,7 +363,7 @@ describe("the connected rows", () => {
 
   it("View guide opens the guide in the dialog, without fields", async () => {
     await show();
-    await openMenu("Alpaca IEX");
+    await openMenu("Alpaca Trading");
     await userEvent.click(screen.getByRole("menuitem", { name: t("connections.row.guide") }));
     const open = await screen.findByRole("dialog");
     expect(within(open).getByTestId("guide-what")).toHaveTextContent(t("connections.guide.alpaca.what"));
@@ -423,7 +423,7 @@ describe("Order of use", () => {
   it("the arrow buttons send the whole order: the connected ones in the new order and the others behind", async () => {
     await show();
     await userEvent.click(within(screen.getByTestId("use-equity")).getByRole("button", { name: t("connections.order.change") }));
-    await userEvent.click(within(screen.getByTestId("priority-equity")).getByRole("button", { name: t("connections.priority.down", { name: "Alpaca IEX" }) }));
+    await userEvent.click(within(screen.getByTestId("priority-equity")).getByRole("button", { name: t("connections.priority.down", { name: "Alpaca Trading" }) }));
     await waitFor(() => expect(backend.sent("PUT", "/connections/priority")).toHaveLength(1));
     // Schwab is not connected: it stays where it was, behind the connected ones
     expect(backend.sent("PUT", "/connections/priority")[0]!.body).toEqual({ asset_class: "equity", order: ["finnhub", "alpaca", "schwab"] });

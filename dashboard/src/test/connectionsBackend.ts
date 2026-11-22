@@ -20,7 +20,7 @@ export function card(over: Partial<ConnectionCard> & Pick<ConnectionCard, "id" |
 export function startCards(): ConnectionCard[] {
   return [
     card({ id: "schwab", name: "Schwab", asset_classes: ["equity"], key_fields: ["client_id", "client_secret"], auth: "oauth", max_symbols: 100, uses: ["equity", "bars", "options"], priority: { equity: 0 } }),
-    card({ id: "alpaca", name: "Alpaca IEX", asset_classes: ["equity"], key_fields: ["key_id", "secret"], max_symbols: 30, uses: ["equity", "bars", "options", "news"], priority: { equity: 1 } }),
+    card({ id: "alpaca", name: "Alpaca Trading", asset_classes: ["equity"], key_fields: ["key_id", "secret"], max_symbols: 30, uses: ["equity", "bars", "options", "news"], priority: { equity: 1 } }),
     card({ id: "finnhub", name: "Finnhub", asset_classes: ["equity", "forex", "crypto"], data_state: "delayed", uses: ["equity", "bars", "crypto", "forex", "news"], priority: { equity: 2, forex: 0, crypto: 1 } }),
     card({ id: "siomtrading_futures", name: "SiomTrading Futures", asset_classes: ["future"], max_symbols: 20, uses: ["future"], priority: { future: 0 } }),
     card({ id: "coinbase", name: "Coinbase", asset_classes: ["crypto"], needs_key: false, key_fields: [], key_state: "not_required", added: true, state: "connected", max_symbols: 100, uses: ["crypto"], priority: { crypto: 0 } }),

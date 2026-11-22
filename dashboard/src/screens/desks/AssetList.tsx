@@ -1,14 +1,10 @@
 import type { KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/api";
 import { Button, Pane } from "@/design";
 import { useI18n } from "@/i18n";
 import { formatPercent, formatPrice } from "../chart/format";
 import { AssetSearch } from "../chart/AssetSearch";
-import type { ChartData } from "../chart/types";
-
-/** How often the list asks for fresh quotes. */
-export const QUOTE_REFRESH_MS = 60_000;
+import { LiveQuotesClient } from "../chart/liveQuotes";
 
 export interface Quote {
   last: number | null;
@@ -19,33 +15,26 @@ export interface Quote {
 /** A quote that could not be read shows as a dash, never as a made-up number. */
 type QuoteState = Quote | "failed";
 
-function quoteOf(data: ChartData): Quote {
-  const lastBar = data.candles.length > 0 ? data.candles[data.candles.length - 1]!.c : null;
-  return { last: data.last_price ?? lastBar, previousClose: data.previous_close, changePct: data.change_pct };
-}
-
-/** Last price and change of each symbol, from `GET /api/market/candles`, read again every 60 seconds. */
+/** Last price and change of each symbol, from the engine's stream (`/ws/market`): one socket, a subscription per symbol, painted as it arrives. No timer. */
 export function useQuotes(symbols: string[]): Record<string, QuoteState | undefined> {
   const [quotes, setQuotes] = useState<Record<string, QuoteState | undefined>>({});
   const key = symbols.join("|");
 
   useEffect(() => {
-    let alive = true;
-    const run = () => {
-      for (const symbol of symbols) {
-        api
-          .get<ChartData>(`/api/market/candles?symbol=${encodeURIComponent(symbol)}&tf=5m`)
-          .then((data) => alive && setQuotes((prev) => ({ ...prev, [symbol]: quoteOf(data) })))
-          .catch(() => alive && setQuotes((prev) => ({ ...prev, [symbol]: prev[symbol] && prev[symbol] !== "failed" ? prev[symbol] : "failed" })));
-      }
-    };
-    run();
-    const timer = setInterval(run, QUOTE_REFRESH_MS);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-    // `key` stands for the list of symbols: a new array with the same symbols must not restart the polling.
+    const client = new LiveQuotesClient({
+      symbols,
+      onQuote: (symbol, quote) =>
+        setQuotes((prev) => {
+          const before = prev[symbol];
+          const held = before && before !== "failed" ? before : null;
+          // A price message carries the price and the change; the previous close stays the one the snapshot gave.
+          return { ...prev, [symbol]: { last: quote.last ?? held?.last ?? null, previousClose: quote.previousClose ?? held?.previousClose ?? null, changePct: quote.changePct ?? held?.changePct ?? null } };
+        }),
+      onFailed: (symbol) => setQuotes((prev) => ({ ...prev, [symbol]: prev[symbol] && prev[symbol] !== "failed" ? prev[symbol] : "failed" })),
+    });
+    client.start();
+    return () => client.stop();
+    // `key` stands for the list of symbols: a new array with the same symbols must not open the stream again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 

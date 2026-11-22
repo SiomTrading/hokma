@@ -234,7 +234,9 @@ def test_the_read_tools_and_the_internal_schwab_routes_never_write():
     assert not [n for n in names if n.startswith("schwab_") and re.search(r"place|preview|cancel|replace|submit", n)]
     assert {n for n in names if n.startswith("order_")} == {
         "order_preview", "order_place", "order_replace", "order_cancel", "order_status", "order_list", "order_log"}
-    assert all(route.methods == {"GET"} for route in router.routes)
+    # Every route is a GET but one: the measuring run (POST), which opens subscriptions of market data and sends no order (SPEC-016 T1)
+    assert all(route.methods == {"GET"} for route in router.routes if route.path != "/api/schwab/diagnostic/streaming")
+    assert next(r for r in router.routes if r.path == "/api/schwab/diagnostic/streaming").methods == {"POST"}
 
 
 # ------------------------------------------------------------------------------- tools: one call per endpoint
@@ -587,13 +589,25 @@ def test_each_route_answers_the_same_as_its_tool(db, fake, client, url, query, t
 
 def test_the_routes_cover_the_19_read_endpoints_and_the_calculations_only():
     paths = {r.path for r in router.routes}
-    assert len([p for p in paths if not p.startswith("/api/schwab/analytics")]) == 19
+    assert len([p for p in paths if not p.startswith(("/api/schwab/analytics", "/api/schwab/diagnostic"))]) == 19
     assert "/api/schwab/analytics/{calc}" in paths
+    assert "/api/schwab/diagnostic/streaming" in paths                     # the measuring tool of SPEC-016: read only
     assert not [p for p in paths if re.search(r"preview|place|cancel|replace", p, re.I)]
     assert set(reader.ANALYTICS_READS) == {"volatility_history", "portfolio_greeks", "account_activity",
                                            "exposure_and_pnl", "market_hours"}
     assert not [n for n in reader.SPECS if re.search(r"gex|flip|wall|dex|vex|tex|max_pain|put_call|skew|term_structure|"
                                                      r"unusual|options_analytics|expected_move|prob_itm", n)]
+
+
+def test_the_diagnostic_route_is_a_post_and_needs_the_session_token_in_the_header(fake, client):
+    route = next(r for r in router.routes if r.path == "/api/schwab/diagnostic/streaming")
+    assert route.methods == {"POST"}                                              # it opens subscriptions: not a GET
+    assert client.get("/api/schwab/diagnostic/streaming", headers={"X-Hokma-Token": SESSION_TOKEN}).status_code in (404, 405)
+    for headers in ({}, {"X-Hokma-Token": "not-the-token"}):
+        answer = client.post("/api/schwab/diagnostic/streaming", headers=headers, json={})
+        assert answer.status_code == 401 and answer.json()["detail"]["code"] == "unauthorized"
+    assert client.post("/api/schwab/diagnostic/streaming?token=" + SESSION_TOKEN, json={}).status_code == 401
+    assert fake.calls == []
 
 
 def test_the_router_is_registered_in_the_app():
@@ -609,10 +623,25 @@ def test_a_request_without_the_session_token_is_refused_before_any_call(db, fake
     assert fake.calls == []
 
 
-def test_the_token_may_also_come_in_the_query_like_the_other_routes(fake, client):
-    assert client.get("/api/schwab/marketdata/expirationchain", params={"symbol": "AAPL", "token": SESSION_TOKEN}).status_code == 200
-    made = calls_to(fake, MARKET + "/expirationchain")[0]
-    assert "token" not in made.query and SESSION_TOKEN not in json.dumps(made.query)
+def test_the_diagnostic_route_answers_busy_with_a_409_and_refuses_a_bad_body_with_a_422(fake, client, monkeypatch):
+    from hokma.schwab import diagnostic
+
+    async def busy(*args, **kwargs):
+        raise diagnostic.DiagnosticBusy()
+
+    monkeypatch.setattr(diagnostic, "run", busy)
+    headers = {"X-Hokma-Token": SESSION_TOKEN}
+    answer = client.post("/api/schwab/diagnostic/streaming", headers=headers, json={"symbol": "QQQ", "seconds": 75})
+    assert answer.status_code == 409 and answer.json()["detail"]["code"] == "schwab.err.diagnostic_busy"
+    assert client.post("/api/schwab/diagnostic/streaming", headers=headers, json={"symbol": 5, "seconds": "x"}).status_code == 422
+
+
+def test_the_token_in_the_address_is_not_accepted_only_the_header_is(fake, client):
+    """A token in a query string is kept by logs and browser histories: these routes read the header only."""
+    answer = client.get("/api/schwab/marketdata/expirationchain", params={"symbol": "AAPL", "token": SESSION_TOKEN})
+    assert answer.status_code == 401 and answer.json()["detail"]["code"] == "unauthorized"
+    assert fake.calls == []
+    assert client.get("/api/schwab/marketdata/expirationchain", params={"symbol": "AAPL"}, headers={"X-Hokma-Token": SESSION_TOKEN}).status_code == 200
 
 
 def test_a_foreign_origin_is_refused_like_in_the_rest_of_the_api(fake, client):

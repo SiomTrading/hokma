@@ -39,13 +39,36 @@ def to_provider(provider_id: str, symbol: str, asset_class: str | None, today: d
         return symbol.replace("-", ".") if asset_class == "equity" and EQUITY.match(symbol) else None
     if provider_id == "schwab":
         # Class shares are written with a slash ("BRK/B"); the REF gives no example, T0 confirms it with a real answer.
+        if asset_class == "future" and FUTURE.match(symbol):
+            return "/" + FUTURE.match(symbol).group(1)               # the root (guide 7.10); an exact contract is `/NQZ26` (`schwab_future`)
         return symbol.replace("-", "/") if asset_class == "equity" and EQUITY.match(symbol) else None
+    if provider_id == "ibkr":
+        # Interactive Brokers: the plain ticker (the contract definition is the adapter's, I1 is not verified); class shares are written by it
+        return symbol if asset_class == "equity" and EQUITY.match(symbol) else None
     if provider_id == "finnhub":
         return _finnhub(symbol, asset_class)
     if provider_id == "siomtrading_futures":
         # The server resolves the current contract from the root.
         return FUTURE.match(symbol).group(1) if asset_class == "future" and FUTURE.match(symbol) else None
     return None
+
+
+MONTH_CODES = "FGHJKMNQUVXZ"                                      # January to December (guide 7.10)
+
+
+def schwab_future(root: str, month: int, year: int) -> str:
+    """The key of an exact futures contract at Schwab: `/` + root + month code + two digit year, for example `/NQZ26`."""
+    if not 1 <= month <= 12:
+        raise ValueError("month must be 1 to 12")
+    return f"/{root}{MONTH_CODES[month - 1]}{year % 100:02d}"
+
+
+def parse_schwab_future(key: str) -> tuple[str, int, int] | None:
+    """`/NQZ26` to (`NQ`, 12, 2026); None when it is not an exact contract (a root alone, `/NQ`, is not)."""
+    found = re.fullmatch(rf"/([A-Z0-9]{{1,4}}?)([{MONTH_CODES}])(\d{{2}})", key or "")
+    if not found:
+        return None
+    return found.group(1), MONTH_CODES.index(found.group(2)) + 1, 2000 + int(found.group(3))
 
 
 def _finnhub(symbol: str, asset_class: str) -> str | None:

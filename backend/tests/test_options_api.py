@@ -55,7 +55,7 @@ def test_errors_carry_their_code_and_status(monkeypatch):
     monkeypatch.setattr(market_api, "_requests", RateLimiter(limit=1000, window=60))
     client = TestClient(create_app())
     detail = error(client, CHAIN + "2026-12-18", 409, "options.no_connection")
-    assert detail["message"] == "The option chain needs Schwab or Alpaca IEX: connect one of them in Connections."
+    assert detail["message"] == "The option chain needs Schwab or Alpaca Trading: connect one of them in Connections."
     error(client, "/api/market/options/expirations?symbol=AAPL", 409, "options.no_connection")
     assert fake.calls == []
 
@@ -113,7 +113,7 @@ def test_three_expirations_in_one_call(client, alpaca):
     assert [g["date"] for g in body["expirations"]] == ["2026-11-20", "2026-12-18", "2027-01-15"]
     assert [g["days"] for g in body["expirations"]] == [0, 28, 56]
     assert (body["underlying"], body["underlying_price"], body["source"]) == ("AAPL", 228.4, "Alpaca")
-    assert (body["price_feed"], body["greeks"], body["market_open"], body["notes"]) == ("indicative", "estimated", True, [])
+    assert (body["price_feed"], body["greeks"], body["market_open"], body["notes"]) == ("indicative", "estimated", None, [])
     assert body["as_of"] == "2026-11-20T16:00:01Z"
     assert len([q for q in alpaca.queries(PAPER)]) == 3                    # one contracts request per expiration
     assert [q["expiration_date"] for q in alpaca.queries(PAPER)] == ["2026-11-20", "2026-12-18", "2027-01-15"]
@@ -250,7 +250,7 @@ def test_volume_is_null_when_the_chart_does_not_give_it(monkeypatch):
 
 
 def test_volume_is_null_when_the_chart_comes_from_alpaca_iex_and_kept_from_a_consolidated_source(monkeypatch):
-    for source in ("Alpaca", "Alpaca IEX"):
+    for source in ("Alpaca", "Alpaca Trading"):
         install(monkeypatch, quote={**QUOTE, "source": source})
         monkeypatch.setattr(market_api, "_requests", RateLimiter(limit=1000, window=60))
         body = TestClient(create_app()).get("/api/market/options/underlying?symbol=AAPL", headers=AUTH).json()

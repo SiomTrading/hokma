@@ -12,6 +12,7 @@ MARKET_CODES: dict[str, Callable[[dict], str]] = {
     "market.not_entitled": lambda params: t("market.error.not_entitled"),
     "market.interval_unavailable": lambda params: t("market.error.interval_unavailable", **params),
     "market.seconds_need_ticks": lambda params: t("market.error.seconds_need_ticks"),
+    "market.futures_not_enabled": lambda params: t("market.error.futures_not_enabled"),
 }
 
 CONNECTION_CODES: dict[str, Callable[[], str]] = {
@@ -26,6 +27,7 @@ CONNECTION_CODES: dict[str, Callable[[], str]] = {
     "connections.unknown_provider": lambda: t("connections.error.unknown_provider"),
     "connections.bad_key": lambda: t("connections.error.bad_key"),
     "connections.bad_priority": lambda: t("connections.error.bad_priority"),
+    "connections.bad_data_source": lambda: t("connections.error.bad_data_source"),
     "connections.token_invalid": lambda: t("connections.error.token_invalid"),
     "connections.access_revoked": lambda: t("connections.error.access_revoked"),
     "connections.other_device": lambda: t("connections.error.other_device"),

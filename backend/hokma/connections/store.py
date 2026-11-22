@@ -89,6 +89,7 @@ class ConnectionSettings:
         self._path = path
         self._enabled: dict[str, bool] = {}
         self._priority: dict[str, list[str]] = {}
+        self._data_source: str | None = None            # the broker the user chose as the source of live data (SPEC-016 3.6)
         self.version = 0                                 # of the file read; 0 when there is none
         self.unreadable = False                          # the file exists but could not be read or parsed
         self.load()
@@ -114,6 +115,8 @@ class ConnectionSettings:
         self._enabled = {k: v for k, v in enabled.items() if isinstance(v, bool)} if isinstance(enabled, dict) else {}
         self._priority = ({k: [x for x in v if isinstance(x, str)] for k, v in priority.items()
                            if isinstance(v, list)} if isinstance(priority, dict) else {})
+        source = raw.get("data_source")
+        self._data_source = source if isinstance(source, str) else None
         # 1.0.9: the candles of stocks and ETFs follow their own order (`bars`). A file written by 1.0.8 has none, so it
         # gets the saved `equity` order once, in memory, so the candles keep coming from the same source. The file is
         # not rewritten here: the copy is saved the next time anything is saved.
@@ -157,6 +160,13 @@ class ConnectionSettings:
         else:
             self.set_enabled(provider_id, value)
 
+    def data_source(self) -> str | None:
+        return self._data_source
+
+    def set_data_source(self, provider_id: str | None) -> None:
+        self._data_source = provider_id
+        self._save()
+
     def set_order(self, asset_class: str, order: list[str]) -> None:
         self._priority[asset_class] = list(order)
         self._save()
@@ -173,7 +183,10 @@ class ConnectionSettings:
     def _save(self) -> None:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        body = json.dumps({"version": SETTINGS_VERSION, "enabled": self._enabled, "priority": self._priority}, indent=2)
+        saved = {"version": SETTINGS_VERSION, "enabled": self._enabled, "priority": self._priority}
+        if self._data_source is not None:
+            saved["data_source"] = self._data_source              # only when the user has a chosen broker: older files stay as they were
+        body = json.dumps(saved, indent=2)
         fd, temp = tempfile.mkstemp(prefix=".connections-", dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:

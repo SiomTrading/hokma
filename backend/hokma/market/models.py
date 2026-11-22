@@ -49,6 +49,7 @@ class Series:
     fetched_at: int
     stale: bool = False  # served from an old cache because the network failed
     source: str = ""
+    clock_aligned: bool = False  # the source sends every session (pre, regular, post, night): intervals it does not give fold on the clock
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,7 @@ class ChartData:
     previous_close: float | None
     change: float | None
     change_pct: float | None
-    market_open: bool
+    market_open: bool | None
     last_trade_at: int | None
     data_age_seconds: int | None
     delayed: bool

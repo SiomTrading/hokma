@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button, EmptyState, Loading, Pane } from "@/design";
 import { useI18n } from "@/i18n";
+import { BrokerAlertBand } from "../chart/BrokerAlertBand";
 import { IntervalBar } from "../chart/IntervalBar";
 import { PriceChart } from "../chart/PriceChart";
 import { errorText, secondsDisabledReason, sourceLine, ticksDisabledReason } from "../chart/liveState";
@@ -57,6 +58,7 @@ export function DeskChart({ symbol, deskId }: { symbol: string; deskId?: number 
         timeframe={data.timeframe}
         timezone={data.timezone}
         opening={data.opening_range}
+        sessions={live.sessions}
         label={t("chart.aria", { symbol: data.symbol, tf: data.timeframe })}
       />
     );
@@ -80,6 +82,7 @@ export function DeskChart({ symbol, deskId }: { symbol: string; deskId?: number 
           />
         </span>
       </div>
+      <BrokerAlertBand alert={live.brokerAlert} assetClass={live.assetClass} />
       <div className="dterm-chart-body">{body}</div>
       {live.source ? <div className="dterm-foot hint">{sourceLine(live, t)}</div> : null}
     </Pane>

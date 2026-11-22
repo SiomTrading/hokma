@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.10
+
+- Live data by streaming in every source. Schwab now uses its Streamer: price, candles and the option chain update by themselves, with the values Schwab sends. Nothing polls.
+- One source of data per user. With Schwab connected, Hokma shows only Schwab; without a broker, Alpaca (now "Alpaca Trading"). If the broker stops, Hokma says so on screen and by Telegram, and never shows data from another source. Crypto is always Coinbase; Finnhub is for forex and news.
+- The day candle, the sessions (pre, regular, post) and the market hours are the ones Schwab sends. Hokma keeps no schedule of its own.
+- The option chain asks Schwab for every strike of an expiration once, shows the strikes around the price of the stream and moves each cell with every message.
+- Connections: "Check Schwab data" in the Schwab menu saves what Schwab sends, with no key or account in it, so the chart and the chain can be compared with thinkorswim.
+- Futures by Schwab when it is connected (SiomTrading Futures when it is not). Interactive Brokers is ready to be added. Alpaca option quotes arrive by stream. The chart is shaded by the pieces of the day the provider names.
+- Alpaca: when you connect it, Hokma tells you once that its free plan has limited data and is not optimal for options.
+
 ## 1.0.9
 
 - Connections: one Add button. Pick a provider, enter its details, Hokma tests it and adds it. Below, the connected sources and the order of use for each kind of data. Everything you had connected stays as it was.

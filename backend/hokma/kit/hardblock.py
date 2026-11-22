@@ -178,6 +178,13 @@ def read_exception_match(host: str, method: str, path: str, consumer: str, broke
     return None
 
 
+def stream_hosts(brokers: dict | None = None) -> tuple[str, ...]:
+    """The only hosts the Schwab Streamer socket may be opened against (SPEC-016 4.1 point 2). A token never travels to a host
+    that is not in this list. Read from `stream_hosts` of `hardblock_brokers.json`; not a rule the hook applies to agents."""
+    raw = (brokers if brokers is not None else load_brokers()).get("stream_hosts", [])
+    return tuple(str(h).lower() for h in raw if isinstance(h, str)) if isinstance(raw, list) else ()
+
+
 def read_exception_allows(host: str, method: str, path: str, consumer: str, brokers: dict | None = None) -> bool:
     """True when `read_exception_match` finds a rule for this request."""
     return read_exception_match(host, method, path, consumer, brokers) is not None

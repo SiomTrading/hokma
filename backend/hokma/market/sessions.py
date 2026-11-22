@@ -76,6 +76,12 @@ class Session:
         return start, min(start + interval.seconds, cap)
 
 
+def clock_session(tz: tzinfo) -> Session:
+    """The grid of a source that sends every session as it comes (SPEC-016 3.4): bars it does not give are folded on the
+    clock, from the local midnight, with no session anchor of ours. It decides no market hours and drops no data."""
+    return Session(tz, 0, 0, False, False)
+
+
 def session_for(kind: str, tz: tzinfo) -> Session:
     """The session of an instrument kind (`Series.kind`: equity, etf, index, future, crypto, currency, other)."""
     if kind == "future":

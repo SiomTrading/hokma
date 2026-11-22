@@ -60,14 +60,18 @@ def match(method, path, consumer="hokma_backend"):
 
 # ------------------------------------------------------------------------------------------- one door
 
-def test_nothing_in_the_schwab_package_opens_the_network_but_http_py():
-    """The only module that imports an HTTP client or a socket is http.py; auth.py calls http.request."""
+def test_nothing_in_the_schwab_package_opens_the_network_but_http_py_and_stream_py():
+    """The only module that imports an HTTP client or a socket is http.py; auth.py calls http.request. The only one that
+    opens a WebSocket is stream.py (the Streamer, SPEC-016 6.2), and it takes no HTTP client: `userPreference` goes by http.py."""
     forbidden = re.compile(r"^\s*(?:import|from)\s+(?:urllib\.request|http\.client|socket|ssl|requests|httpx|aiohttp|"
                            r"websockets?|websocket|hokma\.market\.history|hokma\.core\.tls)\b", re.M)
     for path in (ROOT / "schwab").glob("*.py"):
-        if path.name != "http.py":
+        if path.name not in ("http.py", "stream.py"):
             assert not forbidden.search(path.read_text(encoding="utf-8")), path.name
             assert "urlopen" not in path.read_text(encoding="utf-8"), path.name
+    streamer = (ROOT / "schwab" / "stream.py").read_text(encoding="utf-8")
+    assert not re.search(r"^\s*(?:import|from)\s+(?:urllib\.request|http\.client|socket|ssl|requests|httpx|aiohttp)\b", streamer, re.M)
+    assert "urlopen" not in streamer
 
 
 def test_every_call_of_auth_goes_through_http_request(monkeypatch):

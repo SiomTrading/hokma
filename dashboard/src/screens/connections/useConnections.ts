@@ -11,6 +11,8 @@ export interface ConnectionsState {
   /** Order of every use: provider ids, the not connected ones too. */
   uses: UseOrders;
   storeAvailable: boolean;
+  dataSource: string | null;
+  setDataSource: (id: string | null) => void;
   loading: boolean;
   error: string | null;
   reload: () => void;
@@ -48,6 +50,7 @@ export function useConnections(): ConnectionsState {
   const [cards, setCards] = useState<ConnectionCard[]>([]);
   const [uses, setUses] = useState<UseOrders>({});
   const [storeAvailable, setStoreAvailable] = useState(true);
+  const [dataSource, setDataSource] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const ticket = useRef(0);
@@ -60,6 +63,7 @@ export function useConnections(): ConnectionsState {
         setCards(data.connections);
         setUses(data.uses ?? data.groups ?? {});
         setStoreAvailable(data.store_available);
+        setDataSource(data.data_source ?? null);
         setError(null);
         setLoading(false);
       },
@@ -100,5 +104,5 @@ export function useConnections(): ConnectionsState {
   }, [load]);
 
   const patchCard = useCallback((card: ConnectionCard) => setCards((current) => current.map((c) => (c.id === card.id ? card : c))), []);
-  return { cards, uses, storeAvailable, loading, error, reload: load, patchCard, setStoreAvailable, setUses };
+  return { cards, uses, storeAvailable, dataSource, setDataSource, loading, error, reload: load, patchCard, setStoreAvailable, setUses };
 }

@@ -472,14 +472,7 @@ def _send_notice(session: dict) -> None:
 
 
 def _notify_owner(text: str) -> None:
-    """The owner's linked Telegram chat (its outbox, delivered by the sender; the mail fallback is the owner's choice
-    in Settings). With no Telegram link the mail notice is tried; with neither there is nobody to tell and the notice counts as given."""
-    from hokma.db import get_database
-    from hokma.mail import notify as mail_notify
-    from hokma.telegram.glue import enqueue
+    """The owner's notice (Telegram, else the mail the owner turned on). The code lives in `hokma.notify.owner`, shared by every broker."""
+    from hokma.notify.owner import notify_owner
 
-    with get_database().write() as unit:
-        if unit.session.one("SELECT 1 AS x FROM telegram_link WHERE id = 1") is not None:
-            enqueue(unit, text)
-            return
-    mail_notify.fallback(text)
+    notify_owner(text)

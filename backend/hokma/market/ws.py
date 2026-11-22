@@ -3,6 +3,8 @@ whole app covers it; the session token is checked here before the socket is acce
 
 Panel to engine (JSON text):
     {"op":"subscribe","sub":"c1","symbol":"NQ=F","tf":"5m","desk":3}      {"op":"unsubscribe","sub":"c1"}      {"op":"ping"}
+    {"op":"options","sub":"o1","symbol":"QQQ","expirations":["2026-11-27"],"strikes":14}    {"op":"options_window","sub":"o1","strikes":20,"offset":2}
+(the live option chain, `option_subs.py`; `unsubscribe` closes it too)
 `desk` (optional) is the id of the desk that owns the chart: its candles come only from the connections that desk uses.
 `tf` is any interval of `intervals.py` (`30s`, `7m`, `3h`, `2D`, `1W`, or a range `r:10t` / `r:2.5p`); the snapshot
 answers with the canonical text in `tf` and the parsed form in `interval`.
@@ -92,6 +94,22 @@ def _dispatch(hub: MarketHub, client: PanelClient, operations: asyncio.Queue, ra
             client.push(hub.error_message("market.bad_request", sub))
             return
         operations.put_nowait(("subscribe", sub, symbol, interval.canonical, desk))
+    elif op == "options":
+        symbol, dates, strikes = message.get("symbol"), message.get("expirations"), message.get("strikes")
+        sub_ok = isinstance(sub, str) and SUB_ID.fullmatch(sub) is not None
+        if (not sub_ok or not isinstance(symbol, str) or not valid_symbol(symbol) or not isinstance(dates, list)
+                or not 1 <= len(dates) <= 4 or not all(isinstance(d, str) and len(d) <= 10 for d in dates)
+                or not (strikes is None or isinstance(strikes, (int, str)) and not isinstance(strikes, bool))):
+            client.push(hub.error_message("market.bad_request", sub if sub_ok else None))
+            return
+        operations.put_nowait(("options", sub, symbol, dates, strikes))
+    elif op == "options_window" and isinstance(sub, str):
+        strikes, offset = message.get("strikes"), message.get("offset")
+        if (strikes is not None and (isinstance(strikes, bool) or not isinstance(strikes, (int, str)))) or (
+                offset is not None and (isinstance(offset, bool) or not isinstance(offset, int))):
+            client.push(hub.error_message("market.bad_request", sub))
+            return
+        operations.put_nowait(("options_window", sub, None, strikes, offset))
     elif op == "unsubscribe" and isinstance(sub, str):
         operations.put_nowait(("unsubscribe", sub, None, None, None))
     else:
@@ -106,6 +124,10 @@ async def _operations(hub: MarketHub, client: PanelClient, operations: asyncio.Q
         try:
             if op == "subscribe":
                 await hub.subscribe(client, sub, symbol, tf, desk)
+            elif op == "options":
+                await hub.subscribe_options(client, sub, symbol, tf, desk)         # tf: the expirations, desk: the strikes
+            elif op == "options_window":
+                await hub.options_window(client, sub, tf, desk)                    # tf: the strikes, desk: the offset
             else:
                 await hub.unsubscribe(client, sub)
         except Exception:                                      # one bad request must not end the socket
