@@ -189,6 +189,17 @@ def intrinsic_value(kind: str, spot: float | None, strike: float) -> float | Non
     return round(max(0.0, spot - strike) if kind == "call" else max(0.0, strike - spot), 2)
 
 
+def reference_price(last: float | None, bid: float | None, market_open: bool | None) -> float | None:
+    """The price of the underlying that intrinsic value, in the money and Prob. ITM are measured against.
+
+    thinkorswim, with the market closed, uses the underlying's BID, not its last price: on Sunday 22-nov-2026 QQQ had last 617.74 and bid 617.50
+    and thinkorswim showed intrinsic 6.50 for the 611 call and 0.50 for the 618 put (617.50 - 611 and 618 - 617.50), where Hokma showed 6.74 and
+    0.26 (tarea 3328). With the market open, or when it is not known, the last price is used; a closed market with no bid falls back to the last."""
+    if market_open is False and bid is not None and bid > 0:
+        return bid
+    return last
+
+
 def in_the_money(kind: str, spot: float | None, strike: float) -> bool:
     if spot is None:
         return False
@@ -196,8 +207,14 @@ def in_the_money(kind: str, spot: float | None, strike: float) -> bool:
 
 
 def prob_itm(kind: str, spot: float | None, strike: float, iv: float | None, years: float) -> float | None:
-    """Probability of expiring in the money: N(d2) for a call and N(-d2) for a put, with the contract's IV, r = 0 and
-    q = 0. At or after the close of the expiration day it is 1 for a contract in the money and 0 for the rest."""
+    """Probability of expiring in the money, the way thinkorswim does it (Black-Scholes, tarea 3328):
+
+        d2 = (ln(S / K) - IV^2 * T / 2) / (IV * sqrt(T))        call: N(d2)        put: N(-d2)
+
+    S is the reference price of the underlying (`reference_price`), IV the contract's own implied volatility as Schwab gives it (a fraction),
+    T the years to 16:00 New York of the expiration day in minutes over 525600 (`years_to_expiry`), r = 0 and q = 0. Checked on the 22-nov-2026
+    evidence: the 23 NOV 618 and 617 calls with Schwab's IV (64.26 % and 63.23 %) give 48.4 % and 50.4 % at S = 617.50 against thinkorswim's
+    48.47 % and 50.66 %. At or after the close of the expiration day it is 1 for a contract in the money and 0 for the rest."""
     if spot is None or spot <= 0 or strike <= 0:
         return None
     if years <= 0:
@@ -209,7 +226,9 @@ def prob_itm(kind: str, spot: float | None, strike: float, iv: float | None, yea
 
 
 def expected_move(spot: float | None, iv: float | None, years: float) -> float | None:
-    """S x IV x sqrt(T) x sqrt(2 / pi): the average absolute move implied by the volatility of the expiration."""
+    """S x IV x sqrt(T) x sqrt(2 / pi): the average absolute move implied by the volatility of the expiration (the same figure thinkorswim shows
+    as +/- on the header of each expiration: its 23 NOV and 24 NOV values give the same T in days at that factor, tarea 3328). S is the reference
+    price (`reference_price`), IV the expiration's (`_group`) and T as in `prob_itm`."""
     if spot is None or iv is None or iv <= 0 or years <= 0:
         return None
     return round(spot * iv * math.sqrt(years) * math.sqrt(2.0 / math.pi), 3)
@@ -386,13 +405,29 @@ def _day_of(text: Any) -> date | None:
         return None
 
 
+def _first(item: dict, *names: str) -> float | None:
+    """The first of these keys of a Schwab contract that carries a number. The REF (A.6) names the prices `bidPrice`, `askPrice`,
+    `lastPrice` and `markPrice`, but the real `/chains` answer sends `bid`, `ask`, `last` and `mark` (measured 22-nov-2026 with the
+    diagnostic, tarea 3328): both spellings are read, the real one first. Reading only the REF's names left every Bid, Ask and Last as N/A."""
+    for name in names:
+        number = _clean(item.get(name))
+        if number is not None:
+            return number
+    return None
+
+
+def traded(value: float | None) -> float | None:
+    """A last price of 0 is Schwab's way of saying "no trade yet" (the 22-nov-2026 chain brings `last: 0` beside a real bid and ask): no value."""
+    return value if value is not None and value > 0 else None
+
+
 def _schwab_quote(item: dict) -> dict:
-    """One OptionContract (REF A.6) as the quote of 1.0.8: the same keys as `_quote`."""
-    bid, ask = _clean(item.get("bidPrice")), _clean(item.get("askPrice"))
+    """One OptionContract (REF A.6) as the quote of 1.0.8: the same keys as `_quote`. Out of hours it carries the last values Schwab holds."""
+    bid, ask = _first(item, "bid", "bidPrice"), _first(item, "ask", "askPrice")
     both = bid is not None and ask is not None and bid > 0 and ask > 0
     mid = round((bid + ask) / 2.0, 4) if both else None
     return {"bid": bid, "ask": ask, "mid": mid, "spread_pct": round((ask - bid) / mid * 100.0, 2) if both else None,
-            "bid_exchange": None, "ask_exchange": None, "last": _clean(item.get("lastPrice")), "last_exchange": None,
+            "bid_exchange": None, "ask_exchange": None, "last": traded(_first(item, "last", "lastPrice")), "last_exchange": None,
             "volume": _whole_of(item.get("totalVolume")), "delta": _clean(item.get("delta")),
             "gamma": _clean(item.get("gamma")), "theta": _clean(item.get("theta")), "vega": _clean(item.get("vega")),
             "iv": _iv(item.get("volatility")), "quote_time": _iso_ms(item.get("quoteTimeInLong"))}
@@ -976,7 +1011,8 @@ def _group(day: date, today: date, multiplier: int, rows: list[dict], spot: floa
             "expected_move": expected_move(spot, iv, years), "rows": rows, "feed": feed, "truncated": truncated}
 
 
-def _schwab_group(symbol: str, day: date, count: int | None, spot: float | None, today: date) -> tuple[dict, dict]:
+def _schwab_group(symbol: str, day: date, count: int | None, spot: float | None, today: date, market_open: bool | None = None,
+                  bid: float | None = None) -> tuple[dict, dict]:
     """The group of one expiration from Schwab: ONE `/chains` call for that day (`strikeCount` strikes above and below
     the money, then trimmed to `count` around the price). Returns the group and the chain JSON (for the underlying)."""
     data = _schwab_chain(symbol, contractType="ALL", strategy="SINGLE", includeUnderlyingQuote=True,
@@ -986,13 +1022,15 @@ def _schwab_group(symbol: str, day: date, count: int | None, spot: float | None,
         return {"date": day.isoformat(), "days": (day - today).days, "multiplier": DEFAULT_MULTIPLIER, "iv": None,
                 "expected_move": None, "rows": [], "feed": None, "truncated": False}, data
     spot = spot if spot is not None else _schwab_spot(data)      # the centre is the underlying price of the stream, then the answer's own
+    under = data.get("underlying") if isinstance(data.get("underlying"), dict) else {}
+    ref = reference_price(spot, bid if bid is not None else _clean(under.get("bid")), market_open)     # what intrinsic, ITM and Prob. ITM are measured against
     wanted = _window([c["strike"] for c, _ in found], spot, count)
     by_strike: dict[float, dict] = {s: {"strike": s, "call": None, "put": None} for s in wanted}
     years = years_to_expiry(day)
     for contract, quote in found:
         if contract["strike"] in by_strike:
-            by_strike[contract["strike"]][contract["type"]] = _cell(contract, quote, spot, years)
-    group = _group(day, today, found[0][0]["size"], [by_strike[s] for s in wanted], spot, years, SCHWAB, False)
+            by_strike[contract["strike"]][contract["type"]] = _cell(contract, quote, ref, years)
+    group = _group(day, today, found[0][0]["size"], [by_strike[s] for s in wanted], ref, years, SCHWAB, False)
     return group, data
 
 
@@ -1006,16 +1044,17 @@ def structure(symbol: Any, dates: Any, spot: float | None = None, provider: str 
     today = _today()
     groups, delayed = [], False
     creds = _credentials(None) if provider == ALPACA else None
+    market_open = _market_hours_open() if provider == SCHWAB else None
     for day in [_date(x, "expirations") for x in days]:
         if provider == ALPACA:                                  # every strike of the day, with the first prices of the snapshot (indicative on the free plan)
             group, data = _one_expiration(creds, symbol, day, None, spot, today), {}
         else:
-            group, data = _schwab_group(symbol, day, None, spot, today)
+            group, data = _schwab_group(symbol, day, None, spot, today, market_open)
         group.pop("truncated", None)
         group.pop("feed", None)
         groups.append(group)
         delayed = delayed or _schwab_delayed(data)
-    return {"underlying": symbol, "groups": groups, "delayed": delayed, "today": today.isoformat()}
+    return {"underlying": symbol, "groups": groups, "delayed": delayed, "today": today.isoformat(), "market_open": market_open}
 
 
 def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = None) -> dict:
@@ -1031,9 +1070,12 @@ def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = No
 
     def from_schwab() -> dict:
         live_spot = _hub_spot(symbol)                       # the centre is the price of the stream; without one, the answer's own
+        streamed = _hub_quote(symbol)
+        bid = streamed.bid if streamed is not None else None
+        market_open = _market_hours_open()
         groups, answers = [], []
         for day in parsed:
-            group, data = _schwab_group(symbol, day, count, live_spot, today)
+            group, data = _schwab_group(symbol, day, count, live_spot, today, market_open, bid)
             groups.append(group)
             answers.append(data)
         spot = live_spot if live_spot is not None else next((p for p in (_schwab_spot(d) for d in answers) if p is not None), None)
@@ -1046,7 +1088,7 @@ def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = No
         under_time = next((_iso_ms(d["underlying"].get("quoteTime")) for d in answers
                            if isinstance(d.get("underlying"), dict) and d["underlying"].get("quoteTime")), None)
         return {"underlying": symbol, "underlying_price": spot, "source": "Schwab", "price_feed": "schwab",
-                "greeks": "provider", "market_open": _market_hours_open(), "as_of": _latest(times) or under_time or _iso(_now()),
+                "greeks": "provider", "market_open": market_open, "as_of": _latest(times) or under_time or _iso(_now()),
                 "notes": notes, "delayed": any(_schwab_delayed(d) for d in answers), "expirations": groups}
 
     def from_alpaca() -> dict:

@@ -53,7 +53,10 @@ def _chain_rows(chain: dict) -> tuple[float | None, list[dict]]:
             for strike, contracts in (strikes or {}).items():
                 for contract in contracts if isinstance(contracts, list) else []:
                     rows.append({"side": side, "strike": strike, "symbol": contract.get("symbol"), "bid": contract.get("bid"),
-                                 "ask": contract.get("ask"), "mark": contract.get("mark"), "last": contract.get("last")})
+                                 "ask": contract.get("ask"), "mark": contract.get("mark"), "last": contract.get("last"),
+                                 "volatility": contract.get("volatility"), "theta": contract.get("theta"), "delta": contract.get("delta"),
+                                 "intrinsic": contract.get("intrinsicValue"), "days": contract.get("daysToExpiration"),
+                                 "quote_time": contract.get("quoteTimeInLong")})      # 3328: what thinkorswim's intrinsic, theta and Prob. ITM are compared with
     underlying = chain.get("underlyingPrice")
     return (underlying if isinstance(underlying, (int, float)) else None), rows
 
@@ -68,7 +71,9 @@ def collect_rest(symbol: str, today: dt.date) -> dict:
     out["five_minutes"] = _safe(endpoints.price_history, symbol, frequencyType="minute", frequency=5,
                                 startDate=now - 3 * day, endDate=now, needExtendedHoursData=True)
     out["quote_rest"] = _safe(endpoints.quotes, [symbol], fields="quote,reference")
-    out["markets"] = {m: _safe(endpoints.market_hours, m) for m in MARKETS}
+    out["markets"] = {m: _safe(endpoints.market_hours, m) for m in MARKETS}      # one by one: /markets/{id}, and the list form when Schwab refuses it
+    out["markets_list"] = _safe(endpoints.market_hours, list(MARKETS))           # the three in one call to /markets?markets=, to compare the two routes
+    out["quote_regular"] = _safe(endpoints.quotes, [symbol], fields="quote,regular")   # the regular session numbers (regularMarketNetChange) that ToS shows
     out["expirations"] = _safe(endpoints.expirations, symbol)
     expiries = [str(item.get("expirationDate") or item.get("expiration")) for item in (out["expirations"].get("expirationList") or [])
                 if isinstance(item, dict)] if isinstance(out["expirations"], dict) else []
@@ -77,7 +82,11 @@ def collect_rest(symbol: str, today: dt.date) -> dict:
     if first:
         chain = _safe(endpoints.option_chain, symbol, contractType="ALL", fromDate=first, toDate=first, includeUnderlyingQuote=True)
         underlying, rows = _chain_rows(chain if isinstance(chain, dict) else {})
+        under = chain.get("underlying") if isinstance(chain, dict) and isinstance(chain.get("underlying"), dict) else {}
         out["chain"] = {"underlying_price": underlying, "strike_count": len({r["strike"] for r in rows}), "rows": rows,
+                        "underlying": {k: under.get(k) for k in ("bid", "ask", "last", "mark", "close")},      # the price the chain measures intrinsic against
+                        "volatility": chain.get("volatility") if isinstance(chain, dict) else None,
+                        "interest_rate": chain.get("interestRate") if isinstance(chain, dict) else None,
                         "error": chain.get("error") if isinstance(chain, dict) else None}
     # Only the permissions of the user preferences are kept: never the whole answer (it has account numbers and the ids of the Streamer).
     preference = _safe(endpoints.user_preference)

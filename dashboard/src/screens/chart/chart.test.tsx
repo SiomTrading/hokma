@@ -523,3 +523,24 @@ describe("asset search", () => {
     expect(picked).toEqual(["NQ=F"]);
   });
 });
+
+describe("tarea 3328: a Schwab chart on a closed market", () => {
+  it("says the market is closed (not live) with the link alive, and shows the regular price with the after-hours trade aside", async () => {
+    show({ symbol: "QQQ" });
+    const { socket, sub } = await connect({ market_open: false, last: 608.45, change: -36.59, change_pct: -5.67, extended: { price: 617.74, change: 9.29, change_pct: 1.53 } }, { source: "Schwab", data_state: "live" });
+    act(() => socket.serverSend(envelope("status", sub, 2, { state: "closed", code: "market.closed", market_open: false }, { source: "Schwab", data_state: "live" })));
+    expect(screen.getByTestId("live-status")).toHaveAttribute("data-mode", "closed");
+    expect(screen.getByTestId("market-state")).toHaveTextContent(t("chart.market.closed"));
+    expect(screen.getByTestId("market-state")).not.toHaveTextContent(t("chart.live.live"));
+    expect(screen.getByTestId("chart-price")).toHaveTextContent("608,45");
+    expect(screen.getByTestId("chart-change")).toHaveTextContent("-5,67%");
+    expect(screen.getByTestId("chart-extended")).toHaveTextContent("617,74");
+    expect(screen.getByTestId("chart-extended")).toHaveTextContent("+1,53%");
+  });
+
+  it("shows no after-hours text when the engine sends none", async () => {
+    show({ symbol: "QQQ" });
+    await connect({ last: 504.4 }, { source: "Schwab", data_state: "live" });
+    expect(screen.queryByTestId("chart-extended")).toBeNull();
+  });
+});

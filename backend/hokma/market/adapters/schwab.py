@@ -68,7 +68,7 @@ def quote_of(symbol: str, fields: dict, delayed: bool, now_ms: int) -> Quote:
     stamp = n("35") or n("34") or n("36")
     return Quote(symbol, int(stamp) if stamp else now_ms, bid, ask, n("3"), mark, n("4"), n("5"), n("9"), n("8"), n("17"),
                  n("10"), n("11"), n("12"), n("29"), "regular" if regular is True else "extended" if regular is False else None,
-                 _text(fields.get("32")), delayed, calculated, int(n("36")) if n("36") else None)
+                 _text(fields.get("32")), delayed, calculated, int(n("36")) if n("36") else None, n("31"), n("43"), n("50"), n("51"))
 
 
 def normalize_option(symbol: str) -> str:
@@ -208,9 +208,10 @@ class SchwabSource(LiveSource):
 
             self._queue.put_nowait(_STOP)
 
-    async def market_hours(self, asset_class: str):
+    async def market_hours(self, asset_class: str, days: tuple[str, ...] = ()):
         """The hours of the market of this asset class, as Schwab says them (`GET /markets/{market}`), or None when it cannot say.
-        Asked once a day and again after a reconnection by the hub; nothing is kept here."""
+        Asked once a day and again after a reconnection by the hub; nothing is kept here. `days` (yyyy-MM-dd): other days that are on
+        a chart; the pieces Schwab names for them are added to today's, a day it refuses has no shading (never a schedule of ours)."""
         import asyncio
 
         from hokma.market.hours import parse_schwab_hours
@@ -223,7 +224,21 @@ class SchwabSource(LiveSource):
             payload = await asyncio.to_thread(lambda: models.dump(endpoints.market_hours(market)))
         except Exception:                                   # noqa: BLE001  (no hours is "unknown", never a guess)
             return None
-        return parse_schwab_hours(payload, market)
+        today = parse_schwab_hours(payload, market)
+        if today is None or not days:
+            return today
+        extra = []
+        for day in dict.fromkeys(days):
+            if day == today.date:
+                continue
+            try:
+                other = await asyncio.to_thread(lambda day=day: models.dump(endpoints.market_hours(market, date=day, past_ok=True)))
+            except Exception:                               # noqa: BLE001  (Schwab may not give a past day: that day is not shaded)
+                continue
+            parsed = parse_schwab_hours(other, market)
+            if parsed is not None:
+                extra.append(parsed)
+        return today.merged(extra)
 
     # ---- what the session reports ----
 

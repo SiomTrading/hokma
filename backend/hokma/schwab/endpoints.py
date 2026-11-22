@@ -381,21 +381,29 @@ def movers(index: Any, sort: str | None = None, frequency: int | None = None) ->
     return models.ScreenerList.read(http.get(f"{MARKETDATA}/movers/{chosen.replace('$', '%24')}", query))
 
 
-def market_hours(markets: Any, date: Any = None) -> dict[str, dict[str, models.Hours]]:
+def market_hours(markets: Any, date: Any = None, *, past_ok: bool = False) -> dict[str, dict[str, models.Hours]]:
     """GET /marketdata/v1/markets (REF 2.7) for a list of markets, or GET /marketdata/v1/markets/{market_id} (REF 2.8)
     for one market given as text. Markets: equity, option, bond, future, forex ('markets' is required); 'date'
     yyyy-MM-dd from today to one year ahead (default today). Returns {market: {product: Hours}} (the single market adds
-    'exchange' and 'category' to each Hours)."""
+    'exchange' and 'category' to each Hours). A single market goes to /markets/{market_id}; when Schwab refuses that route with a
+    400 (it did for 'option' and 'future', measured 22-nov-2026) the same market is asked as a list of one, GET /markets?markets=. 'past_ok':
+    the date may be a past one (the hours of a day already on a chart); Schwab decides, a refusal is its error. Public tools never pass it."""
     single = isinstance(markets, str) and "," not in markets
     listed = _choices("markets", markets, "Market", required=True)
     day = _ymd("date", date)
     if day is not None:
         today = _now().date()
-        if not today - dt.timedelta(days=MARKET_DATE_SLACK_DAYS) <= dt.date.fromisoformat(day) <= today + dt.timedelta(
-                days=MARKET_DATE_AHEAD_DAYS):
+        oldest = dt.date.min if past_ok else today - dt.timedelta(days=MARKET_DATE_SLACK_DAYS)
+        if not oldest <= dt.date.fromisoformat(day) <= today + dt.timedelta(days=MARKET_DATE_AHEAD_DAYS):
             raise _bad("date must be from today to one year ahead")
     if single:
-        data = http.get(f"{MARKETDATA}/markets/{listed}", {"date": day})
+        try:
+            data = http.get(f"{MARKETDATA}/markets/{listed}", {"date": day})
+        except SchwabError as error:
+            if error.code != http.BAD_REQUEST:
+                raise
+            data = http.get(f"{MARKETDATA}/markets", {"markets": listed, "date": day})
+            return _hours_map(data, None)
     else:
         data = http.get(f"{MARKETDATA}/markets", {"markets": listed, "date": day})
     return _hours_map(data, listed if single else None)

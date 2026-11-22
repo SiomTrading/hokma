@@ -236,6 +236,12 @@ function ChartView({ tabKey, symbol, front, onSymbol }: ChartViewProps) {
               <Pill tone="acc" className={direction < 0 ? "bad" : undefined} style={NOWRAP} data-testid="chart-change">
                 {formatPercent(data.change_pct, locale)}
               </Pill>
+              {live.extended ? (
+                <span className="mono" data-testid="chart-extended" title={t("chart.extended")} style={{ color: "var(--t3)", fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}>
+                  {t("chart.extended")} {formatPrice(live.extended.price, locale)}
+                  {live.extended.changePct !== null ? ` ${formatPercent(live.extended.changePct, locale)}` : ""}
+                </span>
+              ) : null}
             </>
           ) : null}
           <div className="live-bar" role="status" data-testid="live-status" data-mode={mode} data-data-state={live.dataState}>

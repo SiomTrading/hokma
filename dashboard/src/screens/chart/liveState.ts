@@ -45,6 +45,18 @@ export interface BrokerAlert {
   source: string;
 }
 
+export interface ExtendedPrice {
+  price: number;
+  change: number | null;
+  changePct: number | null;
+}
+
+function extendedOf(value: unknown): ExtendedPrice | null {
+  const e = value as Record<string, unknown> | null | undefined;
+  const price = e ? num(e.price) : null;
+  return e && price !== null ? { price, change: num(e.change), changePct: num(e.change_pct) } : null;
+}
+
 export interface SessionBand {
   name: string;
   start: number;
@@ -85,6 +97,8 @@ export interface LiveState {
   /** Where the bars before the first live trade come from (always the polling source) and how late they are. */
   history: { source: string; delaySeconds: number } | null;
   price: number | null;
+  /** The after-hours trade shown next to the regular price when the market is closed or the last trade was not a regular one; null otherwise. */
+  extended: ExtendedPrice | null;
   previousClose: number | null;
   change: number | null;
   changePct: number | null;
@@ -111,7 +125,7 @@ export const MAX_BARS = 2000;
 export function initialState(symbol: string, timeframe: Timeframe): LiveState {
   return {
     brokerAlert: null, symbol, timeframe, ready: false, link: false, bars: [], name: symbol, kind: "other", exchange: "", currency: "", timezone: "UTC",
-    assetClass: null, fallback: false, source: "", dataState: "delayed", status: "live", delaySeconds: null, history: null, price: null,
+    assetClass: null, fallback: false, source: "", dataState: "delayed", status: "live", delaySeconds: null, history: null, price: null, extended: null,
     previousClose: null, change: null, changePct: null, openingRange: null, marketOpen: null, sessions: null, lastTsMs: null,
     interval: null, exactFrom: null, approxUntil: null, tickSize: null, notice: null, error: null,
   };
@@ -184,6 +198,7 @@ export function applySnapshot(state: LiveState, m: SubMessage): LiveState {
     delaySeconds: num(m.delay_seconds),
     history: historyOf(m.history),
     price: num(m.last),
+    extended: extendedOf(m.extended),
     previousClose: num(m.previous_close),
     change: num(m.change),
     changePct: num(m.change_pct),
@@ -203,6 +218,7 @@ function withPrice(state: LiveState, m: SubMessage): LiveState {
   return {
     ...state,
     price: num(m.price) ?? state.price,
+    extended: m.extended === undefined ? state.extended : extendedOf(m.extended),
     change: m.change === undefined ? state.change : num(m.change),
     changePct: m.change_pct === undefined ? state.changePct : num(m.change_pct),
     lastTsMs: num(m.ts_ms) ?? state.lastTsMs,
@@ -259,7 +275,9 @@ export function applyStatus(state: LiveState, m: SubMessage): LiveState {
   const code = m.state;
   // "down": the broker that is the source stopped for good; the symbol stays, stopped, and the broker alert says why (SPEC-016 3.7)
   const status: SubStatus = code === "live" || code === "delayed" || code === "reconnecting" || code === "closed" ? code : "reconnecting";
-  return { ...state, status, dataState: dataStateOf(m.data_state), marketOpen: status === "closed" ? false : state.marketOpen };
+  // `market_open` of the message is the provider's own answer (open, closed); a closed state always means closed.
+  const open = m.market_open === true ? true : m.market_open === false ? false : null;
+  return { ...state, status, dataState: dataStateOf(m.data_state), marketOpen: status === "closed" ? false : open ?? state.marketOpen };
 }
 
 /** The error of a subscription, with `params` when the engine sends them (it may not yet: then they are empty). */

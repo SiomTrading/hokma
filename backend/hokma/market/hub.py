@@ -21,6 +21,7 @@
 Every message to the panel carries `source` and `data_state`; a delayed value is never labelled live.
 """
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -65,6 +66,7 @@ MAX_INTERVALS_PER_SYMBOL = 12       # distinct intervals built at once for one s
 LINGER_SECONDS = 60                 # the tape and the upstream subscription outlive the last panel subscription
 MINUTES_KEEP = 20000                # 1-minute bars kept for the charts that build their own bars (7 days is about 10000)
 RANGE_KEEP = 400                    # range bars a subscription keeps (the snapshot carries the newest 300)
+HOURS_DAYS = 6                      # the other days on a chart whose pieces (pre, regular, post) are asked of the provider for the shading
 SECONDS_KEEP = 300                  # seconds bars of a snapshot
 
 __all__ = ["BarAggregator", "ConnectionConfig", "HubError", "MarketHub", "PanelClient"]
@@ -151,6 +153,8 @@ class SymbolFeed:
     quote: Quote | None = None                           # the last level 1 the source sent, whole
     hours: ProviderHours | None = None                   # the hours of its market as the provider said them today (SPEC-016 3.4)
     hours_day: str | None = None                         # the day those hours were asked for: once a day and after a reconnection
+    hours_days: tuple[str, ...] = ()                     # the other days on a chart whose pieces were asked too (the shading of the days before today)
+    boundary_timer: asyncio.TimerHandle | None = None    # the next instant the provider's hours change open to closed or back
     hours_timer: asyncio.TimerHandle | None = None       # the end-of-day reconciliation with the source's own candles
     new_day: bool = False
     closing_refresh: bool = False                        # a read of the closed candle of the source is already on its way
@@ -364,6 +368,9 @@ class MarketHub:
         if feed.hours_timer is not None:
             feed.hours_timer.cancel()
             feed.hours_timer = None
+        if feed.boundary_timer is not None:
+            feed.boundary_timer.cancel()
+            feed.boundary_timer = None
         runtime = feed.runtime
         if self._feeds.get(feed.symbol) is feed:
             del self._feeds[feed.symbol]
@@ -440,7 +447,7 @@ class MarketHub:
             self._ensure_range(feed, sub, interval)
         else:
             feed.aggregator.add_interval(sub.tf)
-        await self._ensure_hours(feed)
+        await self._ensure_hours(feed, self._chart_days(sub, chart))
         if sub.feed is not feed or sub.client.subs.get(sub.id) is not sub:
             return          # while the hours were asked, the sub was released: an unsubscribe, or a failover that attaches it again and sends its own snapshot
         self._send_snapshot(sub, chart)
@@ -451,15 +458,75 @@ class MarketHub:
     def _day(self) -> str:
         return datetime.fromtimestamp(self._clock(), NEW_YORK).date().isoformat()      # only the key of the cache: no schedule
 
-    async def _ensure_hours(self, feed: SymbolFeed) -> None:
+    @staticmethod
+    def _chart_days(sub: Sub, chart: ChartData) -> tuple[str, ...]:
+        """The days (yyyy-MM-dd, in the zone of the chart) of the intraday bars on screen, newest few: the provider is asked for the pieces of each."""
+        interval = sub.interval or parse(sub.tf)
+        if isinstance(interval, RangeInterval) or interval.seconds >= 86400:
+            return ()
+        tz = zone(chart.timezone, 0)
+        days = dict.fromkeys(datetime.fromtimestamp(c.t, tz).date().isoformat() for c in chart.candles)
+        return tuple(list(days)[-HOURS_DAYS:])
+
+    async def _ensure_hours(self, feed: SymbolFeed, days: tuple[str, ...] = ()) -> None:
         """The hours of the market of this feed, once a day and again after a reconnection, from the SOURCE that serves it. A source
-        that has none (`market_hours` missing) or cannot say leaves `hours` empty: the chart is not shaded and `market_open` is unknown."""
+        that has none (`market_hours` missing) or cannot say leaves `hours` empty: the chart is not shaded and `market_open` is unknown.
+        `days`: other days on the chart; a source whose `market_hours` takes `days` is asked for them too (only the days not asked yet)."""
         asker = getattr(feed.runtime.source, "market_hours", None)
-        if asker is None or feed.asset_class is None or feed.hours_day == self._day():
+        if asker is None or feed.asset_class is None:
+            return
+        wanted = tuple(sorted({*feed.hours_days, *days}))[-HOURS_DAYS:]
+        if feed.hours_day == self._day() and set(days) <= set(feed.hours_days):
             return
         feed.hours_day = self._day()
-        feed.hours = await asker(feed.asset_class)
+        feed.hours_days = wanted
+        if "days" in inspect.signature(asker).parameters:
+            feed.hours = await asker(feed.asset_class, days=wanted)
+        else:
+            feed.hours = await asker(feed.asset_class)
         self._arm_reconcile(feed)
+        self._arm_boundary(feed)
+
+    def _arm_boundary(self, feed: SymbolFeed) -> None:
+        """At the next instant the provider's hours start or end a piece, the state (open or closed) is told again to every chart of the feed."""
+        if feed.boundary_timer is not None:
+            feed.boundary_timer.cancel()
+            feed.boundary_timer = None
+        edge = feed.hours.next_boundary(self._clock()) if feed.hours is not None else None
+        if edge is None or self._loop is None:
+            return
+        feed.boundary_timer = self._loop.call_later(max(0.0, edge - self._clock()) + 1.0, self._boundary_due, feed)
+
+    def _boundary_due(self, feed: SymbolFeed) -> None:
+        feed.boundary_timer = None
+        if self._feeds.get(feed.symbol) is not feed:
+            return
+        for sub in list(feed.subs.values()):
+            if sub.state in ("reconnecting", "down"):
+                continue
+            state = self._live_state(sub)
+            if state != sub.state:
+                sub.state = state
+                sub.client.push(self._status_message(sub))
+        self._arm_boundary(feed)
+
+    def _hours_closed(self, feed: SymbolFeed | None) -> bool:
+        """The provider's own hours say closed now. False for a source that gives no hours or cannot say: that is unknown, never closed."""
+        return (feed is not None and hasattr(feed.runtime.source, "market_hours") and feed.hours is not None
+                and feed.hours.open_at(self._clock()) is False)
+
+    def _live_state(self, sub: Sub) -> str:
+        """The state of a chart that is connected: closed when the provider's hours say the market is closed (the connection stays alive), else the data state."""
+        feed = sub.feed
+        if self._hours_closed(feed):
+            return "closed"
+        return feed.runtime.data_state if feed else "live"
+
+    def _status_message(self, sub: Sub) -> dict:
+        extra = {}
+        if sub.feed is not None and hasattr(sub.feed.runtime.source, "market_hours"):
+            extra["market_open"] = self._market_open(sub.feed, None)
+        return self._envelope(sub, "status", state=sub.state, code="market.closed" if sub.state == "closed" else "ok", **extra)
 
     def _arm_reconcile(self, feed: SymbolFeed) -> None:
         """When the last piece of the day ends, plus the margin of `providers.json`, the day is asked once from the source's own candles."""
@@ -1028,11 +1095,13 @@ class MarketHub:
         if sub.closed:
             return
         if sub.state in ("closed", "reconnecting") and (sub.bar_dirty or sub.price_dirty):
-            sub.state = sub.feed.runtime.data_state if sub.feed else "live"
-            sub.client.push(self._envelope(sub, "status", state=sub.state, code="ok"))
-            sub.last_sent = time.monotonic()
-            self._schedule(sub)
-            return
+            state = self._live_state(sub)
+            if state != sub.state:                              # a quote after hours does not reopen a market the provider says is closed
+                sub.state = state
+                sub.client.push(self._status_message(sub))
+                sub.last_sent = time.monotonic()
+                self._schedule(sub)
+                return
         if sub.pending_final:
             bar, final = sub.pending_final.pop(0), True
             message = self._bar_message(sub, bar, final)
@@ -1093,14 +1162,37 @@ class MarketHub:
         if price is not None and sub.prev_close:
             change = price - sub.prev_close
             change_pct = change / sub.prev_close * 100
-        fields = {"price": price, "ts_ms": sub.last_ts_ms or int(self._clock() * 1000), "change": change,
-                  "change_pct": change_pct}
         quote = sub.feed.quote if sub.feed is not None else None
+        extended = None
+        if quote is not None and self._shows_regular(sub, quote):
+            # A closed market: the header is the REGULAR session as the source gives it (mark or
+            # the last regular price, and its own change), never the bid or an after-hours trade. The after-hours trade goes aside.
+            regular = quote.regular_last if quote.regular_last is not None else quote.mark
+            if regular is not None:
+                price = regular
+                if quote.regular_change is not None or quote.regular_change_pct is not None:
+                    change, change_pct = quote.regular_change, quote.regular_change_pct
+                elif sub.prev_close:
+                    change = price - sub.prev_close
+                    change_pct = change / sub.prev_close * 100
+                if quote.last is not None and quote.last != regular:
+                    extended = {"price": quote.last, "change": quote.post_change, "change_pct": quote.post_change_pct}
+        fields = {"price": price, "ts_ms": sub.last_ts_ms or int(self._clock() * 1000), "change": change,
+                  "change_pct": change_pct, "extended": extended}
         if quote is not None:
             fields["quote"] = {"bid": quote.bid, "ask": quote.ask, "mark": quote.mark, "bid_size": quote.bid_size,
                                "ask_size": quote.ask_size, "volume": quote.volume, "session": quote.session,
                                "delayed": quote.delayed, "mark_calculated": quote.mark_calculated}
         return fields
+
+    def _shows_regular(self, sub: Sub, quote: Quote) -> bool:
+        """True when the header must show the regular session: the provider's hours say the market is closed, or the source's own status says
+        Closed. While a session is open (pre or post included) the header is the last trade, as agreed in SPEC-016. Only for a source that gives its
+        own hours (a poller or a fallback keeps the answer of 1.0.10)."""
+        feed = sub.feed
+        if feed is None or not hasattr(feed.runtime.source, "market_hours"):
+            return False
+        return self._hours_closed(feed) or quote.status == "Closed"
 
     # ------------------------------------------------------------------ messages
 
@@ -1189,7 +1281,8 @@ class MarketHub:
         sub.last_price, sub.last_ts_ms = last, chart.last_trade_at * 1000 if chart.last_trade_at else 0
         price = self._price_fields(sub)
         sub.state = ("reconnecting" if runtime.state == "reconnecting"
-                     else "closed" if not chart.market_open and runtime is self._fallback else runtime.data_state)
+                     else "closed" if not chart.market_open and runtime is self._fallback
+                     else self._live_state(sub))                  # a connected source whose provider hours say closed: closed, the link stays alive
         sub.client.push(self._envelope(
             sub, "snapshot", symbol=sub.symbol, tf=sub.tf, interval=protocol,
             exact_from=exact_from, approx_until=approx_until, tick_size=sub.tick_size, name=chart.name, kind=chart.kind,
@@ -1200,8 +1293,7 @@ class MarketHub:
             change_pct=price["change_pct"], opening_range=asdict(sub.opening) if sub.opening else None,
             market_open=self._market_open(feed, chart), delay_seconds=self._delay_seconds(runtime, feed.asset_class),
             **self._session_fields(feed)))
-        sub.client.push(self._envelope(sub, "status", state=sub.state,
-                                       code="market.closed" if sub.state == "closed" else "ok"))
+        sub.client.push(self._status_message(sub))
 
     # ------------------------------------------------------------------ connections
 
@@ -1418,6 +1510,9 @@ class MarketHub:
             if feed.hours_timer is not None:
                 feed.hours_timer.cancel()
                 feed.hours_timer = None
+            if feed.boundary_timer is not None:
+                feed.boundary_timer.cancel()
+                feed.boundary_timer = None
             if feed.linger is not None:
                 feed.linger.cancel()
                 feed.linger = None

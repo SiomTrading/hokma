@@ -48,6 +48,8 @@ class OptionsSub:
     limited: set[str] = field(default_factory=set)
     dirty: set[str] = field(default_factory=set)
     spot: float | None = None
+    checked: float = 0.0                                       # monotonic time of the last read of market_open
+    market_open: bool | None = None                            # from /markets with the holidays: decides the reference price (options.reference_price)
     spot_dirty: bool = False
     timer: asyncio.TimerHandle | None = None
     last_sent: float = 0.0
@@ -94,7 +96,8 @@ class OptionSubs:
         except BaseException:
             await self._release_underlying(runtime, upstream)
             raise
-        sub = OptionsSub(client, sub_id, symbol, runtime, upstream, data["groups"], count, data["today"], delayed=data["delayed"], spot=spot)
+        sub = OptionsSub(client, sub_id, symbol, runtime, upstream, data["groups"], count, data["today"], delayed=data["delayed"], spot=spot, market_open=data.get("market_open"),
+                         checked=time.monotonic())
         self.subs[(client.id, sub_id)] = sub
         client.subs[sub_id] = sub                                 # one list of subscriptions per socket: closing it releases this one too
         await self._plan(sub, send=True)
@@ -113,6 +116,7 @@ class OptionSubs:
         if isinstance(offset, int) and not isinstance(offset, bool):
             sub.offset = max(-200, min(200, offset))
         sub.spot = self._spot_of(sub) or sub.spot
+        await self._refresh_open(sub)
         await self._plan(sub, send=True)
 
     async def release(self, client, sub_id: str) -> bool:
@@ -212,6 +216,20 @@ class OptionSubs:
             await asyncio.sleep(0.02)
         return None
 
+    async def _refresh_open(self, sub: OptionsSub) -> None:
+        """Read again whether the regular session is open (`/markets` is cached 5 minutes): a chain left open across the bell changes its reference price."""
+        sub.checked = time.monotonic()
+        try:
+            sub.market_open = await asyncio.to_thread(options._market_hours_open)
+        except Exception:                                        # noqa: BLE001  (the last known state stays)
+            pass
+
+    def _reference(self, sub: OptionsSub) -> float | None:
+        """The price intrinsic value, in the money, Prob. ITM and the expected move are measured against: the underlying's bid with the market
+        closed (what thinkorswim does) and its last price otherwise (`options.reference_price`)."""
+        quote = self.hub._quotes.get((sub.runtime.id, sub.upstream))
+        return options.reference_price(sub.spot, quote.bid if quote is not None else None, sub.market_open)
+
     def _spot_of(self, sub: OptionsSub) -> float | None:
         quote = self.hub._quotes.get((sub.runtime.id, sub.upstream))
         return quote.last if quote is not None else None
@@ -226,12 +244,13 @@ class OptionSubs:
 
     def _snapshot(self, sub: OptionsSub, visible_rows: list[list[dict]]) -> dict:
         today = options.date.fromisoformat(sub.today)
+        ref = self._reference(sub)
         groups = []
         for group, rows in zip(sub.groups, visible_rows):
             day = options.date.fromisoformat(group["date"])
             years = options.years_to_expiry(day)
-            merged = [self._merge_row(sub, row, sub.spot, years) for row in rows]
-            built = options._group(day, today, group["multiplier"], merged, sub.spot, years, None, False) if merged else dict(group, rows=[])
+            merged = [self._merge_row(sub, row, ref, years) for row in rows]
+            built = options._group(day, today, group["multiplier"], merged, ref, years, None, False) if merged else dict(group, rows=[])
             built.pop("feed", None)
             built.pop("truncated", None)
             groups.append(built)
@@ -245,14 +264,15 @@ class OptionSubs:
             if cell is None:
                 continue
             live = sub.cells.get(cell["symbol"])
-            out[side] = dict(cell, **self._live_cell(cell, live, row["strike"], side, spot, years)) if live else dict(cell)
+            out[side] = dict(cell, **self._live_cell(cell, live or {}, row["strike"], side, spot, years))      # the derived values follow the reference price even before the first message
             out[side]["live"] = live is not None and cell["symbol"] not in sub.limited
         return out
 
     @staticmethod
     def _live_cell(cell: dict, live: dict, strike: float, side: str, spot: float | None, years: float) -> dict:
-        iv = live.get("iv", cell.get("iv"))
-        return {**{k: v for k, v in live.items() if k not in ("ts_ms",)}, "iv": iv,
+        iv = live.get("iv") if live.get("iv") is not None else cell.get("iv")
+        # A field the stream has not sent (None) never wipes what the REST chain gave: out of hours that left Last, Bid and Ask as N/A (tarea 3328)
+        return {**{k: v for k, v in live.items() if k not in ("ts_ms",) and v is not None}, "iv": iv,
                 "intrinsic": options.intrinsic_value(side, spot, strike), "itm": options.in_the_money(side, spot, strike) if spot is not None else cell.get("itm"),
                 "prob_itm": options.prob_itm(side, spot, strike, iv, years)}
 
@@ -272,7 +292,7 @@ class OptionSubs:
             symbol = sub.keys.get(key)
             if sub.runtime is not runtime or symbol is None:
                 continue
-            sub.cells[symbol] = {"bid": quote.bid, "ask": quote.ask, "last": quote.last, "mark": quote.mark, "volume": quote.volume,
+            sub.cells[symbol] = {"bid": quote.bid, "ask": quote.ask, "last": options.traded(quote.last), "mark": quote.mark, "volume": quote.volume,
                                  "open_interest": quote.open_interest, "iv": options._iv(quote.iv), "delta": quote.delta, "gamma": quote.gamma,
                                  "theta": quote.theta, "vega": quote.vega, "rho": quote.rho, "theoretical": quote.theoretical,
                                  "quote_time": options._iso(quote.ts_ms / 1000), "delayed": quote.delayed}
@@ -311,14 +331,18 @@ class OptionSubs:
         sub.timer = None
         if sub.closed:
             return
+        if time.monotonic() - sub.checked >= options.HOURS_SECONDS and self.hub._loop is not None:
+            sub.checked = time.monotonic()
+            self.hub._loop.create_task(self._refresh_open(sub))
         by_symbol = {}
+        ref = self._reference(sub)
         for group in sub.groups:
             years = options.years_to_expiry(options.date.fromisoformat(group["date"]))
             for row in group["rows"]:
                 for side in ("call", "put"):
                     cell = row.get(side)
                     if cell and (cell["symbol"] in sub.dirty or (sub.spot_dirty and cell["symbol"] in sub.visible)):
-                        base = self._live_cell(cell, sub.cells.get(cell["symbol"], {}), row["strike"], side, sub.spot, years)
+                        base = self._live_cell(cell, sub.cells.get(cell["symbol"], {}), row["strike"], side, ref, years)
                         by_symbol[cell["symbol"]] = {"symbol": cell["symbol"], **base, "live": cell["symbol"] not in sub.limited
                                                      and cell["symbol"] in sub.cells}
         sub.dirty.clear()

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.11
+
+- Fixed: with the market closed, the chart header shows the regular session as thinkorswim does (the close and its own change, for example 608,45 -5,67%), never the bid. The after-hours trade appears next to it as a second figure.
+- Fixed: on a closed market the badge says "Market closed" while the connection stays alive; it goes back to live by itself when Schwab opens a session.
+- Fixed: market hours of options and futures. When Schwab refuses the single-market route, Hokma asks the same market in the list route. "Check Schwab data" now saves both routes to compare them.
+- Fixed: the chart shades pre-market and post-market with the pieces of the day that Schwab names, also for the days before today that are on screen. If Schwab gives no hours for a day, that day is not shaded.
+- Fixed: Last, Bid and Ask of the option chain were N/A on every contract. Schwab sends them as bid, ask and last; Hokma looked for other names. Out of hours the chain shows the last values Schwab holds, and a stream message that lacks a field no longer erases it.
+- Fixed: with the market closed, intrinsic value, in the money and Prob. ITM are measured against the bid of the underlying, as thinkorswim does (call 611: 6,50; put 618: 0,50). With the market open they use the last price.
+- Checked: the expirations list has every date Schwab gives, 23 NOV included. "Check Schwab data" now also saves volatility, theta, delta and intrinsic value of each contract to compare Prob. ITM and theta with thinkorswim.
 ## 1.0.10
 
 - Live data by streaming in every source. Schwab now uses its Streamer: price, candles and the option chain update by themselves, with the values Schwab sends. Nothing polls.

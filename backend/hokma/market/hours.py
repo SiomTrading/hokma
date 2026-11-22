@@ -34,6 +34,15 @@ class ProviderHours:
             return self.segment_at(ts) is not None
         return self.is_open
 
+    def next_boundary(self, ts: float) -> int | None:
+        """The first instant after `ts` where a piece of the provider's day starts or ends: when open or closed can change."""
+        return min((edge for s in self.segments for edge in (s.start, s.end) if edge > ts), default=None)
+
+    def merged(self, others: "tuple[ProviderHours, ...] | list[ProviderHours]") -> "ProviderHours":
+        """These hours plus the pieces of other days the provider named (the days already on a chart). The flag and the date stay today's."""
+        segments = {(s.name, s.start, s.end): s for item in (self, *others) for s in item.segments}
+        return ProviderHours(self.market, self.product, self.date, self.is_open, tuple(sorted(segments.values(), key=lambda s: s.start)))
+
     def last_end(self) -> int | None:
         return max((s.end for s in self.segments), default=None)
 

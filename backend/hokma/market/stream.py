@@ -63,6 +63,10 @@ class Quote:
     delayed: bool = False
     mark_calculated: bool = False
     regular_ts_ms: int | None = None          # time of the last regular-session trade: the day the open, high and low belong to
+    regular_change: float | None = None       # the source's own change of the REGULAR session (Schwab 31): what a closed market shows as its change
+    regular_change_pct: float | None = None   # and its percent (Schwab 43)
+    post_change: float | None = None          # after-hours change from the regular close, as the source gives it (Schwab 50)
+    post_change_pct: float | None = None      # and its percent (Schwab 51)
 
 
 @dataclass(frozen=True)
