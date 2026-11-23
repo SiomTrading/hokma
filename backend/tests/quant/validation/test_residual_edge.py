@@ -121,3 +121,10 @@ def test_bad_inputs_CTS_038(benchmark):
         registry.call("validation.residual_edge", strategy=strategy, baselines=[1, 2], primary=["market"])
     with pytest.raises(BadInput):
         registry.call("validation.residual_edge", strategy=strategy, baselines=baselines, primary=["market"], frequency="hourly")
+
+
+def test_vif_of_an_exactly_explained_column_is_finite_not_infinite():
+    base = np.random.default_rng(3).normal(0, 0.01, 60)
+    factors = np.column_stack([base, 2.0 * base])                   # the second column is exactly the first one: R squared of 1
+    vif = re_._vif(factors, ["a", "b"])
+    assert all(np.isfinite(v) and v > re_.VIF_LIMIT for v in vif.values())

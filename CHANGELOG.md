@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.13
+
+- Fixed: The Prob. ITM of each option in the chain now matches thinkorswim: Hokma deduces the implied volatility of every contract from its own mark, separately for the call and the put, and uses a 4 % rate. It still shows "calculated by Hokma".
+- Fixed: The expected move (the plus or minus on each expiration of the option chain) is measured against the last price of the regular session, as thinkorswim does, not against the bid: with the market closed on 23-nov it was 608.45 and not 654.68. With the IV of the expiration that thinkorswim shows, the formula gives its figure within 1 % on the 20 expirations checked.
+- Fixed: An out of the money contract shows an intrinsic value of 0, as thinkorswim does. Schwab sends it as a negative distance to the strike (for example -9.66) and Hokma was showing that number.
+- Checked: Last, theta, bid, ask and volume of each contract are the ones Schwab sends, in the chain and in the stream, with no calculation in between. "Check Schwab data" now also saves the close, the trade time and the theoretical value of each contract, to find out where thinkorswim takes its pre-market Last from.
+- Fixed: The intrinsic value of each option in the chain is the one Schwab sends in its chain, as thinkorswim shows it. Hokma calculates it only when Schwab does not send it.
+- Fixed: When you confirm an order that would leave you short, the warning counts the other orders waiting for your answer and warns again if the account is more exposed than it said; selling shares you do not hold and credit spreads are warned too, and the Telegram buttons carry the warning with the contract in words. Confirmations of one desk are counted one at a time, an order that never carried a warning is warned too, and a sale whose risk cannot be measured is not approved. Known limit: confirmed orders that are not yet filled do not add to the count.
+- Fixed: The residual edge check no longer reports an infinite variance inflation factor when a baseline is exactly explained by the others.
+
 ## 1.0.12
 
 - New: Desk core: the signal contract (a conviction from -1 to +1 with an abstention that is never neutral), the graph and state of a desk run, common prompt rules, skills with a versioned format, safe handling of tickers and provider responses, and a hash of the content of a snapshot that ignores generation dates.

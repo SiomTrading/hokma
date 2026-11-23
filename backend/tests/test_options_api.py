@@ -161,14 +161,13 @@ def test_in_the_money_intrinsic_and_probability_follow_the_price(client):
     call, put = rows[235.0]["call"], rows[235.0]["put"]
     assert call["itm"] is False and call["intrinsic"] == 0.0 and put["itm"] is True and put["intrinsic"] == 6.6
     probs = [rows[s]["call"]["prob_itm"] for s in sorted(rows)]
-    assert all(0 < p < 1 for p in probs) and probs == sorted(probs, reverse=True)       # lower strike, higher probability
+    assert all(0 < p < 1 for p in probs)       # each contract has its own IV from its mark, so the order by strike is no longer guaranteed (1.0.14)
     years = options.years_to_expiry(date(2026, 12, 18))
     iv = SNAPS["AAPL261218C00220000"]["impliedVolatility"]
-    d2 = (math.log(228.4 / 220) - iv * iv * years / 2) / (iv * math.sqrt(years))
-    assert rows[220.0]["call"]["prob_itm"] == round(0.5 * (1 + math.erf(d2 / math.sqrt(2))), 4)
+    c, p = rows[220.0]["call"], rows[220.0]["put"]
+    assert c["prob_itm"] == options.contract_prob_itm("call", 228.4, 220.0, c["bid"], c["ask"], iv, years)       # the contract's own IV from its mark (1.0.14)
     put_iv = SNAPS["AAPL261218P00220000"]["impliedVolatility"]
-    put_d2 = (math.log(228.4 / 220) - put_iv * put_iv * years / 2) / (put_iv * math.sqrt(years))
-    assert rows[220.0]["put"]["prob_itm"] == round(0.5 * (1 + math.erf(-put_d2 / math.sqrt(2))), 4)
+    assert p["prob_itm"] == options.contract_prob_itm("put", 228.4, 220.0, p["bid"], p["ask"], put_iv, years)
 
 
 def test_expiration_iv_is_the_average_of_the_call_and_the_put_of_the_strike_nearest_the_price(client):

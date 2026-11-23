@@ -23,7 +23,7 @@ def key(strike: float, side: str) -> str:
 
 def cell(strike: float, side: str) -> dict:
     return {"symbol": key(strike, side), "itm": False, "last": 1.0, "last_exchange": None, "bid": 0.9, "bid_exchange": None, "ask": 1.1,
-            "ask_exchange": None, "volume": 10, "open_interest": 100, "theta": -0.1, "delta": 0.5, "iv": 0.2, "intrinsic": 0.0,
+            "ask_exchange": None, "volume": 10, "open_interest": 100, "theta": -0.1, "delta": 0.5, "iv": 0.2, "intrinsic": None,      # None: Schwab sent no intrinsicValue, Hokma computes it (tarea 3330)
             "prob_itm": 0.5, "quote_time": None}
 
 

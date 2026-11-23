@@ -51,6 +51,7 @@ class OptionsSub:
     checked: float = 0.0                                       # monotonic time of the last read of market_open
     market_open: bool | None = None                            # from /markets with the holidays: decides the reference price (options.reference_price)
     spot_dirty: bool = False
+    base_ref: float | None = None                              # the reference price the first /chains was read against: while it holds, Schwab's intrinsicValue of that read stands (tarea 3330)
     timer: asyncio.TimerHandle | None = None
     last_sent: float = 0.0
     closed: bool = False
@@ -98,6 +99,7 @@ class OptionSubs:
             raise
         sub = OptionsSub(client, sub_id, symbol, runtime, upstream, data["groups"], count, data["today"], delayed=data["delayed"], spot=spot, market_open=data.get("market_open"),
                          checked=time.monotonic())
+        sub.base_ref = self._reference(sub)
         self.subs[(client.id, sub_id)] = sub
         client.subs[sub_id] = sub                                 # one list of subscriptions per socket: closing it releases this one too
         await self._plan(sub, send=True)
@@ -230,6 +232,10 @@ class OptionSubs:
         quote = self.hub._quotes.get((sub.runtime.id, sub.upstream))
         return options.reference_price(sub.spot, quote.bid if quote is not None else None, sub.market_open)
 
+    def _regular_last(self, sub: OptionsSub) -> float | None:
+        quote = self.hub._quotes.get((sub.runtime.id, sub.upstream))
+        return quote.regular_last if quote is not None else None
+
     def _spot_of(self, sub: OptionsSub) -> float | None:
         quote = self.hub._quotes.get((sub.runtime.id, sub.upstream))
         return quote.last if quote is not None else None
@@ -245,12 +251,13 @@ class OptionSubs:
     def _snapshot(self, sub: OptionsSub, visible_rows: list[list[dict]]) -> dict:
         today = options.date.fromisoformat(sub.today)
         ref = self._reference(sub)
+        move = options.move_price(ref, self._regular_last(sub), sub.market_open)      # the expected move is measured against the regular last, as thinkorswim does
         groups = []
         for group, rows in zip(sub.groups, visible_rows):
             day = options.date.fromisoformat(group["date"])
             years = options.years_to_expiry(day)
             merged = [self._merge_row(sub, row, ref, years) for row in rows]
-            built = options._group(day, today, group["multiplier"], merged, ref, years, None, False) if merged else dict(group, rows=[])
+            built = options._group(day, today, group["multiplier"], merged, ref, years, None, False, move) if merged else dict(group, rows=[])
             built.pop("feed", None)
             built.pop("truncated", None)
             groups.append(built)
@@ -264,17 +271,20 @@ class OptionSubs:
             if cell is None:
                 continue
             live = sub.cells.get(cell["symbol"])
-            out[side] = dict(cell, **self._live_cell(cell, live or {}, row["strike"], side, spot, years))      # the derived values follow the reference price even before the first message
+            same = sub.base_ref is not None and spot is not None and abs(spot - sub.base_ref) < 1e-9      # the underlying has not moved since /chains: Schwab's intrinsicValue still holds
+            out[side] = dict(cell, **self._live_cell(cell, live or {}, row["strike"], side, spot, years, same))      # the derived values follow the reference price even before the first message
             out[side]["live"] = live is not None and cell["symbol"] not in sub.limited
         return out
 
     @staticmethod
-    def _live_cell(cell: dict, live: dict, strike: float, side: str, spot: float | None, years: float) -> dict:
+    def _live_cell(cell: dict, live: dict, strike: float, side: str, spot: float | None, years: float, keep_intrinsic: bool = False) -> dict:
         iv = live.get("iv") if live.get("iv") is not None else cell.get("iv")
+        bid = live.get("bid") if live.get("bid") is not None else cell.get("bid")
+        ask = live.get("ask") if live.get("ask") is not None else cell.get("ask")
         # A field the stream has not sent (None) never wipes what the REST chain gave: out of hours that left Last, Bid and Ask as N/A (tarea 3328)
         return {**{k: v for k, v in live.items() if k not in ("ts_ms",) and v is not None}, "iv": iv,
-                "intrinsic": options.intrinsic_value(side, spot, strike), "itm": options.in_the_money(side, spot, strike) if spot is not None else cell.get("itm"),
-                "prob_itm": options.prob_itm(side, spot, strike, iv, years)}
+                "intrinsic": cell["intrinsic"] if keep_intrinsic and cell.get("intrinsic") is not None else options.intrinsic_value(side, spot, strike), "itm": options.in_the_money(side, spot, strike) if spot is not None else cell.get("itm"),
+                "prob_itm": options.contract_prob_itm(side, spot, strike, bid, ask, iv, years)}
 
     # ---------------------------------------------------------------- what the source sends
 
@@ -336,13 +346,14 @@ class OptionSubs:
             self.hub._loop.create_task(self._refresh_open(sub))
         by_symbol = {}
         ref = self._reference(sub)
+        same = sub.base_ref is not None and ref is not None and abs(ref - sub.base_ref) < 1e-9      # Schwab's intrinsicValue of /chains holds while the reference has not moved
         for group in sub.groups:
             years = options.years_to_expiry(options.date.fromisoformat(group["date"]))
             for row in group["rows"]:
                 for side in ("call", "put"):
                     cell = row.get(side)
                     if cell and (cell["symbol"] in sub.dirty or (sub.spot_dirty and cell["symbol"] in sub.visible)):
-                        base = self._live_cell(cell, sub.cells.get(cell["symbol"], {}), row["strike"], side, ref, years)
+                        base = self._live_cell(cell, sub.cells.get(cell["symbol"], {}), row["strike"], side, ref, years, same)
                         by_symbol[cell["symbol"]] = {"symbol": cell["symbol"], **base, "live": cell["symbol"] not in sub.limited
                                                      and cell["symbol"] in sub.cells}
         sub.dirty.clear()

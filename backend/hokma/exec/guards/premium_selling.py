@@ -32,7 +32,7 @@ from typing import Any, Literal
 from hokma.contracts.identity import ContractSheet
 from hokma.db import Database, get_database
 from hokma.db.timeutil import utcnow
-from hokma.exec.guards import GuardContext, GuardResult, blocked, normalize_effects, passed
+from hokma.exec.guards import GuardContext, GuardResult, blocked, normalize_effects, passed, signed
 from hokma.exec.money import ZERO, dec_or_none
 from hokma.exec.proposal import Leg, OrderProposal
 from hokma.i18n import t
@@ -240,11 +240,73 @@ def is_premium_selling(p: OrderProposal, contracts: Mapping[str, ContractSheet],
     return credit is None or credit > ZERO
 
 
+@dataclass(frozen=True)
+class _Held:
+    """A position of the account once the orders that wait for the owner are taken as filled."""
+    contract_id: str
+    qty: Decimal
+
+
+def with_pending(positions: Sequence[Any], pending: Sequence[OrderProposal]) -> tuple[Any, ...]:
+    """The positions of the account plus the net effect of the other orders of the owner that still wait for his answer (bug 1242).
+    With none waiting the positions come back as they are."""
+    if not pending:
+        return tuple(positions)
+    net: dict[str, Decimal] = {}
+    for x in positions:
+        cid = str(getattr(x, "contract_id", "") or "")
+        if cid:
+            net[cid] = net.get(cid, ZERO) + (dec_or_none(getattr(x, "qty", 0)) or ZERO)
+    for q in pending:
+        for g in q.legs:
+            net[g.contract_id] = net.get(g.contract_id, ZERO) + signed(g)
+    return tuple(_Held(cid, qty) for cid, qty in net.items())
+
+
+def _short_after(p: OrderProposal, positions: Sequence[Any], contract_id: str) -> Decimal:
+    """What the account would be short in a contract once this order fills (zero when it ends flat or long)."""
+    have = sum((dec_or_none(getattr(x, "qty", 0)) or ZERO for x in positions if getattr(x, "contract_id", None) == contract_id), ZERO)
+    after = have + sum((signed(g) for g in p.legs if g.contract_id == contract_id), ZERO)
+    return -after if after < 0 else ZERO
+
+
+def _bounded_loss(options: Sequence[_OptionLeg]) -> Decimal | None:
+    """The most a credit spread can lose, in money: the width of each short against the long that bounds it times quantity and multiplier.
+    None when some short has no long of the same underlying, type and an expiration that is not earlier (the risk is then not bounded)."""
+    room = {id(o): o.leg.qty for o in options if o.leg.side == "buy"}
+    longs = [o for o in options if o.leg.side == "buy" and o.known]
+    loss = ZERO
+    for short in (o for o in options if o.leg.side == "sell"):
+        if not short.known:
+            return None
+        need = short.leg.qty
+        for long in sorted((o for o in longs if o.underlying == short.underlying and o.put_call == short.put_call
+                            and o.expiration >= short.expiration), key=lambda o: abs(o.strike - short.strike)):    # type: ignore[operator]
+            take = min(need, room[id(long)])
+            room[id(long)] -= take
+            need -= take
+            loss += take * abs(long.strike - short.strike) * short.multiplier    # type: ignore[operator]
+            if need <= 0:
+                break
+        if need > 0:
+            return None
+    return loss
+
+
 def owner_risk(p: OrderProposal, contracts: Mapping[str, ContractSheet], *, marks: Mapping[str, Any], positions: Sequence[Any],
-               open_orders: Sequence[Any] = ()) -> tuple[str, str, Decimal] | None:
-    """What an order of the owner leaves open once the closes are netted against the positions and the live orders (H3, decision 1265).
-    None when it only reduces, when the sold options are covered (a long option that bounds them, or 100 shares per call) or when the risk
-    is bounded; ("short", contract, qty) when it leaves an option sold with no cover. The owner is warned and decides: nothing here blocks."""
+               open_orders: Sequence[Any] = (), pending: Sequence[OrderProposal] = ()) -> tuple[str, str, Decimal] | None:
+    """What an order of the owner leaves open once the closes are netted against the positions, the live orders and the other orders of the
+    owner that wait for his answer (`pending`, bug 1242: the exposure is the accumulated one, not the one of each order alone).
+    None when it only reduces or when the sold options are covered (a long option that bounds them, or 100 shares per call). Otherwise
+    ("short", contract, qty) when it leaves an option or shares sold with no cover (qty is the accumulated short) and ("spread", contract,
+    max_loss) for a credit spread, whose loss is bounded but is still a sale of premium. The owner is warned and decides: nothing here blocks."""
+    positions = with_pending(positions, pending)
+    risk = _option_risk(p, contracts, marks, positions, open_orders)
+    return risk if risk is not None else _equity_risk(p, positions, open_orders)
+
+
+def _option_risk(p: OrderProposal, contracts: Mapping[str, ContractSheet], marks: Mapping[str, Any], positions: Sequence[Any],
+                 open_orders: Sequence[Any]) -> tuple[str, str, Decimal] | None:
     if not is_premium_selling(p, contracts, marks=marks, positions=positions, open_orders=open_orders):
         return None
     options = _opening_options(normalize_effects(p, positions, open_orders), contracts)
@@ -265,7 +327,19 @@ def owner_risk(p: OrderProposal, contracts: Mapping[str, ContractSheet], *, mark
             need["EQ:" + str(o.underlying)] = need.get("EQ:" + str(o.underlying), ZERO) + o.leg.qty * o.multiplier   # type: ignore[operator]
         if all(shares.get(k, ZERO) >= v for k, v in need.items()):
             return None
-    return "short", sold[0].leg.contract_id, sum((o.leg.qty for o in sold), ZERO)
+    loss = _bounded_loss(options)
+    if loss is not None:
+        return "spread", sold[0].leg.contract_id, loss
+    first = sold[0].leg.contract_id
+    return "short", first, max(sum((o.leg.qty for o in sold), ZERO), _short_after(p, positions, first))
+
+
+def _equity_risk(p: OrderProposal, positions: Sequence[Any], open_orders: Sequence[Any]) -> tuple[str, str, Decimal] | None:
+    """Shares sold that the account does not hold: a short sale has no ceiling on the loss (Vera 5a)."""
+    for g in normalize_effects(p, positions, open_orders).legs:
+        if g.contract_id.upper().startswith("EQ:") and g.side == "sell" and g.effect == "open":
+            return "short", g.contract_id, max(g.qty, _short_after(p, positions, g.contract_id))
+    return None
 
 
 def _underlyings(p: OrderProposal, contracts: Mapping[str, ContractSheet]) -> list[str | None]:

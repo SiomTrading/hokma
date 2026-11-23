@@ -160,7 +160,7 @@ def test_the_probability_of_the_chain_is_measured_against_the_reference_price(mo
     group = options.chain("QQQ", "2026-11-24", "all")["expirations"][0]
     years = options.years_to_expiry(date(2026, 11, 24))
     call = group["rows"][0]["call"]
-    assert call["prob_itm"] == options.prob_itm("call", 617.5, 611.0, 0.6, years)
+    assert call["prob_itm"] == options.contract_prob_itm("call", 617.5, 611.0, call["bid"], call["ask"], 0.6, years)
     assert group["expected_move"] == options.expected_move(617.5, group["iv"], years)
 
 

@@ -82,7 +82,7 @@ def _vif(factors: np.ndarray, names: list[str]) -> dict[str, float]:
         centered = factors[:, i] - factors[:, i].mean()
         tss = float(centered @ centered)
         r2 = 1.0 - float(resid @ resid) / tss if tss > 0 else 1.0
-        out[col] = float("inf") if r2 >= 1.0 else 1.0 / (1.0 - r2)
+        out[col] = 1.0 / max(1.0 - r2, 1e-12)          # a column the others explain exactly would be infinite, which a result cannot hold: floored at rounding noise
     return out
 
 

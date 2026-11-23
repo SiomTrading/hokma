@@ -200,6 +200,16 @@ def reference_price(last: float | None, bid: float | None, market_open: bool | N
     return last
 
 
+def move_price(reference: float | None, regular_last: float | None, market_open: bool | None) -> float | None:
+    """The price of the underlying the expected move is measured against. thinkorswim uses its "Last X", the last price of the REGULAR session, not the bid
+    that intrinsic value and Prob. ITM use: with the market closed on 22 and 23-nov-2026 that was 608.45 (the regular close) while the bid was 617.50 and
+    654.68. With the 608.45, the IV of each expiration header and T in calendar days over 365, S x IV x sqrt(2 / pi) x sqrt(T) gives thinkorswim's +/- of
+    the 20 expirations of both screenshots within 1 % (tarea 3330). With the market open, or without a regular last, it is the reference price."""
+    if market_open is False and regular_last is not None and regular_last > 0:
+        return regular_last
+    return reference
+
+
 def in_the_money(kind: str, spot: float | None, strike: float) -> bool:
     if spot is None:
         return False
@@ -225,10 +235,58 @@ def prob_itm(kind: str, spot: float | None, strike: float, iv: float | None, yea
     return round(_cdf(d2 if kind == "call" else -d2), 4)
 
 
+# The risk-free rate that thinkorswim's Prob. ITM uses. It is the one rate that reproduces its Prob. ITM of the 23-nov-2026 screenshot (84 contracts,
+# 23 to 25 NOV, every one within 0.01 points); 3 % or 5 % leave up to 0.11 points and 0 % up to 0.43. The dividend yield is 0. Change it here only.
+PROB_ITM_RATE = 0.04
+
+
+def _bs_price(kind: str, spot: float, strike: float, vol: float, years: float, rate: float) -> float:
+    sd = vol * math.sqrt(years)
+    d1 = (math.log(spot / strike) + (rate + vol * vol / 2.0) * years) / sd
+    d2 = d1 - sd
+    disc = strike * math.exp(-rate * years)
+    return spot * _cdf(d1) - disc * _cdf(d2) if kind == "call" else disc * _cdf(-d2) - spot * _cdf(-d1)
+
+
+def mark_price(bid: float | None, ask: float | None) -> float | None:
+    """The price thinkorswim deduces the implied volatility from: the midpoint of bid and ask; with no bid (0) the ask over two. No valid ask: None."""
+    if ask is None or ask <= 0:
+        return None
+    return ask / 2.0 if bid is None or bid <= 0 else (bid + ask) / 2.0
+
+
+def implied_vol_from_mark(kind: str, spot: float | None, strike: float, mark: float | None, years: float, rate: float = PROB_ITM_RATE) -> float | None:
+    """Black-Scholes implied volatility (a fraction) of the contract's own mark, by bisection. None when the mark is outside what the model can price."""
+    if spot is None or spot <= 0 or strike <= 0 or mark is None or mark <= 0 or years <= 0:
+        return None
+    lo, hi = 1e-4, 30.0
+    if _bs_price(kind, spot, strike, lo, years, rate) > mark or _bs_price(kind, spot, strike, hi, years, rate) < mark:
+        return None
+    for _ in range(80):
+        mid = (lo + hi) / 2.0
+        if _bs_price(kind, spot, strike, mid, years, rate) < mark:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
+def contract_prob_itm(kind: str, spot: float | None, strike: float, bid: float | None, ask: float | None, iv: float | None, years: float) -> float | None:
+    """Prob. ITM of one contract the way thinkorswim shows it (tarea 3330): N(d2) for a call and N(-d2) for a put with the contract's OWN implied
+    volatility, deduced from its mark (`mark_price`) and `PROB_ITM_RATE`, separately for the call and the put (so at one strike they can add up to
+    more than 100 %). Without a valid ask, or when the mark cannot be priced, it is `prob_itm` with the IV Schwab sends. Past the close: as `prob_itm`."""
+    if spot is not None and spot > 0 and strike > 0 and years > 0:
+        own = implied_vol_from_mark(kind, spot, strike, mark_price(bid, ask), years)
+        if own is not None:
+            d2 = (math.log(spot / strike) + (PROB_ITM_RATE - own * own / 2.0) * years) / (own * math.sqrt(years))
+            return round(_cdf(d2 if kind == "call" else -d2), 4)
+    return prob_itm(kind, spot, strike, iv, years)
+
+
 def expected_move(spot: float | None, iv: float | None, years: float) -> float | None:
     """S x IV x sqrt(T) x sqrt(2 / pi): the average absolute move implied by the volatility of the expiration (the same figure thinkorswim shows
     as +/- on the header of each expiration: its 23 NOV and 24 NOV values give the same T in days at that factor, tarea 3328). S is the reference
-    price (`reference_price`), IV the expiration's (`_group`) and T as in `prob_itm`."""
+    price of `move_price`, IV the expiration's (`_group`) and T as in `prob_itm`."""
     if spot is None or iv is None or iv <= 0 or years <= 0:
         return None
     return round(spot * iv * math.sqrt(years) * math.sqrt(2.0 / math.pi), 3)
@@ -421,6 +479,13 @@ def traded(value: float | None) -> float | None:
     return value if value is not None and value > 0 else None
 
 
+def _given_intrinsic(value: Any) -> float | None:
+    """Schwab's `intrinsicValue` is signed: an out of the money contract comes as the distance to the strike (the 23-nov-2026 chain brings -9.66 for the
+    661 call and -3.34 for the 648 put of QQQ at 651.34). An intrinsic value is never below zero and thinkorswim shows 0 there: the positive part is shown."""
+    number = _clean(value)
+    return None if number is None else max(0.0, number)
+
+
 def _schwab_quote(item: dict) -> dict:
     """One OptionContract (REF A.6) as the quote of 1.0.8: the same keys as `_quote`. Out of hours it carries the last values Schwab holds."""
     bid, ask = _first(item, "bid", "bidPrice"), _first(item, "ask", "askPrice")
@@ -430,7 +495,8 @@ def _schwab_quote(item: dict) -> dict:
             "bid_exchange": None, "ask_exchange": None, "last": traded(_first(item, "last", "lastPrice")), "last_exchange": None,
             "volume": _whole_of(item.get("totalVolume")), "delta": _clean(item.get("delta")),
             "gamma": _clean(item.get("gamma")), "theta": _clean(item.get("theta")), "vega": _clean(item.get("vega")),
-            "iv": _iv(item.get("volatility")), "quote_time": _iso_ms(item.get("quoteTimeInLong"))}
+            "iv": _iv(item.get("volatility")), "quote_time": _iso_ms(item.get("quoteTimeInLong")),
+            "intrinsic": _given_intrinsic(item.get("intrinsicValue"))}      # Schwab's own intrinsic value, shown as it comes (decision 1269, tarea 3330)
 
 
 def _schwab_contracts(data: dict) -> list[tuple[dict, dict]]:
@@ -949,12 +1015,13 @@ def _cell(contract: dict, quote: dict, spot: float | None, years: float) -> dict
     """One side of a strike. `quote` is `_quote(snapshot)` (Alpaca), `_schwab_quote(contract)` (Schwab) or empty (no price)."""
     itm = in_the_money(contract["type"], spot, contract["strike"]) if spot is not None else bool(contract.get("in_money"))
     iv = quote.get("iv")
+    given = quote.get("intrinsic")           # Schwab's intrinsicValue of /chains; None for Alpaca or when Schwab sends no value (then Hokma computes it)
     return {"symbol": contract["symbol"], "itm": itm, "last": quote.get("last"),
             "last_exchange": quote.get("last_exchange"), "bid": quote.get("bid"),
             "bid_exchange": quote.get("bid_exchange"), "ask": quote.get("ask"), "ask_exchange": quote.get("ask_exchange"),
             "volume": quote.get("volume"), "open_interest": contract["open_interest"], "theta": quote.get("theta"),
-            "delta": quote.get("delta"), "iv": iv, "intrinsic": intrinsic_value(contract["type"], spot, contract["strike"]),
-            "prob_itm": prob_itm(contract["type"], spot, contract["strike"], iv, years),
+            "delta": quote.get("delta"), "iv": iv, "intrinsic": given if given is not None else intrinsic_value(contract["type"], spot, contract["strike"]),
+            "prob_itm": contract_prob_itm(contract["type"], spot, contract["strike"], quote.get("bid"), quote.get("ask"), iv, years),
             "quote_time": quote.get("quote_time")}
 
 
@@ -1001,18 +1068,18 @@ def _one_expiration(creds: _Creds, symbol: str, day: date, count: int | None, sp
 
 
 def _group(day: date, today: date, multiplier: int, rows: list[dict], spot: float | None, years: float,
-           feed: str | None, truncated: bool) -> dict:
+           feed: str | None, truncated: bool, move_spot: float | None = None) -> dict:
     """An expiration group of the chain: its rows, the IV of the strike nearest the price (the mean of its call and put)
     and the expected move."""
     nearest = min(rows, key=lambda r: abs(r["strike"] - spot)) if spot is not None else rows[len(rows) // 2]
     ivs = [c["iv"] for c in (nearest["call"], nearest["put"]) if c and c["iv"] is not None]
     iv = round(sum(ivs) / len(ivs), 4) if ivs else None
     return {"date": day.isoformat(), "days": (day - today).days, "multiplier": multiplier, "iv": iv,
-            "expected_move": expected_move(spot, iv, years), "rows": rows, "feed": feed, "truncated": truncated}
+            "expected_move": expected_move(move_spot if move_spot is not None else spot, iv, years), "rows": rows, "feed": feed, "truncated": truncated}
 
 
 def _schwab_group(symbol: str, day: date, count: int | None, spot: float | None, today: date, market_open: bool | None = None,
-                  bid: float | None = None) -> tuple[dict, dict]:
+                  bid: float | None = None, regular_last: float | None = None) -> tuple[dict, dict]:
     """The group of one expiration from Schwab: ONE `/chains` call for that day (`strikeCount` strikes above and below
     the money, then trimmed to `count` around the price). Returns the group and the chain JSON (for the underlying)."""
     data = _schwab_chain(symbol, contractType="ALL", strategy="SINGLE", includeUnderlyingQuote=True,
@@ -1030,7 +1097,8 @@ def _schwab_group(symbol: str, day: date, count: int | None, spot: float | None,
     for contract, quote in found:
         if contract["strike"] in by_strike:
             by_strike[contract["strike"]][contract["type"]] = _cell(contract, quote, ref, years)
-    group = _group(day, today, found[0][0]["size"], [by_strike[s] for s in wanted], ref, years, SCHWAB, False)
+    group = _group(day, today, found[0][0]["size"], [by_strike[s] for s in wanted], ref, years, SCHWAB, False,
+                   move_price(ref, regular_last, market_open))
     return group, data
 
 
@@ -1072,10 +1140,11 @@ def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = No
         live_spot = _hub_spot(symbol)                       # the centre is the price of the stream; without one, the answer's own
         streamed = _hub_quote(symbol)
         bid = streamed.bid if streamed is not None else None
+        regular_last = streamed.regular_last if streamed is not None else None
         market_open = _market_hours_open()
         groups, answers = [], []
         for day in parsed:
-            group, data = _schwab_group(symbol, day, count, live_spot, today, market_open, bid)
+            group, data = _schwab_group(symbol, day, count, live_spot, today, market_open, bid, regular_last)
             groups.append(group)
             answers.append(data)
         spot = live_spot if live_spot is not None else next((p for p in (_schwab_spot(d) for d in answers) if p is not None), None)

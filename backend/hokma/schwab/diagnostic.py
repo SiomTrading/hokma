@@ -56,7 +56,9 @@ def _chain_rows(chain: dict) -> tuple[float | None, list[dict]]:
                                  "ask": contract.get("ask"), "mark": contract.get("mark"), "last": contract.get("last"),
                                  "volatility": contract.get("volatility"), "theta": contract.get("theta"), "delta": contract.get("delta"),
                                  "intrinsic": contract.get("intrinsicValue"), "days": contract.get("daysToExpiration"),
-                                 "quote_time": contract.get("quoteTimeInLong")})      # 3328: what thinkorswim's intrinsic, theta and Prob. ITM are compared with
+                                 "quote_time": contract.get("quoteTimeInLong"), "trade_time": contract.get("tradeTimeInLong"),
+                                 "close": contract.get("closePrice"), "last_price": contract.get("lastPrice"),
+                                 "theoretical": contract.get("theoreticalOptionValue")})      # 3330: where the pre-market Last of thinkorswim comes from      # 3328: what thinkorswim's intrinsic, theta and Prob. ITM are compared with
     underlying = chain.get("underlyingPrice")
     return (underlying if isinstance(underlying, (int, float)) else None), rows
 

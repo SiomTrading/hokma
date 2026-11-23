@@ -24,7 +24,7 @@ from hokma.db import Database, get_database
 from hokma.db.timeutil import utcnow
 from hokma.exec import levels, prefilter, ticket
 from hokma.exec.money import text as dtext
-from hokma.exec.proposal import Leg, OrderProposal
+from hokma.exec.proposal import Leg, OrderProposal, ProposalError
 
 log = logging.getLogger("hokma.exec")
 
@@ -290,7 +290,10 @@ def submit(p: OrderProposal, *, who: Any, db: Database | None = None) -> ExecRes
         return finish("analysis_only", "level_1", ticket.why("level_1"), prefilter_json=detail, clamps=result.clamps, record=False,
                       proposal=final, ticket_text=text)
 
-    risk_why = _owner_risk_why(database, p, final, sheets, preview) if p.origin == "chat" and getattr(who, "owner", False) else None
+    risk = _owner_risk(database, final, sheets, preview) if p.origin == "chat" and getattr(who, "owner", False) else None
+    risk_why = None if risk is None else owner_risk_why(risk)
+    if risk is not None:
+        detail = {**detail, "owner_risk_ack": str(risk[2])}      # what the owner was warned of: a bigger exposure at the approval warns again
     auto, approver = False, None
     if p.origin == "chat":
         if risk_why:
@@ -326,25 +329,43 @@ def submit(p: OrderProposal, *, who: Any, db: Database | None = None) -> ExecRes
         _notify(u, (risk_why or ticket.why("awaiting", desk=desk_name)) + "\n" + text)
     from hokma.exec import telegram_approval
 
-    telegram_approval.request_buttons(pid, final.fingerprint(), text)
+    telegram_approval.request_buttons(pid, final.fingerprint(), (risk_why + "\n" + text) if risk_why else text)
     if risk_why:
         return ExecResult(pid, "awaiting_owner", "owner_risk_confirm", risk_why, final.fingerprint(), rid, decision_id, text)
     return ExecResult(pid, "awaiting_owner", "awaiting_owner", ticket.why("awaiting", desk=desk_name), final.fingerprint(), rid, decision_id, text)
 
 
-def _owner_risk_why(database: Database, p: OrderProposal, final: OrderProposal, sheets: dict[str, ContractSheet], preview: Any) -> str | None:
-    """The warning for an order of the owner that leaves an option sold with no cover once the closes are netted (H3, decision 1265).
-    Plain words, asked once: the confirmation goes through the approval of the order, which does not warn again. A reduce-only order cannot open."""
+def _pending_owner_orders(database: Database, desk_id: int, exclude_id: int | None = None) -> list[OrderProposal]:
+    """The other orders of the owner in the chat that wait for his answer: they are not in the account yet, but the owner may confirm them all."""
+    with database.read() as u:
+        rows = u.session.query("SELECT id, proposal_json FROM exec_proposals WHERE desk_id = :d AND origin = 'chat' AND status = 'awaiting_owner' "
+                               "AND id <> :i ORDER BY id", {"d": desk_id, "i": exclude_id or 0})
+    out = []
+    for row in rows:
+        try:
+            out.append(OrderProposal.from_dict(json.loads(row["proposal_json"])))
+        except (ValueError, ProposalError):
+            continue
+    return out
+
+
+def _owner_risk(database: Database, final: OrderProposal, sheets: dict[str, ContractSheet], preview: Any, *, exclude_id: int | None = None,
+                with_pending: bool = True) -> tuple[str, str, Decimal] | None:
+    """What an order of the owner leaves open once the closes are netted against the account, the live orders and, with `with_pending`, the
+    other orders of the owner that wait for his answer (H3, decisions 1265 and bug 1242). A reduce-only order cannot open."""
     from hokma.exec.guards.premium_selling import owner_risk
 
     if final.reduce_only:
         return None
-    ctx = prefilter.load_context(p.desk_id, final, db=database, preview=preview, sheets=sheets)
-    risk = owner_risk(final, ctx.contracts, marks=ctx.marks, positions=ctx.positions, open_orders=ctx.open_orders)
-    if risk is None:
-        return None
-    _kind, contract, qty = risk
-    return ticket.why("owner_risk_short", qty=dtext(qty), contract=contract)
+    ctx = prefilter.load_context(final.desk_id, final, db=database, preview=preview, sheets=sheets)
+    pending = _pending_owner_orders(database, final.desk_id, exclude_id) if with_pending else ()
+    return owner_risk(final, ctx.contracts, marks=ctx.marks, positions=ctx.positions, open_orders=ctx.open_orders, pending=pending)
+
+
+def owner_risk_why(risk: tuple[str, str, Decimal]) -> str:
+    """The warning in plain words, with the contract as a person reads it."""
+    kind, contract, qty = risk
+    return ticket.why("owner_risk_spread" if kind == "spread" else "owner_risk_short", qty=dtext(qty), contract=ticket.contract_label(contract))
 
 
 def _schwab_preview(broker: Any, account: Any, native: dict) -> Any:

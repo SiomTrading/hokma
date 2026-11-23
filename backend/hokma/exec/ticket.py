@@ -29,6 +29,8 @@ _WHY: dict[str, Callable[..., str]] = {         # one literal t(...) per message
     "no_line": lambda **p: t("exec.why.no_line", **p),
     "line_mismatch": lambda **p: t("exec.why.line_mismatch", **p),
     "owner_risk_short": lambda **p: t("exec.why.owner_risk_short", **p),
+    "owner_risk_spread": lambda **p: t("exec.why.owner_risk_spread", **p),
+    "owner_risk_unreadable": lambda **p: t("exec.why.owner_risk_unreadable", **p),
     "owner_rejected": lambda **p: t("exec.why.owner_rejected", **p),
 }
 
@@ -39,6 +41,23 @@ def why(code: str, **params: Any) -> str:
 
 def short(fingerprint: str) -> str:
     return fingerprint[:SHORT]
+
+
+def contract_label(contract_id: str) -> str:
+    """A contract id in words for the owner: `OPT:SPY:2026-12-18:C:600` reads "SPY call 600 con vencimiento 2026-12-18". Anything that is
+    not an option or shares comes back as it is."""
+    from hokma.contracts.identity import NoContract, parse_symbol
+
+    try:
+        parsed = parse_symbol(contract_id)
+    except NoContract:
+        return contract_id
+    if parsed.asset_type == "option" and None not in (parsed.underlying, parsed.put_call, parsed.strike, parsed.expiration):
+        return t("exec.label.option", underlying=parsed.underlying, kind="call" if parsed.put_call == "C" else "put", strike=dtext(parsed.strike),
+                 expiry=parsed.expiration.isoformat())
+    if parsed.asset_type in ("equity", "etf") and parsed.root:
+        return t("exec.label.shares", underlying=parsed.root)
+    return contract_id
 
 
 def legs_text(p: OrderProposal, contracts: Mapping[str, Any]) -> str:

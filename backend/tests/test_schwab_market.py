@@ -463,12 +463,12 @@ def test_the_dashboard_chain_trims_the_strikes_around_the_price_and_labels_schwa
     years = options.years_to_expiry(date(2026, 12, 18))
     call = group["rows"][0]["call"]
     assert call["itm"] is True and call["intrinsic"] == 8.5 and call["iv"] == 0.255 and call["delta"] == 0.8
-    assert call["prob_itm"] == options.prob_itm("call", 228.5, 220.0, 0.255, years) and call["open_interest"] == 1234
+    assert call["prob_itm"] == options.contract_prob_itm("call", 228.5, 220.0, call["bid"], call["ask"], 0.255, years) and call["open_interest"] == 1234
     assert call["quote_time"] == QUOTE_TEXT and call["bid"] == 11.0 and call["theta"] == -0.05
     far_call = group["rows"][1]["call"]
-    assert far_call["itm"] is False and far_call["intrinsic"] == 0.0 and far_call["iv"] is None and far_call["prob_itm"] is None
+    assert far_call["itm"] is False and far_call["intrinsic"] == 0.0 and far_call["iv"] is None and far_call["prob_itm"] == options.contract_prob_itm("call", 228.5, 230.0, far_call["bid"], far_call["ask"], None, years)       # no IV from Schwab, the mark gives its own
     put = group["rows"][1]["put"]
-    assert put["itm"] is True and put["intrinsic"] == 1.5 and put["prob_itm"] == options.prob_itm("put", 228.5, 230.0, 0.3, years)
+    assert put["itm"] is True and put["intrinsic"] == 1.5 and put["prob_itm"] == options.contract_prob_itm("put", 228.5, 230.0, put["bid"], put["ask"], 0.3, years)
     assert group["iv"] == 0.3                                                   # the strike nearest the price has the put's IV
     assert group["expected_move"] == options.expected_move(228.5, 0.3, years)
 

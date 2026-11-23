@@ -40,10 +40,11 @@ def test_repository_fragments_are_valid():
 
 def test_h1_fragments_describe_the_release_checklist():
     texts = " ".join(text for _kind, _slug, text, _path in cm.collect())
-    if not texts:
-        # Once the release step ran, the fragments were merged and deleted: the entry lives in its section.
-        log = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        texts = log.split("## 1.0.12", 1)[1].split("\n## ", 1)[0]
+    # The H1 entry lives in its fragment until the release step merges it into the 1.0.12 section. Fragments of
+    # other tasks can coexist with it, so the section is read too instead of only when no fragment is left.
+    log = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    if "## 1.0.12" in log:
+        texts += " " + log.split("## 1.0.12", 1)[1].split("\n## ", 1)[0]
     assert "metrics, risk, validation and data modules" in texts
     assert "Integrity checklist for this release" in texts
     assert not (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").startswith("# Changelog\n\n## Unreleased")

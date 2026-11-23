@@ -10,6 +10,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import threading
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from hokma.db import Actor, Database, IntegrityViolation, RuleViolation, get_database
@@ -17,9 +19,21 @@ from hokma.db.timeutil import from_db_time, utcnow
 from hokma.exec import prefilter, ticket
 from hokma.exec.guards import cooldown as cooldown_guard
 from hokma.exec.proposal import OrderProposal, ProposalError
-from hokma.exec.submit import (SENT_STATUSES, ExecResult, Refusal, _insert, _notify, _record_attempt, dispatch, exits_apart, resolve_contracts, to_native)
+from hokma.exec.submit import (SENT_STATUSES, ExecResult, Refusal, _insert, _json, _notify, _owner_risk, _record_attempt, dispatch, exits_apart, owner_risk_why,
+                               resolve_contracts, to_native)
 
 log = logging.getLogger("hokma.exec")
+
+_desk_locks: dict[int, threading.RLock] = {}
+_desk_locks_guard = threading.Lock()
+
+
+def _desk_lock(desk_id: int) -> threading.RLock:
+    """One lock per desk: the reading of the risk, the approval and the send of an order of the owner go together, so two confirmations at
+    the same time are counted one after the other (bug 1242). The app is one process; the send keeps its own atomic claim besides."""
+    with _desk_locks_guard:
+        return _desk_locks.setdefault(desk_id, threading.RLock())
+
 
 _FILLED = {"FILLED": "filled", "PARTIALLY_FILLED": "partially_filled", "WORKING": "sent", "ACCEPTED": "sent", "QUEUED": "sent", "PENDING_ACTIVATION": "sent"}
 
@@ -196,19 +210,67 @@ def approve(proposal_id: int, *, who: Any, db: Database | None = None) -> ExecRe
 
     _need_owner(who)
     database = db or get_database()
-    row, decision = _pending(database, proposal_id)
-    if _expired(decision):
-        _expire(database, row, decision)
-        raise BrokerError("decision_expired", 409)
+    row, _decision = _pending(database, proposal_id)
+    with _desk_lock(row["desk_id"]):
+        row, decision = _pending(database, proposal_id)          # read again inside the lock: another confirmation may have closed it
+        if _expired(decision):
+            _expire(database, row, decision)
+            raise BrokerError("decision_expired", 409)
+        warned = _warn_again(database, row)
+        if warned is not None:
+            return warned
+        with database.write() as u:
+            approval = u.approvals.record("decision", decision.id, "approved", decided_by="owner", channel="dashboard")
+            try:
+                u.decisions.decide(decision.id, "approved", actor=Actor.human("owner"), approval_id=approval.id)
+            except RuleViolation as exc:
+                raise BrokerError("decision_closed", 409) from exc
+            u.session.execute("UPDATE exec_proposals SET approved_fingerprint = fingerprint, approved_by = 'owner', updated_at = :t "
+                              "WHERE id = :i AND status = 'awaiting_owner'", {"i": proposal_id, "t": utcnow()})
+        return send_approved(proposal_id, db=database, auto_by="owner")
+
+
+def _warn_again(database: Database, row: dict[str, Any]) -> ExecResult | None:
+    """Bug 1242: an order of the owner is warned again when, by the time he confirms it, the account is more exposed than what he was told
+    (nothing, for an order that never carried a warning). The new warning replaces the old one and the next confirmation goes through.
+    A sale that cannot be measured is not approved: it fails closed. None when there is nothing to warn about: the approval goes on."""
+    if row["origin"] != "chat":
+        return None
+    p = None
+    try:
+        p = OrderProposal.from_dict(json.loads(row["proposal_json"]))
+        sheets = resolve_contracts(p)
+        preview = None
+        with database.read() as u:
+            pair = _broker_pair(u, p.desk_id)
+        if pair is not None and pair[0].kind == "schwab":
+            from hokma.exec.submit import _schwab_preview, open_broker
+
+            with open_broker(database, p.desk_id) as live:
+                preview = _schwab_preview(live[0], live[1], to_native(p, sheets, "schwab"))
+        risk = _owner_risk(database, p, sheets, preview, exclude_id=row["id"], with_pending=False)
+    except (ValueError, ProposalError, Refusal):
+        return None if p is not None and not any(x.side == "sell" for x in p.legs) else _unreadable(row)
+    try:
+        detail = json.loads(row["prefilter_json"] or "{}")
+        ack = Decimal(str(detail.get("owner_risk_ack", "0")))
+    except (ValueError, InvalidOperation):
+        return _unreadable(row)
+    if risk is None or risk[2] <= ack:
+        return None
+    why = owner_risk_why(risk)
     with database.write() as u:
-        approval = u.approvals.record("decision", decision.id, "approved", decided_by="owner", channel="dashboard")
-        try:
-            u.decisions.decide(decision.id, "approved", actor=Actor.human("owner"), approval_id=approval.id)
-        except RuleViolation as exc:
-            raise BrokerError("decision_closed", 409) from exc
-        u.session.execute("UPDATE exec_proposals SET approved_fingerprint = fingerprint, approved_by = 'owner', updated_at = :t "
-                          "WHERE id = :i AND status = 'awaiting_owner'", {"i": proposal_id, "t": utcnow()})
-    return send_approved(proposal_id, db=database, auto_by="owner")
+        u.session.update("exec_proposals", {"id": row["id"]}, {"prefilter_json": _json({**detail, "owner_risk_ack": str(risk[2])}), "updated_at": utcnow()})
+        _notify(u, why)
+    from hokma.exec import telegram_approval
+
+    telegram_approval.request_buttons(row["id"], row["fingerprint"], why)
+    return _result(row, "awaiting_owner", "owner_risk_confirm", why)
+
+
+def _unreadable(row: dict[str, Any]) -> ExecResult:
+    """The risk of a sale could not be measured: nothing is approved or sent and the owner is told in words."""
+    return _result(row, "awaiting_owner", "owner_risk_unreadable", ticket.why("owner_risk_unreadable"))
 
 
 def reject(proposal_id: int, *, who: Any, db: Database | None = None) -> ExecResult:

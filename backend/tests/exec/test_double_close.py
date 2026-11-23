@@ -259,7 +259,7 @@ def test_the_warning_is_plain_spanish(swo):
     from pathlib import Path
 
     text = json.loads((Path(hexec.__file__).resolve().parents[1] / "catalog" / "es.json").read_text(encoding="utf-8"))["exec.why.owner_risk_short"]
-    assert out.why == text.format(qty=1, contract="OPT:SPY:2026-12-18:C:600")
+    assert out.why == text.format(qty=1, contract="SPY call 600 con vencimiento 2026-12-18")      # the contract in words, not the technical id (5d)
 
 
 def test_shares_and_options_with_a_stop_are_refused_and_without_it_what_is_approved_is_what_is_sent(swo):
@@ -276,6 +276,181 @@ def test_shares_and_options_with_a_stop_are_refused_and_without_it_what_is_appro
         sent = u.session.one("SELECT request_json FROM broker_orders WHERE id = :i", {"i": row["broker_order_record_id"]})
     assert row["fingerprint"] == row["approved_fingerprint"] == json.loads(sent["request_json"])["fingerprint"]
     assert "stop_loss" in sent["request_json"] and json.loads(sent["request_json"])["stop_loss"] is None
+
+
+# ---- bug 1242: the orders of the owner that wait are netted against each other --------------------------------------------------------------
+
+LABEL = "SPY call 600 con vencimiento 2026-12-18"
+
+
+def _owner_sell(swo, **kw):
+    return hexec.submit(OrderProposal(swo.desk_id, "SWO", "chat", (leg(C600, "sell", "close"),), "market", created_by="owner", thesis="s"), who=swo.owner,
+                        db=swo.db, **kw)
+
+
+def _es_text(key, **params):
+    from hokma.i18n import use_language
+
+    with use_language("es"):
+        from hokma.i18n import t
+
+        return t(key, **params)
+
+
+def _capture_buttons(monkeypatch):
+    from hokma.exec import telegram_approval
+
+    sent = []
+    monkeypatch.setattr(telegram_approval, "_button_sender", lambda pid, fp, text: sent.append((pid, text)))
+    return sent
+
+
+def test_pending_sells_that_together_leave_minus_two_warn_the_accumulated_impact_and_the_late_confirmation_warns_again_1242(swo, monkeypatch):
+    from hokma.i18n import use_language
+
+    _own_a_call(swo)
+    sent = _capture_buttons(monkeypatch)
+    with use_language("es"):
+        outs = [_owner_sell(swo) for _ in range(3)]
+    assert outs[0].status == "filled"
+    assert outs[1].why == _es_text("exec.why.owner_risk_short", qty=1, contract=LABEL)
+    assert outs[2].why == _es_text("exec.why.owner_risk_short", qty=2, contract=LABEL)       # the second counts the first that still waits
+    approvals.approve(outs[2].proposal_id, who=swo.owner, db=swo.db)                         # confirmed first: it was warned of the two
+    assert _qty(swo) == -1
+    sent.clear()
+    with use_language("es"):
+        again = approvals.approve(outs[1].proposal_id, who=swo.owner, db=swo.db)
+    assert (again.status, again.code) == ("awaiting_owner", "owner_risk_confirm")           # the account is already short one: the late one warns of two
+    assert again.why == _es_text("exec.why.owner_risk_short", qty=2, contract=LABEL)
+    assert _qty(swo) == -1
+    assert sent and sent[-1][1] == again.why                                                 # the buttons of the new warning carry it
+    final = approvals.approve(outs[1].proposal_id, who=swo.owner, db=swo.db)
+    assert final.status == "filled" and _qty(swo) == -2
+
+
+def _silent_sales(swo, monkeypatch, n):
+    """n sales of the owner that wait with no warning behind them (the account looked safe when they were made), the account long one."""
+    from hokma.exec import submit
+
+    _own_a_call(swo)
+    with monkeypatch.context() as m:
+        m.setattr(submit, "_owner_risk", lambda *a, **k: ("short", C600, Decimal("1")))     # forces the wait; the warning is stripped below
+        pids = [_owner_sell(swo).proposal_id for _ in range(n)]
+    with swo.db.write() as u:
+        for pid in pids:
+            row = u.session.one("SELECT prefilter_json FROM exec_proposals WHERE id = :i", {"i": pid})
+            detail = {k: v for k, v in json.loads(row["prefilter_json"] or "{}").items() if k != "owner_risk_ack"}
+            u.session.update("exec_proposals", {"id": pid}, {"code": "awaiting_owner", "prefilter_json": json.dumps(detail)})
+    return pids
+
+
+def test_an_order_that_never_carried_a_warning_warns_when_the_account_got_riskier_1242(swo, monkeypatch):
+    from hokma.i18n import use_language
+
+    a, b = _silent_sales(swo, monkeypatch, 2)                                                             # the account is long one; A and B wait, neither warned
+    assert approvals.approve(b, who=swo.owner, db=swo.db).status == "filled"                 # B takes the account to zero
+    with use_language("es"):
+        again = approvals.approve(a, who=swo.owner, db=swo.db)
+    assert (again.status, again.code) == ("awaiting_owner", "owner_risk_confirm")
+    assert again.why == _es_text("exec.why.owner_risk_short", qty=1, contract=LABEL)
+    assert _qty(swo) == 0
+
+
+def test_two_confirmations_at_the_same_time_are_counted_one_after_the_other_1242(swo, monkeypatch):
+    import threading
+
+    a, b = _silent_sales(swo, monkeypatch, 2)
+    outs, gate = [], threading.Barrier(2)
+
+    def go(pid):
+        gate.wait()
+        outs.append(approvals.approve(pid, who=swo.owner, db=swo.db))
+
+    threads = [threading.Thread(target=go, args=(x,)) for x in (a, b)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert sorted((o.status, o.code) for o in outs) == [("awaiting_owner", "owner_risk_confirm"), ("filled", "filled")], [(o.status, o.code) for o in outs]
+    assert _qty(swo) == 0
+
+
+def test_a_sale_whose_risk_cannot_be_measured_is_not_approved_1242(swo, monkeypatch):
+    from hokma.i18n import use_language
+
+    (a,) = _silent_sales(swo, monkeypatch, 1)
+
+    def broken(*args, **kwargs):
+        raise ValueError("no marks")
+
+    with monkeypatch.context() as m, use_language("es"):
+        m.setattr(approvals, "_owner_risk", broken)
+        out = approvals.approve(a, who=swo.owner, db=swo.db)
+    assert (out.status, out.code) == ("awaiting_owner", "owner_risk_unreadable") and out.why == _es_text("exec.why.owner_risk_unreadable")
+    assert _qty(swo) == 1
+    with swo.db.write() as u:
+        u.session.update("exec_proposals", {"id": a}, {"prefilter_json": '{"owner_risk_ack": "garbage"}'})
+    out = approvals.approve(a, who=swo.owner, db=swo.db)
+    assert (out.status, out.code) == ("awaiting_owner", "owner_risk_unreadable") and _qty(swo) == 1
+
+
+def test_a_rejected_pending_order_stops_counting_and_the_confirmation_does_not_warn_again_1242(swo):
+    _own_a_call(swo)
+    outs = [_owner_sell(swo) for _ in range(3)]
+    approvals.reject(outs[1].proposal_id, who=swo.owner, db=swo.db)
+    assert approvals.approve(outs[2].proposal_id, who=swo.owner, db=swo.db).status == "filled"
+    assert _qty(swo) == -1
+
+
+def test_the_telegram_buttons_carry_the_warning_with_the_contract_in_words_5d(swo, monkeypatch):
+    from hokma.i18n import use_language
+
+    _own_a_call(swo)
+    sent = _capture_buttons(monkeypatch)
+    with use_language("es"):
+        _owner_sell(swo)
+        out = _owner_sell(swo)
+    assert out.code == "owner_risk_confirm"
+    text = sent[-1][1]
+    assert text.startswith(out.why) and LABEL in out.why and "OPT:SPY" not in out.why
+
+
+def test_a_short_sale_of_shares_by_the_owner_is_warned_5a(swo):
+    out = hexec.submit(OrderProposal(swo.desk_id, "SWO", "chat", (leg("EQ:AAPL", "sell", "open", "5"),), "market", created_by="owner", thesis="s"),
+                       who=swo.owner, db=swo.db)
+    assert (out.status, out.code) == ("awaiting_owner", "owner_risk_confirm"), (out.status, out.code, out.why)
+
+
+def test_owner_risk_unit_shares_credit_spread_and_accumulation_5a_5c_1242():
+    from hokma.exec.guards.premium_selling import owner_risk
+
+    p1, p2 = "OPT:SPY:2026-12-18:P:500", "OPT:SPY:2026-12-18:P:490"
+    cids = (C600, "EQ:AAPL", p1, p2)
+    sheets = {c: identity.resolve(c) for c in cids}
+    marks = {C600: Decimal("8"), "EQ:AAPL": Decimal("200"), p1: Decimal("5"), p2: Decimal("3")}
+
+    def risk(*legs, positions=(), pending=()):
+        return owner_risk(prop(*legs, origin="chat"), sheets, marks=marks, positions=positions, pending=pending)
+
+    assert risk(leg("EQ:AAPL", "sell", "open", "5")) == ("short", "EQ:AAPL", Decimal("5"))              # 5a: shares the account does not hold
+    assert risk(leg("EQ:AAPL", "sell", "close", "5"), positions=(held("EQ:AAPL", "5"),)) is None       # selling what it holds only reduces
+    assert risk(leg("EQ:AAPL", "sell", "close", "8"), positions=(held("EQ:AAPL", "5"),)) == ("short", "EQ:AAPL", Decimal("8"))
+    spread = risk(leg(p1, "sell", "open"), leg(p2, "buy", "open"))
+    assert spread == ("spread", p1, Decimal("1000"))                                                    # 5c: width 10 x 100, bounded and still a sale of premium
+    assert risk(leg(p1, "sell", "open")) == ("short", p1, Decimal("1"))                                 # a naked put is not bounded
+    assert risk(leg(C600, "sell", "close"), positions=(held(C600, "1"),)) is None
+    waiting = prop(leg(C600, "sell", "close"), origin="chat")
+    assert risk(leg(C600, "sell", "close"), positions=(held(C600, "1"),), pending=(waiting,)) == ("short", C600, Decimal("1"))
+    assert risk(leg(C600, "sell", "close"), positions=(), pending=(waiting,)) == ("short", C600, Decimal("2"))     # accumulated, not alone
+
+
+def test_the_contract_in_words():
+    from hokma.exec import ticket
+    from hokma.i18n import use_language
+
+    with use_language("es"):
+        assert ticket.contract_label(C600) == LABEL
+        assert ticket.contract_label("OPT:SPY:2026-12-18:P:500") == "SPY put 500 con vencimiento 2026-12-18"
+        assert ticket.contract_label("EQ:AAPL") == "las acciones de AAPL"
+        assert ticket.contract_label("???") == "???"
 
 
 # ---- flatten: the emergency close cancels what is live first and can never open or cross zero --------------------------------------------------
