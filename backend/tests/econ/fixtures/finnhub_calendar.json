@@ -1,0 +1,34 @@
+{
+ "economicCalendar": [
+  {
+   "actual": 0.4,
+   "country": "US",
+   "estimate": 0.3,
+   "event": "CPI MoM",
+   "impact": "high",
+   "prev": 0.2,
+   "time": "2026-10-15 12:30:00",
+   "unit": "%"
+  },
+  {
+   "actual": null,
+   "country": "US",
+   "estimate": null,
+   "event": "FOMC Minutes",
+   "impact": "high",
+   "prev": null,
+   "time": "2026-10-15 18:00:00",
+   "unit": ""
+  },
+  {
+   "actual": null,
+   "country": "US",
+   "estimate": 1,
+   "event": "Date Only Event",
+   "impact": "high",
+   "prev": null,
+   "time": "2026-10-15",
+   "unit": ""
+  }
+ ]
+}

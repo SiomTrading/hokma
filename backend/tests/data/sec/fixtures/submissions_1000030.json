@@ -1,0 +1,33 @@
+{
+ "cik": "1000030",
+ "name": "Harbor Credit BDC Inc.",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0001000030-24-000007"
+   ],
+   "filingDate": [
+    "2024-02-28"
+   ],
+   "reportDate": [
+    "2023-12-31"
+   ],
+   "acceptanceDateTime": [
+    "2024-02-28T20:00:00.000Z"
+   ],
+   "form": [
+    "10-K"
+   ],
+   "items": [
+    ""
+   ],
+   "primaryDocument": [
+    "hcb-10k.htm"
+   ],
+   "primaryDocDescription": [
+    "10-K"
+   ]
+  },
+  "files": []
+ }
+}

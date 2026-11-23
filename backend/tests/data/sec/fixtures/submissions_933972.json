@@ -1,0 +1,33 @@
+{
+ "cik": "933972",
+ "name": "374Water Inc.",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0002064133-25-000001"
+   ],
+   "filingDate": [
+    "2025-05-02"
+   ],
+   "reportDate": [
+    "2025-04-30"
+   ],
+   "acceptanceDateTime": [
+    "2025-05-02T17:15:00.000Z"
+   ],
+   "form": [
+    "4"
+   ],
+   "items": [
+    ""
+   ],
+   "primaryDocument": [
+    "form4.xml"
+   ],
+   "primaryDocDescription": [
+    "4"
+   ]
+  },
+  "files": []
+ }
+}

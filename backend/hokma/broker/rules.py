@@ -29,7 +29,12 @@ from hokma.schwab.accounts import OPEN_ORDER_STATUSES
 
 ACTIONS = ("preview", "place", "replace", "cancel")
 LIMIT_KEYS = ("max_order_pct", "max_daily_loss_pct", "assets_only", "options_allowed", "short_allowed",
-              "extended_hours_allowed", "max_orders_per_day")
+              "extended_hours_allowed", "max_orders_per_day",
+              # SPEC-018 (H2): the limits that the filter of hokma.exec applies by code
+              "max_position_pct", "cooldown_seconds", "max_drawdown_pct", "capital_floor_usd", "funding", "max_premium_usd",
+              "max_margin_pct", "max_weight_pct", "event_windows", "guards")
+FUNDING_KEYS = ("daily_loss_usd", "trailing_drawdown_usd", "max_contracts", "consistency_pct")
+MAX_EVENT_WINDOWS = 20
 MAX_ORDER_PCT = 1000.0
 MAX_ORDERS_PER_DAY = 10000
 CLOSE_INSTRUCTIONS = ("BUY_TO_COVER", "BUY_TO_CLOSE", "SELL_TO_CLOSE")
@@ -69,6 +74,31 @@ def validate_limits(changes: Any, current: Mapping[str, Any] | None = None) -> d
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_ORDERS_PER_DAY:
                 raise ValueError(f"max_orders_per_day must be a whole number from 1 to {MAX_ORDERS_PER_DAY}")
             merged[key] = value
+        elif key in ("max_position_pct", "max_margin_pct", "max_weight_pct", "max_premium_usd"):
+            top = MAX_ORDER_PCT if key == "max_position_pct" else (100 if key in ("max_weight_pct", "max_margin_pct") else 1e12)
+            if not _is_number(value) or not 0 < value <= top:
+                raise ValueError(f"{key} must be a number above 0 and up to {top:g}")
+            merged[key] = float(value)
+        elif key == "max_drawdown_pct":
+            if not _is_number(value) or not 0 < value <= 100:
+                raise ValueError("max_drawdown_pct must be a number above 0 and up to 100")
+            merged[key] = float(value)
+        elif key == "capital_floor_usd":
+            if not _is_number(value) or value < 0:
+                raise ValueError("capital_floor_usd must be a number of 0 or more")
+            merged[key] = float(value)
+        elif key == "cooldown_seconds":
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 86400:
+                raise ValueError("cooldown_seconds must be a whole number from 0 to 86400")
+            merged[key] = value
+        elif key == "funding":
+            merged[key] = _validate_funding(value)
+        elif key == "event_windows":
+            merged[key] = _validate_windows(value)
+        elif key == "guards":
+            from hokma.exec.guards import registry
+
+            merged[key] = registry.validate_types(value)
         else:                                                  # assets_only and the three *_allowed
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be true or false")
@@ -76,7 +106,48 @@ def validate_limits(changes: Any, current: Mapping[str, Any] | None = None) -> d
     return merged
 
 
+def _validate_funding(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        raise ValueError("funding must be an object with at least one rule")
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        if key not in FUNDING_KEYS:
+            raise ValueError(f"unknown funding rule: {str(key)[:40]}")
+        if key == "max_contracts":
+            if isinstance(item, bool) or not isinstance(item, int) or not 1 <= item <= 100000:
+                raise ValueError("funding.max_contracts must be a whole number from 1 to 100000")
+        elif key == "consistency_pct":
+            if not _is_number(item) or not 0 < item <= 100:
+                raise ValueError("funding.consistency_pct must be a number above 0 and up to 100")
+        elif not _is_number(item) or not 0 < item <= 1e12:
+            raise ValueError(f"funding.{key} must be a number above 0")
+        out[key] = item if key == "max_contracts" else float(item)
+    return out
+
+
+def _validate_windows(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > MAX_EVENT_WINDOWS:
+        raise ValueError(f"event_windows must be a list of at most {MAX_EVENT_WINDOWS} windows")
+    out = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) - {"match", "minutes_before", "minutes_after"}:
+            raise ValueError("an event window is {match, minutes_before, minutes_after}")
+        word = item.get("match")
+        if not isinstance(word, str) or not 1 <= len(word.strip()) <= 40:
+            raise ValueError("an event window needs a match word of 1 to 40 characters")
+        window = {"match": word.strip()}
+        for key in ("minutes_before", "minutes_after"):
+            minutes = item.get(key, 0)
+            if isinstance(minutes, bool) or not isinstance(minutes, int) or not 0 <= minutes <= 1440:
+                raise ValueError(f"{key} must be a whole number of minutes from 0 to 1440")
+            window[key] = minutes
+        out.append(window)
+    return out
+
+
 NUMERIC_LIMITS = ("max_order_pct", "max_daily_loss_pct", "max_orders_per_day")      # smaller is stricter; absent is off
+SMALLER_IS_STRICTER = ("max_position_pct", "max_drawdown_pct", "max_premium_usd", "max_margin_pct", "max_weight_pct")
+LARGER_IS_STRICTER = ("cooldown_seconds", "capital_floor_usd")      # a longer pause and a higher floor are stricter; absent is off
 FLAG_LIMITS = {"assets_only": True, "options_allowed": False, "short_allowed": False, "extended_hours_allowed": False}
 # for a flag limit the value that turns it ON (assets_only is on when True; the three *_allowed are on when False)
 
@@ -94,6 +165,32 @@ def loosened_limits(before: Mapping[str, Any] | None, after: Mapping[str, Any] |
     for key, on in FLAG_LIMITS.items():
         if old.get(key) is on and new.get(key) is not on:
             out.append(key)
+    for key in SMALLER_IS_STRICTER:
+        was, now = old.get(key), new.get(key)
+        if was is not None and (now is None or now > was):
+            out.append(key)
+    for key in LARGER_IS_STRICTER:
+        was, now = old.get(key), new.get(key)
+        if was is not None and (now is None or now < was):
+            out.append(key)
+    was_f, now_f = old.get("funding") or {}, new.get("funding") or {}
+    for key in FUNDING_KEYS:
+        if was_f.get(key) is not None and (now_f.get(key) is None or now_f[key] > was_f[key]):
+            out.append(f"funding.{key}")
+    for window in old.get("event_windows") or []:
+        match = [w for w in (new.get("event_windows") or []) if w.get("match") == window.get("match")]
+        if not match or all(w.get("minutes_before", 0) < window.get("minutes_before", 0)
+                            or w.get("minutes_after", 0) < window.get("minutes_after", 0) for w in match):
+            out.append("event_windows")
+            break
+    from hokma.exec.guards import registry
+
+    def effective(limits: Mapping[str, Any]) -> set[str]:
+        listed = limits.get("guards")
+        return set(registry.known_types()) if listed is None else set(listed) | set(registry.ALWAYS)
+
+    if not effective(old) <= effective(new):          # absent means every known type: dropping any of them loosens
+        out.append("guards")
     return out
 
 

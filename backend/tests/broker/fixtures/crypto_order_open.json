@@ -1,0 +1,19 @@
+{
+  "id": "OABC12-DEF34-GH56",
+  "clientOrderId": "hk-ref-CRYSENT7788KEY",
+  "symbol": "BTC/USD",
+  "type": "limit",
+  "side": "buy",
+  "price": 50000,
+  "amount": 0.01,
+  "filled": 0,
+  "remaining": 0.01,
+  "average": null,
+  "status": "open",
+  "timeInForce": "GTC",
+  "datetime": "2026-11-20T15:30:00.000Z",
+  "timestamp": 1763652600000,
+  "info": {
+    "account": "CRYSENT7788KEY"
+  }
+}

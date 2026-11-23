@@ -1,0 +1,121 @@
+{
+ "cik": 1000005,
+ "entityName": "Splitco Systems Inc.",
+ "facts": {
+  "us-gaap": {
+   "WeightedAverageNumberOfDilutedSharesOutstanding": {
+    "label": "Diluted Shares",
+    "description": "Diluted Shares",
+    "units": {
+     "shares": [
+      {
+       "end": "2023-03-31",
+       "val": 10000000,
+       "accn": "0001000005-23-000001",
+       "fy": 2023,
+       "fp": "Q1",
+       "form": "10-Q",
+       "filed": "2023-05-04",
+       "start": "2023-01-01"
+      },
+      {
+       "end": "2023-06-30",
+       "val": 20000000,
+       "accn": "0001000005-23-000002",
+       "fy": 2023,
+       "fp": "Q2",
+       "form": "10-Q",
+       "filed": "2023-08-03",
+       "start": "2023-04-01"
+      },
+      {
+       "end": "2023-09-30",
+       "val": 20000000,
+       "accn": "0001000005-23-000003",
+       "fy": 2023,
+       "fp": "Q3",
+       "form": "10-Q",
+       "filed": "2023-11-02",
+       "start": "2023-07-01"
+      },
+      {
+       "end": "2023-12-31",
+       "val": 20000000,
+       "accn": "0001000005-24-000001",
+       "fy": 2023,
+       "fp": "Q4",
+       "form": "10-K",
+       "filed": "2024-02-22",
+       "start": "2023-10-01"
+      }
+     ]
+    }
+   },
+   "StockholdersEquityNoteStockSplitConversionRatio1": {
+    "label": "Stock Split Conversion Ratio",
+    "description": "Stock Split Conversion Ratio",
+    "units": {
+     "pure": [
+      {
+       "end": "2023-07-10",
+       "val": 2,
+       "accn": "0001000005-23-000010",
+       "fy": 2023,
+       "fp": "Q2",
+       "form": "8-K",
+       "filed": "2023-07-10"
+      }
+     ]
+    }
+   },
+   "Revenues": {
+    "label": "Revenues",
+    "description": "Revenues",
+    "units": {
+     "USD": [
+      {
+       "end": "2023-03-31",
+       "val": 5000000,
+       "accn": "0001000005-23-000001",
+       "fy": 2023,
+       "fp": "Q1",
+       "form": "10-Q",
+       "filed": "2023-05-04",
+       "start": "2023-01-01"
+      },
+      {
+       "end": "2023-06-30",
+       "val": 6000000,
+       "accn": "0001000005-23-000002",
+       "fy": 2023,
+       "fp": "Q2",
+       "form": "10-Q",
+       "filed": "2023-08-03",
+       "start": "2023-04-01"
+      },
+      {
+       "end": "2023-09-30",
+       "val": 7000000,
+       "accn": "0001000005-23-000003",
+       "fy": 2023,
+       "fp": "Q3",
+       "form": "10-Q",
+       "filed": "2023-11-02",
+       "start": "2023-07-01"
+      },
+      {
+       "end": "2023-12-31",
+       "val": 8000000,
+       "accn": "0001000005-24-000001",
+       "fy": 2023,
+       "fp": "Q4",
+       "form": "10-K",
+       "filed": "2024-02-22",
+       "start": "2023-10-01"
+      }
+     ]
+    }
+   }
+  }
+ }
+}

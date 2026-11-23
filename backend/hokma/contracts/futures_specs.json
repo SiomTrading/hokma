@@ -1,0 +1,19 @@
+{
+  "note": "Exchange contract specifications used only when no provider sheet is registered. A provider sheet always wins.",
+  "roots": {
+    "NQ": {"multiplier": "20", "tick_size": "0.25"},
+    "MNQ": {"multiplier": "2", "tick_size": "0.25"},
+    "ES": {"multiplier": "50", "tick_size": "0.25"},
+    "MES": {"multiplier": "5", "tick_size": "0.25"},
+    "YM": {"multiplier": "5", "tick_size": "1"},
+    "MYM": {"multiplier": "0.5", "tick_size": "1"},
+    "RTY": {"multiplier": "50", "tick_size": "0.1"},
+    "M2K": {"multiplier": "5", "tick_size": "0.1"},
+    "CL": {"multiplier": "1000", "tick_size": "0.01"},
+    "MCL": {"multiplier": "100", "tick_size": "0.01"},
+    "NG": {"multiplier": "10000", "tick_size": "0.001"},
+    "GC": {"multiplier": "100", "tick_size": "0.1"},
+    "MGC": {"multiplier": "10", "tick_size": "0.1"},
+    "SI": {"multiplier": "5000", "tick_size": "0.005"}
+  }
+}

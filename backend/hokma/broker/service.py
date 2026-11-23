@@ -4,7 +4,6 @@ here, not only on the screen, and a broker that cannot reset (Schwab) refuses it
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import hmac
 import json
 import logging
@@ -14,7 +13,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from hokma.broker import rules
+from hokma.broker import external, rules
 from hokma.broker.contract import Broker, NotSupported
 from hokma.broker.schwab import KIND as SCHWAB_KIND
 from hokma.broker.schwab import SchwabBroker
@@ -22,6 +21,10 @@ from hokma.broker.sim import SimBroker
 from hokma.db import Actor, Database, IntegrityViolation, NotFound, RuleViolation, ValidationError, get_database
 from hokma.db.repos.broker import BrokerAccount, BrokerRow, NameTaken
 from hokma.db.timeutil import from_db_time, to_db_time, utcnow
+from hokma.exec import approvals as exec_approvals
+from hokma.exec import native as exec_native
+from hokma.exec.submit import dispatch as exec_dispatch
+from hokma.exec.proposal import fingerprint_of
 from hokma.i18n import t
 from hokma.schwab import accounts as schwab_accounts
 from hokma.schwab import orders as schwab_orders
@@ -90,6 +93,8 @@ def _open(u, row: BrokerRow) -> Broker:
         return SchwabBroker(u.broker, row)
     if row.kind == "sim":
         return SimBroker(u.broker, row)
+    if row.kind in external.CONNECTORS:                          # alpaca, ibkr, crypto: opened on first use (SPEC-018 B5)
+        return external.connector_class(row.kind)(u.broker, row)
     raise BrokerError("broker_not_found", 404)
 
 
@@ -500,6 +505,10 @@ def _run(db: Database, out: _Out) -> _Out:
         if out.action == "preview":
             out.status = "previewed"
             return out
+        if out.action in ("place", "replace") and out.rule["result"] != "refused":
+            filtered = exec_native.check(ctx.desk.id, out.order, preview=out.preview, who=out.who, db=db)       # the same guards as any proposal
+            if filtered is not None:
+                out.rule = filtered
         rule = out.rule
         if rule["result"] == "refused":
             return _refuse(out, rule)
@@ -522,12 +531,7 @@ def _run(db: Database, out: _Out) -> _Out:
                 return out
             out.approved_by = "owner"                                # the owner placed it in the app: nothing to ask
         try:
-            if out.action == "place":
-                out.sent, out.http_status, out.status = broker.place_order(account.id, out.order), 201, "sent"
-            elif out.action == "replace":
-                out.sent, out.http_status, out.status = broker.replace_order(account.id, out.order_id, out.order), 201, "replaced"
-            else:
-                out.sent, out.http_status, out.status = broker.cancel_order(account.id, out.order_id), 200, "canceled"
+            out.sent, out.http_status, out.status = exec_dispatch(broker, account.id, out.action, out.order, out.order_id)
             out.correl_id = (out.sent or {}).get("correl_id")
         except SchwabError as error:
             return _fail(out, error, sending=True)
@@ -664,7 +668,7 @@ def _canonical(action: str, desk_id: Any, order: Any, replaces: Any) -> str:
     agent (the same order with another reason is the same order). Desk, action and the order it replaces are part of it."""
     body = {"desk": desk_id, "action": action, "replaces": None if replaces is None else str(replaces),
             "order": json.loads(json.dumps(order, default=str))}
-    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+    return fingerprint_of(body)
 
 
 def _open_twin(u, out: _Out) -> int | None:
@@ -775,7 +779,8 @@ def expire_pending(db: Database | None = None) -> int:
     database = _db(db)
     with database.read() as u:
         waiting = [(u.decisions.get(r.decision_id), r) for r in u.broker.pending_order_records()]
-    return sum(1 for decision, row in waiting if _expired(decision) and _expire(database, decision, row))
+    return (sum(1 for decision, row in waiting if _expired(decision) and _expire(database, decision, row))
+            + exec_approvals.expire_pending(database))
 
 
 def _pending_of(db: Database, decision_id: Any, desk_id: int | None = None):
@@ -792,6 +797,22 @@ def _pending_of(db: Database, decision_id: Any, desk_id: int | None = None):
     return decision, row
 
 
+def _exec_proposal(database: Database, decision_id: Any, desk_id: int | None) -> dict | None:
+    """The proposal of `hokma.exec` that a decision belongs to, or None when it is a native order of SPEC-015."""
+    if not isinstance(decision_id, int) or isinstance(decision_id, bool):
+        return None
+    row = exec_approvals.proposal_of_decision(decision_id, db=database)
+    if row is None or (desk_id is not None and row["desk_id"] != desk_id):
+        return None
+    return row
+
+
+def _exec_answer(result: Any, decision_id: int) -> dict[str, Any]:
+    status = "rejected" if result.status == "canceled" else ("sent" if result.status in ("sent", "filled", "partially_filled") else "not_sent")
+    return {"status": status, "decision_id": decision_id, "proposal_id": result.proposal_id, "execution": result.status, "why": result.why,
+            "code": result.code, "log_id": result.broker_order_record_id}
+
+
 def _need_owner(who: Who | None) -> None:
     if who is None or not who.owner:
         raise BrokerError("owner_required", 403)
@@ -806,6 +827,8 @@ def approve_pending(decision_id: int, decided_by: str = "owner", db: Database | 
     owner saw (the `order_value` kept in the record of the decision), it is not sent and a new decision asks again (C2)."""
     _need_owner(who)
     database = _db(db)
+    if (proposal := _exec_proposal(database, decision_id, desk_id)) is not None:        # a proposal of a desk: hokma.exec sends it
+        return _exec_answer(exec_approvals.approve(proposal["id"], who=who, db=database), decision_id)
     decision, row = _pending_of(database, decision_id, desk_id)
     if _expired(decision):
         _expire(database, decision, row)
@@ -831,6 +854,8 @@ def reject_pending(decision_id: int, decided_by: str = "owner", db: Database | N
     """The owner rejected an order decision: nothing goes out and the log and the journal say so."""
     _need_owner(who)
     database = _db(db)
+    if (proposal := _exec_proposal(database, decision_id, desk_id)) is not None:
+        return _exec_answer(exec_approvals.reject(proposal["id"], who=who, db=database), decision_id)
     decision, row = _pending_of(database, decision_id, desk_id)
     with database.write() as u:
         approval = u.approvals.record("decision", decision.id, "rejected", decided_by=decided_by, channel="dashboard")
@@ -855,7 +880,8 @@ def list_pending(desk_id: int, db: Database | None = None) -> list[dict[str, Any
             out.append({"decision_id": decision.id, "action": row.action, "agent": row.agent_slug, "reason": row.reason,
                         "why": row.rule_why, "order": row.request_json, "replaces_order_id": row.replaces_order_id,
                         "created_at": decision.created_at, "expires_at": expires.strftime("%Y-%m-%d %H:%M:%S")})
-        return out
+    out += exec_approvals.list_pending(desk_id, db=database)          # the proposals of the desk that wait for the owner
+    return sorted(out, key=lambda item: item["created_at"])
 
 
 # --------------------------------------------------------------------------------------------------------------- reads

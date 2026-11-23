@@ -1,0 +1,106 @@
+# Column mapping of the book importers (SPEC-018: FT-107).
+# Every broker statement is read into the same book schema: date, type, symbol, quantity, price, commission, amount, currency,
+# reference, note (and multiplier, only to be checked against the contract sheet). A header is matched without case and spaces.
+version: 1
+
+# Currency conversion is OFF on purpose. The book holds US dollars only: a row in any other currency is rejected with an error.
+currency:
+  convert: false
+  accepted: [USD]
+
+# The words a statement uses for each kind of row. Anything else is rejected, never guessed.
+actions: &actions
+  buy: [buy, bought, buy to open, buy to close, buy to cover, b, bot]
+  sell: [sell, sold, sell to open, sell to close, sell short, s, sld]
+  deposit: [deposit, cash deposit, moneylink deposit, journal in, ach in, transfer in]
+  withdrawal: [withdrawal, cash withdrawal, moneylink withdrawal, journal out, ach out, transfer out]
+  dividend: [dividend, cash dividend, qualified dividend, ordinary dividend, div, reinvest dividend]
+  interest: [interest, bank interest, credit interest, int]
+  fee: [fee, service fee, adr fee, margin interest]
+
+brokers:
+  student:
+    source: import
+    columns:
+      date: [date, datetime, trade date, trade_date]
+      type: [type, action]
+      symbol: [symbol, ticker, contract, contract_id]
+      quantity: [quantity, qty, shares]
+      price: [price]
+      commission: [commission, fees, fee]
+      amount: [amount, net amount]
+      currency: [currency]
+      reference: [reference, ref, id]
+      note: [note, notes, description]
+    required: [date, type, symbol, quantity, price, amount]
+    actions: *actions
+
+  schwab:
+    source: schwab
+    symbol_style: schwab
+    money_text: true
+    columns:
+      date: [date]
+      type: [action]
+      symbol: [symbol]
+      quantity: [quantity]
+      price: [price]
+      commission: [fees & comm, fees and comm]
+      amount: [amount]
+      note: [description]
+    required: [date, type, symbol, quantity, price, amount]
+    actions: *actions
+
+  alpaca:
+    source: alpaca
+    columns:
+      date: [transaction_time, date]
+      type: [side, activity_type]
+      symbol: [symbol]
+      quantity: [qty, quantity]
+      price: [price]
+      commission: [commission]
+      amount: [net_amount]
+      reference: [id, activity_id]
+    required: [date, type, symbol, quantity, price, amount]
+    actions:
+      buy: [buy]
+      sell: [sell, sell_short]
+      dividend: [div, dividend]
+      interest: [int, interest]
+      fee: [fee]
+      deposit: [csd, deposit]
+      withdrawal: [csw, withdrawal]
+
+  ibkr:
+    source: ibkr
+    signed_quantity: true
+    commission_sign: negative
+    columns:
+      date: [datetime, tradedate, date/time]
+      type: [buy/sell, buysell]
+      symbol: [symbol]
+      quantity: [quantity]
+      price: [tradeprice, price]
+      commission: [ibcommission, commission]
+      amount: [proceeds, amount]
+      currency: [currencyprimary, currency]
+      reference: [tradeid, transactionid]
+      multiplier: [multiplier]
+    required: [date, type, symbol, quantity, price]
+    actions: *actions
+
+  sim:
+    source: sim
+    columns:
+      date: [filled_at, date]
+      type: [side, type]
+      symbol: [contract_id, symbol]
+      quantity: [qty, quantity]
+      price: [price]
+      commission: [commission]
+      amount: [amount]
+      reference: [ref, order_ref]
+      multiplier: [multiplier]
+    required: [date, type, symbol, quantity, price]
+    actions: *actions

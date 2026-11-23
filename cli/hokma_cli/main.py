@@ -539,6 +539,9 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--force", action="store_true", help="recreate the ones that already exist")
     sc.set_defaults(fn=cmd_shortcuts)
     sub.add_parser("post-update", help="Kit sync + settings after an update").set_defaults(fn=cmd_post_update)
+    from hokma_cli import quant_cmd
+
+    quant_cmd.register(sub)
 
     args = p.parse_args(argv)
     # The runtime limit (core/processguard.py): the sensitive modules load only while one of Hokma's own commands

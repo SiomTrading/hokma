@@ -1,0 +1,56 @@
+<SEC-DOCUMENT>0001000001-23-000060.txt : 20231201
+<SEC-HEADER>0001000001-23-000060.hdr.sgml : 20231201
+<ACCEPTANCE-DATETIME>20231201200000
+ACCESSION NUMBER:		0001000001-23-000060
+CONFORMED SUBMISSION TYPE:	4
+PUBLIC DOCUMENT COUNT:		1
+CONFORMED PERIOD OF REPORT:	20231129
+FILED AS OF DATE:		20231201
+
+FILER:
+
+	COMPANY DATA:	
+		COMPANY CONFORMED NAME:			Northwind Instruments Inc.
+		CENTRAL INDEX KEY:			0001000001
+
+	FILING VALUES:
+		FORM TYPE:		4
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>4
+<SEQUENCE>1
+<FILENAME>form4.xml
+<DESCRIPTION>4
+<TEXT>
+<XML>
+<ownershipDocument>
+    <schemaVersion>X0508</schemaVersion>
+    <documentType>4</documentType>
+    <periodOfReport>2023-11-29</periodOfReport>
+    <issuer><issuerCik>0001000001</issuerCik><issuerName>Northwind Instruments Inc.</issuerName><issuerTradingSymbol>NWND</issuerTradingSymbol></issuer>
+    <reportingOwner>
+        <reportingOwnerId><rptOwnerCik>0001900001</rptOwnerCik><rptOwnerName>Reyes Marta L</rptOwnerName></reportingOwnerId>
+        <reportingOwnerAddress><rptOwnerStreet1>1 Northwind Way</rptOwnerStreet1><rptOwnerCity>Austin</rptOwnerCity><rptOwnerState>TX</rptOwnerState><rptOwnerZipCode>78701</rptOwnerZipCode></reportingOwnerAddress>
+        <reportingOwnerRelationship><isOfficer>true</isOfficer><officerTitle>Chief Financial Officer</officerTitle></reportingOwnerRelationship>
+    </reportingOwner>
+    <aff10b5One>false</aff10b5One>
+    <nonDerivativeTable>
+        <nonDerivativeTransaction>
+            <securityTitle><value>Common Stock</value></securityTitle>
+            <transactionDate><value>2023-11-29</value></transactionDate>
+            <transactionCoding><transactionFormType>4</transactionFormType><transactionCode>P</transactionCode><equitySwapInvolved>false</equitySwapInvolved></transactionCoding>
+            <transactionAmounts>
+                <transactionShares><value>1000</value></transactionShares>
+                <transactionPricePerShare><value>20</value></transactionPricePerShare>
+                <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts><sharesOwnedFollowingTransaction><value>20000</value></sharesOwnedFollowingTransaction></postTransactionAmounts>
+            <ownershipNature><directOrIndirectOwnership><value>D</value></directOrIndirectOwnership></ownershipNature>
+        </nonDerivativeTransaction>
+    </nonDerivativeTable>
+    <ownerSignature><signatureName>/s/ Reyes Marta L</signatureName><signatureDate>2023-11-29</signatureDate></ownerSignature>
+</ownershipDocument>
+</XML>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

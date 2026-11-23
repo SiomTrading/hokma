@@ -49,10 +49,10 @@ def test_every_route_needs_the_token(client):
         assert res.status_code == 401 and code(res) == "bad_token", url
 
 
-def test_the_simulated_broker_is_listed_with_its_costs_and_no_orders(client):
+def test_the_simulated_broker_is_listed_with_its_costs_and_its_orders_switch_off(client):
     b = sim(client)
     assert b["name"] == "Hokma" and b["slippage_bps"] == 2.0 and b["commission"]["type"] == "bps"
-    assert b["capabilities"]["orders"] is False
+    assert b["capabilities"]["orders"] is True and b["orders_enabled"] is False        # SPEC-018: it takes orders; the switch starts off
 
 
 def test_create_a_broker_with_costs_and_refuse_a_repeated_name_or_bad_costs(client):

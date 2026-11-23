@@ -38,7 +38,7 @@ def test_once_and_interval():
     ("weekly", "funday 07:00", "UTC", "schedule_invalid"), ("interval", "1m", "UTC", "interval_out_of_range"),
     ("interval", "99d", "UTC", "interval_out_of_range"), ("interval", "abc", "UTC", "schedule_invalid"),
     ("once", "tomorrow", "UTC", "schedule_invalid"), ("daily", "07:00", "Mars/Base", "timezone_invalid"),
-    ("cron", "* * * * *", "UTC", "kind_invalid")])
+    ("cron", "* * * * *", "UTC", "interval_out_of_range")])
 def test_invalid(kind, expr, tz, code):
     with pytest.raises(sc.ScheduleError) as err:
         sc.normalize(kind, expr, tz)

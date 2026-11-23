@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from hokma.kit import mail_tools
+from hokma.kit.tool_registry import ToolError
 from hokma.schwab import models as schwab_models
 
 PRIORITY = {"low": -1, "normal": 0, "high": 1, "urgent": 2}
@@ -1543,6 +1544,25 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
 }
 
 
+# Quant and data tools (SPEC-017, B9): few tools, access by name. They need no database unit.
+from hokma.kit import backoffice_tools as _backoffice_tools  # noqa: E402
+from hokma.kit import data_tools as _data_tools  # noqa: E402
+from hokma.kit import desk_tools as _desk_tools  # noqa: E402
+from hokma.kit import exec_tools as _exec_tools  # noqa: E402
+from hokma.kit import quant_tools as _quant_tools  # noqa: E402
+
+TOOLS.update(_quant_tools.TOOLS)
+TOOLS.update(_data_tools.TOOLS)
+NO_UNIT |= set(_quant_tools.TOOLS) | set(_data_tools.TOOLS)
+# Execution, contracts and calendar tools (SPEC-018, B10); the back office tools join in kit/backoffice_tools.py.
+TOOLS.update(_exec_tools.TOOLS)
+TOOLS.update(_backoffice_tools.TOOLS)
+NO_UNIT |= set(_exec_tools.TOOLS) | set(_backoffice_tools.TOOLS)
+# SWO desk tools (SPEC-019, B13): create the desk, run its cycle, read its state and its signals, propose lessons.
+TOOLS.update(_desk_tools.TOOLS)
+NO_UNIT |= set(_desk_tools.TOOLS)
+
+
 def definitions() -> list[dict[str, Any]]:
     out = []
     for name, (desc, props, req, _h, _w) in TOOLS.items():
@@ -1640,5 +1660,7 @@ def call(name: str, args: dict, caller: Caller | None = None) -> tuple[str, bool
                 text = handler(unit, caller or Caller(), args)
         _desk_agents_on(db, name, args, caller or Caller())
         return text, False
+    except ToolError as exc:                                          # a classified failure: the text is JSON with the code
+        return exc.payload(), True
     except (DbError, LookupError, ValueError, ProjectError) as exc:   # MailToolError is a ValueError
         return f"{type(exc).__name__}: {exc}", True

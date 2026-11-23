@@ -1,0 +1,26 @@
+[
+  {
+    "id": "DUSENT4455",
+    "accountId": "DUSENT4455",
+    "accountVan": "DUSENT4455",
+    "accountTitle": "Test DUSENT4455",
+    "displayName": "DUSENT4455",
+    "accountAlias": null,
+    "accountStatus": 1700000000000,
+    "currency": "USD",
+    "type": "DEMO",
+    "tradingType": "PMRGN",
+    "ibEntity": "IBLLC-US",
+    "faClient": false,
+    "clearingStatus": "O",
+    "covestor": false,
+    "parent": {
+      "mmc": [],
+      "accountId": "",
+      "isMParent": false,
+      "isMChild": false,
+      "isMultiplex": false
+    },
+    "desc": "DUSENT4455"
+  }
+]

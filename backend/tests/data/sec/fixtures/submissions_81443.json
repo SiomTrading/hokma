@@ -1,0 +1,33 @@
+{
+ "cik": "81443",
+ "name": "AB CAP FUND, INC.",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0001410368-26-010921"
+   ],
+   "filingDate": [
+    "2026-02-12"
+   ],
+   "reportDate": [
+    "2025-11-30"
+   ],
+   "acceptanceDateTime": [
+    "2026-02-12T11:12:40.000Z"
+   ],
+   "form": [
+    "N-CEN"
+   ],
+   "items": [
+    ""
+   ],
+   "primaryDocument": [
+    "primary_doc.xml"
+   ],
+   "primaryDocDescription": [
+    "N-CEN"
+   ]
+  },
+  "files": []
+ }
+}

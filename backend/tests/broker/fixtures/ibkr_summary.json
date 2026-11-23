@@ -1,0 +1,25 @@
+{
+  "availablefunds": {
+    "amount": 12000.5,
+    "currency": "USD",
+    "isNull": false,
+    "timestamp": 1700000000000,
+    "value": "12000.5"
+  },
+  "netliquidation": {
+    "amount": 15500.25,
+    "currency": "USD",
+    "isNull": false,
+    "timestamp": 1700000000000
+  },
+  "buyingpower": {
+    "amount": 48000,
+    "currency": "USD",
+    "isNull": false
+  },
+  "totalcashvalue": {
+    "amount": null,
+    "currency": null,
+    "isNull": true
+  }
+}

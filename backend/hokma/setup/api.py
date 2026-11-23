@@ -108,6 +108,7 @@ def get_setup(request: Request) -> dict:
 def complete_setup(request: Request) -> dict:
     def go(lang: str) -> dict:
         db = _db()
+        state = claude.detect()        # before the write unit: the unit keeps the file locked and syncs to disk once
         with db.write() as u:
             profile = u.profile.get()
             if profile is None:
@@ -121,7 +122,7 @@ def complete_setup(request: Request) -> dict:
                 # finished this step long ago, so it keeps "ask" and sees the one-time notice in the chat.
                 u.profile.set_permission_mode("auto", intro_seen=True)
             u.profile.complete_setup()
-        _remember_claude(claude.detect())
+            u.profile.set_claude_status(state.state, state.plan)    # same unit: one commit instead of two
         _journal(db, lang, t("setup.journal.done"))
         return _state()
 

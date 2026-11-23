@@ -1,0 +1,32 @@
+{
+ "approved_versions": [
+  {
+   "digest": "2d0e9aaef3ea51abaa1f97e1514e482c55fa73dc4c3e2fa654a3a4ea97b374ab",
+   "version": "1.0.0"
+  }
+ ],
+ "description": "A desk that studies a market question with computed evidence: a brief, runs of the calculation modules and a verdict backed by numbers.",
+ "display_name": "Quantitative research desk",
+ "files": {
+  "README.md": "e4c73ed659cc8da0449b3dab21ff2191d7c8a47af8003031c17aeda303956856",
+  "files/research/brief.md": "197c16630a722692d65dac0975f1d7ae66c7a2b227991ce1b99b5d09a3b7432d",
+  "files/research/evidence.md": "ad8ee38e15a158b6530bbfad8633c41ca5429a58ca4ed4cfcb6918470f0980e8"
+ },
+ "inject_rules": [
+  "desk-base",
+  "collaboration",
+  "citations",
+  "source-policy",
+  "no-lookahead",
+  "scope-honesty"
+ ],
+ "lines": [
+  "DT",
+  "SWC",
+  "SWO",
+  "LP"
+ ],
+ "name": "quant-research",
+ "schema_version": 1,
+ "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+date,type,symbol,quantity,price,commission,amount,currency,reference,note
+2026-01-05,deposit,,,,,10000.00,USD,EX-001,Example: cash deposit. Replace the example rows with your own before you import.
+2026-01-06,buy,AAPL,10,200.00,1.00,,USD,EX-002,Example: buy 10 shares
+2026-01-20,sell,AAPL,4,210.00,1.00,,USD,EX-003,Example: sell 4 shares
+2026-01-31,dividend,AAPL,,,,2.50,USD,EX-004,Example: dividend received

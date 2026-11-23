@@ -26,6 +26,11 @@ TABLES = {
     "desks", "desk_agents", "desk_assets", "desk_connections", "today_config",
     "brokers", "broker_accounts", "account_ledger", "desk_accounts",
     "broker_orders", "broker_external_accounts", "desk_limits",
+    "lessons", "thesis_events",
+    "desk_profile", "desk_autonomy", "exec_proposals", "exec_guard_state", "exec_alerts", "sim_orders", "sim_fills",
+    "book_entries", "contracts", "contract_aliases", "econ_events", "run_records", "run_checkpoints", "reconciliations",
+    "recon_breaks",
+    "desk_seats", "desk_signals", "desk_mandates", "premium_thresholds",
 }
 
 
@@ -41,7 +46,7 @@ def test_fresh_database_has_the_22_tables_plus_onboarding_and_is_healthy(env):
     assert result.created and result.applied == list(range(1, LATEST + 1)) and result.version == LATEST and result.backup is None
     con = raw()
     names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
-    assert names - FTS_SHADOW == TABLES and len(TABLES) == 49
+    assert names - FTS_SHADOW == TABLES and len(TABLES) == 70
     assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
     assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"

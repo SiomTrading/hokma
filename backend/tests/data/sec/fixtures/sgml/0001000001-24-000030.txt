@@ -1,0 +1,29 @@
+<SEC-DOCUMENT>0001000001-24-000030.txt : 20240715
+<SEC-HEADER>0001000001-24-000030.hdr.sgml : 20240715
+<ACCEPTANCE-DATETIME>20240715120000
+ACCESSION NUMBER:		0001000001-24-000030
+CONFORMED SUBMISSION TYPE:	8-K
+PUBLIC DOCUMENT COUNT:		1
+CONFORMED PERIOD OF REPORT:	20240715
+FILED AS OF DATE:		20240715
+
+FILER:
+
+	COMPANY DATA:	
+		COMPANY CONFORMED NAME:			Northwind Instruments Inc.
+		CENTRAL INDEX KEY:			0001000001
+
+	FILING VALUES:
+		FORM TYPE:		8-K
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>8-K
+<SEQUENCE>1
+<FILENAME>nwnd-8k2.htm
+<DESCRIPTION>8-K
+<TEXT>
+<html><body><h1>FORM 8-K</h1><p>Date of Report: July 15, 2024</p><p>Northwind Instruments Inc.</p>
+<p><b>Item 5.02 Departure of Directors or Certain Officers.</b></p><p>The Chief Financial Officer notified the board of her decision to retire effective October 31, 2024.</p></body></html>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

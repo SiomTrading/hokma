@@ -10,7 +10,7 @@ from test_db_migrate import _desk, _desk_project, raw
 from hokma.db import migrate
 from hokma.db.errors import NotFound, ValidationError
 from hokma.db.migrate import MIGRATIONS_DIR
-from hokma.db.transfer import BROKER_TABLES
+from hokma.db.transfer import BROKER_TABLES, EXEC_TABLES, LESSON_TABLES, PLANTEL_TABLES
 
 NEW_TABLES = ("broker_orders", "broker_external_accounts", "desk_limits")
 FP = "f" * 64
@@ -45,11 +45,11 @@ def test_a_1_0_8_base_migrates_by_adding_three_tables_and_loses_nothing(env):
     before_sql = _tables_sql(con)
     before_rows = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in before_sql}
     con.close()
-    assert migrate().applied == [20]
+    assert migrate().applied == [20, 21, 22, 23]
     con = raw()
     after_sql = _tables_sql(con)
     assert {n: s for n, s in after_sql.items() if n in before_sql} == before_sql        # no table was altered
-    assert set(after_sql) - set(before_sql) - {n for n in after_sql if n.startswith("doc_chunks_fts_")} == set(NEW_TABLES)
+    assert set(after_sql) - set(before_sql) - {n for n in after_sql if n.startswith("doc_chunks_fts_")} - set(LESSON_TABLES) - set(EXEC_TABLES) - set(PLANTEL_TABLES) == set(NEW_TABLES)
     kept = ("projects", "desks", "broker_accounts", "account_ledger", "desk_accounts")      # what the test filled
     assert {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in kept} == {t: before_rows[t] for t in kept}
     assert con.execute("SELECT count(*) FROM desks").fetchone()[0] == 1

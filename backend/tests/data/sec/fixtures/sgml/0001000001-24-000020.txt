@@ -1,0 +1,31 @@
+<SEC-DOCUMENT>0001000001-24-000020.txt : 20240502
+<SEC-HEADER>0001000001-24-000020.hdr.sgml : 20240502
+<ACCEPTANCE-DATETIME>20240502160500
+ACCESSION NUMBER:		0001000001-24-000020
+CONFORMED SUBMISSION TYPE:	10-Q
+PUBLIC DOCUMENT COUNT:		1
+CONFORMED PERIOD OF REPORT:	20240331
+FILED AS OF DATE:		20240502
+
+FILER:
+
+	COMPANY DATA:	
+		COMPANY CONFORMED NAME:			Northwind Instruments Inc.
+		CENTRAL INDEX KEY:			0001000001
+
+	FILING VALUES:
+		FORM TYPE:		10-Q
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>10-Q
+<SEQUENCE>1
+<FILENAME>nwnd-10q.htm
+<DESCRIPTION>10-Q
+<TEXT>
+<html><body><h1>NORTHWIND INSTRUMENTS INC.</h1><p>FORM 10-Q</p><p>For the quarterly period ended March 31, 2024</p>
+<p>PART I</p><p><b>Item 1. Financial Statements</b></p><p>Condensed statements follow.</p>
+<p><b>Item 2. Management's Discussion and Analysis of Financial Condition and Results of Operations</b></p><p>Revenue for the first quarter was 108.2 million dollars, up 9 percent.</p>
+<p><b>Item 4. Controls and Procedures</b></p><p>Effective.</p></body></html>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

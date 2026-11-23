@@ -1,0 +1,33 @@
+{
+ "cik": "1118676",
+ "name": "RUFUS TEST CO",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0001161286-22-000001"
+   ],
+   "filingDate": [
+    "2022-09-08"
+   ],
+   "reportDate": [
+    ""
+   ],
+   "acceptanceDateTime": [
+    "2022-09-08T13:00:00.000Z"
+   ],
+   "form": [
+    "144"
+   ],
+   "items": [
+    ""
+   ],
+   "primaryDocument": [
+    "primary_doc.xml"
+   ],
+   "primaryDocDescription": [
+    "144"
+   ]
+  },
+  "files": []
+ }
+}

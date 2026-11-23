@@ -1,0 +1,14 @@
+{
+  "id": "OFILL1-AAAA-BBBB",
+  "symbol": "BTC/USD",
+  "type": "market",
+  "side": "buy",
+  "price": null,
+  "amount": 0.01,
+  "filled": 0.01,
+  "remaining": 0,
+  "average": 60010,
+  "status": "closed",
+  "datetime": "2026-11-20T15:31:00.000Z",
+  "info": {}
+}

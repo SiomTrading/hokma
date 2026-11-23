@@ -1,0 +1,35 @@
+<SEC-DOCUMENT>0001000001-24-000045.txt : 20240405
+<SEC-HEADER>0001000001-24-000045.hdr.sgml : 20240405
+<ACCEPTANCE-DATETIME>20240405140000
+ACCESSION NUMBER:		0001000001-24-000045
+CONFORMED SUBMISSION TYPE:	DEF 14A
+PUBLIC DOCUMENT COUNT:		1
+FILED AS OF DATE:		20240405
+
+FILER:
+
+	COMPANY DATA:	
+		COMPANY CONFORMED NAME:			Northwind Instruments Inc.
+		CENTRAL INDEX KEY:			0001000001
+
+	FILING VALUES:
+		FORM TYPE:		DEF 14A
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>DEF 14A
+<SEQUENCE>1
+<FILENAME>nwnd-def14a.htm
+<DESCRIPTION>DEF 14A
+<TEXT>
+<html><body><h1>NORTHWIND INSTRUMENTS INC.</h1><p>NOTICE OF ANNUAL MEETING OF SHAREHOLDERS</p>
+<p>The Annual Meeting of Shareholders will be held on June 12, 2024. Shareholders of record at the close of business on April 15, 2024 may vote.</p>
+<p>Proposal 1: Election of seven directors</p><p>Proposal 2: Ratification of Harlow &amp; Finch LLP as independent registered public accounting firm</p>
+<p>Proposal 3: Advisory vote to approve named executive officer compensation (say on pay)</p>
+<p>Summary Compensation Table</p>
+<table><tr><th>Name and Principal Position</th><th>Year</th><th>Salary</th><th>Bonus</th><th>Total</th></tr>
+<tr><td>Daniel T. Okafor, Chief Executive Officer</td><td>2023</td><td>$650,000</td><td>$400,000</td><td>$2,150,000</td></tr>
+<tr><td>Marta L. Reyes, Chief Financial Officer</td><td>2023</td><td>$420,000</td><td>$210,000</td><td>$980,000</td></tr></table>
+</body></html>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

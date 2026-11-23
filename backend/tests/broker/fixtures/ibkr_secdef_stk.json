@@ -1,0 +1,23 @@
+[
+  {
+    "conid": "265598",
+    "companyHeader": "APPLE INC - NASDAQ",
+    "companyName": "APPLE INC",
+    "symbol": "AAPL",
+    "description": "NASDAQ",
+    "restricted": null,
+    "fop": null,
+    "opt": "20261218;20270115",
+    "war": null,
+    "sections": [
+      {
+        "secType": "STK"
+      },
+      {
+        "secType": "OPT",
+        "months": "DEC26"
+      }
+    ],
+    "unknownNewField": 1
+  }
+]

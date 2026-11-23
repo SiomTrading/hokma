@@ -18,7 +18,7 @@ from schwab_support import (FAKE_ACCOUNT_NUMBER, FAKE_ACCOUNT_NUMBER_2, FAKE_HAS
 
 from hokma.broker import service
 from hokma.broker.api import router as broker_router
-from hokma.broker.contract import Broker, NotSupported, OrdersNotSupported
+from hokma.broker.contract import BaseBroker, Broker, NotSupported, OrdersNotSupported
 from hokma.broker.schwab import KEY_ENTRY, SchwabBroker, balance_values, fingerprint, load_key
 from hokma.broker.sim import SimBroker
 from hokma.connections import runtime
@@ -261,8 +261,10 @@ def test_capabilities_and_contract(linked):
     assert isinstance(schwab, Broker) and isinstance(sim, Broker) and schwab.kind == "schwab"
     caps = schwab.capabilities
     assert (caps.accounts, caps.reset, caps.orders, caps.positions) == (True, False, True, True)
-    assert (sim.capabilities.orders, sim.capabilities.positions) == (False, False)
-    for call in (sim.place_order, sim.replace_order, sim.cancel_order, sim.preview_order, sim.orders, sim.get_order, sim.positions):
+    assert (sim.capabilities.orders, sim.capabilities.positions) == (True, True)       # SPEC-018
+    with linked.read() as u:
+        plain = BaseBroker(u.broker, u.broker.find_broker("Hokma"))
+    for call in (plain.place_order, plain.replace_order, plain.cancel_order, plain.preview_order, plain.orders, plain.get_order, plain.positions):
         with pytest.raises(OrdersNotSupported):
             call()
     with pytest.raises(NotSupported):
@@ -314,7 +316,7 @@ def test_brokers_list_capabilities_the_switch_and_per_account_can_reset_and_mask
     brokers = listed(client)
     assert brokers["schwab"]["orders_enabled"] is False and brokers["sim"]["orders_enabled"] is False
     assert brokers["schwab"]["capabilities"] == {"accounts": True, "reset": False, "orders": True, "positions": True}
-    assert brokers["sim"]["capabilities"]["orders"] is False
+    assert brokers["sim"]["capabilities"]["orders"] is True
     accounts_ = client.get(f"/api/brokers/{brokers['schwab']['id']}/accounts").json()["accounts"]
     assert [(a["mask"], a["can_reset"]) for a in accounts_] == [(MASK_1, False), (MASK_2, False)]
     assert (accounts_[0]["cash"], accounts_[0]["equity"]) == (216.25, 217.75)
@@ -331,8 +333,9 @@ def test_the_orders_switch_goes_on_and_off_only_for_a_broker_with_orders(client)
     assert client.put(url, json={"enabled": False}).json()["orders_enabled"] is False
     for body in ({"enabled": "yes"}, {"enabled": 1}, {}):
         assert client.put(url, json=body).status_code == 422
-    refused = client.put(f"/api/brokers/{brokers['sim']['id']}/orders-enabled", json={"enabled": True})
-    assert refused.status_code == 422 and refused.json()["detail"]["code"] == "not_supported"
+    accepted = client.put(f"/api/brokers/{brokers['sim']['id']}/orders-enabled", json={"enabled": True})      # SPEC-018: the simulated broker has the switch too
+    assert accepted.status_code == 200 and accepted.json()["orders_enabled"] is True
+    client.put(f"/api/brokers/{brokers['sim']['id']}/orders-enabled", json={"enabled": False})
     assert client.put("/api/brokers/9999/orders-enabled", json={"enabled": True}).status_code == 404
     assert client.put(url, json={"enabled": True}, headers={"X-Hokma-Token": "no"}).status_code == 401
 

@@ -1,0 +1,12 @@
+{
+  "authenticated": true,
+  "competing": false,
+  "connected": true,
+  "message": "",
+  "MAC": "AA:BB:CC:DD:EE:FF",
+  "serverInfo": {
+    "serverName": "JifN00000",
+    "serverVersion": "Build 10.00.0a"
+  },
+  "extraKey": 1
+}

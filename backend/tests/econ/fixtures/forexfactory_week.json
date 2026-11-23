@@ -1,0 +1,65 @@
+[
+ {
+  "title": "CPI m/m",
+  "country": "USD",
+  "date": "2026-10-15T08:30:00-04:00",
+  "impact": "High",
+  "forecast": "0.3%",
+  "previous": "0.2%"
+ },
+ {
+  "title": "Core CPI m/m",
+  "country": "USD",
+  "date": "2026-10-15T08:30:00-04:00",
+  "impact": "High",
+  "forecast": "0.3%",
+  "previous": "0.3%"
+ },
+ {
+  "title": "Unemployment Claims",
+  "country": "USD",
+  "date": "2026-10-15T08:30:00-04:00",
+  "impact": "High",
+  "forecast": "225K",
+  "previous": "231K"
+ },
+ {
+  "title": "ECB Press Conference",
+  "country": "EUR",
+  "date": "2026-10-15T08:45:00-04:00",
+  "impact": "Medium",
+  "forecast": "",
+  "previous": ""
+ },
+ {
+  "title": "Retail Sales y/y",
+  "country": "CNY",
+  "date": "2026-10-14T21:00:00-04:00",
+  "impact": "Low",
+  "forecast": "3.1|3.4",
+  "previous": "2.9%"
+ },
+ {
+  "title": "All Day Event",
+  "country": "USD",
+  "date": "2026-10-15",
+  "impact": "High",
+  "forecast": "",
+  "previous": ""
+ },
+ {
+  "title": "Naive Time Event",
+  "country": "USD",
+  "date": "2026-10-15T09:00:00",
+  "impact": "High",
+  "forecast": "",
+  "previous": ""
+ },
+ {
+  "title": "No Date Event",
+  "country": "USD",
+  "impact": "High",
+  "forecast": "",
+  "previous": ""
+ }
+]

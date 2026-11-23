@@ -1,0 +1,28 @@
+{
+  "orders": [
+    {
+      "acct": "DUSENT4455",
+      "conid": 265598,
+      "orderId": 987654321,
+      "cashCcy": "USD",
+      "sizeAndFills": "0/1",
+      "orderDesc": "Buy 1 Limit 100.00, GTC",
+      "description1": "AAPL",
+      "ticker": "AAPL",
+      "secType": "STK",
+      "listingExchange": "NASDAQ",
+      "remainingQuantity": 1,
+      "filledQuantity": 0,
+      "totalSize": 1,
+      "companyName": "APPLE INC",
+      "status": "Submitted",
+      "origOrderType": "LIMIT",
+      "side": "BUY",
+      "price": "100.00",
+      "timeInForce": "GTC",
+      "lastExecutionTime_r": 1700000000000,
+      "order_ref": "hk-ref DUSENT4455"
+    }
+  ],
+  "snapshot": true
+}

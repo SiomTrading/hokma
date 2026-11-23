@@ -1,0 +1,66 @@
+{
+ "package_version": "1.0.0",
+ "schema_version": 1,
+ "skills": {
+  "assumption-stress-test": {
+   "digest": "213cfd86fadf5ceacc2a489884c13295111653a846e855ba6a3cd90da134702e",
+   "version": "1.0.0"
+  },
+  "debate-moderator": {
+   "digest": "89d928f6121bd3aa668502cc18afd702a6fc2a55b28a7df8482c8e9bc973ccd4",
+   "version": "1.0.0"
+  },
+  "devils-advocate": {
+   "digest": "fd599845dd854380224c8e62e1632a63fba64478ed237a19d9acb8a65cbaf0eb",
+   "version": "1.0.0"
+  },
+  "double-review": {
+   "digest": "687ee3b74de0c40fa562265b0457d4ccd9010a8cc1032d9e369af1268b841258",
+   "version": "1.0.0"
+  },
+  "economic-releases": {
+   "digest": "2241bc37ace040b8bcc14b815a07ab1e9ddd203af47d5a8026d2a505c23909f0",
+   "version": "1.0.0"
+  },
+  "filing-events": {
+   "digest": "ed29cdd46e77967561ed1c64b14d6e24353e1aa6ef475b11749da195ae75d70a",
+   "version": "1.0.0"
+  },
+  "financial-ratios-dcf": {
+   "digest": "832a882c7009c0ccb54670d28e199ffd0c1294b9c6dc216bc2539c969b12a64c",
+   "version": "1.0.0"
+  },
+  "morning-note": {
+   "digest": "f6bb20137398d9c4cd7e7487b924d4eec0a321aa858436ad7e230288213412a0",
+   "version": "1.0.0"
+  },
+  "overfitting-checks": {
+   "digest": "aef8e5232625162e63123cf8b9faa41ae0adce40fa0df881f8c957708cf6232b",
+   "version": "1.0.0"
+  },
+  "signal-postmortem": {
+   "digest": "c5a5a3712f948a29db1f2c0efab0db242047d1cdcf4cf1ca263c50dc38cc4253",
+   "version": "1.0.0"
+  },
+  "strategy-review-rubric": {
+   "digest": "5d355a8f1f143d146eb20bfe7868a1483adfa250a0a70fcd1ba706e7556c409f",
+   "version": "1.0.0"
+  },
+  "tail-risk-hedging": {
+   "digest": "6b0f76a965fc3a8724bfd959cbf71b0232301dfe093aaed64a185a4c3a9ba680",
+   "version": "1.0.0"
+  },
+  "thesis-tracker": {
+   "digest": "17f877403e9291a827dd3a88f8044b94eb1b0f58fc206919b8007b2b73b69265",
+   "version": "1.0.0"
+  },
+  "trade-process-review": {
+   "digest": "97dffc7b518cb2fdada53d5881e52391dd8de003319a9bf8c7548cb14f272083",
+   "version": "1.0.0"
+  },
+  "volatility-premium": {
+   "digest": "5cd2d56688730aa7b0abd260229b584a0d49afa456729254b21cb27e8e9f581d",
+   "version": "1.0.0"
+  }
+ }
+}

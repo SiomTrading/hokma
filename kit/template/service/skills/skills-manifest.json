@@ -1,0 +1,46 @@
+{
+ "package_version": "1.0.0",
+ "schema_version": 1,
+ "skills": {
+  "account-reconciliation": {
+   "digest": "7dccd1fc315d765bfdf779578000c2c5d2afecbb3ab5ac63b426c6377d36acd9",
+   "version": "1.0.0"
+  },
+  "account-report": {
+   "digest": "b99b52cc3f77917551d3cf4de3d65ff72a4ee43337d71b056315208b283716d6",
+   "version": "1.0.0"
+  },
+  "accrual-schedule": {
+   "digest": "d3ae754ec76689f185fcf50b5dc8fa03ff90f8679fa2b08d5a8db151331b12db",
+   "version": "1.0.0"
+  },
+  "break-trace": {
+   "digest": "7171a0566addee83a898f29bbfbc1bbbd852ae203b7f8380aff56ae7a23d0d9f",
+   "version": "1.0.0"
+  },
+  "performance-attribution": {
+   "digest": "8fef3aa57c8bbb2e90e646a1dcd542c9f105b92fc64a5f98c7f65c9fe9b091ed",
+   "version": "1.0.0"
+  },
+  "roll-forward": {
+   "digest": "41c0e8ea2df6e587890393d1a2653ad252de17f6af4953b60ae6178ce197a25b",
+   "version": "1.0.0"
+  },
+  "setup-practice": {
+   "digest": "c588dfb2ea12830fd8e73953e85f28d9b5196f1b0786134508d23144f940fb7e",
+   "version": "1.0.0"
+  },
+  "spreadsheet-export": {
+   "digest": "7038ccd24577b165c8d48f3d290ad4b5d4512f4c49971936cc2078b7abf2b22c",
+   "version": "1.0.0"
+  },
+  "statement-pdf": {
+   "digest": "e90c499b612f16981559bc568a62ccbbff5399266ea3b81d7f9e727eb1f9f826",
+   "version": "1.0.0"
+  },
+  "weekly-digest": {
+   "digest": "dfe137f72572db0dc6b7878271e61e5d63c385f5cc9433cc35d90a1d9927e8c9",
+   "version": "1.0.0"
+  }
+ }
+}

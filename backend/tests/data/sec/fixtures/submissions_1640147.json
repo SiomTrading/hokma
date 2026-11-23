@@ -1,0 +1,41 @@
+{
+ "cik": "1640147",
+ "name": "Snowflake Inc.",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0001640147-22-000012",
+    "0001640147-20-000090"
+   ],
+   "filingDate": [
+    "2022-02-14",
+    "2020-09-15"
+   ],
+   "reportDate": [
+    "2022-01-31",
+    "2020-09-15"
+   ],
+   "acceptanceDateTime": [
+    "2022-02-14T17:00:00.000Z",
+    "2020-09-15T18:00:00.000Z"
+   ],
+   "form": [
+    "5",
+    "3"
+   ],
+   "items": [
+    "",
+    ""
+   ],
+   "primaryDocument": [
+    "form5.xml",
+    "form3.xml"
+   ],
+   "primaryDocDescription": [
+    "5",
+    "3"
+   ]
+  },
+  "files": []
+ }
+}

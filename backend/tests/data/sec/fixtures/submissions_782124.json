@@ -1,0 +1,33 @@
+{
+ "cik": "782124",
+ "name": "J.P. MORGAN SECURITIES LLC",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0000019617-24-000664"
+   ],
+   "filingDate": [
+    "2024-12-23"
+   ],
+   "reportDate": [
+    ""
+   ],
+   "acceptanceDateTime": [
+    "2024-12-23T13:57:29.000Z"
+   ],
+   "form": [
+    "ATS-N-W"
+   ],
+   "items": [
+    ""
+   ],
+   "primaryDocument": [
+    "primary_doc.xml"
+   ],
+   "primaryDocDescription": [
+    "ATS-N-W"
+   ]
+  },
+  "files": []
+ }
+}

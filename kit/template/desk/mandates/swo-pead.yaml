@@ -1,0 +1,42 @@
+# Example mandate of a stock options swing desk, post earnings drift variant (seat A23 runs the own method of the desk).
+# The mandate names no instrument: the universe is an argument of every run.
+# The same method adapts to futures: the variant declares the future asset class and the run supplies the contracts.
+name: Options swing, earnings drift
+line: SWO
+variant: pead
+rebalance: daily
+asset_classes: [stock, option, future]
+risk:
+  max_risk_per_trade_pct: 0.75
+  max_open_positions: 4
+  max_drawdown_pct: 8
+analysts:
+  - key: market
+  - key: news
+  - key: fundamentals
+  - key: options
+strategies:
+  - name: earnings-drift
+    display_name: Earnings drift
+    horizon: weeks
+    cadence: daily
+    models:
+      - name: A23
+        weight: 3
+      - name: A20
+      - name: A16
+    blend:
+      method: conviction_weighted
+  - name: drift-quality-filter
+    display_name: Drift with a quality filter
+    horizon: weeks
+    cadence: weekly
+    models:
+      - name: A23
+        weight: 2
+      - name: A16
+        weight: 2
+      - name: A18
+    blend:
+      method: equal
+notes: Entries only after a closed weekly bar; the fiscal quarter is read from the text of the call, never from the calendar date.

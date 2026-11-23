@@ -33,6 +33,11 @@ APP_ROLE, AGENT_ROLE = "hokma_app", "hokma_agent"
 DESK_TABLES = ("desks", "desk_agents", "desk_assets", "desk_connections", "today_config")
 BROKER_TABLES = ("brokers", "broker_accounts", "account_ledger", "desk_accounts", "broker_orders",
                  "broker_external_accounts", "desk_limits")
+LESSON_TABLES = ("lessons", "thesis_events")      # 0021: written by Hokma code from executed decisions, never by an agent
+EXEC_TABLES = ("desk_profile", "desk_autonomy", "exec_proposals", "exec_guard_state", "exec_alerts", "sim_orders",
+               "sim_fills", "book_entries", "contracts", "contract_aliases", "econ_events", "run_records",
+               "run_checkpoints", "reconciliations", "recon_breaks")      # 0022: execution, contracts, calendar, back office
+PLANTEL_TABLES = ("desk_seats", "desk_signals", "desk_mandates", "premium_thresholds")   # 0023: desk plantel, signals, mandates, premium switch
 _CREATE_TABLE = re.compile(r"^CREATE TABLE (\w+)\s*\(", re.IGNORECASE)
 _REFERENCE = re.compile(r"^\s*(\w+)\s+.*?REFERENCES\s+(\w+)\s*\(", re.IGNORECASE)
 _ALTER_REFERENCE = re.compile(r"^ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)\b.*?REFERENCES\s+(\w+)\s*\(",
@@ -396,7 +401,7 @@ def provision_roles(target: Backend) -> str:
                 session.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO {role}")
             session.execute(f"REVOKE INSERT, UPDATE, DELETE ON {schema}.status_transitions, {schema}.approvals "
                             f"FROM {AGENT_ROLE}")
-            for desk_table in DESK_TABLES + BROKER_TABLES:   # the agents read desks through tools, they never write them
+            for desk_table in DESK_TABLES + BROKER_TABLES + LESSON_TABLES + EXEC_TABLES + PLANTEL_TABLES:   # the agents read desks through tools, they never write them
                 if session.table_exists(desk_table):
                     session.execute(f"REVOKE INSERT, UPDATE, DELETE ON {schema}.{desk_table} FROM {AGENT_ROLE}")
             session.commit()

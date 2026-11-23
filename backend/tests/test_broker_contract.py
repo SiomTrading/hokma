@@ -2,13 +2,13 @@
 import pytest
 from dbsupport import db, env  # noqa: F401  (fixtures)
 
-from hokma.broker.contract import ORDERS_MESSAGE, Broker, OrdersNotSupported
+from hokma.broker.contract import ORDERS_MESSAGE, BaseBroker, Broker, OrdersNotSupported
 from hokma.broker.sim import SimBroker
 from hokma.broker.types import Balance
 from hokma.db.errors import NotFound, ValidationError
 from hokma.db.seeds import SIM_BROKER
 
-BROKERS = [SimBroker]
+BROKERS = [BaseBroker, SimBroker]          # SPEC-018: the simulated broker takes orders; the base class still does not
 
 
 @pytest.fixture(params=BROKERS)
@@ -27,7 +27,8 @@ def test_the_simulated_broker_is_seeded_once_with_its_costs(db):  # noqa: F811
 def test_it_is_a_broker_and_declares_what_it_cannot_do(broker):
     assert isinstance(broker, Broker) and broker.kind == "sim"
     assert broker.capabilities.accounts and broker.capabilities.reset
-    assert not broker.capabilities.orders and not broker.capabilities.positions
+    takes_orders = isinstance(broker, SimBroker)
+    assert broker.capabilities.orders is takes_orders and broker.capabilities.positions is takes_orders
 
 
 def test_create_balance_and_reset_one_account_without_touching_the_others(broker):
@@ -76,6 +77,8 @@ def test_an_account_of_another_broker_is_not_found(broker):
 
 
 def test_orders_and_positions_fail_with_the_class_9_message(broker):
+    if broker.capabilities.orders:
+        return                                  # the simulated broker takes orders since SPEC-018 (tests/broker)
     for call in (broker.place_order, broker.positions, broker.cancel_order):
         with pytest.raises(OrdersNotSupported, match=ORDERS_MESSAGE):
             call()

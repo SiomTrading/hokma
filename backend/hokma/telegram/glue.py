@@ -196,7 +196,7 @@ class HokmaLink(TelegramLink):
     def _register_handlers(self, app) -> None:
         from telegram.ext import MessageHandler, filters
 
-        self._ui = LateRunUI(                       # before core registers its callback handler
+        self._ui = order_ticket_ui()(                # before core registers its callback handler
             self._bot, is_authorized=self._is_authorized, on_decision=self._on_decision, t=self._t,
             on_rejected=self._note_ignored, is_sender_ok=self._sender_ok)
         self._ui.on_late = self.on_late
@@ -326,6 +326,15 @@ class HokmaLink(TelegramLink):
         text = self._t("telegram.late_ask", name=job.name, planned=job.next_run_at)
         result = await self._ui.send_late_prompt(chat_id, destination, text, job.id,
                                                  self._t("telegram.late_btn_run"), self._t("telegram.late_btn_skip"))
+        return bool(result.success)
+
+    async def send_order_ticket(self, proposal_id: int, fingerprint: str, text: str) -> bool:
+        """The ticket of an order that waits for the owner, with its Approve and Reject buttons. False when it could not be sent."""
+        chat_id, destination = self._destination(None)
+        if self._ui is None or chat_id is None or not hasattr(self._ui, "send_order_ticket"):
+            return False
+        result = await self._ui.send_order_ticket(chat_id, destination, proposal_id, fingerprint, text,
+                                                  (self._t("telegram.order_btn_approve"), self._t("telegram.order_btn_reject")))
         return bool(result.success)
 
     async def send_exec_approval(self, command: str, request_id: str, description: str = "", *,
@@ -473,6 +482,20 @@ def enqueue(unit, text: str, thread_id: int | None = None) -> int:
     return unit.session.insert("telegram_outbox", {"text": fit(text), "thread_id": thread_id})
 
 
+def order_ticket_ui() -> type:
+    """The approvals interface with the `late run` buttons and the order ticket buttons of SPEC-018 (`hokma.exec.telegram_approval`)."""
+    from hokma.exec.telegram_approval import make_ui_class
+
+    return make_ui_class(LateRunUI)
+
+
+def order_notice(unit, kind: str, text: str) -> int:
+    """A notice about an order (a fill, a rejection, an expiry) for the owner, through the outbox: the sender retries it until Telegram takes
+    it, and one that fails does not hold back the next ones (`flush` goes on with the rest). `kind` is only for the log."""
+    log.info("order notice queued: %s", kind)
+    return enqueue(unit, text)
+
+
 class TelegramGlue:
     def __init__(self, get_db: Callable[[], Database], get_engine: Callable[[], Any], *,
                  keys: KeyStore | None = None, application_factory=build_application, data_dir=None, now=datetime.now) -> None:
@@ -505,6 +528,9 @@ class TelegramGlue:
             if not token:
                 return False
             await self.link.start(token)
+            from hokma.exec import telegram_approval
+
+            telegram_approval.set_button_sender(self.link.send_order_ticket)     # the tickets of the orders go out with their buttons
         self.connect_error = None
         await self._revalidate_avisos()
         return True

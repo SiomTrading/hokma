@@ -1,0 +1,53 @@
+<SEC-DOCUMENT>0001000001-23-000010.txt : 20230221
+<SEC-HEADER>0001000001-23-000010.hdr.sgml : 20230221
+<ACCEPTANCE-DATETIME>20230221170000
+ACCESSION NUMBER:		0001000001-23-000010
+CONFORMED SUBMISSION TYPE:	10-K
+PUBLIC DOCUMENT COUNT:		2
+CONFORMED PERIOD OF REPORT:	20221231
+FILED AS OF DATE:		20230221
+
+FILER:
+
+	COMPANY DATA:	
+		COMPANY CONFORMED NAME:			Northwind Instruments Inc.
+		CENTRAL INDEX KEY:			0001000001
+
+	FILING VALUES:
+		FORM TYPE:		10-K
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>10-K
+<SEQUENCE>1
+<FILENAME>nwnd-10k-2022.htm
+<DESCRIPTION>10-K
+<TEXT>
+<html><body><p>FORM 10-K</p><p>Item 1. Business</p><p>Northwind sells sensors.</p></body></html>
+</TEXT>
+</DOCUMENT>
+<DOCUMENT>
+<TYPE>EX-101.INS
+<SEQUENCE>2
+<FILENAME>nwnd-20221231.xml
+<DESCRIPTION>EX-101.INS
+<TEXT>
+<XML>
+<xbrli:xbrl xmlns="http://www.xbrl.org/2003/instance" xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:link="http://www.xbrl.org/2003/linkbase" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:iso4217="http://www.xbrl.org/2003/iso4217" xmlns:us-gaap="http://fasb.org/us-gaap/2023" xmlns:dei="http://xbrl.sec.gov/dei/2023" xmlns:srt="http://fasb.org/srt/2023" xmlns:nw="http://www.northwind.example/20231231">
+  <link:schemaRef xlink:type="simple" xlink:href="nwnd-20221231.xsd"/>
+  <xbrli:context id="c_fy22"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000001</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2022-01-01</xbrli:startDate><xbrli:endDate>2022-12-31</xbrli:endDate></xbrli:period></xbrli:context>
+  <xbrli:context id="c_fy21"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000001</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2021-01-01</xbrli:startDate><xbrli:endDate>2021-12-31</xbrli:endDate></xbrli:period></xbrli:context>
+  <xbrli:context id="c_end22"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000001</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>2022-12-31</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:unit id="usd"><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="usdPerShare"><xbrli:divide><xbrli:unitNumerator><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unitNumerator><xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator></xbrli:divide></xbrli:unit>
+  <xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+  <dei:DocumentType contextRef="c_fy22">10-K</dei:DocumentType>
+  <us-gaap:Revenues contextRef="c_fy22" unitRef="usd" decimals="-5">365000000</us-gaap:Revenues>
+  <us-gaap:Revenues contextRef="c_fy21" unitRef="usd" decimals="-5">330000000</us-gaap:Revenues>
+  <us-gaap:NetIncomeLoss contextRef="c_fy22" unitRef="usd" decimals="-5">31000000</us-gaap:NetIncomeLoss>
+  <us-gaap:NetIncomeLoss contextRef="c_fy21" unitRef="usd" decimals="-5">27000000</us-gaap:NetIncomeLoss>
+  <us-gaap:Assets contextRef="c_end22" unitRef="usd" decimals="-5">301000000</us-gaap:Assets>
+</xbrli:xbrl>
+</XML>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

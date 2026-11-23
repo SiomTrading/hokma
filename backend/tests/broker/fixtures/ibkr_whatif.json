@@ -1,0 +1,13 @@
+{
+  "amount": {
+    "amount": "1,001.00 USD",
+    "commission": "1.00 USD",
+    "total": "1,002.00 USD"
+  },
+  "equity": {
+    "current": "15,500",
+    "change": "0",
+    "after": "15,500"
+  },
+  "warn": ""
+}

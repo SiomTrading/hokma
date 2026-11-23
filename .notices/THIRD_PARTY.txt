@@ -19,3 +19,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----------------------------------------------------------------------
+
+Broker connectors (SPEC-018, block B5). Hokma's own code, written on top of these libraries and public interfaces; nothing is copied from them.
+
+- alpaca-py: Apache-2.0 License. Used by the Alpaca connector for orders, positions and the account.
+- ccxt: MIT License. Used by the crypto connector for spot balances and orders at an exchange.
+- IBKR web API documentation (Client Portal Web API): the interface that the IBKR connector speaks to the gateway on the student's own computer.
+
+---
+
+Back office charts (equity curve, drawdown and composition): the idea of these three views follows the plots of the open projects
+Perspective, D-Tale and btplotting. The charts of Hokma are written from scratch as inline SVG; no code, data or asset of those projects
+is included or loaded.
+
+---
+
+Derivative pricing (SVC-options, SPEC-019 block B1; recipe in docs/quant/options-pricing.md). The recipe and the code are Hokma's own; nothing is copied.
+The models follow their published papers, cited here as the origin of the formulas: Black and Scholes (1973) and Merton (1973) for the option price with a
+dividend yield; Garman and Kohlhagen (1983) for currency options; Cox, Ross and Rubinstein (1979), Jarrow and Rudd (1983), Tian (1993) and Leisen and Reimer
+(1996) for the binomial trees; Bjerksund and Stensland (2002) for the American approximation; Reiner and Rubinstein (1991) for barrier options and
+Kemna and Vorst (1990) for the geometric average price option; Breeden and Litzenberger (1978) for the risk-neutral density; Gatheral (2004) for the SVI smile.
+The pricing libraries FinancePy, tf-quant-finance and the QuantLib bindings were read only for the idea of which model fits which style of option; no code, data or asset of them is included or loaded.
+
+---
+
+Replication statistics (SPEC-019 block B9, rule "realistic expectations" of the desk judge). The rule text is Hokma's own; nothing is copied.
+The figures it quotes (a median Sharpe ratio of 0.37 and 48 percent of results with a t statistic above 1.96, out of 4,843 academic papers coded and run) are
+self-declared by the maintainer of a public index of replicated academic trading results. They have not been verified here and carry medium confidence.
+Hokma uses them only as a prior for the judge, never as a threshold.

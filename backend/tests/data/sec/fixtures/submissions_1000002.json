@@ -1,0 +1,49 @@
+{
+ "cik": "1000002",
+ "name": "Harbor Fund Trust",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0001000002-26-000002",
+    "0001000002-24-000010",
+    "0001000002-24-000003"
+   ],
+   "filingDate": [
+    "2026-02-20",
+    "2024-08-30",
+    "2024-05-28"
+   ],
+   "reportDate": [
+    "2026-01-31",
+    "",
+    "2017-10-22"
+   ],
+   "acceptanceDateTime": [
+    "2026-02-20T15:00:00.000Z",
+    "2024-08-30T15:00:00.000Z",
+    "2024-05-28T15:00:00.000Z"
+   ],
+   "form": [
+    "N-MFP3",
+    "N-PX",
+    "NPORT-P"
+   ],
+   "items": [
+    "",
+    "",
+    ""
+   ],
+   "primaryDocument": [
+    "primary_doc.xml",
+    "primary_doc.xml",
+    "primary_doc.xml"
+   ],
+   "primaryDocDescription": [
+    "N-MFP3",
+    "N-PX",
+    "NPORT-P"
+   ]
+  },
+  "files": []
+ }
+}

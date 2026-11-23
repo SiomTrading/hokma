@@ -1,0 +1,16 @@
+services:
+  hokma:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: hokma:local
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - hokma-data:/data
+    restart: unless-stopped
+volumes:
+  hokma-data:

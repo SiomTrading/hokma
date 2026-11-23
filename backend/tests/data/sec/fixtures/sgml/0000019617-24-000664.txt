@@ -1,0 +1,92 @@
+<SEC-DOCUMENT>0000019617-24-000664.txt : 20241223
+<SEC-HEADER>0000019617-24-000664.hdr.sgml : 20241223
+<ACCEPTANCE-DATETIME>20241223135729
+ACCESSION NUMBER:		0000019617-24-000664
+CONFORMED SUBMISSION TYPE:	ATS-N-W
+PUBLIC DOCUMENT COUNT:		1
+WITHDRAWN ACCESSION NUMBER: 	0000019617-24-000662
+FILED AS OF DATE:		20241223
+EFFECTIVENESS DATE:		20241223
+
+FILER:
+
+	COMPANY DATA:	
+		COMPANY CONFORMED NAME:			J.P. MORGAN SECURITIES LLC
+		CENTRAL INDEX KEY:			0000782124
+		ORGANIZATION NAME:           	
+		IRS NUMBER:				134110995
+		STATE OF INCORPORATION:			DE
+		FISCAL YEAR END:			1231
+
+	FILING VALUES:
+		FORM TYPE:		ATS-N-W
+		SEC ACT:		1934 Act
+		SEC FILE NUMBER:	013-00109
+		FILM NUMBER:		241572320
+
+	BUSINESS ADDRESS:	
+		STREET 1:		383 MADISON AVENUE
+		CITY:			NEW YORK
+		STATE:			NY
+		ZIP:			10179
+		BUSINESS PHONE:		000-000-0000
+
+	MAIL ADDRESS:	
+		STREET 1:		1111 POLARIS PKWY
+		STREET 2:		FLOOR 3F
+		CITY:			COLUMBUS
+		STATE:			OH
+		ZIP:			43240
+
+	FORMER COMPANY:	
+		FORMER CONFORMED NAME:	J.P. MORGAN SECURITIES INC.
+		DATE OF NAME CHANGE:	20100902
+
+	FORMER COMPANY:	
+		FORMER CONFORMED NAME:	J.P. MORGAN SECURITIES LLC
+		DATE OF NAME CHANGE:	20100823
+
+	FORMER COMPANY:	
+		FORMER CONFORMED NAME:	J.P. MORGAN SECURITIES INC.
+		DATE OF NAME CHANGE:	20090219
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>ATS-N-W
+<SEQUENCE>1
+<FILENAME>primary_doc.xml
+<TEXT>
+<XML>
+<?xml version="1.0" encoding="UTF-8"?>
+<edgarSubmission xmlns="http://www.sec.gov/edgar/atsncw" xmlns:com="http://www.sec.gov/edgar/common" xmlns:ats="http://www.sec.gov/edgar/atsncommon">
+  <headerData>
+    <submissionType>ATS-N-W</submissionType>
+    <accessionNumber>0000019617-24-000662</accessionNumber>
+    <filerInfo>
+      <liveTestFlag>LIVE</liveTestFlag>
+      <filer>
+        <filerCredentials>
+          <com:cik>0000782124</com:cik>
+          <com:ccc>XXXXXXXX</com:ccc>
+        </filerCredentials>
+        <MPID>JPBX</MPID>
+        <NMSStockATSName>JPB-X</NMSStockATSName>
+      </filer>
+      <contact>
+        <ats:contactName>Contact Person</ats:contactName>
+        <ats:contactPhoneNumber>000-000-0000</ats:contactPhoneNumber>
+        <ats:contactEmailAddress>contact@example.invalid</ats:contactEmailAddress>
+      </contact>
+      <flags>
+        <ats:overrideInternetFlag>false</ats:overrideInternetFlag>
+        <ats:confirmingCopyFlag>false</ats:confirmingCopyFlag>
+      </flags>
+    </filerInfo>
+  </headerData>
+  <formData>
+
+  </formData>
+</edgarSubmission>
+</XML>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

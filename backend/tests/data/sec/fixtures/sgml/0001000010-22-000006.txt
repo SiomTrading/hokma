@@ -1,0 +1,106 @@
+<SEC-DOCUMENT>0001000010-22-000006.txt : 20220513
+<SEC-HEADER>0001000010-22-000006.hdr.sgml : 20220513
+<ACCEPTANCE-DATETIME>20220513143000
+ACCESSION NUMBER:		0001000010-22-000006
+CONFORMED SUBMISSION TYPE:	13F-HR
+PUBLIC DOCUMENT COUNT:		2
+CONFORMED PERIOD OF REPORT:	20220331
+FILED AS OF DATE:		20220513
+
+FILER:
+
+	COMPANY DATA:	
+		COMPANY CONFORMED NAME:			HARBOR CAPITAL MANAGEMENT LLC
+		CENTRAL INDEX KEY:			0001000010
+
+	FILING VALUES:
+		FORM TYPE:		13F-HR
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>13F-HR
+<SEQUENCE>1
+<FILENAME>primary_doc.xml
+<DESCRIPTION>13F-HR
+<TEXT>
+<XML>
+<edgarSubmission xmlns:com="http://www.sec.gov/edgar/common" xmlns="http://www.sec.gov/edgar/thirteenffiler">
+  <schemaVersion>X0202</schemaVersion>
+  <headerData>
+    <submissionType>13F-HR</submissionType>
+    <filerInfo>
+      <liveTestFlag>LIVE</liveTestFlag>
+      <filer><credentials><cik>0001000010</cik><ccc>XXXXXXXX</ccc></credentials></filer>
+      <periodOfReport>03-31-2022</periodOfReport>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <coverPage>
+      <reportCalendarOrQuarter>03-31-2022</reportCalendarOrQuarter>
+      <isAmendment>false</isAmendment>
+      <filingManager>
+        <name>HARBOR CAPITAL MANAGEMENT LLC</name>
+        <address><com:street1>1 HARBOR PLAZA</com:street1><com:city>BOSTON</com:city><com:stateOrCountry>MA</com:stateOrCountry><com:zipCode>02110</com:zipCode></address>
+      </filingManager>
+      <reportType>13F HOLDINGS REPORT</reportType>
+      <form13FFileNumber>028-99999</form13FFileNumber>
+      <provideInfoForInstruction5>N</provideInfoForInstruction5>
+    </coverPage>
+    <signatureBlock>
+      <name>Dana Whitfield</name>
+      <title>Chief Compliance Officer</title>
+      <phone>000-000-0000</phone>
+      <signature>/s/ Dana Whitfield</signature>
+      <city>BOSTON</city>
+      <stateOrCountry>MA</stateOrCountry>
+      <signatureDate>05-13-2022</signatureDate>
+    </signatureBlock>
+    <summaryPage>
+      <otherIncludedManagersCount>0</otherIncludedManagersCount>
+      <tableEntryTotal>3</tableEntryTotal>
+      <tableValueTotal>38686</tableValueTotal>
+    </summaryPage>
+  </formData>
+</edgarSubmission>
+</XML>
+</TEXT>
+</DOCUMENT>
+<DOCUMENT>
+<TYPE>INFORMATION TABLE
+<SEQUENCE>2
+<FILENAME>infotable.xml
+<DESCRIPTION>INFORMATION TABLE
+<TEXT>
+<XML>
+<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <infoTable>
+    <nameOfIssuer>APPLE INC</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>037833100</cusip>
+    <value>22699</value>
+    <shrsOrPrnAmt><sshPrnamt>130000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+    <votingAuthority><Sole>130000</Sole><Shared>0</Shared><None>0</None></votingAuthority>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>MICROSOFT CORP</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>594918104</cusip>
+    <value>12974</value>
+    <shrsOrPrnAmt><sshPrnamt>45000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+    <votingAuthority><Sole>45000</Sole><Shared>0</Shared><None>0</None></votingAuthority>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>AMAZON COM INC</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>023135106</cusip>
+    <value>3013</value>
+    <shrsOrPrnAmt><sshPrnamt>1000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+    <votingAuthority><Sole>1000</Sole><Shared>0</Shared><None>0</None></votingAuthority>
+  </infoTable>
+</informationTable>
+</XML>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

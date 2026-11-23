@@ -300,12 +300,12 @@ def test_a_desk_without_an_account_or_with_an_account_that_does_not_trade_or_is_
     with pytest.raises(BrokerError) as refused:
         service.place(bare["id"], limit(), "t", AGENT, db=ready.db)
     assert refused.value.code == "no_trading_account"
-    internal = service.create_account(1, "Interna", 5000, db=ready.db)                            # the internal broker takes no orders
+    internal = service.create_account(1, "Interna", 5000, db=ready.db)                            # the simulated broker takes orders, with its switch off
     other = make_desk(ready.db, name="Interna")
     service.assign_account(other["id"], internal["id"], db=ready.db)
     with pytest.raises(BrokerError) as refused:
         service.place(other["id"], limit(), "t", AGENT, db=ready.db)
-    assert refused.value.code == "no_trading_account"
+    assert refused.value.code == "orders_off"
     with ready.db.write() as u:
         u.broker.archive_account(ready.account_id)
     with pytest.raises(BrokerError) as refused:
@@ -498,7 +498,9 @@ def test_assets_only_uses_the_symbols_of_the_desk(ready):
 
     desks.set_assets(ready.desk_id, ["MSFT"], db=ready.db)
     service.set_limits(ready.desk_id, {"assets_only": True}, db=ready.db)
-    assert service.place(ready.desk_id, limit(symbol="AAPL"), "t", AGENT, db=ready.db)["status"] == "needs_owner"
+    with pytest.raises(BrokerError) as outside:                     # SPEC-018: the symbol list of the desk is a guard that blocks, also for native orders
+        service.place(ready.desk_id, limit(symbol="AAPL"), "t", AGENT, db=ready.db)
+    assert outside.value.code == "symbol_not_allowed"
     assert service.place(ready.desk_id, limit(symbol="MSFT"), "t", AGENT, db=ready.db)["status"] == "sent"
 
 

@@ -1,0 +1,33 @@
+{
+ "cik": "1000020",
+ "name": "Northwind Auto Receivables Trust",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0001000020-24-000005"
+   ],
+   "filingDate": [
+    "2024-06-14"
+   ],
+   "reportDate": [
+    "2024-05-31"
+   ],
+   "acceptanceDateTime": [
+    "2024-06-14T15:00:00.000Z"
+   ],
+   "form": [
+    "ABS-EE"
+   ],
+   "items": [
+    ""
+   ],
+   "primaryDocument": [
+    "primary_doc.xml"
+   ],
+   "primaryDocDescription": [
+    "ABS-EE"
+   ]
+  },
+  "files": []
+ }
+}

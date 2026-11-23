@@ -1,0 +1,19 @@
+{
+  "symbol": "BTC/USD",
+  "base": "BTC",
+  "quote": "USD",
+  "limits": {
+    "amount": {
+      "min": 0.0001,
+      "max": 100
+    },
+    "price": {
+      "min": 1,
+      "max": null
+    }
+  },
+  "precision": {
+    "amount": 8,
+    "price": 2
+  }
+}

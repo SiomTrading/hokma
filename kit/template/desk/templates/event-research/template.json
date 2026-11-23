@@ -1,0 +1,30 @@
+{
+ "approved_versions": [
+  {
+   "digest": "1725e996571f92a579c995d58b68c52ff8c8c5e63daf4d5c04174588046af303",
+   "version": "1.0.0"
+  }
+ ],
+ "description": "A desk that follows dated events such as results, filings and large holder moves, and reviews how each one played out.",
+ "display_name": "Event research desk",
+ "files": {
+  "README.md": "6507d161908665cd8e9bb27f8fe6cb3d91cb24fce49b1a9f1ed56b461a74c3e1",
+  "files/events/calendar.md": "6f981a2a4944dc5ddab066154bc9421f1691b8f11284f6f62b651edf471a3b25",
+  "files/events/review.md": "8c7de64a64a1275cefb9829257a2872494b8b322e4ddaae67c5bba9cc6e23e3d"
+ },
+ "inject_rules": [
+  "desk-base",
+  "collaboration",
+  "citations",
+  "source-policy",
+  "no-lookahead",
+  "scope-honesty"
+ ],
+ "lines": [
+  "SWO",
+  "LP"
+ ],
+ "name": "event-research",
+ "schema_version": 1,
+ "version": "1.0.0"
+}

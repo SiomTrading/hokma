@@ -6,7 +6,7 @@ the answers of Schwab are made up and come from a fake server. Nothing leaves th
 import json
 
 import pytest
-from broker_orders_support import (ACCOUNT, FIRST_ID, ORDERS, PREVIEW_PATH, SECRETS, calls, connections, created, desks_db,  # noqa: F401
+from broker_orders_support import (ACCOUNT, account_body, pos, FIRST_ID, ORDERS, PREVIEW_PATH, SECRETS, calls, connections, created, desks_db,  # noqa: F401
                                    env, db, eq, fake, keys, limit, order_body, ready, rows, sent, server)
 from test_schwab_order_endpoints import RECIPES
 
@@ -38,9 +38,36 @@ KINDS = {
 }
 
 
+CREDIT_KINDS = {"net_credit", "iron_condor"}          # they receive a credit: premium selling, closed for a desk until a calibrated threshold exists (SPEC-019 4.5)
+
+
+def _debit_marks(order):
+    """Marks for the option legs of an order: a bought leg is worth more than a sold one, so a covered structure reads as a debit."""
+    from decimal import Decimal
+
+    from hokma.contracts import symbols
+
+    marks = {}
+    for leg in order.get("orderLegCollection", []):
+        if leg["instrument"].get("assetType") == "OPTION":
+            marks[symbols.from_provider("schwab", leg["instrument"]["symbol"])] = Decimal(5 if leg["instruction"].startswith("BUY") else 1)
+    return lambda ids: {i: marks[i] for i in ids if i in marks}
+
+
 @pytest.mark.parametrize("kind", sorted(KINDS))
-def test_the_service_previews_then_posts_the_same_body_reads_the_id_and_records(ready, kind):
+def test_the_service_previews_then_posts_the_same_body_reads_the_id_and_records(ready, kind, monkeypatch):
+    from hokma.exec import prefilter
+
     order = RECIPES[KINDS[kind]]
+    monkeypatch.setattr(prefilter, "_mark_source", _debit_marks(order))
+    if kind in CREDIT_KINDS:
+        with pytest.raises(BrokerError) as refused:
+            service.place(ready.desk_id, order, f"test of {kind}", AGENT, db=ready.db)
+        assert "premium_selling_closed" in str(refused.value)
+        assert ORDERS not in [c.path for c in calls(ready.fake, "POST")]            # nothing was posted to the broker
+        return
+    if kind == "oco":                                                         # an OCO of exits only goes with something held to exit
+        ready.fake.on("GET", ACCOUNT, account_body([pos("XYZ", long=5, value=50)]))
     answer = service.place(ready.desk_id, order, f"test of {kind}", AGENT, db=ready.db)
 
     assert answer["status"] == "sent" and answer["order_id"] == FIRST_ID and answer["approved_by"] == "auto"

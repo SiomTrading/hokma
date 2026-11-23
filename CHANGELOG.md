@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.12
+
+- New: Desk core: the signal contract (a conviction from -1 to +1 with an abstention that is never neutral), the graph and state of a desk run, common prompt rules, skills with a versioned format, safe handling of tickers and provider responses, and a hash of the content of a snapshot that ignores generation dates.
+- New: Integrity checklist for this release: the lock resolves on the five supported platforms, no file outside a module imports a quantitative or data library, every blocked function raises and names its replacement, every quant call has size and time limits, and the repository rules check passes.
+- New: Lessons: a lesson is saved only from a decision whose order executed, measured from the real entry fill, per desk and general after approval.
+- New: Multi model layer: Hokma starts with any engine you already use and extracts structured answers from any of them.
+- New: `hokma quant list` and `hokma quant run` print any registered function over a file of returns.
+- New: Hokma has its own metrics, risk, validation and data modules. Agents ask for a Sharpe, a VaR, a probabilistic Sharpe or a point in time snapshot through registered functions and get the number with its method, parameters and source. The functions of the underlying libraries that give wrong numbers are blocked and name the function that replaces them.
+- New: Full SWO desk (H1 to H3): core, execution with a simulated broker and the options desk; the chat tells the owner the impact when an order of theirs leaves the fund short.
+
 ## 1.0.11
 
 - Fixed: with the market closed, the chart header shows the regular session as thinkorswim does (the close and its own change, for example 608,45 -5,67%), never the bid. The after-hours trade appears next to it as a second figure.

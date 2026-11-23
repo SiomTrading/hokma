@@ -32,7 +32,7 @@ def test_the_retired_providers_are_removed_from_every_desk_and_the_others_stay(e
                         (desk, provider, enabled))
     con.commit()
     con.close()
-    assert migrate().applied == [19, 20]
+    assert migrate().applied == [19, 20, 21, 22, 23]
     con = raw()
     assert _providers(con) == [(d1, "alpaca", 1), (d1, "finnhub", 0), (d2, "alpaca", 1), (d2, "finnhub", 0)]
     assert con.execute("SELECT count(*) FROM desks").fetchone()[0] == 2                 # nothing else is touched
@@ -47,7 +47,7 @@ def test_running_the_file_again_does_not_fail_and_changes_nothing(env):
     con.execute("INSERT INTO desk_connections (desk_id, provider_id) VALUES (?, 'alpaca')", (desk,))
     con.commit()
     con.close()
-    assert migrate().applied == [19, 20]
+    assert migrate().applied == [19, 20, 21, 22, 23]
     assert migrate().applied == []                                                       # the runner does not repeat it
     con = raw()
     sql = (MIGRATIONS_DIR / "0019_retire_market_providers.sql").read_text(encoding="utf-8")

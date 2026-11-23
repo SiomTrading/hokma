@@ -1,0 +1,45 @@
+# Example mandate of a stock options swing desk, traditional variant.
+# The mandate names no instrument: the universe is an argument of every run.
+# Premium selling stays closed until the desk has a calibrated threshold; this mandate only buys options and debit spreads.
+name: Options swing, traditional
+line: SWO
+variant: traditional
+rebalance: weekly
+asset_classes: [stock, etf, option]
+risk:
+  max_risk_per_trade_pct: 1.0
+  max_open_positions: 5
+  max_drawdown_pct: 10
+analysts:
+  - key: market
+  - key: sentiment
+  - key: news
+  - key: fundamentals
+  - key: options
+strategies:
+  - name: quality-on-a-pullback
+    display_name: Quality on a pullback
+    horizon: weeks
+    cadence: weekly
+    models:
+      - name: A16
+        weight: 2
+      - name: A17
+      - name: A18
+      - name: A19
+      - name: A22
+    blend:
+      method: conviction_weighted
+  - name: inflection-with-a-catalyst
+    display_name: Inflection with a dated catalyst
+    horizon: weeks
+    cadence: daily
+    models:
+      - name: A20
+        weight: 2
+      - name: A21
+        weight: 2
+      - name: A16
+    blend:
+      method: conviction_weighted
+notes: Debit structures only. Size and exits come from the trader pieces, never from this file.

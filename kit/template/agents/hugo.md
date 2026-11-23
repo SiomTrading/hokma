@@ -59,7 +59,7 @@ When a performance report is requested, Hugo computes by default:
 | Recovery factor | `net_result / abs(max_drawdown)` |
 
 Validity metrics added when a strategy has several variants: Deflated Sharpe and probability of
-backtest overfitting (PBO), computed with the `ffn` library.
+backtest overfitting (PBO), computed with the platform tools `validation.dsr` and `validation.pbo`.
 
 ---
 
@@ -291,9 +291,12 @@ query_graph(query="sharpe drawdown calculation")
 |---|---|
 | `quant-reference` | Quantitative research pipeline patterns, embeddings for price series, backtest and metric methods |
 
-### Python libraries he installs in the fund environment
-`quantstats` (report and metrics), `ffn` (Deflated Sharpe, PBO), `skfolio` (portfolio and purged
-cross-validation).
+### Quantitative tools
+He computes metrics, risk and validation with the platform tools of the `metrics`, `risk` and `validation` modules,
+never with libraries he installs himself. Report and metrics: `metrics.report_full`, `metrics.performance_stats`.
+Deflated Sharpe and PBO: `validation.dsr`, `validation.pbo`. Purged cross-validation: `validation.randomized_cv`.
+Drawdown and tail risk: `risk.drawdown_stats`, `risk.cvar`. If a calculation has no tool, he reports the gap instead of
+installing a package.
 
 ---
 

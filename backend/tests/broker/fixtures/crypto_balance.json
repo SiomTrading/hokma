@@ -1,0 +1,21 @@
+{
+  "free": {
+    "USD": 2500.5,
+    "BTC": 0.5,
+    "ETH": 0
+  },
+  "used": {
+    "USD": 0,
+    "BTC": 0,
+    "ETH": 0
+  },
+  "total": {
+    "USD": 2500.5,
+    "BTC": 0.5,
+    "ETH": 0
+  },
+  "info": {
+    "key": "CRYSENT7788KEY",
+    "uid": "CRYSENT7788KEY"
+  }
+}

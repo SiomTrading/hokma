@@ -1,0 +1,113 @@
+<edgarSubmission>
+  <formData>
+    <generalInfo>
+      <reportDate>2026-01-31</reportDate>
+      <registrantFullName>Test Registrant Inc</registrantFullName>
+      <cik>0000000099</cik>
+      <registrantLEIId>LEI12345</registrantLEIId>
+      <nameOfSeries>Test Series</nameOfSeries>
+      <leiOfSeries>SLEI67890</leiOfSeries>
+      <seriesId>S000099999</seriesId>
+      <totalShareClassesInSeries>1</totalShareClassesInSeries>
+      <finalFilingFlag>N</finalFilingFlag>
+    </generalInfo>
+    <seriesLevelInfo>
+      <moneyMarketFundCategory>Government</moneyMarketFundCategory>
+      <averagePortfolioMaturity>30</averagePortfolioMaturity>
+      <averageLifeMaturity>60</averageLifeMaturity>
+      <cash>50000.00</cash>
+      <netAssetOfSeries>1000000.00</netAssetOfSeries>
+      <numberOfSharesOutstanding>1000000</numberOfSharesOutstanding>
+      <seekStablePricePerShare>Y</seekStablePricePerShare>
+      <stablePricePerShare>1.0000</stablePricePerShare>
+      <sevenDayGrossYield>
+        <sevenDayGrossYieldDate>2026-01-02</sevenDayGrossYieldDate>
+        <sevenDayGrossYieldValue>0.0400</sevenDayGrossYieldValue>
+      </sevenDayGrossYield>
+      <dailyNetAssetValuePerShareSeries>
+        <dailyNetAssetValuePerShareDateSeries>2026-01-02</dailyNetAssetValuePerShareDateSeries>
+        <dailyNetAssetValuePerShareSeries>1.0001</dailyNetAssetValuePerShareSeries>
+      </dailyNetAssetValuePerShareSeries>
+      <liquidAssetsDetails>
+        <totalLiquidAssetsNearPercentDate>2026-01-02</totalLiquidAssetsNearPercentDate>
+        <totalValueDailyLiquidAssets>600000</totalValueDailyLiquidAssets>
+        <totalValueWeeklyLiquidAssets>800000</totalValueWeeklyLiquidAssets>
+        <percentageDailyLiquidAssets>0.60</percentageDailyLiquidAssets>
+        <percentageWeeklyLiquidAssets>0.80</percentageWeeklyLiquidAssets>
+      </liquidAssetsDetails>
+    </seriesLevelInfo>
+    <classLevelInfo>
+      <classFullName>Class A</classFullName>
+      <classesId>C000012345</classesId>
+      <minInitialInvestment>1000</minInitialInvestment>
+      <netAssetsOfClass>500000.00</netAssetsOfClass>
+      <numberOfSharesOutstanding>500000</numberOfSharesOutstanding>
+      <dailyNetAssetValuePerShareClass>
+        <dailyNetAssetValuePerShareDateClass>2026-01-02</dailyNetAssetValuePerShareDateClass>
+        <dailyNetAssetValuePerShareClass>1.0001</dailyNetAssetValuePerShareClass>
+      </dailyNetAssetValuePerShareClass>
+      <dialyShareholderFlowReported>
+        <dailyShareHolderFlowDate>2026-01-02</dailyShareHolderFlowDate>
+        <dailyGrossSubscriptions>10000</dailyGrossSubscriptions>
+        <dailyGrossRedemptions>5000</dailyGrossRedemptions>
+      </dialyShareholderFlowReported>
+      <sevenDayNetYield>
+        <sevenDayNetYieldDate>2026-01-02</sevenDayNetYieldDate>
+        <sevenDayNetYieldValue>0.038</sevenDayNetYieldValue>
+      </sevenDayNetYield>
+    </classLevelInfo>
+    <scheduleOfPortfolioSecuritiesInfo>
+      <nameOfIssuer>US Treasury</nameOfIssuer>
+      <titleOfIssuer>T-Bill</titleOfIssuer>
+      <CUSIPMember>912796001</CUSIPMember>
+      <ISINId>US9127960010</ISINId>
+      <investmentCategory>U.S. Treasury Debt</investmentCategory>
+      <investmentMaturityDateWAM>2026-03-15</investmentMaturityDateWAM>
+      <investmentMaturityDateWAL>2026-06-15</investmentMaturityDateWAL>
+      <yieldOfTheSecurityAsOfReportingDate>0.042</yieldOfTheSecurityAsOfReportingDate>
+      <includingValueOfAnySponsorSupport>500000.00</includingValueOfAnySponsorSupport>
+      <excludingValueOfAnySponsorSupport>499500.00</excludingValueOfAnySponsorSupport>
+      <percentageOfMoneyMarketFundNetAssets>0.50</percentageOfMoneyMarketFundNetAssets>
+      <dailyLiquidAssetSecurityFlag>Y</dailyLiquidAssetSecurityFlag>
+      <weeklyLiquidAssetSecurityFlag>Y</weeklyLiquidAssetSecurityFlag>
+      <illiquidSecurityFlag>N</illiquidSecurityFlag>
+      <securityDemandFeatureFlag>N</securityDemandFeatureFlag>
+      <securityGuaranteeFlag>N</securityGuaranteeFlag>
+      <securityEnhancementsFlag>N</securityEnhancementsFlag>
+      <assigningNRSRORating>
+        <nameOfNRSRO>Moody's</nameOfNRSRO>
+        <rating>Aaa</rating>
+      </assigningNRSRORating>
+    </scheduleOfPortfolioSecuritiesInfo>
+    <scheduleOfPortfolioSecuritiesInfo>
+      <nameOfIssuer>Repo Bank</nameOfIssuer>
+      <titleOfIssuer>Repo Agreement</titleOfIssuer>
+      <CUSIPMember>REPO001</CUSIPMember>
+      <investmentCategory>U.S. Treasury Repurchase Agreement</investmentCategory>
+      <yieldOfTheSecurityAsOfReportingDate>0.035</yieldOfTheSecurityAsOfReportingDate>
+      <includingValueOfAnySponsorSupport>300000.00</includingValueOfAnySponsorSupport>
+      <percentageOfMoneyMarketFundNetAssets>0.30</percentageOfMoneyMarketFundNetAssets>
+      <dailyLiquidAssetSecurityFlag>Y</dailyLiquidAssetSecurityFlag>
+      <weeklyLiquidAssetSecurityFlag>Y</weeklyLiquidAssetSecurityFlag>
+      <illiquidSecurityFlag>N</illiquidSecurityFlag>
+      <securityDemandFeatureFlag>N</securityDemandFeatureFlag>
+      <securityGuaranteeFlag>N</securityGuaranteeFlag>
+      <securityEnhancementsFlag>N</securityEnhancementsFlag>
+      <repurchaseAgreement>
+        <repurchaseAgreementOpenFlag>N</repurchaseAgreementOpenFlag>
+        <repurchaseAgreementClearedFlag>Y</repurchaseAgreementClearedFlag>
+        <repurchaseAgreementTripartyFlag>Y</repurchaseAgreementTripartyFlag>
+        <collateralIssuers>
+          <nameOfCollateralIssuer>US Treasury Bond</nameOfCollateralIssuer>
+          <LEIID>COLLATERAL_LEI</LEIID>
+          <CUSIPMember>COLLCUSIP</CUSIPMember>
+          <maturityDate><date>2035-06-15</date></maturityDate>
+          <coupon>2.500</coupon>
+          <principalAmountToTheNearestCent>310000.00</principalAmountToTheNearestCent>
+          <valueOfCollateralToTheNearestCent>305000.00</valueOfCollateralToTheNearestCent>
+          <ctgryInvestmentsRprsntsCollateral>U.S. Treasury Debt</ctgryInvestmentsRprsntsCollateral>
+        </collateralIssuers>
+      </repurchaseAgreement>
+    </scheduleOfPortfolioSecuritiesInfo>
+  </formData>
+</edgarSubmission>

@@ -1,0 +1,32 @@
+{
+ "approved_versions": [
+  {
+   "digest": "449d8c0d8d0a33fa6a25e36e30a6c6f0a3acda2f9bfd198296987a7166b588c9",
+   "version": "1.0.0"
+  }
+ ],
+ "description": "A general desk for talking through a market idea with the whole team before it becomes a task or a study.",
+ "display_name": "Open conversation desk",
+ "files": {
+  "README.md": "b5e35584214d166cd664c5ecb74dea3496a4ea4b79d27514b78bf126cf1268e3",
+  "files/notes/inbox.md": "b9c09d60c46e53c9aa42d0225d9ec7c481af392a78368b5ee82331d26a7f6306"
+ },
+ "inject_rules": [
+  "desk-base",
+  "collaboration",
+  "citations",
+  "source-policy",
+  "no-lookahead",
+  "scope-honesty"
+ ],
+ "lines": [
+  "RF",
+  "DT",
+  "SWC",
+  "SWO",
+  "LP"
+ ],
+ "name": "desk-chat",
+ "schema_version": 1,
+ "version": "1.0.0"
+}

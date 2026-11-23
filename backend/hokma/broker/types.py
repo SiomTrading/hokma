@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 
@@ -49,6 +50,8 @@ class Order:
     mask: str | None = None
     legs: tuple[dict[str, Any], ...] = ()
     data: dict[str, Any] | None = None
+    multiplier: Decimal | None = None       # of the contract sheet (futures 20, options 100...); None while there is no sheet
+    contract_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,12 +66,14 @@ class Fill:
     order_id: str | None = None
     account_ref: str | None = None
     mask: str | None = None
+    multiplier: Decimal | None = None       # of the contract sheet; the cash value of a fill is qty * price * multiplier
+    contract_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Position:
-    """`qty` is long minus short. `market_value` is the broker's, signed as the broker gives it. `multiplier` is that of an
-    option contract (100) and None for anything else. `data` is the broker's own object, already masked."""
+    """`qty` is long minus short. `market_value` is the broker's, signed as the broker gives it. `multiplier` is that of the contract sheet (an option 100, a future
+    its own) and None while the position has no sheet: a position with no sheet is not valued (AH-23). `qty` is signed. `data` is the broker's own object, already masked."""
     account_id: int
     symbol: str
     qty: float
@@ -86,3 +91,4 @@ class Position:
     account_ref: str | None = None
     mask: str | None = None
     data: dict[str, Any] | None = None
+    contract_id: str | None = None

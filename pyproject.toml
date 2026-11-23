@@ -1,6 +1,6 @@
 [project]
 name = "hokma"
-version = "1.0.11"
+version = "1.0.12"
 description = "Hokma: installable harness by SiomTrading"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +31,21 @@ dependencies = [
     # already in the lock through httpx and huggingface_hub; naming them here keeps them there on every platform.
     "truststore==0.10.5",
     "certifi==2026.10.23",
+    # Quant and data libraries (SPEC-017, H1). Only the _lib.py file of each module imports them.
+    "numpy==2.5.4",
+    "pandas==3.1.1",
+    "scipy==1.18.1",
+    "scikit-learn==1.9.1",
+    "skfolio==1.14.4",
+    "quantstats==0.0.86",
+    "ffn==1.4.1",
+    "financetoolkit==2.3.5",
+    "financedatabase==2.5.2",
+    "edgartools==6.3.0",
+    # Broker connectors (SPEC-018, H2). alpaca-py is imported only in backend/hokma/broker/alpaca.py and ccxt only in
+    # backend/hokma/broker/crypto.py.
+    "alpaca-py==0.45.0",
+    "ccxt==4.5.64",
 ]
 
 [project.scripts]

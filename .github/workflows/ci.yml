@@ -17,6 +17,47 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
       - run: uv run pytest
+  quant-modules:
+    # Quant, data and desk core modules (SPEC-017, H1): the registry, the modules, their tests and the supply chain
+    # checks run together so a change that breaks one of the module rules turns this job red.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Lock resolves for the five supported platforms
+        run: uv lock --check
+      - name: Libraries are imported only in the _lib.py of each module
+        run: uv run pytest backend/tests/test_quant_import_scan.py
+      - name: Module tests
+        run: uv run pytest backend/tests/quant backend/tests/data backend/tests/desks backend/tests/llm backend/tests/lessons
+      - name: Changelog fragments
+        run: python3 scripts/changelog_merge.py --check
+      - name: Software bill of materials
+        run: uv export --frozen --no-dev --format cyclonedx1.5 --no-emit-project -o sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+  quant-compat:
+    # The quant modules against the pandas and numpy pairs they support (SPEC-017, H1). The pair of uv.lock runs in the
+    # backend job; these are the older pairs a library update could break first.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+        pair:
+          - { pandas: "2.3.3", numpy: "2.3.5" }
+          - { pandas: "3.1.1", numpy: "2.5.4" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --python ${{ matrix.python }}
+      - name: Quant tests with pandas ${{ matrix.pair.pandas }} and numpy ${{ matrix.pair.numpy }}
+        run: >-
+          uv run --python ${{ matrix.python }} --with "pandas==${{ matrix.pair.pandas }}" --with "numpy==${{ matrix.pair.numpy }}"
+          pytest backend/tests/quant -q
   docs-tests:
     # Project documents (SPEC-009 P9): the readers, the store and the endpoints run on the two platforms where
     # students work. Paths with spaces and accents, and removing a file just read, only fail on Windows.

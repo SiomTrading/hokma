@@ -1,0 +1,132 @@
+{
+ "took": 12,
+ "timed_out": false,
+ "hits": {
+  "total": {
+   "value": 3,
+   "relation": "eq"
+  },
+  "max_score": 7.5,
+  "hits": [
+   {
+    "_index": "edgar_file",
+    "_id": "0001000001-24-000021:nwnd-ex991.htm",
+    "_score": 7.5,
+    "_source": {
+     "ciks": [
+      "0001000001"
+     ],
+     "period_ending": "2024-05-02",
+     "file_num": [
+      "001-99999"
+     ],
+     "display_names": [
+      "Northwind Instruments Inc.  (NWND)  (CIK 0001000001)"
+     ],
+     "root_forms": [
+      "8-K"
+     ],
+     "file_date": "2024-05-02",
+     "form": "8-K",
+     "adsh": "0001000001-24-000021",
+     "file_type": "EX-99.1",
+     "file_description": "PRESS RELEASE",
+     "sics": [
+      "3829"
+     ],
+     "items": [
+      "2.02",
+      "9.01"
+     ],
+     "biz_locations": [
+      "Austin, TX"
+     ],
+     "biz_states": [
+      "TX"
+     ],
+     "inc_states": [
+      "DE"
+     ]
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001000001-24-000010:nwnd-10k.htm",
+    "_score": 7.5,
+    "_source": {
+     "ciks": [
+      "0001000001"
+     ],
+     "period_ending": "2024-02-20",
+     "file_num": [
+      "001-99999"
+     ],
+     "display_names": [
+      "Northwind Instruments Inc.  (NWND)  (CIK 0001000001)"
+     ],
+     "root_forms": [
+      "10-K"
+     ],
+     "file_date": "2024-02-20",
+     "form": "10-K",
+     "adsh": "0001000001-24-000010",
+     "file_type": "10-K",
+     "file_description": "10-K",
+     "sics": [
+      "3829"
+     ],
+     "items": [],
+     "biz_locations": [
+      "Austin, TX"
+     ],
+     "biz_states": [
+      "TX"
+     ],
+     "inc_states": [
+      "DE"
+     ]
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001000001-24-000030:nwnd-8k2.htm",
+    "_score": 7.5,
+    "_source": {
+     "ciks": [
+      "0001000001"
+     ],
+     "period_ending": "2024-07-15",
+     "file_num": [
+      "001-99999"
+     ],
+     "display_names": [
+      "Northwind Instruments Inc.  (NWND)  (CIK 0001000001)"
+     ],
+     "root_forms": [
+      "8-K"
+     ],
+     "file_date": "2024-07-15",
+     "form": "8-K",
+     "adsh": "0001000001-24-000030",
+     "file_type": "8-K",
+     "file_description": "8-K",
+     "sics": [
+      "3829"
+     ],
+     "items": [
+      "5.02"
+     ],
+     "biz_locations": [
+      "Austin, TX"
+     ],
+     "biz_states": [
+      "TX"
+     ],
+     "inc_states": [
+      "DE"
+     ]
+    }
+   }
+  ]
+ }
+}

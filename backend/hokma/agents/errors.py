@@ -7,6 +7,10 @@ from hokma.i18n import t
 
 _TEXT: dict[str, Callable[[], str]] = {
     "agent_not_found": lambda: t("agents.error.agent_not_found"),
+    "desk_not_found": lambda: t("agents.error.desk_not_found"),
+    "not_desk_agent": lambda: t("agents.error.not_desk_agent"),
+    "desk_has_no_chief": lambda: t("agents.error.desk_has_no_chief"),
+    "too_many_runs": lambda: t("agents.error.too_many_runs"),
     "agent_invalid": lambda: t("agents.error.agent_invalid"),
     "model_invalid": lambda: t("agents.error.model_invalid"),
     "status_invalid": lambda: t("agents.error.status_invalid"),

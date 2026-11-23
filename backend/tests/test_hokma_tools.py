@@ -46,7 +46,15 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "schwab_transaction", "schwab_user_preference", "volatility_history",
                 "portfolio_greeks", "account_activity",
                 "order_preview", "order_place", "order_replace", "order_cancel", "order_status", "order_list",
-                "position_list", "order_log"}
+                "position_list", "order_log",
+                    "quant_list", "quant_describe", "quant_call", "data_bars", "data_snapshot", "data_fundamentals", "data_filings",
+                    "data_macro", "data_universe", "data_filings_watch",
+                    # SPEC-018 (H2): execution, contracts, calendar and back office
+                    "exec_propose", "exec_status", "exec_pending", "exec_flatten", "desk_level_get", "desk_level_set", "contract_get",
+                    "calendar_events", "calendar_windows", "schedule_run", "book_positions", "book_snapshot", "book_pnl", "recon_run",
+                    "recon_breaks", "report_account", "report_weekly", "export_book",
+                    # SPEC-019 (H3): the SWO desk
+                    "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_status", "desk_cycle_learn", "desk_signals", "lessons_propose"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]
     assert all(t["inputSchema"]["additionalProperties"] is False for t in listed)
@@ -642,7 +650,8 @@ def test_desk_tools_are_declared_with_strict_schemas():
     assert listed["desk_list"]["inputSchema"]["properties"] == {}
     assert listed["desk_show"]["inputSchema"]["required"] == []
     assert {n for n in hokma_tools.TOOLS if n.startswith("desk_") and hokma_tools.TOOLS[n][4]} == {
-        "desk_create", "desk_configure", "desk_money_set", "desk_assign_account", "desk_unassign_account"}
+        "desk_create", "desk_configure", "desk_money_set", "desk_assign_account", "desk_unassign_account", "desk_level_set",
+        "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_learn"}
 
 
 def test_desk_list_gives_id_name_and_status_and_leaves_archived_out(two_desks, db):

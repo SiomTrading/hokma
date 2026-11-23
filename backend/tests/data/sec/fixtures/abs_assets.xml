@@ -1,0 +1,53 @@
+<assetData xmlns="http://www.sec.gov/edgar/document/absee/autoloan/assetdata">
+  <assets>
+    <assetTypeNumber>ABS-15G</assetTypeNumber>
+    <assetNumber>A001</assetNumber>
+    <reportingPeriodBeginningDate>2024-05-01</reportingPeriodBeginningDate>
+    <reportingPeriodEndDate>2024-05-31</reportingPeriodEndDate>
+    <originationDate>2022-03-14</originationDate>
+    <originalLoanAmount>28000</originalLoanAmount>
+    <originalLoanTerm>60</originalLoanTerm>
+    <originalInterestRatePercentage>5.9</originalInterestRatePercentage>
+    <interestRateTypeCode>Fixed</interestRateTypeCode>
+    <vehicleNewUsedCode>1</vehicleNewUsedCode>
+    <obligorCreditScore>712</obligorCreditScore>
+    <reportingPeriodBeginningLoanBalanceAmount>24100</reportingPeriodBeginningLoanBalanceAmount>
+    <reportingPeriodActualEndBalanceAmount>23400</reportingPeriodActualEndBalanceAmount>
+    <currentDelinquencyStatus>0</currentDelinquencyStatus>
+    
+  </assets>
+  <assets>
+    <assetTypeNumber>ABS-15G</assetTypeNumber>
+    <assetNumber>A002</assetNumber>
+    <reportingPeriodBeginningDate>2024-05-01</reportingPeriodBeginningDate>
+    <reportingPeriodEndDate>2024-05-31</reportingPeriodEndDate>
+    <originationDate>2022-05-02</originationDate>
+    <originalLoanAmount>35000</originalLoanAmount>
+    <originalLoanTerm>72</originalLoanTerm>
+    <originalInterestRatePercentage>7.4</originalInterestRatePercentage>
+    <interestRateTypeCode>Fixed</interestRateTypeCode>
+    <vehicleNewUsedCode>2</vehicleNewUsedCode>
+    <obligorCreditScore>655</obligorCreditScore>
+    <reportingPeriodBeginningLoanBalanceAmount>31000</reportingPeriodBeginningLoanBalanceAmount>
+    <reportingPeriodActualEndBalanceAmount>30250</reportingPeriodActualEndBalanceAmount>
+    <currentDelinquencyStatus>2</currentDelinquencyStatus>
+    
+  </assets>
+  <assets>
+    <assetTypeNumber>ABS-15G</assetTypeNumber>
+    <assetNumber>A003</assetNumber>
+    <reportingPeriodBeginningDate>2024-05-01</reportingPeriodBeginningDate>
+    <reportingPeriodEndDate>2024-05-31</reportingPeriodEndDate>
+    <originationDate>2023-01-19</originationDate>
+    <originalLoanAmount>21000</originalLoanAmount>
+    <originalLoanTerm>48</originalLoanTerm>
+    <originalInterestRatePercentage>4.2</originalInterestRatePercentage>
+    <interestRateTypeCode>Fixed</interestRateTypeCode>
+    <vehicleNewUsedCode>1</vehicleNewUsedCode>
+    <obligorCreditScore>780</obligorCreditScore>
+    <reportingPeriodBeginningLoanBalanceAmount>15000</reportingPeriodBeginningLoanBalanceAmount>
+    <reportingPeriodActualEndBalanceAmount>0</reportingPeriodActualEndBalanceAmount>
+    <currentDelinquencyStatus>0</currentDelinquencyStatus>
+    <zeroBalanceCode>Paid in Full</zeroBalanceCode>
+  </assets>
+</assetData>

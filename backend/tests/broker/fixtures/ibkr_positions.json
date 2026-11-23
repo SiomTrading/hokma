@@ -1,0 +1,34 @@
+[
+  {
+    "acctId": "DUSENT4455",
+    "conid": 265598,
+    "contractDesc": "AAPL",
+    "position": 10,
+    "mktPrice": 160,
+    "mktValue": 1600,
+    "currency": "USD",
+    "avgCost": 150,
+    "avgPrice": 150,
+    "realizedPnl": 0,
+    "unrealizedPnl": 100,
+    "assetClass": "STK",
+    "ticker": "AAPL",
+    "multiplier": null,
+    "newField": "x"
+  },
+  {
+    "acctId": "DUSENT4455",
+    "conid": 700123,
+    "contractDesc": "AAPL    DEC2026 200 C [AAPL  261218C00200000 100]",
+    "position": -2,
+    "mktPrice": 5.5,
+    "mktValue": -1100,
+    "currency": "USD",
+    "avgPrice": 4,
+    "unrealizedPnl": -300,
+    "assetClass": "OPT",
+    "ticker": "AAPL",
+    "multiplier": 100,
+    "putOrCall": "C"
+  }
+]

@@ -1,0 +1,49 @@
+{
+ "cik": "1000010",
+ "name": "HARBOR CAPITAL MANAGEMENT LLC",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0001000010-22-000006",
+    "0001000010-22-000002",
+    "0001000010-21-000004"
+   ],
+   "filingDate": [
+    "2022-05-13",
+    "2022-02-11",
+    "2021-11-12"
+   ],
+   "reportDate": [
+    "2022-03-31",
+    "2021-12-31",
+    "2021-09-30"
+   ],
+   "acceptanceDateTime": [
+    "2022-05-13T14:30:00.000Z",
+    "2022-02-11T14:30:00.000Z",
+    "2021-11-12T14:30:00.000Z"
+   ],
+   "form": [
+    "13F-HR",
+    "13F-HR",
+    "13F-HR"
+   ],
+   "items": [
+    "",
+    "",
+    ""
+   ],
+   "primaryDocument": [
+    "primary_doc.xml",
+    "primary_doc.xml",
+    "primary_doc.xml"
+   ],
+   "primaryDocDescription": [
+    "13F-HR",
+    "13F-HR",
+    "13F-HR"
+   ]
+  },
+  "files": []
+ }
+}

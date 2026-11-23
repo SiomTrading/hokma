@@ -1,0 +1,22 @@
+{
+  "id": "904837e3-3b76-47ec-b432-046db621571b",
+  "account_number": "ALPSENT9371",
+  "status": "ACTIVE",
+  "currency": "USD",
+  "cash": "25000.50",
+  "portfolio_value": "30500.75",
+  "equity": "30500.75",
+  "last_equity": "30000",
+  "buying_power": "50000",
+  "trading_blocked": false,
+  "transfers_blocked": false,
+  "account_blocked": false,
+  "created_at": "2025-01-02T10:00:00Z",
+  "multiplier": "2",
+  "shorting_enabled": true,
+  "long_market_value": "6000.25",
+  "short_market_value": "0",
+  "initial_margin": "0",
+  "maintenance_margin": "0",
+  "daytrade_count": 0
+}

@@ -9,7 +9,10 @@ from hokma.agents.service import AgentsError
 from hokma.db import Database, DbError, IntegrityViolation, NotFound, get_database
 from hokma.scheduler import schedule
 
+_UTC = timezone.utc
 MAX_PROMPT = 4000
+MAX_DESK_RUNS = 10               # scheduled runs one desk may have at a time (SPEC-018: OA-07)
+DESK_RUN_PREFIX = "desk-{desk_id}-run-"
 BRIEFING_NAME = "Premarket briefing"
 BRIEFING_SCHEDULE = ("weekly", "mon-fri 08:00")
 MAX_NAME_INPUT = 200
@@ -121,7 +124,7 @@ class JobsService:
         if not text:
             raise AgentsError("prompt_required", 422)
         try:
-            return {"name": clean, "agent_slug": agent, "prompt": text, "schedule_kind": kind,
+            return {"name": clean, "agent_slug": agent, "prompt": text, "schedule_kind": schedule.stored_kind(kind),
                     "schedule_expr": schedule.normalize(kind, expr, tz), "timezone": tz}
         except schedule.ScheduleError as exc:
             raise _schedule_error(exc) from exc
@@ -134,8 +137,8 @@ class JobsService:
             with self.db.write() as u:
                 if u.agents.find(agent) is None:
                     raise AgentsError("agent_not_found", 404)
-                job = u.scheduled_jobs.create(values["name"], agent, values["prompt"], kind, values["schedule_expr"],
-                                              tz, is_active=False)
+                job = u.scheduled_jobs.create(values["name"], agent, values["prompt"], values["schedule_kind"],
+                                              values["schedule_expr"], tz, is_active=False)
         except IntegrityViolation as exc:
             raise AgentsError("job_name_taken", 409, str(exc)) from exc
         except DbError as exc:
@@ -207,7 +210,7 @@ class JobsService:
                     raise AgentsError("agent_not_found", 404)
                 u.scheduled_jobs.update(job_id, **values)
                 changed = (current.agent_slug, current.prompt, current.schedule_kind, current.schedule_expr,
-                           current.timezone) != (agent, values["prompt"], kind, values["schedule_expr"], tz)
+                           current.timezone) != (agent, values["prompt"], values["schedule_kind"], values["schedule_expr"], tz)
                 if changed and current.is_active:              # what the owner approved is no longer what will run
                     u.scheduled_jobs.set_active(job_id, False)
         except IntegrityViolation as exc:
@@ -270,3 +273,99 @@ class JobsService:
             raise AgentsError("job_not_found", 404, str(exc)) from exc
         return self.get(job_id)
 
+
+
+# ---------------------------------------------------------------------------------------------- runs of one desk (OA-07)
+
+def _desk_run_prefix(desk_id: int) -> str:
+    return DESK_RUN_PREFIX.format(desk_id=int(desk_id))
+
+
+def _desk_member(u, desk_id: int, who: Any) -> str:
+    """The slug that owns the run: the asking agent when it works on this desk, or the chief of the desk when the owner asks.
+    Everything else is refused: the desk comes from the database, never from what the caller says about itself."""
+    if getattr(who, "owner", False) is True:
+        chief = u.desks.chief(desk_id)
+        if chief is None:
+            raise AgentsError("desk_has_no_chief", 409)
+        return chief.agent_slug
+    slug = getattr(who, "agent", None)
+    member = u.desks.find_agent(desk_id, slug) if isinstance(slug, str) and slug else None
+    if member is None or not member.active:
+        raise AgentsError("not_desk_agent", 403)
+    return slug
+
+
+def schedule_desk_run(desk_id: int, *, expr: str, instruction: str, who: Any, db: Database | None = None,
+                      timezone: str | None = None) -> dict[str, Any]:
+    """Program a run of ONE desk: an agent of that desk, with an instruction, at a time (OA-07). Stable signature; the tool
+    `schedule_run` of `kit/exec_tools.py` calls it.
+
+    `expr`: `<kind> <expr> [tz=<IANA zone>]` with kind `at`, `every`, `cron`, `once`, `daily`, `weekly` or `interval` (see
+    `hokma.scheduler.schedule`), for example `cron 30 9 * * mon-fri tz=America/New_York`. The zone is the `tz=` of the text, else
+    `timezone`, else the owner's, else UTC. `who`: a `hokma.broker.service.Who`; an agent may program only the desk it belongs to
+    (a desk it does not belong to is `not_desk_agent`), the owner any desk (the run is of the chief of the desk).
+
+    The job is saved OFF and without an approval, like every job an agent creates: it runs only after the owner turns it on in the
+    panel. The answer says so. Errors are `AgentsError` with a stable code: desk_not_found, not_desk_agent, desk_has_no_chief,
+    too_many_runs, job_name_taken (the same run twice), prompt_required, prompt_too_long, run_in_past and the schedule codes
+    (schedule_invalid, timezone_invalid, interval_out_of_range, kind_invalid)."""
+    import hashlib
+
+    database = db or get_database()
+    text = clean_text(instruction, MAX_PROMPT)
+    if not text:
+        raise AgentsError("prompt_required", 422)
+    if len(clean_text(instruction, MAX_PROMPT + 1)) > MAX_PROMPT - 200:           # room for the line that names the desk
+        raise AgentsError("prompt_too_long", 422)
+    try:
+        with database.write() as u:
+            desk = u.desks.find(int(desk_id)) if isinstance(desk_id, int) and not isinstance(desk_id, bool) else None
+            if desk is None or desk.status == "archived":
+                raise AgentsError("desk_not_found", 404)
+            slug = _desk_member(u, desk.id, who)
+            default_tz = timezone or u.profile.get_or_default().timezone or "UTC"
+            try:
+                parsed = schedule.parse_expression(expr, default_tz)
+                first = schedule.next_run(parsed.kind, parsed.expr, parsed.timezone, datetime.now(_UTC))
+            except schedule.ScheduleError as exc:
+                raise _schedule_error(exc) from exc
+            if first is None:
+                raise AgentsError("run_in_past", 422)
+            prefix = _desk_run_prefix(desk.id)
+            if sum(1 for j in u.scheduled_jobs.list() if j.name.startswith(prefix)) >= MAX_DESK_RUNS:
+                raise AgentsError("too_many_runs", 409)
+            digest = hashlib.sha256(f"{slug}|{parsed.kind}|{parsed.expr}|{parsed.timezone}|{text}".encode()).hexdigest()[:10]
+            body = f"Scheduled run of desk #{desk.id} ({desk.name}). Work only on this desk.\n\n{text}"
+            job = u.scheduled_jobs.create(f"{prefix}{digest}", slug, body, parsed.kind, parsed.expr, parsed.timezone, is_active=False)
+    except IntegrityViolation as exc:
+        raise AgentsError("job_name_taken", 409, str(exc)) from exc
+    except AgentsError:
+        raise
+    except DbError as exc:
+        raise AgentsError("job_invalid", 422, str(exc)) from exc
+    return {"job_id": job.id, "name": job.name, "desk_id": desk.id, "agent": slug, "kind": parsed.kind, "expr": parsed.expr,
+            "timezone": parsed.timezone, "active": False, "first_run_at": first.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "note": "saved off: it runs only after the owner turns it on"}
+
+
+def list_desk_runs(desk_id: int, db: Database | None = None) -> list[dict[str, Any]]:
+    """The scheduled runs of one desk, for the owner: the jobs saved by `schedule_desk_run` whose agent still works on the desk.
+    Read only."""
+    database = db or get_database()
+    prefix = _desk_run_prefix(desk_id)
+    out: list[dict[str, Any]] = []
+    with database.read() as u:
+        members = {m.agent_slug for m in u.desks.list_agents(desk_id)}
+        for job in u.scheduled_jobs.list():
+            if not job.name.startswith(prefix) or job.agent_slug not in members:
+                continue
+            status = None
+            if job.last_task_id is not None:
+                task = u.tasks.find(job.last_task_id)
+                status = task.status if task is not None else None
+            out.append({"job_id": job.id, "name": job.name, "agent": job.agent_slug, "instruction": job.prompt.split("\n\n", 1)[-1],
+                        "kind": job.schedule_kind, "expr": job.schedule_expr, "timezone": job.timezone, "active": job.is_active,
+                        "approved": job.approval_id is not None, "next_run_at": job.next_run_at, "last_run_at": job.last_run_at,
+                        "last_status": status})
+    return sorted(out, key=lambda r: r["job_id"])

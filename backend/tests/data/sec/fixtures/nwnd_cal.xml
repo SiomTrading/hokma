@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<link:linkbase xmlns:link="http://www.xbrl.org/2003/linkbase" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <link:calculationLink xlink:type="extended" xlink:role="http://www.northwind.example/role/BalanceSheet">
+    <link:loc xlink:type="locator" xlink:href="nwnd-20231231.xsd#us-gaap_Assets" xlink:label="loc_assets"/>
+    <link:loc xlink:type="locator" xlink:href="nwnd-20231231.xsd#us-gaap_Liabilities" xlink:label="loc_liab"/>
+    <link:loc xlink:type="locator" xlink:href="nwnd-20231231.xsd#us-gaap_StockholdersEquity" xlink:label="loc_eq"/>
+    <link:calculationArc xlink:type="arc" xlink:arcrole="http://www.xbrl.org/2003/arcrole/summation-item" xlink:from="loc_assets" xlink:to="loc_liab" order="1" weight="1"/>
+    <link:calculationArc xlink:type="arc" xlink:arcrole="http://www.xbrl.org/2003/arcrole/summation-item" xlink:from="loc_assets" xlink:to="loc_eq" order="2" weight="1"/>
+  </link:calculationLink>
+</link:linkbase>

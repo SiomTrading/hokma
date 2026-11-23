@@ -1,0 +1,58 @@
+<SEC-DOCUMENT>0001000030-24-000007.txt : 20240228
+<SEC-HEADER>0001000030-24-000007.hdr.sgml : 20240228
+<ACCEPTANCE-DATETIME>20240228200000
+ACCESSION NUMBER:		0001000030-24-000007
+CONFORMED SUBMISSION TYPE:	10-K
+PUBLIC DOCUMENT COUNT:		2
+CONFORMED PERIOD OF REPORT:	20231231
+FILED AS OF DATE:		20240228
+
+FILER:
+
+	COMPANY DATA:	
+		COMPANY CONFORMED NAME:			Harbor Credit BDC Inc.
+		CENTRAL INDEX KEY:			0001000030
+
+	FILING VALUES:
+		FORM TYPE:		10-K
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>10-K
+<SEQUENCE>1
+<FILENAME>hcb-10k.htm
+<DESCRIPTION>10-K
+<TEXT>
+<html><body><p>FORM 10-K</p><p>Item 1. Business</p><p>Business development company.</p></body></html>
+</TEXT>
+</DOCUMENT>
+<DOCUMENT>
+<TYPE>EX-101.INS
+<SEQUENCE>2
+<FILENAME>hcb-20231231.xml
+<DESCRIPTION>EX-101.INS
+<TEXT>
+<XML>
+<xbrli:xbrl xmlns="http://www.xbrl.org/2003/instance" xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:link="http://www.xbrl.org/2003/linkbase" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:iso4217="http://www.xbrl.org/2003/iso4217" xmlns:us-gaap="http://fasb.org/us-gaap/2023" xmlns:dei="http://xbrl.sec.gov/dei/2023" xmlns:srt="http://fasb.org/srt/2023" xmlns:nw="http://www.harborbdc.example/20231231">
+  <link:schemaRef xlink:type="simple" xlink:href="nwnd-20231231.xsd"/>
+  <xbrli:context id="i_a"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000030</xbrli:identifier><xbrli:segment><xbrldi:explicitMember dimension="us-gaap:InvestmentIdentifierAxis">nw:AlphaSoftTermLoanMember</xbrldi:explicitMember><xbrldi:explicitMember dimension="us-gaap:IndustryAxis">nw:SoftwareMember</xbrldi:explicitMember></xbrli:segment></xbrli:entity><xbrli:period><xbrli:instant>2023-12-31</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:context id="i_b"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000030</xbrli:identifier><xbrli:segment><xbrldi:explicitMember dimension="us-gaap:InvestmentIdentifierAxis">nw:BetaHealthRevolverMember</xbrldi:explicitMember><xbrldi:explicitMember dimension="us-gaap:IndustryAxis">nw:HealthcareMember</xbrldi:explicitMember></xbrli:segment></xbrli:entity><xbrli:period><xbrli:instant>2023-12-31</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:context id="i_c"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000030</xbrli:identifier><xbrli:segment><xbrldi:explicitMember dimension="us-gaap:InvestmentIdentifierAxis">nw:GammaSoftNoteMember</xbrldi:explicitMember><xbrldi:explicitMember dimension="us-gaap:IndustryAxis">nw:SoftwareMember</xbrldi:explicitMember><xbrldi:explicitMember dimension="nw:AccrualStatusAxis">nw:NonAccrualMember</xbrldi:explicitMember></xbrli:segment></xbrli:entity><xbrli:period><xbrli:instant>2023-12-31</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:context id="c_total"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000001</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>2023-12-31</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:unit id="usd"><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="usdPerShare"><xbrli:divide><xbrli:unitNumerator><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unitNumerator><xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator></xbrli:divide></xbrli:unit>
+  <xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+  <us-gaap:InvestmentOwnedAtFairValue contextRef="i_a" unitRef="usd" decimals="0">20000000</us-gaap:InvestmentOwnedAtFairValue>
+  <us-gaap:InvestmentOwnedAtCost contextRef="i_a" unitRef="usd" decimals="0">21000000</us-gaap:InvestmentOwnedAtCost>
+  <us-gaap:InvestmentOwnedBalancePrincipalAmount contextRef="i_a" unitRef="usd" decimals="0">21000000</us-gaap:InvestmentOwnedBalancePrincipalAmount>
+  <us-gaap:InvestmentOwnedAtFairValue contextRef="i_b" unitRef="usd" decimals="0">10000000</us-gaap:InvestmentOwnedAtFairValue>
+  <us-gaap:InvestmentOwnedAtCost contextRef="i_b" unitRef="usd" decimals="0">10000000</us-gaap:InvestmentOwnedAtCost>
+  <us-gaap:InvestmentOwnedBalancePrincipalAmount contextRef="i_b" unitRef="usd" decimals="0">10000000</us-gaap:InvestmentOwnedBalancePrincipalAmount>
+  <us-gaap:InvestmentOwnedAtFairValue contextRef="i_c" unitRef="usd" decimals="0">4000000</us-gaap:InvestmentOwnedAtFairValue>
+  <us-gaap:InvestmentOwnedAtCost contextRef="i_c" unitRef="usd" decimals="0">9000000</us-gaap:InvestmentOwnedAtCost>
+  <us-gaap:InvestmentOwnedBalancePrincipalAmount contextRef="i_c" unitRef="usd" decimals="0">9500000</us-gaap:InvestmentOwnedBalancePrincipalAmount>
+  <us-gaap:NetAssets contextRef="c_total" unitRef="usd" decimals="0">31000000</us-gaap:NetAssets>
+</xbrli:xbrl>
+</XML>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>
