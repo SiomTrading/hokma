@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.15
+
+- Fixed: The top bar of a desk keeps the desk selector, tabs and figures on one row instead of stretching the selector across the whole width.
+
 ## 1.0.14
 
 - New: Adding an agent to a desk opens a search box over your agents, with an "Add agent" button; an agent that is off is switched on and added in one step.
