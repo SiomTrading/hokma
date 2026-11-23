@@ -300,6 +300,7 @@ def create_desk(name: str, capital: Any, *, focus: str | None = None, template: 
                 for member in chosen.members:
                     u.desks.add_agent(desk.id, member.agent_slug, member.role, member.model)
                 u.desks.replace_assets(desk.id, clean_assets)
+                given = connections_for_new_desk(u, desk.id)
                 for sub in projects.SUBFOLDERS:
                     safefs.write_atomic(folder, f"{sub}/.gitkeep", b"")
                     written += [sub, f"{sub}/.gitkeep"]
@@ -317,6 +318,7 @@ def create_desk(name: str, capital: Any, *, focus: str | None = None, template: 
     diskfolders.ensure_own_folder(project.id, database)
     out = get_desk(desk.id, database)
     out["git"] = {"ok": git.ok, "reason": git.reason}
+    out["connections"] = connections_report(given)
     return out
 
 
@@ -648,6 +650,57 @@ def set_connection(desk_id: int, provider_id: str, enabled: Any, db: Database | 
         _desk(u, desk_id)
         row = u.desks.set_connection(desk_id, provider_id, enabled)
     return {"provider_id": row.provider_id, "enabled": row.enabled}
+
+
+def connections_for_new_desk(u, desk_id: int) -> list[str]:
+    """A desk is born with every provider the owner already has connected turned on (SPEC-015 4.3 rule 5 for desks made later),
+    in the order of Connections for the bars. Returns their ids; empty when nothing is connected: the desk then only has the
+    Yahoo fallback and the caller says so. Runs inside the write transaction of the creation, so no desk is born half done."""
+    service = _market_service()
+    if not getattr(service, "loaded", True):
+        service.load()
+    added = [pid for pid in service.catalog.providers if service.is_added(pid)]
+    rank = {pid: i for i, pid in enumerate(service.order("bars"))}
+    added.sort(key=lambda pid: rank.get(pid, len(rank)))
+    for pid in added:
+        u.desks.set_connection(desk_id, pid, True)
+    return added
+
+
+def activate_my_connections(desk_id: int, db: Database | None = None) -> dict[str, Any]:
+    """The button "Activar mis conexiones": turn on in this desk every provider the owner has connected that the desk has no row for.
+    Idempotent. A row the desk already has, on or off, is the owner's explicit choice and is never touched. Returns what is on now:
+    `activated` (rows made by this call), `providers` (every provider the desk uses, in the order of Connections for the bars) and
+    `fallback_only` (nothing connected and nothing on: only the Yahoo fallback is left)."""
+    service = _market_service()
+    if not getattr(service, "loaded", True):
+        service.load()
+    added = [pid for pid in service.catalog.providers if service.is_added(pid)]
+    rank = {pid: i for i, pid in enumerate(service.order("bars"))}
+    added.sort(key=lambda pid: rank.get(pid, len(rank)))
+    made: list[str] = []
+    with _db(db).write() as u:
+        _desk(u, desk_id)
+        have = {c.provider_id for c in u.desks.list_connections(desk_id)}
+        for pid in added:
+            if pid not in have:
+                u.desks.set_connection(desk_id, pid, True)
+                made.append(pid)
+        on = [c.provider_id for c in u.desks.list_connections(desk_id) if c.enabled]
+    on.sort(key=lambda pid: rank.get(pid, len(rank)))
+    return {"activated": made, "providers": on, "fallback_only": not on}
+
+
+FALLBACK_NOTICE = "esta mesa solo tiene el respaldo (Yahoo); conecta Schwab o Finnhub en Conexiones"
+
+
+def connections_report(provider_ids: list[str]) -> dict[str, Any]:
+    """What the creation answers about the connections of the new desk: the providers it uses, or that only the fallback is left."""
+    out: dict[str, Any] = {"providers": provider_ids, "fallback_only": not provider_ids}
+    if not provider_ids:
+        out["notice"] = FALLBACK_NOTICE
+        out["link"] = "connections"                                  # the screen of the app where Schwab or Finnhub are connected
+    return out
 
 
 def enable_connection_everywhere(provider_id: str, db: Database | None = None) -> list[int]:

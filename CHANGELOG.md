@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.14
+
+- New: Adding an agent to a desk opens a search box over your agents, with an "Add agent" button; an agent that is off is switched on and added in one step.
+- New: A desk has a "Turn on my connections" button that switches on every provider you have connected without touching your own choices, and a new desk (in the app or created by Hokma in the chat) says when it only has the Yahoo fallback, with a link to Connections.
+- Changed: Futures candles (NQ=F, ES=F, MNQ=F...) are asked from Schwab first and Yahoo answers when Schwab has no bars; the price list of a desk names the provider that served each price.
+- Changed: Headlines for a desk come from Finnhub when it is connected with its key; Yahoo answers only as a fallback and is named as such.
+- Fixed: The Terminal view of a desk keeps its layout when the chat grows: the chat scrolls inside its own column instead of stretching the page.
+- Fixed: A desk cycle that cannot read its data now says which source is missing and where to connect it, keeps the analysts that did have data, and records each analyst's status and cause.
+- Fixed: A new desk is born with every provider you already have connected turned on (Schwab, Finnhub and the rest), so its charts, prices and option chains use them and Yahoo stays the last fallback; if nothing is connected the new desk says it only has the fallback, and the options answer from Yahoo says so by name.
+
 ## 1.0.13
 
 - Fixed: The Prob. ITM of each option in the chain now matches thinkorswim: Hokma deduces the implied volatility of every contract from its own mark, separately for the call and the put, and uses a 4 % rate. It still shows "calculated by Hokma".

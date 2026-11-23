@@ -244,44 +244,66 @@ describe("budget meter", () => {
 });
 
 describe("bring an existing agent", () => {
-  it("offers only the agents that are not in the desk and brings one with the chosen model", async () => {
+  const rowOf = (dialog: HTMLElement, name: string) => within(dialog).getByRole("button", { name: t("desks.agents.bring.addNamed", { name }) });
+
+  it("lists the agents with a search, marks those already in the desk and adds one with its own model", async () => {
     const server = stubServer();
     open();
     await userEvent.click(await screen.findByRole("button", { name: t("desks.agents.bring") }));
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByText("Iris")).toBeInTheDocument();
-    expect(within(dialog).queryByText("Hugo")).not.toBeInTheDocument();
-    await userEvent.click(within(dialog).getByRole("radio", { name: /Iris/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Haiku" }));
-    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.agents.bring.submit") }));
+    expect(within(dialog).getByText(t("desks.agents.bring.inDesk"))).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: t("desks.agents.bring.addNamed", { name: "Hugo" }) })).not.toBeInTheDocument();
+    await userEvent.click(rowOf(dialog, "Iris"));
     await waitFor(() => expect(sent(server, "POST", "/api/desks/7/agents")).toHaveLength(1));
-    expect(sent(server, "POST", "/api/desks/7/agents")[0]!.body).toEqual({ agent_slug: "iris", model: "haiku" });
+    expect(sent(server, "POST", "/api/desks/7/agents")[0]!.body).toEqual({ agent_slug: "iris", model: "sonnet" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(await screen.findAllByText("iris")).not.toHaveLength(0);
   });
 
-  it("an agent that is off asks to turn it on, and then brings it", async () => {
-    const server = stubServer({ addFails: "agent_off" });
+  it("filters live by name, role and description, ignoring accents, and says when nothing matches", async () => {
+    stubServer({ catalog: [agentItem("iris", "Iris", { description: "Investigaci\u00f3n de mercado" }), agentItem("diego", "Diego", { is_custom: true })] });
     open();
     await userEvent.click(await screen.findByRole("button", { name: t("desks.agents.bring") }));
     const dialog = await screen.findByRole("dialog");
-    await userEvent.click(await within(dialog).findByRole("radio", { name: /Diego/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.agents.bring.submit") }));
-    expect(await within(dialog).findByText(t("desks.agents.bring.offAsk", { name: "Diego" }))).toBeInTheDocument();
-    expect(server.calls.some((c) => c.url === "/api/agents/diego/status")).toBe(false);
-    server.addFails = null;
-    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.agents.bring.turnOn") }));
-    await waitFor(() => expect(sent(server, "PUT", "/api/agents/diego/status")[0]?.body).toEqual({ status: "active" }));
-    await waitFor(() => expect(sent(server, "POST", "/api/desks/7/agents")).toHaveLength(2));
+    const box = await within(dialog).findByRole("searchbox", { name: t("desks.agents.bring.search") });
+    await userEvent.type(box, "investigacion");
+    expect(within(dialog).getByText("Iris")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Diego")).not.toBeInTheDocument();
+    await userEvent.clear(box);
+    await userEvent.type(box, "personalizado");
+    expect(within(dialog).getByText("Diego")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Iris")).not.toBeInTheDocument();
+    await userEvent.clear(box);
+    await userEvent.type(box, "zzz");
+    expect(within(dialog).getByText(t("desks.agents.bring.none"))).toBeInTheDocument();
   });
 
-  it("shows the server's reason when bringing fails for another cause", async () => {
+  it("an agent that is off is turned on and added in the same click", async () => {
+    const server = stubServer();
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: t("desks.agents.bring") }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(await within(dialog).findByRole("button", { name: t("desks.agents.bring.addNamed", { name: "Diego" }) }));
+    await waitFor(() => expect(sent(server, "PUT", "/api/agents/diego/status")[0]?.body).toEqual({ status: "active" }));
+    await waitFor(() => expect(sent(server, "POST", "/api/desks/7/agents")).toHaveLength(1));
+  });
+
+  it("asks before adding an agent that runs on Opus", async () => {
+    const server = stubServer({ catalog: [agentItem("iris", "Iris", { model: "opus" })] });
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: t("desks.agents.bring") }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(await within(dialog).findByRole("button", { name: t("desks.agents.bring.addNamed", { name: "Iris" }) }));
+    expect(sent(server, "POST", "/api/desks/7/agents")).toHaveLength(0);
+    expect(screen.getAllByRole("dialog").length).toBeGreaterThan(1);
+  });
+
+  it("shows the server's reason when adding fails", async () => {
     stubServer({ addFails: "duplicate" });
     open();
     await userEvent.click(await screen.findByRole("button", { name: t("desks.agents.bring") }));
     const dialog = await screen.findByRole("dialog");
-    await userEvent.click(await within(dialog).findByRole("radio", { name: /Iris/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.agents.bring.submit") }));
+    await userEvent.click(await within(dialog).findByRole("button", { name: t("desks.agents.bring.addNamed", { name: "Iris" }) }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("refused");
   });
 });
@@ -369,7 +391,7 @@ describe("languages", () => {
     setLocale("en");
     open();
     expect(await screen.findByText("Working now")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Bring an existing agent" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add agent" })).toBeInTheDocument();
     expect(screen.getByText("Talks with you, hands out the work and writes the decision.")).toBeInTheDocument();
   });
 });

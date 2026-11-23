@@ -45,8 +45,11 @@ HISTORY_CLASSES = {
     "alpaca": ("equity", "crypto"),
     "coinbase": ("crypto",),
     "finnhub": ("forex",),                 # Finnhub no longer serves stocks, ETFs or crypto (SPEC-016 3.6 rule 3 and 4)
-    "schwab": ("equity",),
+    "schwab": ("equity", "future"),        # futures: `/NQ` through `symbols.to_provider`; the REF only documents pricehistory for stocks, so it is tried and Yahoo follows
 }
+# Classes where the broker is the ONLY source of the candles (SPEC-016 3.7: nothing else answers, not even Yahoo). A class that is not here is
+# asked of the broker first and, when the broker has no bars, the next source answers and the chart says its own name.
+EXCLUSIVE_CLASSES = ("equity",)
 # Providers that serve bars but are not in the order of Connections for the class, by class, in the order they go last.
 # The bars of stocks follow the use `bars` of Connections (4.4), so they need no entry here.
 EXTRA_ORDER = {"crypto": ("alpaca",)}
@@ -261,6 +264,8 @@ def _schwab(fetch: HttpGet, secret: str, symbol: str, asset: str, base: str, now
     try:
         data = models.dump(endpoints.price_history(mapped, **window))
     except http.SchwabError as error:
+        if error.code == http.DENIED and asset == "future":
+            raise MarketError(UPSTREAM, 502) from None      # the account may have no futures bars: that must not shut Schwab for stocks for an hour
         if error.code == http.DENIED:
             raise Denied from None
         if error.code == http.RATE_LIMITED:
@@ -399,7 +404,7 @@ class ConnectedSource:
                 continue
             if series is not None:
                 return series
-        if self.broker_for(asset) is not None:
+        if asset in EXCLUSIVE_CLASSES and self.broker_for(asset) is not None:
             raise MarketError(UPSTREAM, 502)          # the broker is the source and gave nothing: no other source, not even Yahoo
         return self.fallback.history(symbol, timeframe)
 

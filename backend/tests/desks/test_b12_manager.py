@@ -569,3 +569,30 @@ def test_a_closed_spread_settles_by_the_net_of_its_legs(desks_db):
     assert done.status == "settled" and out["structure"] == "debit" and out["direction"] == "long" and out["symbol"] == "SPYC600+SPYC610"
     assert out["entry_price"] == pytest.approx(4.0) and out["exit_price"] == pytest.approx(6.0)               # net debit 8-4, net value 11-5
     assert out["return"] == pytest.approx(0.5) and out["pnl"] == pytest.approx((3.0 + -1.0) * 100 - 4.0) and out["costs"] == 4.0
+
+
+def test_a_swo_desk_is_born_with_the_connected_providers_turned_on(db, monkeypatch):
+    from hokma.desks import service
+    from hokma.desks.swo.create import create_swo_desk
+
+    class Fake:
+        loaded = True
+
+        def __init__(self):
+            from hokma.market.providers import get_catalog
+
+            self.catalog = get_catalog()
+
+        def is_added(self, provider_id):
+            return provider_id in ("schwab", "finnhub")
+
+        def order(self, asset_class):
+            return ["schwab", "finnhub"]
+
+    monkeypatch.setattr(service, "_market_service", Fake)
+    with db.write() as u:
+        u.profile.save(owner_name="Ana", fund_name="Test Fund")
+    made = create_swo_desk("Swing con Schwab", 100_000, db=db)
+    with db.read() as u:
+        rows = {c.provider_id: c.enabled for c in u.desks.list_connections(made["id"])}
+    assert rows == {"schwab": True, "finnhub": True} and made["connections"]["fallback_only"] is False

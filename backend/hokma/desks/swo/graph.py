@@ -43,12 +43,14 @@ from hokma.desks.agents.manager import (
 )
 from hokma.desks.agents.trader import Delivery, TradeContext, TradeResult, deliver, mcp_handlers, run_trader, trader_toolbox
 from hokma.desks.core.graph import END, START, ChatModel, CompiledGraph, ModelReply, StateGraph, complete_path_map
+from hokma.desks.core.safety import scrub_text
 from hokma.desks.core.signal import Signal
 from hokma.desks.core.state import DeskState, Message, initial_state, make_report
 from hokma.desks.plantel import SEATS
 from hokma.desks.swo import premium_switch, regime
 from hokma.desks.swo.premium_switch import PremiumSwitchClosed
 from hokma.exec import levels
+from hokma.i18n import t as _t
 
 log = logging.getLogger("hokma.desks.swo")
 
@@ -67,11 +69,30 @@ NODES = ("plan", "analysts", "company_filter", "debate", "judge", "trader", "com
 
 
 class CycleError(RuntimeError):
-    """The cycle cannot start. `code` is stable: not_swo, no_runtime, no_mandate."""
+    """The cycle cannot start or cannot go on. `code` is stable: not_swo, no_runtime, no_mandate, no_data, no_run.
 
-    def __init__(self, code: str, message: str) -> None:
+    The message is written for the owner, in Spanish when it comes from a missing source, and says what failed and what to set up.
+    `source` names the data source or the analyst it is about; `hint` is the step the owner takes (where to configure what)."""
+
+    def __init__(self, code: str, message: str, *, source: str | None = None, hint: str | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.source = source
+        self.hint = hint
+
+
+def explain(exc: BaseException) -> str:
+    """The whole chain of an exception as one line: its class and message, then each cause it was raised from. Never empty. Every message goes
+    through `scrub_text`: an exception of an HTTP client repeats the URL with its key or the Authorization header, and this text reaches the owner."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        text = scrub_text(str(cur)).strip()
+        parts.append(f"{type(cur).__name__}: {text}" if text else type(cur).__name__)
+        cur = cur.__cause__ or cur.__context__
+    return " <- ".join(parts)[:600]
 
 
 # ---- what the app hands to the cycle -----------------------------------------------------------------------------------------------
@@ -95,6 +116,7 @@ class CycleData:
     bars: Any                                   # OHLC bars of the benchmark, the source of the regime
     snapshot: Mapping[str, Any]                 # the evidence the tribunal and the judge may cite, by dotted path
     pead_signal: Signal | None = None           # Drew's view on a PEAD desk, computed by code from the earnings event
+    problems: Mapping[str, str] = field(default_factory=dict)   # analyst key -> why its data did not arrive (text for the owner); that analyst is absent
 
 
 @dataclass(frozen=True)
@@ -166,6 +188,9 @@ class CycleResult:
     stopped_at: str | None = None     # the step that ended the cycle without a proposal
     reason: str | None = None         # why, as a stable code
     learning: str | None = None       # step 9 outcome when the order had already executed
+    detail: str | None = None         # the reason in words for the owner: what failed and what to set up (None when the cycle ran to its end)
+    analyst_status: Mapping[str, str] = field(default_factory=dict)   # per analyst: ok, error:<Class>, invalid:<why>, no_data
+    analyst_causes: Mapping[str, str] = field(default_factory=dict)   # per analyst that did not arrive: the cause, readable
 
 
 # ---- the run object -------------------------------------------------------------------------------------------------------------------
@@ -233,35 +258,54 @@ def _plan(run: _Run, state: DeskState) -> dict[str, Any]:
     return {"plan": [s.key for s in plan], "selected": list(selection.run), "off": list(selection.off), "reports": reports}
 
 
-def _run_analyst(run: _Run, key: str) -> tuple[str, str, str]:
+def _run_analyst(run: _Run, key: str) -> tuple[str, str, str, str]:
+    """(key, report text, status, cause). The status is `ok`, `no_data`, `invalid:<why>` or `error:<Class>`; the cause is empty when ok."""
     agent = ANALYST_AGENTS[key]
+    problem = (run.data.problems.get(key) if run.data else None)
+    if problem:                                                                # its data did not arrive: nothing to read, nothing is made up
+        return key, "", "no_data", problem
     given = (run.data.analysts.get(key) if run.data else None) or AnalystInput()
     try:
         result = agent.run(_chat(run, agent.code), desk_id=run.desk_id, symbol=run.symbol, as_of=run.as_of, line=LINE, snapshot=given.snapshot,
                            facts=given.facts, kit_root=run.rt.kit_root, handlers=given.handlers, sources=given.sources, language=run.rt.language)
     except Exception as exc:                                                   # noqa: BLE001  (an analyst that fails is an absent report)
-        return key, "", f"error:{type(exc).__name__}"
+        log.warning("analyst %s of desk %s failed: %s", key, run.desk_id, explain(exc))
+        cause = str(exc) if isinstance(exc, CycleError) else _t("desks.cycle.analyst_failed", key=key, error=explain(exc))
+        return key, "", f"error:{type(exc).__name__}", cause
     if not result.valid:
-        return key, "", "invalid:" + "; ".join(result.check.problems[:2])[:200]
-    return key, result.text, "ok"
+        why = "; ".join(result.check.problems[:2])[:200]
+        return key, "", "invalid:" + why, _t("desks.cycle.report_invalid", key=key, why=why)
+    return key, result.text, "ok", ""
 
 
 def _analysts(run: _Run, state: DeskState) -> dict[str, Any]:
-    """Step 2: the analysts that are on, in parallel. A report that does not arrive, or does not validate, stays absent and does not break the run."""
-    run.data = run.rt.load(run.desk_id, run.symbol, run.as_of)
+    """Step 2: the analysts that are on, in parallel. A report that does not arrive, or does not validate, stays absent with its cause and does
+    not break the run. The quorum is one report: with none the cycle stops and says why, analyst by analyst."""
     keys = list(state["selected"])
+    try:
+        run.data = run.rt.load(run.desk_id, run.symbol, run.as_of)
+    except Exception as exc:                                                   # noqa: BLE001  (no data for anybody: every analyst is absent with the cause)
+        log.warning("the data of %s for desk %s did not load: %s", run.symbol, run.desk_id, explain(exc))
+        detail = str(exc) if isinstance(exc, CycleError) else _t("desks.cycle.load_failed", symbol=run.symbol, error=explain(exc))
+        return {"analyst_status": {k: f"error:{type(exc).__name__}" for k in keys}, "analyst_causes": {k: detail for k in keys},
+                "stop": f"error:analysts:{type(exc).__name__}", "error": explain(exc), "detail": detail}
     with ThreadPoolExecutor(max_workers=max(1, len(keys))) as pool:
         done = list(pool.map(lambda key: _run_analyst(run, key), keys))
     reports = dict(state["reports"])
     status: dict[str, str] = {}
-    for key, text, how in done:
+    causes: dict[str, str] = {}
+    for key, text, how, cause in done:
         status[key] = how
+        if cause:
+            causes[key] = cause
         reports[key] = make_report(key, text or None)
         if text:
             run.reports[key] = text
-    update: dict[str, Any] = {"reports": reports, "analyst_status": status}
+    update: dict[str, Any] = {"reports": reports, "analyst_status": status, "analyst_causes": causes}
     if not run.reports:
         update.update(_stop("no_analyst_report"))
+        why = "; ".join(f"{k}: {v}" for k, v in causes.items()) or _t("desks.cycle.no_analyst_active")
+        update["detail"] = _t("desks.cycle.no_report", why=why)
     return update
 
 
@@ -281,6 +325,9 @@ def _company_filter(run: _Run, state: DeskState) -> dict[str, Any]:
     update: dict[str, Any] = {"regime": label, "regime_facts": regime_facts, "filter": summary}
     if not result.passes:
         update.update(_stop(f"filter:{result.reason_code}"))
+        if getattr(run.data.company.statements, "empty", False):
+            why = run.data.problems.get("fundamentals", "")
+            update["detail"] = _t("desks.cycle.company_filter_no_statements", symbol=run.symbol, why=why).strip()
     return update
 
 
@@ -490,6 +537,7 @@ def _close(run: _Run, state: DeskState) -> dict[str, Any]:
                       "regime_facts": state.get("regime_facts"), "filter": state.get("filter"), "judge": state.get("judge"), "trade": state.get("trade"),
                       "committee": state.get("committee"), "final": state.get("final"), "delivery": state.get("delivery"),
                       "learning": state.get("learning"), "orders": run.orders, "absent": absent, "analyst_status": state.get("analyst_status"),
+                      "analyst_causes": state.get("analyst_causes"), "error": state.get("error"), "detail": state.get("detail"),
                       "debate": state.get("debate"), "trail": [*state.get("trail", []), "close"]})
     runs.finish(run.run_id, status, entries={"symbol": run.symbol, "as_of": run.as_of.isoformat(), "desk_id": run.desk_id, "mandate": run.mandate.name},
                 outputs=outputs, order_ids=[run.proposal_id] if run.proposal_id is not None else [], db=run.db)
@@ -518,8 +566,9 @@ def build_graph(run: _Run) -> CompiledGraph:
             try:
                 update = bodies[name](run, state) or {}
             except Exception as exc:                                                # noqa: BLE001  (fail closed: no proposal after an error)
-                log.exception("step %s failed", name)
-                update = {"stop": f"error:{name}:{type(exc).__name__}", "error": str(exc)[:300]}
+                log.error("step %s failed: %s", name, explain(exc))               # no traceback: its messages repeat URLs with keys
+                update = {"stop": f"error:{name}:{type(exc).__name__}", "error": explain(exc),
+                          "detail": str(exc) if isinstance(exc, CycleError) else _t("desks.cycle.step_failed", name=name, error=explain(exc))}
             if update.get("stop"):
                 update["stop_at"] = name
             return {**update, "trail": trail}
@@ -587,4 +636,5 @@ def run_cycle(desk_id: int, *, symbol: str, as_of: datetime, runtime: CycleRunti
     stop = final_state.get("stop")
     return CycleResult(run_id, (final_state.get("final") or {}).get("rating"), run.proposal_id, run.exec_status, tuple(final_state.get("absent", ())),
                        final_state.get("stop_at") if stop else None, stop if isinstance(stop, str) else None,
-                       None if run.learning is None else run.learning.status)
+                       None if run.learning is None else run.learning.status, final_state.get("detail") if stop else None,
+                       dict(final_state.get("analyst_status") or {}), dict(final_state.get("analyst_causes") or {}))

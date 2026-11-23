@@ -28,6 +28,13 @@ export interface DeskConnection {
   asset_classes: string[];
 }
 
+/** Answer of `POST /api/desks/{id}/connections/activate`. */
+export interface ActivateResult {
+  activated: string[];
+  providers: string[];
+  fallback_only: boolean;
+}
+
 /** Sections of the Settings tab. The last two are empty states. */
 export const CONFIG_SECTIONS = ["objective", "connections", "memory", "accounts"] as const;
 export type ConfigSection = (typeof CONFIG_SECTIONS)[number];

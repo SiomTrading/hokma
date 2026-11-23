@@ -470,6 +470,8 @@ def _desk_out(desk: dict) -> dict:
     out = {k: desk[k] for k in DESK_KEYS if k in desk}
     out["assets"] = [x["symbol"] for x in desk["assets"]]
     out["limits"] = desk.get("limits", {})
+    if isinstance(desk.get("connections"), dict):                   # a desk just created: what data it was born with
+        out["connections"] = desk["connections"]
     out["agents"] = [{k: x[k] for k in ("agent_slug", "name", "role", "model", "active")} for x in desk["agents"]]
     out["budget"] = {k: budget[k] for k in ("starts_at", "ends_at", "token_budget", "used", "pct", "state")}
     return out

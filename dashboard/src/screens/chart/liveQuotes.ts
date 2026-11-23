@@ -9,6 +9,10 @@ export interface LiveQuote {
   last: number | null;
   previousClose: number | null;
   changePct: number | null;
+  /** The provider that sent it, by name (Schwab, SiomTrading Futures, Yahoo Finance...). Null when the message does not say. */
+  source: string | null;
+  /** The provider says the data is delayed. */
+  delayed: boolean;
 }
 
 export interface LiveQuotesOptions {
@@ -19,6 +23,11 @@ export interface LiveQuotesOptions {
   onFailed: (symbol: string) => void;
   createSocket?: (url: string) => SocketLike;
 }
+
+const origin = (message: Record<string, unknown>): { source: string | null; delayed: boolean } => ({
+  source: typeof message.source === "string" && message.source !== "" && message.source !== "none" ? message.source : null,
+  delayed: message.data_state === "delayed",
+});
 
 const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 
@@ -130,9 +139,9 @@ export class LiveQuotesClient {
       this.options.onFailed(symbol);
     } else if (message.type === "snapshot") {
       this.attempt = 0;
-      this.options.onQuote(symbol, { last: num(message.last), previousClose: num(message.previous_close), changePct: num(message.change_pct) });
+      this.options.onQuote(symbol, { last: num(message.last), previousClose: num(message.previous_close), changePct: num(message.change_pct), ...origin(message) });
     } else if (message.type === "last" || message.type === "bar") {
-      this.options.onQuote(symbol, { last: num(message.price), previousClose: null, changePct: num(message.change_pct) });
+      this.options.onQuote(symbol, { last: num(message.price), previousClose: null, changePct: num(message.change_pct), ...origin(message) });
     }
   }
 }

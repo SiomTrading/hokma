@@ -16,6 +16,7 @@ from hokma.quant.types import QuantResult
 
 MAX_SYMBOL = 12
 LIBRARY_SOURCE = "library"
+LIBRARY_PROVIDER = "Yahoo Finance"                # who really answers for the library: the last fallback, never hidden behind "library"
 NO_CHAIN_CODES = ("no_connection", "desk")
 
 
@@ -72,14 +73,14 @@ def expiry_dates(symbol: str, desk_id: int | None = None) -> QuantResult:
             dates = list(_lib.ft_options.get_option_expiry_dates(sym))
             if not dates:
                 raise ValueError("no chain is connected and the library source has no expirations for this symbol") from exc
-            return {"symbol": sym, "source": LIBRARY_SOURCE, "delayed": True, "expirations": [{"date": d, "days": None, "multiplier": None} for d in dates]}
+            return {"symbol": sym, "source": LIBRARY_SOURCE, "provider": LIBRARY_PROVIDER, "delayed": True, "expirations": [{"date": d, "days": None, "multiplier": None} for d in dates]}
         return {"symbol": sym, "source": got.get("source"), "delayed": False, "expirations": got.get("expirations", [])}
 
     result = c.guarded(name, unit, method, pieces, params, compute)
     if result.value is not None and result.value["source"] == LIBRARY_SOURCE:
         return QuantResult(name=result.name, value=result.value, unit=result.unit, method=result.method, params=result.params,
                            inputs_hash=result.inputs_hash, as_of=result.as_of,
-                           warnings=result.warnings + ("no chain is connected: the library source answered, delayed and without multiplier",), piece_ids=result.piece_ids)
+                           warnings=result.warnings + ("no chain is connected: the library source (Yahoo Finance, last fallback) answered, delayed and without multiplier",), piece_ids=result.piece_ids)
     return result
 
 
@@ -116,7 +117,7 @@ def option_chain(symbol: str, expiration: str | None = None, kind: str | None = 
             rows = _library_rows(sym, expiration, kind)
             if not rows:
                 raise ValueError("no chain is connected and the library source has no contracts for this symbol and date") from exc
-            return {"symbol": sym, "source": LIBRARY_SOURCE, "delayed": True, "underlying_price": None, "as_of": None, "greeks": "none", "contracts": rows}
+            return {"symbol": sym, "source": LIBRARY_SOURCE, "provider": LIBRARY_PROVIDER, "delayed": True, "underlying_price": None, "as_of": None, "greeks": "none", "contracts": rows}
         delayed = bool(got["delayed"]) if "delayed" in got else got.get("price_feed") != "opra"
         return {"symbol": sym, "source": got.get("source"), "delayed": delayed, "underlying_price": got.get("underlying_price"), "as_of": got.get("as_of"),
                 "greeks": got.get("greeks"), "contracts": got.get("contracts", [])}
@@ -125,5 +126,5 @@ def option_chain(symbol: str, expiration: str | None = None, kind: str | None = 
     if result.value is not None and result.value["source"] == LIBRARY_SOURCE:
         return QuantResult(name=result.name, value=result.value, unit=result.unit, method=result.method, params=result.params,
                            inputs_hash=result.inputs_hash, as_of=result.as_of,
-                           warnings=result.warnings + ("no chain is connected: the library source answered, delayed and without greeks",), piece_ids=result.piece_ids)
+                           warnings=result.warnings + ("no chain is connected: the library source (Yahoo Finance, last fallback) answered, delayed and without greeks",), piece_ids=result.piece_ids)
     return result

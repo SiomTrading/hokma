@@ -143,6 +143,11 @@ def set_connection(desk_id: int, provider_id: str, body: ConnectionChoice) -> di
     return service.set_connection(desk_id, provider_id, body.enabled)
 
 
+@router.post("/api/desks/{desk_id}/connections/activate")
+def activate_my_connections(desk_id: int) -> dict:
+    return service.activate_my_connections(desk_id)
+
+
 # ---- team -----------------------------------------------------------------------------------
 
 @router.get("/api/desks/{desk_id}/agents")

@@ -80,10 +80,12 @@ def test_the_library_answers_only_when_no_chain_is_connected_and_says_so_FT_033(
     monkeypatch.setattr(_lib.ft_options, "get_option_chains", library_chain)
     dates = chain_module.expiry_dates("SPY")
     assert dates.value["source"] == "library" and dates.value["delayed"] is True
+    assert dates.value["provider"] == "Yahoo Finance" and any("Yahoo Finance" in w for w in dates.warnings)      # the fallback names itself
     assert [e["date"] for e in dates.value["expirations"]] == ["2026-12-18", "2027-01-15"] and dates.value["expirations"][0]["multiplier"] is None
     assert any("no chain is connected" in w for w in dates.warnings)
     res = chain_module.option_chain("SPY", expiration="2026-12-18")
     assert res.value["source"] == "library" and res.value["delayed"] is True and res.value["greeks"] == "none"
+    assert res.value["provider"] == "Yahoo Finance" and any("Yahoo Finance" in w for w in res.warnings)
     rows = res.value["contracts"]
     assert [(r["type"], r["strike"], r["bid"], r["ask"], r["open_interest"], r["iv"]) for r in rows] == [("call", 590.0, 10.0, 10.2, 1000.0, 0.16), ("call", 600.0, 5.0, 5.2, 800.0, 0.15)]
     assert rows[0]["mid"] == pytest.approx(10.1) and rows[0]["delta"] is None and rows[0]["expiration"] == "2026-12-18"

@@ -779,8 +779,8 @@ def test_adding_a_provider_turns_it_on_in_every_desk_without_a_row_and_is_idempo
             assert connections_runtime.get_service().mark_added("alpaca") == []
             with desks_db.read() as u:
                 assert u.session.scalar("SELECT count(*) FROM desk_connections WHERE provider_id = 'alpaca'") == rows == 2
-            third = make_desk(desks_db, name="Opciones")                              # a desk made later has no row
-            assert not any(c["enabled"] for c in desks_service.list_connections(third["id"], desks_db))
+            third = make_desk(desks_db, name="Opciones")                              # a desk made later is born with the connected ones on
+            assert {c["provider_id"]: c["enabled"] for c in desks_service.list_connections(third["id"], desks_db)}["alpaca"] is True
     finally:
         alpaca.stop()
 

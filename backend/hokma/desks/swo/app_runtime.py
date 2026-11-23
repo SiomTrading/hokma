@@ -20,12 +20,14 @@ from hokma.backoffice import snapshot as account_snapshot
 from hokma.broker.types import Fill
 from hokma.db import get_database
 from hokma.desks.agents.investors import CompanyData
+from hokma.desks.core.safety import scrub_text
 from hokma.desks.agents.trader import BrokerCosts, Quote, TradeContext
 from hokma.desks.core.graph import ChatModel
 from hokma.desks.plantel import SEATS
 from hokma.desks.swo.create import desk_agent_slug
 from hokma.desks.swo.graph import AnalystInput, ClientChat, CycleData, CycleError, CycleRuntime
 from hokma.desks.trading.budget import BudgetInputs
+from hokma.i18n import t as _t
 
 BENCHMARK = "SPY"
 BARS_DAYS = 400
@@ -46,43 +48,110 @@ def _client(desk_id: int, code: str) -> Any:
     return make_llm(_slug(desk_id, code), desk_id=desk_id)
 
 
-def _need(result: Any, what: str) -> Any:
-    """The value of a `DataResult`; anything that is not ok stops the cycle with its reason."""
+# What the owner reads when a source is missing: what failed, in words, and where to set it up (Connections).
+# The texts live in the message catalogs, read when they are needed so they follow the language of the owner.
+def _fix_market() -> str:
+    return _t("desks.cycle.fix_market")
+
+
+def _fix_fundamentals() -> str:
+    return _t("desks.cycle.fix_fundamentals")
+
+
+# One literal key per reason, so the catalog check can see that every key is used.
+REASONS = {
+    "provider_key_missing": lambda: _t("desks.cycle.reason.provider_key_missing"),
+    "provider_unreachable": lambda: _t("desks.cycle.reason.provider_unreachable"),
+    "rate_limited": lambda: _t("desks.cycle.reason.rate_limited"),
+    "empty_result": lambda: _t("desks.cycle.reason.empty_result"),
+    "no_closed_bars_in_window": lambda: _t("desks.cycle.reason.no_closed_bars_in_window"),
+    "stale_data": lambda: _t("desks.cycle.reason.stale_data"),
+    "window_not_observed": lambda: _t("desks.cycle.reason.window_not_observed"),
+    "not_published_by_as_of": lambda: _t("desks.cycle.reason.not_published_by_as_of"),
+    "sec_identity_missing": lambda: _t("desks.cycle.reason.sec_identity_missing"),
+    "not_connected": lambda: _t("desks.cycle.reason.not_connected"),
+}
+
+
+def _why(result: Any) -> str:
+    reason = str(result.reason or "")
+    text = REASONS.get(reason) or REASONS.get(str(result.status))
+    return text() if text else reason or str(result.status)
+
+
+NEEDS_SETUP = ("provider_key_missing", "not_connected")      # only these causes are solved by connecting something; the others are not the owner's setup
+
+
+def _need(result: Any, what: str, *, source: str = "data", fix: str = "") -> Any:
+    """The value of a `DataResult`; anything that is not ok stops the step with its reason, in words. The setup step is added only when the
+    cause is a missing key or connection."""
     if not result.ok:
-        raise CycleError("no_data", f"{what}: {result.status}: {result.reason}")
+        fix = fix if str(result.reason) in NEEDS_SETUP else ""
+        raise CycleError("no_data", _t("desks.cycle.no_data", what=what, why=_why(result), source=result.source, status=result.status, reason=result.reason, fix=fix).strip(), source=source, hint=fix or None)
     return result.value
+
+
+def _fetch(call: Any, what: str, *, source: str, fix: str) -> Any:
+    """Run one source. A source that raises instead of answering is the same as one that does not answer: the cause is chained, not lost."""
+    try:
+        result = call()
+    except CycleError:
+        raise
+    except Exception as exc:                                                   # noqa: BLE001
+        raise CycleError("no_data", _t("desks.cycle.source_failed", what=what, error=f"{type(exc).__name__}: {scrub_text(str(exc))[:200]}"), source=source) from exc
+    return _need(result, what, source=source, fix=fix)
 
 
 def _statements(records: Any) -> pd.DataFrame:
     """The point in time frame the investors read: one row per period end, a `filed` column, numeric accounts."""
     frame = pd.DataFrame(list(records))
     if frame.empty or "report_period" not in frame or "filing_date" not in frame:
-        raise CycleError("no_data", "fundamentals: the provider gave no dated statements")
+        raise CycleError("no_data", _t("desks.cycle.no_statements"), source="fundamentals")
     frame = frame.dropna(subset=["report_period", "filing_date"]).copy()
     frame["filed"] = frame.pop("filing_date").astype(str).str[:10]
     frame = frame.set_index(frame.pop("report_period").astype(str).str[:10]).sort_index()
     numeric = [c for c in frame.columns if c != "filed" and pd.api.types.is_numeric_dtype(frame[c])]
     if not numeric:
-        raise CycleError("no_data", "fundamentals: the provider gave no numeric accounts")
+        raise CycleError("no_data", _t("desks.cycle.no_numeric_accounts"), source="fundamentals")
     return frame[[*numeric, "filed"]]
 
 
 def load(desk_id: int, symbol: str, as_of: datetime) -> CycleData:
-    """The data of one symbol at one cut-off: bars of the symbol and of the benchmark, point in time fundamentals and the verified snapshot."""
+    """The data of one symbol at one cut-off: bars of the symbol and of the benchmark, point in time fundamentals and the verified snapshot.
+
+    Market data is the quorum: without bars of the symbol and of the benchmark there is no cycle, and the error says so. A missing source of
+    fundamentals only leaves the fundamentals analyst absent (`problems`) and the company filter without statements (its profiles abstain);
+    the analysts that have their data go on."""
     from hokma import data
     from hokma.data import fundamentals_src
     from hokma.data import snapshot as snapshots
 
     start = as_of - timedelta(days=BARS_DAYS)
-    bars = _need(data.bars(symbol, "1D", start=start, end=as_of, as_of=as_of), f"bars of {symbol}")
-    benchmark = _need(data.bars(BENCHMARK, "1D", start=start, end=as_of, as_of=as_of), f"bars of {BENCHMARK}")
-    records = _need(fundamentals_src.fundamentals(symbol, as_of=as_of, statement="metrics", period="quarterly"), f"fundamentals of {symbol}")
-    snap = snapshots.snapshot(symbol, as_of=as_of, categories=["market", "fundamentals"]).to_dict()
-    sections = {key: section for key, section in snap["sections"].items() if section.get("status") == "ok"}
+    bars = _fetch(lambda: data.bars(symbol, "1D", start=start, end=as_of, as_of=as_of), _t("desks.cycle.what.market", symbol=symbol), source="market", fix=_fix_market())
+    benchmark = _fetch(lambda: data.bars(BENCHMARK, "1D", start=start, end=as_of, as_of=as_of), _t("desks.cycle.what.market", symbol=BENCHMARK), source="market", fix=_fix_market())
+    problems: dict[str, str] = {}
+    statements = pd.DataFrame({"filed": pd.Series(dtype=str)})
+    try:
+        records = _fetch(lambda: fundamentals_src.fundamentals(symbol, as_of=as_of, statement="metrics", period="quarterly"),
+                         _t("desks.cycle.what.fundamentals", symbol=symbol), source="fundamentals", fix=_fix_fundamentals())
+        statements = _statements(records)
+    except CycleError as exc:
+        problems["fundamentals"] = str(exc)
+    sections: dict[str, Any] = {}
+    try:
+        snap = snapshots.snapshot(symbol, as_of=as_of, categories=["market", "fundamentals"]).to_dict()
+        sections = {key: section for key, section in snap["sections"].items() if section.get("status") == "ok"}
+    except Exception as exc:                                                   # noqa: BLE001  (the snapshot is evidence for two analysts, not the quorum)
+        problems.setdefault("market", _t("desks.cycle.snapshot_failed", symbol=symbol, error=f"{type(exc).__name__}: {scrub_text(str(exc))[:200]}"))
+    if "market" not in sections:
+        problems.setdefault("market", _t("desks.cycle.snapshot_market_missing", symbol=symbol))
+    if "fundamentals" not in sections:
+        problems.setdefault("fundamentals", _t("desks.cycle.snapshot_fundamentals_missing", symbol=symbol))
     given = {"symbol": symbol, "as_of": as_of.isoformat(), "sections": sections}
-    analysts = {"market": AnalystInput(snapshot=given), "fundamentals": AnalystInput(snapshot=given)}
-    company = CompanyData(statements=_statements(records), candles=bars, regime=None)
-    return CycleData(analysts=analysts, company=company, bars=benchmark, snapshot={"market": sections.get("market"), "fundamentals": sections.get("fundamentals")})
+    analysts = {key: AnalystInput(snapshot=given) for key in ("market", "fundamentals") if key not in problems}
+    company = CompanyData(statements=statements, candles=bars, regime=None)
+    return CycleData(analysts=analysts, company=company, bars=benchmark, snapshot={"market": sections.get("market"), "fundamentals": sections.get("fundamentals")},
+                     problems=problems)
 
 
 def _contract_id(symbol: str, row: Mapping[str, Any]) -> str:

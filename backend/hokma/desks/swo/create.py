@@ -190,6 +190,7 @@ def create_swo_desk(name: str, capital: Any, *, variant: str = "traditional", ma
                         safefs.write_atomic(folder, f"{TEAM_DIR}/skills/{skill_name}/SKILL.md", body.encode("utf-8"))
                         written += [f"{TEAM_DIR}/skills", f"{TEAM_DIR}/skills/{skill_name}", f"{TEAM_DIR}/skills/{skill_name}/SKILL.md"]
                 u.desks.replace_assets(desk.id, clean_assets)
+                given = service.connections_for_new_desk(u, desk.id)
                 for sub in projects.SUBFOLDERS:
                     safefs.write_atomic(folder, f"{sub}/.gitkeep", b"")
                     written += [sub, f"{sub}/.gitkeep"]
@@ -207,6 +208,7 @@ def create_swo_desk(name: str, capital: Any, *, variant: str = "traditional", ma
     diskfolders.ensure_own_folder(project.id, database)
     out = service.get_desk(desk.id, database)
     out["git"] = {"ok": git.ok, "reason": git.reason}
+    out["connections"] = service.connections_report(given)
     out["line"], out["variant"] = LINE, variant
     out["seats"] = [{"seat_code": m.seat.code, "name": m.seat.name, "agent_slug": desk_agent_slug(m.seat, desk.id)} for m in members]
     out["analysts"] = [step.key for step in plan if step.enabled]

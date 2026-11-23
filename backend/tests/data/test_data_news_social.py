@@ -132,3 +132,83 @@ def test_feeds_that_declare_entities_are_refused_and_html_is_stripped_TA_73() ->
         parse_atom(fixture_bytes("reddit_entity.atom.xml"))
     assert strip_html("<!-- SC_OFF --><div>a &amp; <b>b</b></div><!-- SC_ON --><p>footer</p>") == "a & b"
     assert strip_html("") == "" and len(parse_atom(fixture_bytes("reddit_search.atom.xml"))) == 2
+
+
+# ------------------------------------------------------------------------------------------------ Finnhub first, Yahoo as the named fallback
+FINNHUB_ROWS = [
+    {"headline": "ACME raises guidance", "summary": "Up.", "source": "Reuters", "url": "https://example.test/f1", "datetime": int(when("2024-04-09T15:00:00").timestamp())},
+    {"headline": "ACME old note", "summary": "", "source": "Wire", "url": "https://example.test/f2", "datetime": int(when("2024-03-01T10:00:00").timestamp())},
+    {"headline": "", "summary": "no title", "source": "Wire", "url": "", "datetime": int(when("2024-04-09T10:00:00").timestamp())},
+]
+
+
+def _finnhub(monkeypatch, status=200, rows=FINNHUB_ROWS, key="K"):
+    calls = []
+
+    def get(url, headers):
+        calls.append((url, headers))
+        return status, json.dumps(rows)
+
+    monkeypatch.setattr(news_module, "_finnhub_key", lambda: key)
+    monkeypatch.setattr(news_module, "_http_get", get)
+    return calls
+
+
+def _yahoo(monkeypatch):
+    seen = []
+    monkeypatch.setattr(news_module, "default_fetch", lambda query, **kw: seen.append(query) or fixture_json("yf_news.json"))
+    return seen
+
+
+def test_news_comes_from_finnhub_when_it_is_connected_with_its_key(monkeypatch) -> None:
+    calls = _finnhub(monkeypatch)
+    yahoo = _yahoo(monkeypatch)
+    result = news_module.news("ACME", as_of=when("2024-04-10"), start=when("2024-04-03"), clock=clock)
+    assert result.ok and result.source == "finnhub_news" and result.meta["provider"] == "Finnhub" and yahoo == []
+    assert [a["title"] for a in result.value] == ["ACME raises guidance"]            # the old one is outside the window, the titleless one is dropped
+    url, headers = calls[0]
+    assert "/company-news?" in url and "symbol=ACME" in url and "from=2024-04-03" in url and "to=2024-04-10" in url
+    assert headers == {"X-Finnhub-Token": "K"}
+
+
+def test_news_uses_yahoo_named_as_the_fallback_without_a_finnhub_key(monkeypatch) -> None:
+    monkeypatch.setattr(news_module, "_finnhub_key", lambda: None)
+    yahoo = _yahoo(monkeypatch)
+    result = news_module.news("ACME", as_of=when("2024-04-01"), start=when("2024-03-20"), clock=clock)
+    assert result.ok and result.source == "yahoo_news" and result.meta == {"provider": "Yahoo Finance", "fallback": True} and yahoo == ["ACME"]
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500])
+def test_news_falls_back_to_yahoo_and_says_finnhub_failed(monkeypatch, status) -> None:
+    _finnhub(monkeypatch, status=status)
+    _yahoo(monkeypatch)
+    result = news_module.news("ACME", as_of=when("2024-04-01"), start=when("2024-03-20"), clock=clock)
+    assert result.ok and result.source == "yahoo_news" and result.meta["fallback"] is True
+    assert any(w.startswith("finnhub_failed") for w in result.warnings)
+
+
+def test_a_symbol_finnhub_does_not_cover_goes_straight_to_yahoo(monkeypatch) -> None:
+    calls = _finnhub(monkeypatch)
+    _yahoo(monkeypatch)
+    for symbol in ("NQ=F", "^GSPC", "EURUSD=X"):
+        result = news_module.news(symbol, as_of=when("2024-04-01"), start=when("2024-03-20"), clock=clock)
+        assert result.source == "yahoo_news"
+    assert calls == []
+
+
+def test_an_empty_finnhub_answer_is_an_absence_of_news_not_a_reason_to_ask_yahoo(monkeypatch) -> None:
+    _finnhub(monkeypatch, rows=[])
+    yahoo = _yahoo(monkeypatch)
+    result = news_module.news("ACME", as_of=when("2024-04-10"), clock=clock)
+    assert result.status == sentinels.NO_DATA and result.source == "finnhub_news" and yahoo == []
+
+
+def test_global_news_uses_the_general_finnhub_feed_and_falls_back_to_yahoo_queries(monkeypatch) -> None:
+    calls = _finnhub(monkeypatch)
+    yahoo = _yahoo(monkeypatch)
+    result = news_module.global_news(as_of=when("2024-04-10"), clock=clock)
+    assert result.ok and result.source == "finnhub_news" and "/news?category=general" in calls[0][0] and yahoo == []
+    _finnhub(monkeypatch, status=403)
+    fallback = news_module.global_news(as_of=when("2024-04-01"), look_back_days=30, clock=clock)
+    assert fallback.source == "yahoo_news" and len(yahoo) == len(news_module.DEFAULT_GLOBAL_QUERIES)
+    assert any(w.startswith("finnhub_failed") for w in fallback.warnings)

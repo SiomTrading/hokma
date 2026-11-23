@@ -135,10 +135,10 @@ export function AgentsTab({ desk }: TabProps) {
         <div className="ph">
           <span className="title">{t("desks.agents.team")}</span>
           <span className="x desk-agents-tools">
-            <Button size="sm" onClick={() => setBringing(true)}>
+            <Button variant="primary" onClick={() => setBringing(true)}>
               {t("desks.agents.bring")}
             </Button>
-            <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
+            <Button onClick={() => setCreating(true)}>
               {t("desks.agents.create")}
             </Button>
           </span>

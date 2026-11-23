@@ -10,8 +10,8 @@ import type { CreateDeskPayload, DeskTemplateDef, WizardTemplate } from "./types
 
 interface Props {
   onClose: () => void;
-  /** Called with the id of the desk the server created. */
-  onCreated: (id: number) => void;
+  /** Called with the id of the desk the server created and whether it was born with only the Yahoo fallback. */
+  onCreated: (id: number, fallbackOnly: boolean) => void;
 }
 
 const STEPS = ["focus", "team", "rules", "assets"] as const;
@@ -102,7 +102,7 @@ export function TemplateWizard({ onClose, onCreated }: Props) {
     setError(null);
     try {
       const created = await desksApi.create(payload);
-      onCreated(created.id);
+      onCreated(created.id, created.connections?.fallback_only === true);
     } catch (cause) {
       setError(cause instanceof ApiError || cause instanceof Error ? cause.message : t("api.error"));
       setBusy(false);

@@ -335,8 +335,8 @@ def test_connections_are_stored_per_desk(desks_db):
         u.desks.set_connection(desk["id"], "tradovate", True)
         u.desks.set_connection(desk["id"], "tradovate", False)
         u.desks.set_connection(desk["id"], "fred", True)
-    assert [(c["provider_id"], c["enabled"]) for c in service.get_desk(desk["id"], desks_db)["connections"]] == [
-        ("fred", True), ("tradovate", False)]
+    chosen = {c["provider_id"]: c["enabled"] for c in service.get_desk(desk["id"], desks_db)["connections"]}
+    assert chosen["fred"] is True and chosen["tradovate"] is False        # the provider already connected is on from the start (coinbase has no key)
 
 
 def test_by_project_and_missing_desk(desks_db):
@@ -397,3 +397,72 @@ def test_reorder_assets_refuses_a_different_set(db):
         with pytest.raises(service.DeskError):
             service.reorder_assets(desk["id"], bad, db=db)
     assert [a["symbol"] for a in service.get_desk(desk["id"], db=db)["assets"]] == ["NQ", "ES"]
+
+
+# ------------------------------------------------------------------------------------------ connections of a new desk
+
+class _FakeConnections:
+    """The part of the connection service a new desk reads: the catalog, the order of the bars and who is connected."""
+
+    loaded = True
+
+    def __init__(self, added):
+        from hokma.market.providers import get_catalog
+
+        self.catalog = get_catalog()
+        self._added = added
+
+    def is_added(self, provider_id):
+        return provider_id in self._added
+
+    def order(self, asset_class):
+        return list(self._added)
+
+    def is_enabled(self, provider_id):
+        return provider_id in self._added
+
+    def has_key(self, provider_id):
+        return provider_id in self._added
+
+
+def _rows(db, desk_id):
+    with db.read() as u:
+        return {c.provider_id: c.enabled for c in u.desks.list_connections(desk_id)}
+
+
+def test_a_new_desk_is_born_with_the_connected_providers_turned_on(desks_db, monkeypatch):
+    monkeypatch.setattr(service, "_market_service", lambda: _FakeConnections(["schwab", "finnhub"]))
+    made = service.create_desk("Con Schwab", 10000, db=desks_db)
+    assert _rows(desks_db, made["id"]) == {"schwab": True, "finnhub": True}
+    assert made["connections"] == {"providers": ["schwab", "finnhub"], "fallback_only": False}
+    assert {c["provider_id"]: c["enabled"] for c in service.list_connections(made["id"], desks_db)}["schwab"] is True
+
+
+def test_a_new_desk_with_nothing_connected_says_it_only_has_the_fallback(desks_db, monkeypatch):
+    monkeypatch.setattr(service, "_market_service", lambda: _FakeConnections([]))
+    made = service.create_desk("Sin nada", 10000, db=desks_db)
+    assert _rows(desks_db, made["id"]) == {}
+    assert made["connections"] == {"providers": [], "fallback_only": True, "notice": service.FALLBACK_NOTICE, "link": "connections"}
+    assert "Yahoo" in service.FALLBACK_NOTICE and "Schwab" in service.FALLBACK_NOTICE and "Finnhub" in service.FALLBACK_NOTICE
+
+
+def test_activate_my_connections_only_makes_the_missing_rows_and_never_overrides_a_choice(desks_db, monkeypatch):
+    monkeypatch.setattr(service, "_market_service", lambda: _FakeConnections([]))
+    made = service.create_desk("Antes de conectar", 10000, db=desks_db)           # born with nothing connected: no rows
+    assert made["connections"]["fallback_only"] is True
+    monkeypatch.setattr(service, "_market_service", lambda: _FakeConnections(["schwab", "finnhub"]))
+    service.set_connection(made["id"], "finnhub", False, desks_db)                # explicit choice: finnhub off
+    first = service.activate_my_connections(made["id"], desks_db)
+    assert first == {"activated": ["schwab"], "providers": ["schwab"], "fallback_only": False}
+    assert _rows(desks_db, made["id"]) == {"schwab": True, "finnhub": False}      # the explicit off was not overridden
+    again = service.activate_my_connections(made["id"], desks_db)
+    assert again == {"activated": [], "providers": ["schwab"], "fallback_only": False}
+    assert _rows(desks_db, made["id"]) == {"schwab": True, "finnhub": False}
+
+
+def test_activate_my_connections_with_nothing_connected_says_fallback_only(desks_db, monkeypatch):
+    monkeypatch.setattr(service, "_market_service", lambda: _FakeConnections([]))
+    made = service.create_desk("Nada", 10000, db=desks_db)
+    assert service.activate_my_connections(made["id"], desks_db) == {"activated": [], "providers": [], "fallback_only": True}
+    with pytest.raises(service.DeskError):
+        service.activate_my_connections(999999, desks_db)

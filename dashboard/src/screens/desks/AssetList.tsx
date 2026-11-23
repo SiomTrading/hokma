@@ -10,6 +10,9 @@ export interface Quote {
   last: number | null;
   previousClose: number | null;
   changePct: number | null;
+  /** The provider that served this price, by name; null until a message says it. */
+  source: string | null;
+  delayed: boolean;
 }
 
 /** A quote that could not be read shows as a dash, never as a made-up number. */
@@ -28,7 +31,7 @@ export function useQuotes(symbols: string[]): Record<string, QuoteState | undefi
           const before = prev[symbol];
           const held = before && before !== "failed" ? before : null;
           // A price message carries the price and the change; the previous close stays the one the snapshot gave.
-          return { ...prev, [symbol]: { last: quote.last ?? held?.last ?? null, previousClose: quote.previousClose ?? held?.previousClose ?? null, changePct: quote.changePct ?? held?.changePct ?? null } };
+          return { ...prev, [symbol]: { last: quote.last ?? held?.last ?? null, previousClose: quote.previousClose ?? held?.previousClose ?? null, changePct: quote.changePct ?? held?.changePct ?? null, source: quote.source ?? held?.source ?? null, delayed: quote.source ? quote.delayed : (held?.delayed ?? false) } };
         }),
       onFailed: (symbol) => setQuotes((prev) => ({ ...prev, [symbol]: prev[symbol] && prev[symbol] !== "failed" ? prev[symbol] : "failed" })),
     });
@@ -56,6 +59,11 @@ interface Props {
   onRemove: (symbol: string) => void;
   /** The student moved an asset: the whole list in its new order. */
   onReorder: (symbols: string[]) => void;
+}
+
+/** "Precio de Schwab" or "Precio de Yahoo Finance (con retraso)": the provider that really served the price. */
+function sourceText(quote: Quote, t: ReturnType<typeof useI18n>["t"]): string {
+  return t(quote.delayed ? "desks.terminal.priceDelayed" : "desks.terminal.priceFrom", { source: quote.source ?? "" });
 }
 
 /** The list with `symbol` taken out and put at `index` (an index of the list without it). */
@@ -203,7 +211,7 @@ export function AssetList({ symbols, focus, onFocus, adding, busy, error, onTogg
                     {symbol}
                   </button>
                 </td>
-                <td className="r mono">{quote ? formatPrice(quote.last, locale) : "-"}</td>
+                <td className="r mono" title={quote?.source ? sourceText(quote, t) : undefined}>{quote ? formatPrice(quote.last, locale) : "-"}</td>
                 <td className={`r mono ${tone}`}>{quote ? formatPercent(quote.changePct, locale) : "-"}</td>
                 <td className="r dterm-x">
                   <button type="button" className="ib dterm-remove" disabled={busy} aria-label={t("desks.field.asset.remove", { symbol })} onClick={() => setConfirming(symbol)}>
@@ -222,6 +230,7 @@ export function AssetList({ symbols, focus, onFocus, adding, busy, error, onTogg
         <span className="lbl">{t("desks.terminal.quote", { symbol: focus })}</span>
         <div className="mono dterm-quote-px">{focusQuote ? formatPrice(focusQuote.last, locale) : "-"}</div>
         <div className="mono hint">{t("desks.terminal.prevClose", { value: focusQuote ? formatPrice(focusQuote.previousClose, locale) : "-" })}</div>
+        {focusQuote?.source ? <div className="hint" data-testid="quote-source">{sourceText(focusQuote, t)}</div> : null}
       </div>
       ) : null}
     </Pane>

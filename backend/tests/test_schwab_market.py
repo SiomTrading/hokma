@@ -304,12 +304,37 @@ def test_schwab_is_not_asked_without_a_session_or_when_it_is_switched_off(tmp_pa
     assert source.providers_for("AAPL") == [] and schwab.calls == []
 
 
-def test_schwab_serves_only_stocks_and_etfs(tmp_path, schwab):
-    from hokma.market.history import HISTORY_CLASSES
+def test_schwab_serves_stocks_etfs_and_futures_but_not_crypto(tmp_path, schwab):
+    from hokma.market.history import EXCLUSIVE_CLASSES, HISTORY_CLASSES
 
-    assert HISTORY_CLASSES["schwab"] == ("equity",)
+    assert HISTORY_CLASSES["schwab"] == ("equity", "future") and EXCLUSIVE_CLASSES == ("equity",)
     source, yahoo = history_chain(tmp_path)
-    assert "schwab" not in source.providers_for("BTC-USD") and source.providers_for("NQ=F") == []
+    assert "schwab" not in source.providers_for("BTC-USD") and source.providers_for("NQ=F") == ["schwab"]
+
+
+def test_futures_candles_ask_schwab_for_the_root_and_say_schwab(tmp_path, schwab):
+    schwab.on("GET", HISTORY, {**SCHWAB_BARS, "symbol": "/NQ", "candles": [bar(OPEN_930, 10, 12, 9, 11, 100)]})
+    source, yahoo = history_chain(tmp_path)
+    series = source.history("NQ=F", "5m")
+    assert series.source == "Schwab" and series.kind == "future" and yahoo.calls == []
+    assert schwab.calls[0].query["symbol"] == "/NQ"
+
+
+@pytest.mark.parametrize("answer", [(400, {"errors": [{"status": "400"}]}), (404, {"errors": [{"status": "404"}]}), (500, {}),
+                                    (403, {"errors": [{"status": "403"}]}), {"symbol": "/NQ", "empty": True, "candles": []}])
+def test_futures_without_bars_at_schwab_fall_to_yahoo_which_says_its_name(tmp_path, schwab, answer):
+    schwab.on("GET", HISTORY, answer)
+    source, yahoo = history_chain(tmp_path)
+    assert source.history("NQ=F", "5m").source == "Yahoo Finance" and ("NQ=F", "5m") in yahoo.calls
+
+
+def test_a_futures_refusal_does_not_close_schwab_for_stocks(tmp_path, schwab):
+    schwab.on("GET", HISTORY, (403, {"errors": [{"status": "403"}]}))
+    source, yahoo = history_chain(tmp_path)
+    assert source.history("NQ=F", "5m").source == "Yahoo Finance"
+    assert source.providers_for("AAPL") == ["schwab"] and "schwab" not in source._denied
+    with pytest.raises(MarketError):                                  # stocks keep their rule: the broker is the only source
+        source.history("AAPL", "5m")
 
 
 # ------------------------------------------------------------------------------------------ 5.6 the option chain

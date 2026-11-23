@@ -82,6 +82,27 @@ def test_desk_create_defaults_to_standard_and_has_no_budget_of_its_own(desks_db)
     assert created["assets"] == []
 
 
+def test_desk_create_answer_tells_when_the_desk_only_has_the_fallback(desks_db, monkeypatch):
+    class Nothing:
+        loaded = True
+
+        def __init__(self):
+            from hokma.market.providers import get_catalog
+
+            self.catalog = get_catalog()
+
+        def is_added(self, provider_id):
+            return False
+
+        def order(self, asset_class):
+            return []
+
+    monkeypatch.setattr(service, "_market_service", Nothing)
+    created, err = call("desk_create", {"name": "Solo respaldo", "capital": 1000})
+    assert not err and created["connections"]["fallback_only"] is True
+    assert "Yahoo" in created["connections"]["notice"] and created["connections"]["link"] == "connections"
+
+
 def test_a_repeated_name_is_refused_with_a_clear_error_and_creates_nothing(desks_db):
     assert not call("desk_create", {"name": "Futuros NQ", "capital": 1000})[1]
     before = counts(desks_db)

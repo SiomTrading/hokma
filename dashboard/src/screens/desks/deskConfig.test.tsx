@@ -59,6 +59,9 @@ function stubServer(over: Partial<Server> = {}): Server {
         return server.assetsStatus === 200 ? json({ ok: true }) : json({ detail: { code: "desks.unknown_symbol", message: "That symbol is not in the catalog." } }, server.assetsStatus);
       }
       if (path === "/api/desks/7/connections" && method === "GET") return json({ connections: server.connections });
+      if (path === "/api/desks/7/connections/activate" && method === "POST") {
+        return json({ activated: ["alpaca"], providers: ["finnhub", "alpaca"], fallback_only: false });
+      }
       if (path.startsWith("/api/desks/7/connections/") && method === "PUT") return json({ ok: true });
       return json({});
     }),
@@ -248,6 +251,23 @@ describe("Settings: connections and empty sections", () => {
     const puts = sent(server, "PUT", "/api/desks/7/connections/alpaca");
     expect(puts[0]!.body).toEqual({ enabled: true });
     expect(screen.getByText(t("desks.cfg.connections.note"))).toBeInTheDocument();
+  });
+
+  it("Activar mis conexiones asks the server once and says what got turned on", async () => {
+    const server = stubServer();
+    open("config");
+    await userEvent.click(await screen.findByRole("button", { name: t("desks.cfg.section.connections") }));
+    await userEvent.click(await screen.findByRole("button", { name: t("desks.cfg.connections.activate") }));
+    expect(await screen.findByText(t("desks.cfg.connections.activate.done", { providers: "Alpaca" }))).toBeInTheDocument();
+    expect(sent(server, "POST", "/api/desks/7/connections/activate")).toHaveLength(1);
+  });
+
+  it("when the desk uses no provider it says it only has the Yahoo fallback and links to Connections", async () => {
+    stubServer({ connections: [{ provider_id: "schwab", name: "Schwab", enabled: false, asset_classes: ["equity"] }] });
+    open("config");
+    await userEvent.click(await screen.findByRole("button", { name: t("desks.cfg.section.connections") }));
+    expect(await screen.findByText(t("desks.cfg.connections.fallbackNote"))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("desks.cfg.connections.goConnections") })).toBeInTheDocument();
   });
 
   it("memory and trading accounts are empty states with no step label", async () => {

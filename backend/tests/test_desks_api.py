@@ -179,7 +179,7 @@ def test_connections_join_the_global_list_with_the_choice_of_the_desk(client):
     items = client.get(f"/api/desks/{desk_id}/connections").json()["connections"]
     ids = [c["provider_id"] for c in items]
     assert "coinbase" in ids and len(ids) >= 2
-    assert all(c["enabled"] is False for c in items)
+    assert all(c["enabled"] is (c["provider_id"] == "coinbase") for c in items)       # born with the connected ones on (coinbase has no key)
     for field in ("name", "asset_classes", "needs_key", "key_ready", "enabled_global"):
         assert field in items[0]
     res = client.put(f"/api/desks/{desk_id}/connections/coinbase", json={"enabled": True})
@@ -188,7 +188,7 @@ def test_connections_join_the_global_list_with_the_choice_of_the_desk(client):
     assert chosen["coinbase"] is True and sum(chosen.values()) == 1
     assert client.put(f"/api/desks/{desk_id}/connections/coinbase", json={"enabled": False}).json()["enabled"] is False
     other = new_desk(client, "Otra")["id"]
-    assert not any(c["enabled"] for c in client.get(f"/api/desks/{other}/connections").json()["connections"])
+    assert [c["provider_id"] for c in client.get(f"/api/desks/{other}/connections").json()["connections"] if c["enabled"]] == ["coinbase"]
 
 
 def test_connection_errors(client):

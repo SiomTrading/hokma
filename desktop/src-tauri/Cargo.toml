@@ -1,6 +1,6 @@
 [package]
 name = "hokma-desktop"
-version = "1.0.13"
+version = "1.0.14"
 description = "Hokma desktop window: starts and stops the local engine and shows its panel"
 edition = "2021"
 publish = false

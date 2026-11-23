@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, ErrorState, Glyph, Loading, Modal, Option, Pill, Segmented } from "@/design";
+import { Button, ErrorState, Glyph, Input, Loading, Modal, Pill } from "@/design";
 import { useI18n } from "@/i18n";
 import { agentsApi } from "../agents/api";
-import { agentTint, MODELS, shortDescription } from "../agents/format";
+import { agentTint, shortDescription } from "../agents/format";
 import { OpusConfirm } from "../agents/OpusConfirm";
 import type { AgentItem } from "../agents/types";
 import { useAgentName } from "./agentName";
-import { deskAgentsApi, errorCode } from "./agentsApi";
+import { deskAgentsApi } from "./agentsApi";
 import { failText } from "./configApi";
-import type { DeskModel } from "./types";
 
 interface Props {
   deskId: number;
@@ -20,18 +19,29 @@ interface Props {
   onBrought: (name: string) => void;
 }
 
-/** Picks an agent that exists and brings it to the desk with the model chosen for it. The agent is not copied. */
+/** Lower case and without accents, so a search without the accent finds the word with it. */
+const fold = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** Role of an agent as the catalog knows it, in words. */
+function roleKey(item: AgentItem): "orchestrator" | "custom" | "specialist" {
+  if (item.is_orchestrator) return "orchestrator";
+  return item.is_custom ? "custom" : "specialist";
+}
+
+/**
+ * Finds an agent that exists, by name, role or description, and brings it to the desk with the model it already has.
+ * The agent is not copied. The model of the desk is changed afterwards in the detail of the agent.
+ */
 export function BringAgentModal({ deskId, deskName, taken, onClose, onBrought }: Props) {
   const { t } = useI18n();
   const nameOf = useAgentName();
   const [items, setItems] = useState<AgentItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [slug, setSlug] = useState<string | null>(null);
-  const [model, setModel] = useState<DeskModel>("sonnet");
-  const [askOpus, setAskOpus] = useState(false);
-  const [needsOn, setNeedsOn] = useState(false);
+  const [query, setQuery] = useState("");
+  /** Agent waiting for the Opus confirmation. */
+  const [askOpus, setAskOpus] = useState<AgentItem | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -42,31 +52,31 @@ export function BringAgentModal({ deskId, deskName, taken, onClose, onBrought }:
   }, [t]);
   useEffect(load, [load]);
 
-  const free = (items ?? []).filter((item) => !taken.includes(item.slug));
-  const picked = free.find((item) => item.slug === slug) ?? null;
+  const needle = fold(query.trim());
+  const found = (items ?? []).filter((item) => {
+    if (!needle) return true;
+    const haystack = [nameOf(item.slug, item.name), item.name, t(`desks.agents.bring.role.${roleKey(item)}`), item.role ?? "", item.description];
+    return fold(haystack.join(" ")).includes(needle);
+  });
+  /** Agents already in the desk stay in the list, marked and last, so nobody wonders where they went. */
+  const rows = [...found.filter((item) => !taken.includes(item.slug)), ...found.filter((item) => taken.includes(item.slug))];
 
-  const pick = (item: AgentItem) => {
-    setSlug(item.slug);
-    setModel(item.model);
-    setNeedsOn(false);
-    setError(null);
-  };
-
-  const bring = async (turnOn: boolean) => {
-    if (!picked) return;
-    setBusy(true);
+  const bring = async (item: AgentItem) => {
+    setBusy(item.slug);
     setError(null);
     try {
-      if (turnOn) await agentsApi.setStatus(picked.slug, "active");
-      await deskAgentsApi.add(deskId, { agent_slug: picked.slug, model });
-      onBrought(picked.name);
+      if (!item.active) await agentsApi.setStatus(item.slug, "active");
+      await deskAgentsApi.add(deskId, { agent_slug: item.slug, model: item.model });
+      onBrought(item.name);
       onClose();
     } catch (cause) {
-      if (errorCode(cause).endsWith("agent_off")) setNeedsOn(true);
-      else setError(failText(cause, t("desks.agents.bring.error")));
-      setBusy(false);
+      setError(failText(cause, t("desks.agents.bring.error")));
+      setBusy(null);
     }
   };
+
+  /** Opus costs more: it is confirmed before an agent that runs on it joins the desk. */
+  const add = (item: AgentItem) => (item.model === "opus" ? setAskOpus(item) : void bring(item));
 
   return (
     <>
@@ -74,36 +84,53 @@ export function BringAgentModal({ deskId, deskName, taken, onClose, onBrought }:
         <div className="desk-bring">
           <h2 className="h1">{t("desks.agents.bring.title", { name: deskName })}</h2>
           <p className="hint">{t("desks.agents.bring.text")}</p>
+          <Input
+            type="search"
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("desks.agents.bring.search")}
+            aria-label={t("desks.agents.bring.search")}
+          />
           {loadError ? <ErrorState message={loadError} onRetry={load} /> : null}
           {!loadError && items === null ? <Loading label={t("desks.agents.loading")} /> : null}
-          {items !== null && free.length === 0 ? <p className="hint">{t("desks.agents.bring.empty")}</p> : null}
-          <div role="radiogroup" aria-label={t("desks.agents.bring")} className="desk-bring-list">
-            {free.map((item) => (
-              <Option key={item.slug} selected={item.slug === slug} onSelect={() => pick(item)} className="desk-bring-row">
-                <Glyph initial={nameOf(item.slug, item.name).slice(0, 2).toUpperCase()} color={agentTint(item.slug)} size={34} />
-                <span className="desk-bring-text">
-                  <b>{nameOf(item.slug, item.name)}</b>
-                  <span className="hint">{shortDescription(item.description)}</span>
-                </span>
-                <Pill tone={item.active ? "default" : "warn"}>{item.active ? t("desks.agents.bring.unassigned") : t("desks.agents.bring.off")}</Pill>
-              </Option>
-            ))}
-          </div>
-          {picked ? (
-            <div className="desk-bring-model">
-              <span className="lbl">{t("desks.agents.bring.model")}</span>
-              <Segmented
-                label={t("desks.agents.bring.model")}
-                value={model}
-                onChange={(next) => (next === "opus" ? setAskOpus(true) : setModel(next))}
-                options={MODELS.map((m) => ({ value: m, label: t(`desks.model.${m}`) }))}
-              />
-            </div>
-          ) : null}
-          {needsOn && picked ? (
-            <p className="hint" role="status">
-              {t("desks.agents.bring.offAsk", { name: picked.name })}
+          {items !== null && rows.length === 0 ? (
+            <p className="hint desk-bring-none" role="status">
+              {t("desks.agents.bring.none")}
             </p>
+          ) : null}
+          {rows.length > 0 ? (
+            <ul className="desk-bring-list" aria-label={t("desks.agents.bring")}>
+              {rows.map((item) => {
+                const inDesk = taken.includes(item.slug);
+                const name = nameOf(item.slug, item.name);
+                return (
+                  <li key={item.slug} className="desk-bring-row">
+                    <Glyph initial={name.slice(0, 2).toUpperCase()} color={agentTint(item.slug)} size={30} />
+                    <span className="desk-bring-text">
+                      <b>{name}</b>
+                      <span className="hint">{shortDescription(item.description)}</span>
+                    </span>
+                    <Pill tone={!inDesk && !item.active ? "warn" : "default"}>
+                      {!inDesk && !item.active ? t("desks.agents.bring.off") : t(`desks.agents.bring.role.${roleKey(item)}`)}
+                    </Pill>
+                    {inDesk ? (
+                      <Pill tone="ok">{t("desks.agents.bring.inDesk")}</Pill>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={busy !== null}
+                        aria-label={t("desks.agents.bring.addNamed", { name })}
+                        onClick={() => add(item)}
+                      >
+                        {item.active ? t("desks.agents.bring.add") : t("desks.agents.bring.turnOn")}
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           ) : null}
           {error ? (
             <p className="err" role="alert">
@@ -114,18 +141,16 @@ export function BringAgentModal({ deskId, deskName, taken, onClose, onBrought }:
             <Button variant="ghost" onClick={onClose}>
               {t("desks.agents.bring.cancel")}
             </Button>
-            <Button variant="primary" disabled={busy || !picked} onClick={() => void bring(needsOn)}>
-              {needsOn ? t("desks.agents.bring.turnOn") : t("desks.agents.bring.submit")}
-            </Button>
           </div>
         </div>
       </Modal>
       {askOpus ? (
         <OpusConfirm
-          onCancel={() => setAskOpus(false)}
+          onCancel={() => setAskOpus(null)}
           onConfirm={() => {
-            setAskOpus(false);
-            setModel("opus");
+            const item = askOpus;
+            setAskOpus(null);
+            void bring(item);
           }}
         />
       ) : null}

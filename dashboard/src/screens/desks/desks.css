@@ -144,10 +144,12 @@
 .desk-remove-ask { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
 .desk-remove-ask p { margin: 0; }
 .desk-bring { display: flex; flex-direction: column; gap: 12px; padding: 22px; }
-.desk-bring-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
-.desk-bring-row { display: flex; flex-direction: row; align-items: center; gap: 12px; text-align: left; }
-.desk-bring-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.desk-bring-model { display: flex; align-items: center; gap: 12px; }
+.desk-bring-list { display: flex; flex-direction: column; gap: 2px; max-height: min(360px, 48vh); overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.desk-bring-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; border: 1px solid transparent; }
+.desk-bring-row:hover { background: var(--glass-subtle); }
+.desk-bring-text { display: flex; flex-direction: column; min-width: 0; }
+.desk-bring-text .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk-bring-none { padding: 16px 0; text-align: center; }
 .desk-bring-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 900px) {
   .desk-agents { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
@@ -346,7 +348,8 @@
 @media (max-width: 1000px) {
   .brk-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.desks-body > * { flex: none; }
+/* Terminal fills the body (.dterm: flex 1, min-height 0); .state keeps flex 1 (:not(.state) avoids a (0,2,0) tie with .desks-body > .state); other tabs keep their height and the body scrolls */
+.desks-body > :not(.dterm):not(.state) { flex: none; }
 
 .brk-pending { padding: 14px 20px; display: flex; flex-direction: column; gap: 10px; flex: none; }
 .brk-pending-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }

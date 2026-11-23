@@ -1,5 +1,5 @@
 import { api, ApiError } from "@/api";
-import type { DeskConnection, DeskDetail, DeskPatch } from "./configTypes";
+import type { ActivateResult, DeskConnection, DeskDetail, DeskPatch } from "./configTypes";
 
 const base = (id: number) => `/api/desks/${id}`;
 
@@ -48,6 +48,8 @@ export const deskConfigApi = {
     const body = await api.get<RawConnection[] | { connections: RawConnection[] }>(`${base(id)}/connections`);
     return (Array.isArray(body) ? body : (body.connections ?? [])).map(readConnection);
   },
+  /** "Activar mis conexiones": turns on the connected providers the desk has no row for; never overrides a choice. */
+  activateMine: (id: number) => api.post<ActivateResult>(`${base(id)}/connections/activate`, {}),
   setConnection: (id: number, providerId: string, enabled: boolean) =>
     api.put<unknown>(`${base(id)}/connections/${encodeURIComponent(providerId)}`, { enabled }),
 };

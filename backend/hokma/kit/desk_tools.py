@@ -157,7 +157,8 @@ def desk_create_swo(u, c, a: dict) -> str:
     except (DeskError, ValueError) as exc:
         raise _plain_error(exc) from None
     return _dump({"desk_id": desk["id"], "name": desk["name"], "line": desk["line"], "variant": desk["variant"], "level": 1,
-                  "seats": desk["seats"], "analysts": desk["analysts"], "mandate_approved_by_owner": approved is True})
+                  "seats": desk["seats"], "analysts": desk["analysts"], "mandate_approved_by_owner": approved is True,
+                  "connections": desk.get("connections")})
 
 
 @TOOLSET.tool("desk_mandate_save", "Replace the typed mandate of your SWO desk (the same door as the desk API). The line and the variant never change. The mandate counts as the owner's only when the owner is the one who edits it: here it is saved as the agent's and the owner approves it in the app.", {
@@ -198,6 +199,7 @@ def desk_cycle_run(u, c, a: dict) -> str:
         raise _plain_error(exc) from None
     return _dump({"desk_id": desk_id, "symbol": symbol, "run_id": result.run_id, "rating": result.rating, "proposal_id": result.proposal_id,
                   "exec_status": result.exec_status, "absent": list(result.absent), "stopped_at": result.stopped_at, "reason": result.reason,
+                  "detail": result.detail, "analyst_status": dict(result.analyst_status), "analyst_causes": dict(result.analyst_causes),
                   "learning": result.learning})
 
 
@@ -228,10 +230,11 @@ def _cycle_row(record: dict, *, full: bool) -> dict[str, Any]:
     row = {"run_id": record["id"], "status": record["status"], "symbol": (body.get("entries") or {}).get("symbol"),
            "as_of": (body.get("entries") or {}).get("as_of"), "stopped_at": out.get("stopped_at"), "reason": out.get("reason"),
            "rating": (out.get("final") or {}).get("rating"), "absent": out.get("absent") or [],
+           "detail": out.get("detail"), "analyst_status": out.get("analyst_status") or {}, "analyst_causes": out.get("analyst_causes") or {},
            "proposal_ids": [o.get("proposal_id") for o in out.get("orders") or []], "delivery": out.get("delivery"), "learning": out.get("learning")}
     if full:
         row.update({"trail": out.get("trail"), "regime": out.get("regime"), "filter": out.get("filter"), "judge": out.get("judge"),
-                    "committee": out.get("committee"), "final": out.get("final"), "analyst_status": out.get("analyst_status")})
+                    "committee": out.get("committee"), "final": out.get("final"), "error": out.get("error")})
     return row
 
 
