@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.16
+
+- Fixed: When you confirm a sale, the warning also counts your orders that were already sent to the broker and are not filled yet, only for the part still waiting, and the ticket names the contract in words.
+
 ## 1.0.15
 
 - Fixed: The top bar of a desk keeps the desk selector, tabs and figures on one row instead of stretching the selector across the whole width.

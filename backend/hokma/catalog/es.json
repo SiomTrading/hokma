@@ -909,6 +909,8 @@
   "exec.why.owner_risk_unreadable": "No pude medir el riesgo de esta venta, así que no se aprobó ni se envió. Revisa la cuenta e inténtalo de nuevo.",
   "exec.why.owner_risk_spread": "Ojo: esta orden vende un spread de crédito en {contract}; tu pérdida máxima sería {qty} USD. No se ha enviado: ¿confirmas?",
   "exec.label.option": "{underlying} {kind} {strike} con vencimiento {expiry}",
+  "exec.label.call": "call",
+  "exec.label.put": "put",
   "exec.label.shares": "las acciones de {underlying}",
   "exec.why.premium_selling_closed": "La venta de prima sobre {underlying} está cerrada para esta mesa: se abre solo cuando un backtest calibre su umbral. La compra de opciones y los spreads de débito siguen abiertos.",
   "exec.why.premium_selling_unreadable": "Esta orden puede vender prima y no se pudo leer el interruptor o los contratos, así que no se envió.",

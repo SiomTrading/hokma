@@ -53,19 +53,20 @@ def contract_label(contract_id: str) -> str:
     except NoContract:
         return contract_id
     if parsed.asset_type == "option" and None not in (parsed.underlying, parsed.put_call, parsed.strike, parsed.expiration):
-        return t("exec.label.option", underlying=parsed.underlying, kind="call" if parsed.put_call == "C" else "put", strike=dtext(parsed.strike),
+        return t("exec.label.option", underlying=parsed.underlying, kind=t("exec.label.call") if parsed.put_call == "C" else t("exec.label.put"), strike=dtext(parsed.strike),
                  expiry=parsed.expiration.isoformat())
     if parsed.asset_type in ("equity", "etf") and parsed.root:
         return t("exec.label.shares", underlying=parsed.root)
     return contract_id
 
 
-def legs_text(p: OrderProposal, contracts: Mapping[str, Any]) -> str:
+def legs_text(p: OrderProposal, contracts: Mapping[str, Any], *, words: bool = False) -> str:
+    """The legs of an order, one per part. With `words` each contract reads as a person says it (`contract_label`) instead of its technical id."""
     parts = []
     for leg in p.legs:
         sheet = contracts.get(leg.contract_id)
         mult = "?" if sheet is None else dtext(sheet.multiplier)
-        parts.append(f"{leg.side.upper()} {dtext(leg.qty)} {leg.contract_id} x{mult} ({leg.effect})")
+        parts.append(f"{leg.side.upper()} {dtext(leg.qty)} {contract_label(leg.contract_id) if words else leg.contract_id} x{mult} ({leg.effect})")
     return "; ".join(parts)
 
 
@@ -87,7 +88,7 @@ def ticket(p: OrderProposal, *, desk_name: str, level: int, contracts: Mapping[s
     none = t("exec.ticket.none")
     value = order_value(p, contracts, marks)
     lines = [t("exec.ticket.header", desk=desk_name),
-             t("exec.ticket.legs", legs=legs_text(p, contracts)),
+             t("exec.ticket.legs", legs=legs_text(p, contracts, words=True)),
              t("exec.ticket.type", type=p.order_type, price=dtext(p.limit_price) or dtext(p.stop_price) or none),
              t("exec.ticket.value", value=none if value is None else f"{value:,.2f}"),
              t("exec.ticket.stop", stop=dtext(p.stop_loss) or none),

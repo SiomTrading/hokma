@@ -13,6 +13,7 @@ import logging
 import sys
 import types
 from contextlib import contextmanager
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -23,7 +24,7 @@ from hokma.contracts.identity import ContractSheet
 from hokma.db import Database, get_database
 from hokma.db.timeutil import utcnow
 from hokma.exec import levels, prefilter, ticket
-from hokma.exec.money import text as dtext
+from hokma.exec.money import ZERO, dec_or_none, text as dtext
 from hokma.exec.proposal import Leg, OrderProposal, ProposalError
 
 log = logging.getLogger("hokma.exec")
@@ -349,17 +350,75 @@ def _pending_owner_orders(database: Database, desk_id: int, exclude_id: int | No
     return out
 
 
+def _field(order: Any, key: str) -> Any:
+    return order.get(key) if isinstance(order, Mapping) else getattr(order, key, None)
+
+
+def _unfilled(p: OrderProposal, order: Any) -> OrderProposal | None:
+    """The part of a sent order of the owner that the broker has not filled: the proposal with every leg cut to the share that is left, or None
+    when nothing is left. Criterion, in this order: a broker status that is done (filled, canceled, rejected, expired, replaced) leaves nothing,
+    because a fill is already in the real position and the other four never reach it; otherwise what is left is `remaining_qty`, or
+    `qty - filled_qty` when the broker gives no remaining, and a partial fill counts only that rest. When the quantities cannot be read the whole
+    order counts: it can only warn more, never less. A broker without the `orders` capability leaves `open_orders` empty, so no sent order
+    counts there (a known undercount)."""
+    from hokma.exec.guards import _DONE
+
+    if str(_field(order, "status") or "").upper() in _DONE:
+        return None
+    total, left = dec_or_none(_field(order, "qty")), dec_or_none(_field(order, "remaining_qty"))
+    if left is None and total is not None:
+        left = total - (dec_or_none(_field(order, "filled_qty")) or ZERO)
+    if total is None or left is None or total <= 0:
+        return p
+    if left <= 0:
+        return None
+    if left >= total:
+        return p
+    return dataclasses.replace(p, legs=tuple(dataclasses.replace(g, qty=g.qty * left / total) for g in p.legs))
+
+
+def _sent_unfilled_orders(database: Database, desk_id: int, open_orders: Sequence[Any],
+                          exclude_id: int | None = None) -> tuple[list[OrderProposal], set[str]]:
+    """The orders of the owner in the chat that were confirmed and sent to the broker and are still live there (bug 1243), each one as what it
+    has left to fill (`_unfilled`). An order counts only while the broker still lists it as live, matched by its broker order id: one that
+    is no longer listed was filled (it is in the positions already) or died, so counting it would be counting it twice. A sent order with no
+    broker order id cannot be matched and does not count. Returns those orders and the broker order ids it matched: the caller takes those
+    live orders out of the list it reads as live orders, so each sent order counts ONCE (as a pending order that moves the positions) and not
+    again as a live order that reserves the position."""
+    with database.read() as u:
+        rows = u.session.query("SELECT p.proposal_json, b.broker_order_id FROM exec_proposals p JOIN broker_orders b ON b.id = p.broker_order_record_id "
+                               "WHERE p.desk_id = :d AND p.origin = 'chat' AND p.status IN ('sent', 'partially_filled') AND p.id <> :i "
+                               "AND b.broker_order_id IS NOT NULL ORDER BY p.id", {"d": desk_id, "i": exclude_id or 0})
+    live = {str(_field(o, "order_id")): o for o in open_orders or () if _field(o, "order_id") is not None}
+    out, matched = [], set()
+    for row in rows:
+        order = live.get(str(row["broker_order_id"]))
+        if order is None:
+            continue
+        try:
+            left = _unfilled(OrderProposal.from_dict(json.loads(row["proposal_json"])), order)
+        except (ValueError, ProposalError):
+            continue
+        if left is not None:
+            out.append(left)
+            matched.add(str(row["broker_order_id"]))
+    return out, matched
+
+
 def _owner_risk(database: Database, final: OrderProposal, sheets: dict[str, ContractSheet], preview: Any, *, exclude_id: int | None = None,
                 with_pending: bool = True) -> tuple[str, str, Decimal] | None:
-    """What an order of the owner leaves open once the closes are netted against the account, the live orders and, with `with_pending`, the
-    other orders of the owner that wait for his answer (H3, decisions 1265 and bug 1242). A reduce-only order cannot open."""
+    """What an order of the owner leaves open once the closes are netted against the account, the live orders, the orders of the owner already
+    sent and not yet filled (bug 1243, always counted) and, with `with_pending`, the other orders of the owner that wait for his answer (H3,
+    decisions 1265 and bug 1242). A reduce-only order cannot open."""
     from hokma.exec.guards.premium_selling import owner_risk
 
     if final.reduce_only:
         return None
     ctx = prefilter.load_context(final.desk_id, final, db=database, preview=preview, sheets=sheets)
-    pending = _pending_owner_orders(database, final.desk_id, exclude_id) if with_pending else ()
-    return owner_risk(final, ctx.contracts, marks=ctx.marks, positions=ctx.positions, open_orders=ctx.open_orders, pending=pending)
+    sent, matched = _sent_unfilled_orders(database, final.desk_id, ctx.open_orders, exclude_id)
+    live = [o for o in ctx.open_orders or () if str(_field(o, "order_id")) not in matched]       # a sent order counts once: as pending, not as a live order too
+    pending = [*(_pending_owner_orders(database, final.desk_id, exclude_id) if with_pending else ()), *sent]
+    return owner_risk(final, ctx.contracts, marks=ctx.marks, positions=ctx.positions, open_orders=live, pending=pending)
 
 
 def owner_risk_why(risk: tuple[str, str, Decimal]) -> str:

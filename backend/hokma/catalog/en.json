@@ -909,6 +909,8 @@
   "exec.why.owner_risk_unreadable": "I could not measure the risk of this sale, so it was neither approved nor sent. Check the account and try again.",
   "exec.why.owner_risk_spread": "Heads up: this order sells a credit spread on {contract}; your maximum loss would be {qty} USD. It has not been sent: do you confirm?",
   "exec.label.option": "{underlying} {kind} {strike} expiring {expiry}",
+  "exec.label.call": "call",
+  "exec.label.put": "put",
   "exec.label.shares": "the shares of {underlying}",
   "exec.why.premium_selling_closed": "Selling premium on {underlying} is closed for this desk: it opens only when a backtest has calibrated its threshold. Buying options and debit spreads stay open.",
   "exec.why.premium_selling_unreadable": "This order may sell premium and the switch or the contracts could not be read, so it was not sent.",

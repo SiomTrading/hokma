@@ -453,6 +453,139 @@ def test_the_contract_in_words():
         assert ticket.contract_label("???") == "???"
 
 
+# ---- bug 1243: the orders of the owner already sent and not yet filled count too, without counting a fill twice -----------------------------------
+
+def _silent_limit_sales(swo, monkeypatch, n, *, owned=1, qty="1"):
+    """n limit sales of qty of the owner far above the quote (they never fill by themselves) that wait with no warning behind them, the account
+    long `owned` units (they close it) or flat (they open)."""
+    from hokma.exec import submit
+
+    for _ in range(owned):
+        _own_a_call(swo)
+    with monkeypatch.context() as m:
+        m.setattr(submit, "_owner_risk", lambda *a, **k: ("short", C600, Decimal("1")))
+        outs = [hexec.submit(OrderProposal(swo.desk_id, "SWO", "chat", (leg(C600, "sell", "close", qty),), "limit", limit_price=Decimal("99"),
+                                           created_by="owner", thesis="s"), who=swo.owner, db=swo.db) for _ in range(n)]
+    pids = [o.proposal_id for o in outs]
+    with swo.db.write() as u:
+        for pid in pids:
+            row = u.session.one("SELECT prefilter_json FROM exec_proposals WHERE id = :i", {"i": pid})
+            detail = {k: v for k, v in json.loads(row["prefilter_json"] or "{}").items() if k != "owner_risk_ack"}
+            u.session.update("exec_proposals", {"id": pid}, {"code": "awaiting_owner", "prefilter_json": json.dumps(detail)})
+    return pids
+
+
+def _confirm(swo, pid):
+    from hokma.i18n import use_language
+
+    with use_language("es"):
+        return approvals.approve(pid, who=swo.owner, db=swo.db)
+
+
+def test_two_confirmed_sales_with_no_fill_between_them_warn_again_with_the_total_1243(swo, monkeypatch):
+    a, b = _silent_limit_sales(swo, monkeypatch, 2, owned=0)                           # the account is flat; two sales that open wait, neither warned
+    assert _confirm(swo, a).code == "owner_risk_confirm" and _confirm(swo, a).status == "sent"
+    again = _confirm(swo, b)                                                              # A is sent and not filled: B counts it and warns of the two
+    assert (again.status, again.code) == ("awaiting_owner", "owner_risk_confirm")
+    assert again.why == _es_text("exec.why.owner_risk_short", qty=2, contract=LABEL)
+    assert _confirm(swo, b).status == "sent"
+    assert _qty(swo) == 0                                                                 # nothing filled
+
+
+def test_a_sent_order_that_got_filled_is_not_counted_twice_1243(swo, monkeypatch):
+    a, b = _silent_limit_sales(swo, monkeypatch, 2)
+    assert _confirm(swo, a).status == "sent"
+    swo.board.feed(C600, bid="101", ask="101.1", last="101")                              # the quote crosses the limit: A fills and is in the position
+    simmod.on_quote(C600, swo.board.quote(C600))
+    assert _qty(swo) == 0
+    again = _confirm(swo, b)                                                              # its row still says "sent", the broker says FILLED
+    assert (again.status, again.code) == ("awaiting_owner", "owner_risk_confirm")
+    assert again.why == _es_text("exec.why.owner_risk_short", qty=1, contract=LABEL)      # short one, not two
+
+
+def test_a_sent_sale_is_counted_once_so_two_sales_of_a_long_two_do_not_warn_1243(swo, monkeypatch):
+    a, b = _silent_limit_sales(swo, monkeypatch, 2, owned=2)                              # long 2, A (1) sent and live, B (1) waits
+    assert _confirm(swo, a).status == "sent"
+    assert _confirm(swo, b).status == "sent"                                              # both fill and the account is flat: nothing to warn
+
+
+def test_a_sent_sale_still_warns_when_the_account_is_short_of_it_1243(swo, monkeypatch):
+    a, b = _silent_limit_sales(swo, monkeypatch, 2, owned=1)                              # long 1, A (1) sent and live, B (1) would leave it short 1
+    assert _confirm(swo, a).status == "sent"
+    again = _confirm(swo, b)
+    assert (again.status, again.code) == ("awaiting_owner", "owner_risk_confirm")
+    assert again.why == _es_text("exec.why.owner_risk_short", qty=1, contract=LABEL)
+
+
+def _partly_filled(monkeypatch, left, long):
+    """The broker reports the live orders as partly filled (1 unit done, `left` units to go) and the account long `long`."""
+    import dataclasses
+
+    from hokma.exec import submit
+
+    real = submit.prefilter.load_context
+
+    def load(*a, **k):
+        c = real(*a, **k)
+        orders = [dataclasses.replace(o, status="PARTIALLY_FILLED", filled_qty=1.0, remaining_qty=float(left)) for o in c.open_orders]
+        return dataclasses.replace(c, positions=[held(C600, long)], open_orders=orders)
+
+    owner_risk = submit._owner_risk
+
+    def only_for_the_warning(*a, **k):                                                    # the rest of the pipeline keeps reading the real account
+        with monkeypatch.context() as m:
+            m.setattr(submit.prefilter, "load_context", load)
+            return owner_risk(*a, **k)
+
+    monkeypatch.setattr(submit, "_owner_risk", only_for_the_warning)
+
+
+@pytest.mark.parametrize("owned, warns", [(4, False), (3, True)])
+def test_a_partly_filled_sent_sale_counts_only_what_is_left_1243(swo, monkeypatch, owned, warns):
+    a, b = _silent_limit_sales(swo, monkeypatch, 2, owned=owned, qty="2")                 # A sells 2 (sent), B sells 2 waits
+    assert _confirm(swo, a).status == "sent"
+    _partly_filled(monkeypatch, 1, owned - 1)                                             # A filled 1: the account is long owned-1 and A has 1 left
+    again = _confirm(swo, b)                                                              # owned-1 - 1 (A left) - 2 (B): flat with 4, short 1 with 3
+    assert (again.status, again.code) == (("awaiting_owner", "owner_risk_confirm") if warns else ("sent", again.code))
+
+
+def test_a_canceled_or_rejected_sent_order_does_not_count_1243(swo, monkeypatch):
+    a, b = _silent_limit_sales(swo, monkeypatch, 2)
+    assert _confirm(swo, a).status == "sent"
+    with swo.db.write() as u:
+        u.session.execute("UPDATE sim_orders SET status = 'canceled' WHERE status = 'working'", {})
+    assert _confirm(swo, b).status == "sent"                                              # the account is long one and nothing else is open: no warning
+
+
+def test_the_unfilled_part_of_a_sent_order_1243():
+    from hokma.exec.submit import _unfilled
+
+    p = prop(leg(C600, "sell", "close", "4"), origin="chat")
+
+    def order(**kw):
+        return SimpleNamespace(**{"status": "WORKING", "qty": 4.0, "filled_qty": 0.0, "remaining_qty": None, **kw})
+
+    assert _unfilled(p, order()) == p                                                     # nothing filled: all of it counts
+    assert _unfilled(p, order(filled_qty=3.0)).legs[0].qty == Decimal("1")                # a partial fill counts only the rest
+    assert _unfilled(p, order(status="PARTIALLY_FILLED", filled_qty=1.0, remaining_qty=2.0)).legs[0].qty == Decimal("2")   # the broker's remaining wins
+    assert _unfilled(p, order(filled_qty=4.0)) is None and _unfilled(p, order(remaining_qty=0.0)) is None
+    for status in ("FILLED", "CANCELED", "REJECTED", "EXPIRED", "REPLACED"):
+        assert _unfilled(p, order(status=status)) is None
+    assert _unfilled(p, order(qty=None)) == p                                             # unreadable quantities: it counts whole, never less
+
+
+def test_the_ticket_and_the_label_use_the_catalog_1243(swo):
+    from hokma.exec import ticket
+    from hokma.i18n import use_language
+
+    p = prop(leg(C600, "sell", "close"), origin="chat")
+    with use_language("es"):
+        body = ticket.ticket(p, desk_name="d", level=2, contracts={C600: identity.resolve(C600)})
+    assert LABEL in body and "OPT:SPY" not in body
+    with use_language("en"):
+        assert ticket.contract_label(C600) == "SPY call 600 expiring 2026-12-18"
+
+
 # ---- flatten: the emergency close cancels what is live first and can never open or cross zero --------------------------------------------------
 
 def _owner_limit(swo, side, price, cid=C600, effect="close", qty="1"):
