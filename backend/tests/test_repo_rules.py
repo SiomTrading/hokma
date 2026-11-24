@@ -55,6 +55,13 @@ def test_names_in_paths_are_caught(tmp_path):
     assert problems and "path" in problems[0]
 
 
+def test_the_dot_claude_folder_of_the_kit_is_not_an_origin_in_a_path(tmp_path):
+    assert rules.check(repo(tmp_path, {"kit/template/.claude/skills/x/SKILL.md": "neutral text"})) == []
+    other = tmp_path / "other"
+    other.mkdir()
+    assert rules.check(repo(other, {f"docs/{NAMES[8]}.md": "neutral text"}))          # the same words without the dot stay caught
+
+
 def test_only_the_legal_folder_may_name_authors(tmp_path):
     root = repo(tmp_path, {"legal/notices.md": f"Copyright {NAMES[1]}", "docs/a.md": f"Copyright {NAMES[1]}"})
     problems = rules.check(root)

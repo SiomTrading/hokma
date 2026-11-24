@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.17
+
+- New: Write "create my IPS" in the chat and Hokma interviews you block by block, calculates your net worth, investable capital, risk level and loss capacity with its own method, and saves your IPS as a versioned project; "update my IPS" changes one block and shows the numbers before and after. Funded accounts stay out of your net worth, and the limits of the fund are measured in the house's money.
+
 ## 1.0.16
 
 - Fixed: When you confirm a sale, the warning also counts your orders that were already sent to the broker and are not filled yet, only for the part still waiting, and the ticket names the contract in words.

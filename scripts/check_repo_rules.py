@@ -128,7 +128,8 @@ def check(root: Path, files: list[str] | None = None) -> list[str]:
             continue
         allowed_spanish = rel.startswith(SPANISH_ALLOWED)
         exempt = rel.startswith(ORIGIN_EXEMPT)
-        for line, what in ([] if exempt else origin_hits(rel.replace("/", " ").replace(".", " "))):
+        dotted = re.sub(r"(?<![\w-])\.claude(?![\w-])", "dotclaude", rel)         # the folder .claude of the kit is not an origin
+        for line, what in ([] if exempt else origin_hits(dotted.replace("/", " ").replace(".", " "))):
             problems.append(f"{rel}:0: origin reference in the path: {what}")
         if not allowed_spanish:
             for line, what in spanish_hits(rel.replace("/", " ").replace("-", " ").replace("_", " ")):

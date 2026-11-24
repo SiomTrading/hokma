@@ -1,0 +1,450 @@
+{
+ "full": {
+  "inputs": {
+   "profile": {
+    "owner_name": "Sample Owner",
+    "adopted_on": "2026-11-01",
+    "next_review_on": "2027-05-01"
+   },
+   "assets": [
+    {
+     "name": "Checking",
+     "type": "cash",
+     "value_usd": 12000.5
+    },
+    {
+     "name": "Emergency fund",
+     "type": "reserve",
+     "value_usd": 30000
+    },
+    {
+     "name": "Index funds",
+     "type": "investments",
+     "value_usd": 85000.75
+    },
+    {
+     "name": "Own broker",
+     "type": "trading_account",
+     "value_usd": 25000
+    },
+    {
+     "name": "House",
+     "type": "real_estate",
+     "value_usd": 150000
+    },
+    {
+     "name": "Car",
+     "type": "vehicle",
+     "value_usd": 18000
+    },
+    {
+     "name": "Funded account A",
+     "type": "prop_account",
+     "value_usd": 7000
+    }
+   ],
+   "has_debts": true,
+   "debts": [
+    {
+     "name": "Card",
+     "balance_usd": 4200,
+     "monthly_payment_usd": 350,
+     "annual_rate_pct": 24.5,
+     "funds_trading": false
+    },
+    {
+     "name": "Car loan",
+     "balance_usd": 12000,
+     "monthly_payment_usd": 420,
+     "annual_rate_pct": 9,
+     "funds_trading": false
+    }
+   ],
+   "cashflow": {
+    "monthly_spend_usd": 3200,
+    "reserve_target_months": 6,
+    "monthly_savings_usd": 800
+   },
+   "income": {
+    "monthly_income_usd": 5200,
+    "stability": "fixed",
+    "dependents": 2,
+    "withdrawal_habit": "irregular"
+   },
+   "conduct": {
+    "overtrading_days_pct": 8,
+    "stop_moved_pct": 3,
+    "off_rule_size_pct": 12,
+    "revenge_reentry_pct": 4
+   },
+   "prop": {
+    "history": {
+     "paid_12m_usd": 2400.55,
+     "evaluations": 24,
+     "funded": 6,
+     "paid_out_accounts": 3,
+     "payouts_12m_usd": 5100.25,
+     "reinvest_pct": 40
+    },
+    "estimate": {
+     "evaluation_usd": null,
+     "reset_usd": null,
+     "activation_usd": null,
+     "resets_per_attempt": null
+    },
+    "own_accounts_net_12m_usd": 3000.4
+   },
+   "pockets": {
+    "operating_max_loss_usd": 2500,
+    "operating_from_payouts_usd": 500,
+    "speculative_max_loss_usd": 1000,
+    "speculative_from_payouts_usd": 300
+   }
+  },
+  "expected": {
+   "counted_assets": 320001.25,
+   "prop_excluded": 7000,
+   "total_debt": 16200,
+   "total_payment": 770,
+   "net_worth": 303801.25,
+   "reserve_now": 30000,
+   "investable_capital": 273801.25,
+   "months_covered": 9.375,
+   "reserve_target": 19200,
+   "reserve_gap": 0,
+   "reserve_status": "covers",
+   "debts_funding_trading": 0,
+   "debt_status": "pass",
+   "risk_level": "high",
+   "recovery_months": 24,
+   "fallback_pct": 15,
+   "loss_method": "savings_x_months",
+   "loss_capacity": 30600.24,
+   "cost_per_attempt": 100.02291666666667,
+   "affordable_attempts": 278,
+   "coherence_sum": 30600.24,
+   "coherence_status": "pass",
+   "coherence_slack": 27900.24,
+   "debt_ratio": 0.13568258029501268,
+   "savings_rate": 0.22467096974278458,
+   "c1": 2,
+   "c2": 2,
+   "c3": 2,
+   "c4": 1,
+   "c5": 1,
+   "capacity_score": 8,
+   "capacity_level": "high",
+   "w1": 1,
+   "w2": 2,
+   "w3": 1,
+   "w4": 2,
+   "w5": 1,
+   "willingness_score": 7,
+   "willingness_level": "high",
+   "cost_mode": "real",
+   "pass_rate": 0.25,
+   "cost_per_funded_account": 400.0916666666667,
+   "cost_per_paid_out_account": 800.1833333333334,
+   "funding_budget": 27900.24,
+   "expected_funded": 69.5,
+   "net_prop_result": 2699.7,
+   "prop_multiple": 2.1246172752077648,
+   "avg_payout_per_account": 1700.0833333333333,
+   "payout_conversion": 0.5,
+   "prop_signal": "green",
+   "funding_spend_test": "pass",
+   "funding_spend_excess": 0,
+   "payout_per_evaluation": 212.51041666666666,
+   "value_per_evaluation": 112.49,
+   "expanded_budget": 27900.24,
+   "expanded_attempts": 278,
+   "expected_funded_expanded": 69.5,
+   "evaluations_paid_by_payout_account": 16.996938201662118,
+   "house_loss_operating": 2000,
+   "house_loss_speculative": 700,
+   "payouts_in_pockets": 800,
+   "trading_net_12m": 5700.1,
+   "trading_income_month": 475.01,
+   "total_income_month": 5675.01,
+   "trading_share": 0.0837020551505636,
+   "savings_used": 1275.01,
+   "stability_used": "fixed",
+   "payouts_for_living": 2699.7,
+   "payouts_paying_funding": 2400.55,
+   "house_spend": 0,
+   "reinvested_payouts": 2040.1,
+   "free_payouts": 0
+  }
+ },
+ "estimated_no_income": {
+  "inputs": {
+   "assets": [
+    {
+     "name": "Savings",
+     "type": "reserve",
+     "value_usd": 9000.33
+    },
+    {
+     "name": "Broker",
+     "type": "trading_account",
+     "value_usd": 15000.1
+    },
+    {
+     "name": "Funded",
+     "type": "prop_account",
+     "value_usd": 5000
+    }
+   ],
+   "has_debts": false,
+   "debts": [],
+   "cashflow": {
+    "monthly_spend_usd": 1500,
+    "reserve_target_months": 6,
+    "monthly_savings_usd": 0
+   },
+   "income": {
+    "monthly_income_usd": 0,
+    "stability": "none",
+    "dependents": 0,
+    "withdrawal_habit": "never"
+   },
+   "conduct": {
+    "overtrading_days_pct": 25,
+    "stop_moved_pct": 6,
+    "off_rule_size_pct": 0,
+    "revenge_reentry_pct": 5
+   },
+   "prop": {
+    "history": {
+     "paid_12m_usd": null,
+     "evaluations": null,
+     "funded": null,
+     "paid_out_accounts": null,
+     "payouts_12m_usd": null,
+     "reinvest_pct": null
+    },
+    "estimate": {
+     "evaluation_usd": 80.99,
+     "reset_usd": 55.5,
+     "activation_usd": 99,
+     "resets_per_attempt": 1.5
+    },
+    "own_accounts_net_12m_usd": -1200.75
+   },
+   "pockets": {
+    "operating_max_loss_usd": 400,
+    "operating_from_payouts_usd": null,
+    "speculative_max_loss_usd": 150,
+    "speculative_from_payouts_usd": null
+   },
+   "profile": {}
+  },
+  "expected": {
+   "counted_assets": 24000.43,
+   "prop_excluded": 5000,
+   "total_debt": 0,
+   "total_payment": 0,
+   "net_worth": 24000.43,
+   "reserve_now": 9000.33,
+   "investable_capital": 15000.1,
+   "months_covered": 6.00022,
+   "reserve_target": 9000,
+   "reserve_gap": 0,
+   "reserve_status": "covers",
+   "debts_funding_trading": 0,
+   "debt_status": "pass",
+   "risk_level": "medium",
+   "recovery_months": 12,
+   "fallback_pct": 10,
+   "loss_method": "percent_of_investable",
+   "loss_capacity": 1500.01,
+   "cost_per_attempt": 263.24,
+   "affordable_attempts": 3,
+   "coherence_sum": 1500.01,
+   "coherence_status": "pass",
+   "coherence_slack": 950.01,
+   "debt_ratio": "no_data",
+   "savings_rate": "no_data",
+   "c1": 2,
+   "c2": 2,
+   "c3": 0,
+   "c4": 2,
+   "c5": 0,
+   "capacity_score": 6,
+   "capacity_level": "medium",
+   "w1": 0,
+   "w2": 1,
+   "w3": 2,
+   "w4": 1,
+   "w5": 0,
+   "willingness_score": 4,
+   "willingness_level": "medium",
+   "cost_mode": "estimated",
+   "pass_rate": "no_data",
+   "cost_per_funded_account": null,
+   "cost_per_paid_out_account": null,
+   "funding_budget": 950.01,
+   "expected_funded": "no_data",
+   "net_prop_result": "no_data",
+   "prop_multiple": "no_data",
+   "avg_payout_per_account": "no_data",
+   "payout_conversion": "no_data",
+   "prop_signal": "no_data",
+   "funding_spend_test": "no_data",
+   "funding_spend_excess": "no_data",
+   "payout_per_evaluation": "no_data",
+   "value_per_evaluation": "no_data",
+   "expanded_budget": "no_data",
+   "expanded_attempts": "no_data",
+   "expected_funded_expanded": "no_data",
+   "evaluations_paid_by_payout_account": "no_data",
+   "house_loss_operating": 400,
+   "house_loss_speculative": 150,
+   "payouts_in_pockets": 0,
+   "trading_net_12m": -1200.75,
+   "trading_income_month": 0,
+   "total_income_month": 0,
+   "trading_share": "no_data",
+   "savings_used": 0,
+   "stability_used": "none",
+   "payouts_for_living": 0,
+   "payouts_paying_funding": 0,
+   "house_spend": "no_data",
+   "reinvested_payouts": "no_data",
+   "free_payouts": 0
+  }
+ },
+ "no_evaluations": {
+  "inputs": {
+   "assets": [
+    {
+     "name": "Cash",
+     "type": "cash",
+     "value_usd": 50000
+    },
+    {
+     "name": "Reserve",
+     "type": "reserve",
+     "value_usd": 20000
+    }
+   ],
+   "has_debts": false,
+   "debts": [],
+   "cashflow": {
+    "monthly_spend_usd": 2000,
+    "reserve_target_months": 12,
+    "monthly_savings_usd": 1500
+   },
+   "income": {
+    "monthly_income_usd": 6000,
+    "stability": "variable",
+    "dependents": 1,
+    "withdrawal_habit": "regular"
+   },
+   "conduct": {
+    "overtrading_days_pct": 2,
+    "stop_moved_pct": 1,
+    "off_rule_size_pct": 0,
+    "revenge_reentry_pct": 3
+   },
+   "prop": {
+    "history": {
+     "paid_12m_usd": 0,
+     "evaluations": 0,
+     "funded": 0,
+     "paid_out_accounts": 0,
+     "payouts_12m_usd": 0,
+     "reinvest_pct": 0
+    },
+    "estimate": {
+     "evaluation_usd": null,
+     "reset_usd": null,
+     "activation_usd": null,
+     "resets_per_attempt": null
+    },
+    "own_accounts_net_12m_usd": null
+   },
+   "pockets": {
+    "operating_max_loss_usd": 1000,
+    "operating_from_payouts_usd": null,
+    "speculative_max_loss_usd": 500,
+    "speculative_from_payouts_usd": null
+   },
+   "profile": {}
+  },
+  "expected": {
+   "counted_assets": 70000,
+   "prop_excluded": 0,
+   "total_debt": 0,
+   "total_payment": 0,
+   "net_worth": 70000,
+   "reserve_now": 20000,
+   "investable_capital": 46000,
+   "months_covered": 10,
+   "reserve_target": 24000,
+   "reserve_gap": 4000,
+   "reserve_status": "short",
+   "debts_funding_trading": 0,
+   "debt_status": "pass",
+   "risk_level": "high",
+   "recovery_months": 24,
+   "fallback_pct": 15,
+   "loss_method": "savings_x_months",
+   "loss_capacity": 36000,
+   "cost_per_attempt": "no_data",
+   "affordable_attempts": "no_data",
+   "coherence_sum": 36000,
+   "coherence_status": "pass",
+   "coherence_slack": 34500,
+   "debt_ratio": 0,
+   "savings_rate": 0.25,
+   "c1": 2,
+   "c2": 2,
+   "c3": 1,
+   "c4": 1,
+   "c5": 1,
+   "capacity_score": 7,
+   "capacity_level": "high",
+   "w1": 2,
+   "w2": 2,
+   "w3": 2,
+   "w4": 2,
+   "w5": 2,
+   "willingness_score": 10,
+   "willingness_level": "high",
+   "cost_mode": "no_data",
+   "pass_rate": "no_data",
+   "cost_per_funded_account": "no_data",
+   "cost_per_paid_out_account": "no_data",
+   "funding_budget": 34500,
+   "expected_funded": "no_data",
+   "net_prop_result": 0,
+   "prop_multiple": "no_data",
+   "avg_payout_per_account": "no_data",
+   "payout_conversion": "no_data",
+   "prop_signal": "no_data",
+   "funding_spend_test": "pass",
+   "funding_spend_excess": 0,
+   "payout_per_evaluation": "no_data",
+   "value_per_evaluation": "no_data",
+   "expanded_budget": 34500,
+   "expanded_attempts": "no_data",
+   "expected_funded_expanded": "no_data",
+   "evaluations_paid_by_payout_account": "no_data",
+   "house_loss_operating": 1000,
+   "house_loss_speculative": 500,
+   "payouts_in_pockets": 0,
+   "trading_net_12m": 0,
+   "trading_income_month": 0,
+   "total_income_month": 6000,
+   "trading_share": 0,
+   "savings_used": 1500,
+   "stability_used": "variable",
+   "payouts_for_living": 0,
+   "payouts_paying_funding": 0,
+   "house_spend": 0,
+   "reinvested_payouts": 0,
+   "free_payouts": 0
+  }
+ }
+}

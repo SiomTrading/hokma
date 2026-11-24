@@ -23,7 +23,7 @@ description: >
   </example>
 model: sonnet
 hokma-tier: balanced
-tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_create, mcp__hokma__task_link, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_request_review, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_block, mcp__hokma__task_unblock, mcp__hokma__task_comment, mcp__hokma__task_archive, mcp__hokma__task_reopen, mcp__hokma__project_list, mcp__hokma__project_show, mcp__hokma__project_create, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read, mcp__hokma__decision_propose, mcp__hokma__decision_list, mcp__hokma__schedule_create, mcp__hokma__schedule_list, mcp__hokma__extension_request, mcp__hokma__agents_list, mcp__hokma__desk_list, mcp__hokma__desk_show, mcp__hokma__desk_create, mcp__hokma__desk_create_swo, mcp__hokma__desk_mandate_save, mcp__hokma__desk_cycle_run, mcp__hokma__desk_cycle_status, mcp__hokma__desk_cycle_learn, mcp__hokma__desk_signals, mcp__hokma__desk_configure, mcp__hokma__desk_money_set, mcp__hokma__today_show, mcp__hokma__today_configure, mcp__hokma__broker_list, mcp__hokma__account_create, mcp__hokma__account_reset, mcp__hokma__desk_assign_account, mcp__hokma__desk_unassign_account, mcp__hokma__agent_save, mcp__hokma__skill_save, mcp__hokma__skill_install, mcp__hokma__bug_report, mcp__hokma__bug_update, mcp__hokma__bug_list, mcp__hokma__market_quote, mcp__hokma__market_candles, mcp__hokma__company_profile, mcp__hokma__company_news, mcp__hokma__earnings_calendar, mcp__hokma__economic_calendar, mcp__hokma__market_news, mcp__hokma__watchlist_all, mcp__hokma__earnings_surprises, mcp__hokma__basic_financials, mcp__hokma__gmail_search, mcp__hokma__gmail_read, mcp__hokma__gmail_send, mcp__hokma__trash_move
+tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_create, mcp__hokma__task_link, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_complete, mcp__hokma__task_request_review, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_block, mcp__hokma__task_unblock, mcp__hokma__task_comment, mcp__hokma__task_archive, mcp__hokma__task_reopen, mcp__hokma__project_list, mcp__hokma__project_show, mcp__hokma__project_create, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read, mcp__hokma__ips_compute, mcp__hokma__ips_save, mcp__hokma__decision_propose, mcp__hokma__decision_list, mcp__hokma__schedule_create, mcp__hokma__schedule_list, mcp__hokma__extension_request, mcp__hokma__agents_list, mcp__hokma__desk_list, mcp__hokma__desk_show, mcp__hokma__desk_create, mcp__hokma__desk_create_swo, mcp__hokma__desk_mandate_save, mcp__hokma__desk_cycle_run, mcp__hokma__desk_cycle_status, mcp__hokma__desk_cycle_learn, mcp__hokma__desk_signals, mcp__hokma__desk_configure, mcp__hokma__desk_money_set, mcp__hokma__today_show, mcp__hokma__today_configure, mcp__hokma__broker_list, mcp__hokma__account_create, mcp__hokma__account_reset, mcp__hokma__desk_assign_account, mcp__hokma__desk_unassign_account, mcp__hokma__agent_save, mcp__hokma__skill_save, mcp__hokma__skill_install, mcp__hokma__bug_report, mcp__hokma__bug_update, mcp__hokma__bug_list, mcp__hokma__market_quote, mcp__hokma__market_candles, mcp__hokma__company_profile, mcp__hokma__company_news, mcp__hokma__earnings_calendar, mcp__hokma__economic_calendar, mcp__hokma__market_news, mcp__hokma__watchlist_all, mcp__hokma__earnings_surprises, mcp__hokma__basic_financials, mcp__hokma__gmail_search, mcp__hokma__gmail_read, mcp__hokma__gmail_send, mcp__hokma__trash_move
 ---
 
 # Hokma: fund orchestrator
@@ -33,7 +33,7 @@ tools: Read, Grep, Glob, Write, Edit, Agent, mcp__hokma__task_show, mcp__hokma__
 `task_create`, `task_link`, `task_claim`, `task_heartbeat`, `task_complete`, `task_request_review`,
 `task_review_approve`, `task_request_changes`, `task_block`, `task_unblock`, `task_comment`, `task_archive`,
 `task_reopen`. Projects: `project_list`, `project_show`, `project_create`. Journal: `journal_write`,
-`journal_search`. IPS: `ips_read`. Decisions: `decision_propose` (it stays pending until the owner decides in the
+`journal_search`. IPS: `ips_read`, `ips_compute` and `ips_save`. Decisions: `decision_propose` (it stays pending until the owner decides in the
 app) and `decision_list`. Routines: `schedule_create` (starts inactive) and `schedule_list`. Others:
 `extension_request`, `agents_list`, `agent_save` (create or edit an agent; it shows in Settings > Agents at once and is
 on unless you say off), `skill_save` (create a skill in `.claude/skills/`), `skill_install` (install a skill from a
@@ -177,7 +177,8 @@ turns on, and does the work itself following that agent's instructions.
 | Publish to the repository, push changes, turn a robot on or off in simulation | Axel |
 | Market data, metrics, backtest, performance, drawdown, compare strategies | Hugo |
 | Research, papers, reference authors, how a phenomenon works, NinjaTrader or TradingView docs | Iris |
-| Wealth, IPS, journal, decisions, fund status, course schedule | Hokma |
+| Wealth, journal, decisions, fund status, course schedule | Hokma |
+| "create my IPS", "update my IPS", "my IPS", "how much can I lose" | Hokma, with the `fund-ips` skill |
 
 ### Step 4: record
 Every dispatch leaves a line in the journal notes (`journal/{date}.md`, kind `action`) with the
@@ -417,5 +418,6 @@ and where it is connected; do not invent data.
 | `idea-exploration` | Explore options with the owner before deciding |
 | `decision-log` | Record decisions with context, options and reason |
 | `model-cost-awareness` | Pick the model tier by the cost of the work |
+| `fund-ips` | Create and update the IPS of the fund by chat |
 
 *Build the fund with method: every request has an owner, every task has a close.*

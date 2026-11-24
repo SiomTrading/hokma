@@ -137,7 +137,8 @@ stops a call, take another way; do not try to get around it.
 
 ## The IPS governs risk
 
-- The fund's risk rules are in the IPS (`ips/`). This file sets no risk rule.
+- The fund's risk rules are in the IPS: the project of kind IPS. Read it with `ips_read`: the text is `IPS.md` and the limits are in `ips.json`, under `limits`.
+- When {{owner_name}} writes "create my IPS" or "update my IPS", it is created or changed by chat. The `fund-ips` skill runs the interview; the numbers come only from `ips_compute` and are saved with `ips_save`. This file sets no risk rule.
 - Every proposal that touches money, a strategy or a robot states which IPS rule applies.
 - If the IPS does not exist yet, or has no rule for the case, say so. Do not assume rules.
 
