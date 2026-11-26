@@ -19,6 +19,10 @@ restore, empty or delete for good. Errors are `{"detail": {"code", "message"}}`.
     GET  /api/checkpoints/{point}/changes        ?project_id=  -> {deleted[], changed[], truncated}
     POST /api/checkpoints/{point}/restore-file   {path, project_id?} -> {restored[], renamed, unchanged}
     POST /api/checkpoints/{point}/restore-deleted {project_id?}     -> {restored[], count, skipped[]}
+    GET  /api/strategy-code                      ?stage= -> {rows[]}   (strategies written as code: the notice of the chat reads the ones in stage generated)
+    GET  /api/strategy-code/{id}                 -> the code, the checks and the verdicts of one version (read only)
+    POST /api/strategy-code/{id}/approve         {confirm, note?} -> {status owner_reviewed}   (token + owner; 409 agent_review_required without the reviewer)
+    POST /api/strategy-code/{id}/reject          {note?} -> {status rejected}                  (token + owner)
 
 The calls that change something the owner decides (the PUT of the mode, restore, purge and empty of the Trash, the two
 restores of a restore point) also need `X-Hokma-Owner`: the confirmation the open tab registered. A token read from
@@ -89,6 +93,11 @@ class RestoreFile(BaseModel):
 
 class ProjectRef(BaseModel):
     project_id: str | None = Field(default=None, max_length=32)
+
+
+class CodeDecision(BaseModel):
+    confirm: bool = False
+    note: str | None = Field(default=None, max_length=2000)
 
 
 def _fail(status: int, code: str, message: str) -> HTTPException:
@@ -415,6 +424,50 @@ def create_router(engine_getter=None) -> APIRouter:
         result = _trash_call(trash.purge, db, item_id)
         _journal(db, t("permissions.journal.trash_purged", name=result["name"]), {"trash_item": item_id})
         return {"id": item_id}
+
+    # ---------------------------------------------------------------------------------- strategies written as code (SPEC-031 A2)
+
+    def _code_call(fn, **kwargs):
+        from hokma.factory.user_rules import UserRuleError
+
+        try:
+            return fn(**kwargs)
+        except UserRuleError as exc:
+            raise _fail({"no_data": 404, "bad_input": 400}.get(exc.code, 409), "agent_review_required" if exc.code == "blocked" else exc.code, exc.message) from exc
+
+    @router.get("/api/strategy-code")
+    def strategy_code_rows(stage: str | None = Query(default=None, max_length=20), x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+        _auth(x_hokma_token, token)
+        from hokma.factory import user_rules
+
+        return _code_call(user_rules.list_code, stage=stage, limit=200)
+
+    @router.get("/api/strategy-code/{item_id}")
+    def strategy_code_read(item_id: int, x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+        _auth(x_hokma_token, token)
+        from hokma.factory import user_rules
+
+        return _code_call(user_rules.get_code, rule_version_id=item_id)
+
+    @router.post("/api/strategy-code/{item_id}/approve")
+    def strategy_code_approve(item_id: int, body: CodeDecision, x_hokma_token: str = Header(default=""), x_hokma_owner: str = Header(default=""),
+                              token: str = Query(default="")) -> dict:
+        _auth(x_hokma_token, token)
+        _owner(x_hokma_owner)
+        if not body.confirm:
+            raise _fail(400, "confirm_required", t("permissions.err.confirm_required"))
+        from hokma.factory import user_rules
+
+        return _code_call(user_rules.owner_decision, rule_version_id=item_id, approve=True, note=body.note)
+
+    @router.post("/api/strategy-code/{item_id}/reject")
+    def strategy_code_reject(item_id: int, body: CodeDecision, x_hokma_token: str = Header(default=""), x_hokma_owner: str = Header(default=""),
+                             token: str = Query(default="")) -> dict:
+        _auth(x_hokma_token, token)
+        _owner(x_hokma_owner)
+        from hokma.factory import user_rules
+
+        return _code_call(user_rules.owner_decision, rule_version_id=item_id, approve=False, note=body.note)
 
     # ---------------------------------------------------------------------------------- restore points
 

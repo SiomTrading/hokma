@@ -1,0 +1,35 @@
+# Fundamental long short: rank the universe on value, quality and momentum and take both ends of the ranking.
+# The dollar balance of the two sides is done by the portfolio module and checked at every rebalance by the backtest.
+# A future has no statements: its ranks come from price history only, so its quality weight is zero.
+- id: fundamental_ls_lp
+  kind: alpha
+  class: hokma.factory.alphas.fundamental_rank.FundamentalRank
+  line: LP
+  description: Long and short book of equities ranked on value, quality and momentum. Both sides are balanced in dollars by the portfolio module. ref idea-013
+  params:
+    weight_value: 0.4
+    weight_quality: 0.4
+    weight_momentum: 0.2
+    book: dollar_neutral
+
+- id: fundamental_ls_swo
+  kind: alpha
+  class: hokma.factory.alphas.fundamental_rank.FundamentalRank
+  line: SWO
+  description: Ranking of option underlyings on value, quality and momentum. The best ranked are candidates for bullish structures and the worst for bearish ones. ref idea-013
+  params:
+    weight_value: 0.4
+    weight_quality: 0.4
+    weight_momentum: 0.2
+    book: dollar_neutral
+
+- id: fundamental_ls_swc_future
+  kind: alpha
+  class: hokma.factory.alphas.fundamental_rank.FundamentalRank
+  line: SWC
+  description: Ranking of futures on price based value and momentum ranks only. The quality weight is zero because a future has no statements. ref idea-013
+  params:
+    weight_value: 0.5
+    weight_quality: 0.0
+    weight_momentum: 0.5
+    book: dollar_neutral

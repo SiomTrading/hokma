@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-031 in .notices/THIRD_PARTY.txt
+id: "momentum_inside_high_growth_firms"
+name: "Momentum inside the fastest growing balance sheets"
+ref: "LIB-031"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly except January"
+universe: "The 500 most traded US stocks, the smallest fifth by market capitalisation removed."
+signal: "Yearly percentage change of total assets, keep the top decile; inside it, rank by the return of the last eleven months skipping the latest month, in quintiles."
+entry: "Go long the strongest momentum quintile and short the weakest."
+exit: "Rebuild monthly and stay flat during January, a month where momentum has repeatedly been weak."
+sizing: "Equal weight inside each leg."
+risk_note: "Skipping a calendar month is a documented seasonal; verify it on your own sample before using it."

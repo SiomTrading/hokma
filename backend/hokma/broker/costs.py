@@ -1,6 +1,5 @@
 """Cost of a fill: slippage against the trader and commission (task 3294, C7-5b). Pure functions. No route calls them in
-class 7; class 9 will, with a real reference price. The idea (adverse slippage, a commission model per broker) comes from
-Nautilus Trader's fill and fee models; no code is copied (LGPL)."""
+class 7; class 9 will, with a real reference price. Slippage is in basis points (stocks, options, crypto) or in ticks (futures, SPEC-020 L-14): one function, two modes."""
 from __future__ import annotations
 
 from typing import Any, Mapping
@@ -30,11 +29,22 @@ def validate_commission(cfg: Mapping[str, Any]) -> dict[str, Any]:
             "min": _number(cfg.get("min", 0.0), "commission minimum", MAX_BPS)}
 
 
-def fill_price(side: str, ref_price: float, slippage_bps: float) -> float:
-    """Against the trader: a buy fills higher, a sell lower. Rounded to 4 decimals."""
+def fill_price(side: str, ref_price: float, slippage_bps: float | None = None, *, ticks: float | None = None,
+               tick: float | None = None) -> float:
+    """Against the trader: a buy fills higher, a sell lower. Rounded to 4 decimals. Give `slippage_bps`, or `ticks` with the size of
+    one `tick` (the mode of futures: `fill_price("buy", 25551.75, ticks=1, tick=0.25)` is 25552.0); never both, never neither."""
     if side not in ("buy", "sell"):
         raise ValidationError(f"side must be 'buy' or 'sell'; got {side!r}")
-    ref, bps = _number(ref_price, "reference price"), _number(slippage_bps, "slippage")
+    if (slippage_bps is None) == (ticks is None):
+        raise ValidationError("give the slippage in basis points or in ticks, one of them")
+    ref = _number(ref_price, "reference price")
+    if ticks is not None:
+        step = _number(tick, "tick size")
+        if step == 0:
+            raise ValidationError("tick size must be above 0")
+        move = _number(ticks, "ticks") * step
+        return round(ref + move if side == "buy" else ref - move, 4)
+    bps = _number(slippage_bps, "slippage")
     return round(ref * (1 + bps / 10_000 if side == "buy" else 1 - bps / 10_000), 4)
 
 

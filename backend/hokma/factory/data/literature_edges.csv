@@ -1,0 +1,62 @@
+edge_id,asset_class,idea,sharpe_reported,sharpe_basis,t_stat,years_tested,ref
+E-001,equities,Small minus large stock return gap across European markets.,1.89,gross,11.4,37,LIT-001
+E-002,equities,Pricing model where firms that invest little earn more than firms that invest a lot.,1.80,gross,11.0,37,LIT-002
+E-003,equities,Factor returns on German stocks after the known errors of one data vendor are cleaned.,1.68,gross,10.2,37,LIT-003
+E-004,equities,Beta and size sorts of European stocks looked at together.,1.63,gross,9.6,34,LIT-004
+E-005,equities,Return anomalies that repeat in many national equity markets.,1.57,gross,8.2,27,LIT-005
+E-006,equities,Value and size sorts and the way each changes the other.,1.52,gross,9.3,37,LIT-006
+E-007,equities,Portfolio built to maximise the diversification ratio of its stocks.,1.50,gross,9.0,37,LIT-007
+E-008,equities,Winners minus losers with the short term reversal part split out.,1.36,gross,8.2,36,LIT-008
+E-009,equities,Small minus big with a quality screen to remove weak firms.,1.33,gross,8.1,37,LIT-009
+E-010,equities,Factor premia in small frontier equity markets.,1.32,gross,8.0,36,LIT-010
+E-011,equities,Bet size that maximises long run growth when there are several possible outcomes.,1.31,gross,7.9,37,LIT-011
+E-012,equities,Minimum variance weights from a network that learns from cleaned covariance estimates.,1.28,gross,7.3,33,LIT-012
+E-013,bonds,Bond yield forecasts after whitening the residuals of the yield model.,0.90,gross,5.0,30,LIT-013
+E-014,bonds,Yield search that adjusts the pick for risk in fixed income.,0.89,gross,4.4,25,LIT-014
+E-015,bonds,Factor tilts applied to corporate bond indices.,0.85,gross,5.1,36,LIT-015
+E-016,bonds,Risk premia that the corporate bond market actually prices.,0.72,gross,3.0,17,LIT-016
+E-017,bonds,Fund prices that update late in fixed income funds create a predictable gap.,0.64,gross,3.9,37,LIT-017
+E-018,bonds,Government bonds of frontier and emerging markets as a return source.,0.62,gross,3.7,36,LIT-018
+E-019,bonds,Fixed income allocation that switches by a hidden regime state.,0.62,gross,3.6,33,LIT-019
+E-020,bonds,Price pattern around euro area government debt auctions.,0.51,gross,3.1,37,LIT-020
+E-021,bonds,Bond return forecasts from macro data as it was known at the time.,0.49,gross,2.5,26,LIT-021
+E-022,bonds,Trading the term premium of the yield curve.,0.45,gross,2.8,37,LIT-022
+E-023,bonds,Bank exposure to rate risk and the effect on yield curve dynamics.,0.44,gross,2.7,38,LIT-023
+E-024,bonds,Treasury returns that are higher at the end of the month.,0.43,gross,2.6,37,LIT-024
+E-025,commodities,Commodity momentum improved with the correlation inside each market group.,0.65,gross,2.8,19,LIT-025
+E-026,commodities,Long horizon reversal of commodity prices over a very long history.,0.63,gross,3.8,37,LIT-026
+E-027,commodities,Gold and silver pair with rolling versus expanding estimation windows.,0.36,gross,2.2,37,LIT-027
+E-028,currencies,Carry split into a good part and a bad part by risk.,1.74,gross,10.6,37,LIT-028
+E-029,currencies,Currency strategy exposure to systematic risk that changes over time (the source title is cut off in the list).,1.53,gross,9.3,36,LIT-029
+E-030,currencies,How currency trading strategies changed over decades.,1.24,gross,7.4,36,LIT-030
+E-031,currencies,Currency mix of central bank reserves seen as a portfolio choice.,0.68,gross,2.9,19,LIT-031
+E-032,crypto,Multi timeframe trend rule on Bitcoin.,3.39,gross,16.2,23,LIT-032
+E-033,crypto,Factor investing in crypto assets.,1.53,gross,6.2,16,LIT-033
+E-034,crypto,"Seasonality, trend and mean reversion tested together on Bitcoin.",1.11,gross,4.5,16,LIT-034
+E-035,crypto,Crypto momentum linked to the risk preference of holders.,0.68,gross,4.0,34,LIT-035
+E-036,crypto,Risk parity weights applied to crypto assets.,0.58,gross,3.4,34,LIT-036
+E-037,crypto,Overreaction after large crypto price moves.,0.53,gross,3.1,35,LIT-037
+E-038,crypto,Four factor model to tell crypto consensus designs apart.,0.52,gross,2.4,22,LIT-038
+E-039,crypto,Trading rule that treats a crypto asset as money.,0.47,gross,2.8,35,LIT-039
+E-040,derivatives,Currency returns linked to the tone of news media.,1.06,gross,6.5,38,LIT-040
+E-041,derivatives,Portfolio choice with a value at risk adjusted Sharpe ratio.,0.92,gross,5.6,37,LIT-041
+E-042,derivatives,"Timing of factors, and when the timing adds value.",0.74,gross,4.5,37,LIT-042
+E-043,derivatives,Betting amounts on a coin of known bias.,0.60,gross,3.7,38,LIT-043
+E-044,derivatives,Callable option products and how holder preferences affect their pricing.,0.55,gross,3.4,37,LIT-044
+E-045,derivatives,Operational risk when models become more elaborate.,0.50,gross,3.1,37,LIT-045
+E-046,derivatives,Tail risk protection rules and their cost.,0.49,gross,3.0,37,LIT-046
+E-047,derivatives,"Media tone and currency returns, in time series and across currencies.",0.35,gross,2.1,36,LIT-047
+E-048,derivatives,Technical rule profits in currencies around central bank intervention.,0.33,gross,2.0,37,LIT-048
+E-049,derivatives,Foreign exchange arbitrage seen at fine time resolution.,0.32,gross,2.0,37,LIT-049
+E-050,multi_asset,Risk management of annuity decisions.,1.62,gross,9.9,38,LIT-050
+E-051,multi_asset,Portfolio choice that explains low annuity demand in Japan.,1.60,gross,9.8,38,LIT-051
+E-052,multi_asset,Theory driven versus machine learning estimates of stock risk premia.,1.57,gross,9.5,37,LIT-052
+E-053,multi_asset,Covered call closed end fund and its odd return pattern.,1.36,gross,8.3,37,LIT-053
+E-054,multi_asset,Mean reversion at short horizons across assets.,1.30,gross,7.4,32,LIT-054
+E-055,multi_asset,Investment and consumption choices that change with time.,1.26,gross,7.7,38,LIT-055
+E-056,multi_asset,Simple portfolio rules with labour income.,1.21,gross,7.4,38,LIT-056
+E-057,multi_asset,Long run investing in European real estate.,1.11,gross,4.5,16,LIT-057
+E-058,multi_asset,Risk control that reacts to the market regime in a concentrated equity book.,1.11,gross,6.4,33,LIT-058
+E-059,multi_asset,Simple rules against theory when crashes can happen.,1.10,gross,6.7,37,LIT-059
+E-060,multi_asset,Risk parity portfolios built on risk factors.,1.08,gross,6.3,34,LIT-060
+E-061,multi_asset,Tactical asset allocation driven by risk measures.,1.06,gross,6.4,37,LIT-061

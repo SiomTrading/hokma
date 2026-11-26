@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-018 in .notices/THIRD_PARTY.txt
+id: "buyback_before_earnings_window"
+name: "Long stocks with a large buyback before earnings"
+ref: "LIB-018"
+asset_class: "equities"
+lines: [SWO]
+horizon: "days"
+rebalance: "daily check"
+universe: "US listed stocks excluding the smallest quarter by market capitalisation, with a known earnings date."
+signal: "A stock qualifies when a buyback of at least 5 percent of shares was announced between 30 and 15 days before its earnings date."
+entry: "Buy the stock 10 days before the earnings date."
+exit: "Sell 15 days after the earnings date."
+sizing: "Equal capital slot of one fortieth of the account per position, at most 40 positions."
+risk_note: "Long only; event dates and buyback dates must come with their public timestamp."

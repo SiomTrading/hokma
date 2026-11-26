@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-058 in .notices/THIRD_PARTY.txt
+id: "twelve_vehicle_value_momentum_rank"
+name: "Value and momentum ranks across asset classes"
+ref: "LIB-058"
+asset_class: "multi_asset"
+lines: [LP, RF]
+horizon: "months"
+rebalance: "monthly"
+universe: "Twelve ETFs or index futures: US large cap, US mid cap, real estate, UK, Japan, emerging stocks, investment grade bonds, high yield bonds, US, German and Japanese government bonds, cash."
+signal: "Three ranks: twelve month return (25 percent), one month return (25 percent), valuation (50 percent). Valuation is earnings yield for stocks and yield to maturity for bonds, each reduced by a structural offset (one to six percentage points)."
+entry: "Go long the top quartile by combined score and short the bottom quartile."
+exit: "Rebuild monthly."
+sizing: "Equal weight inside each leg."
+risk_note: "Offsets and valuation series are judgement inputs; record them as parameters and test neighbouring values."

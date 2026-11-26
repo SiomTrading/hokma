@@ -1,0 +1,24 @@
+id: value_momentum
+title: Value and momentum across asset classes
+ref: idea-009
+lines: [LP]
+asset_classes: [etf]
+requires_premium_switch: false
+requires_event_study: false
+summary: >-
+  Cheapness and strength work in many asset classes at once, and they tend to offset each other, so mixing them is smoother than
+  either alone. Rank the asset classes by a valuation yield and by recent price strength, blend the ranks, and hold the best
+  quarter. Valuation uses earnings yield for equities and yield to maturity for bonds, adjusted so that classes with a structural
+  yield premium are not always at the top.
+needs: [quant.fundamentals]
+data: [close, fundamentals]
+variants:
+  - line: LP
+    vehicle: one ETF or index fund per asset class
+    alpha: fundamental_ls_lp
+    params: {weight_value: 0.5, weight_quality: 0.0, weight_momentum: 0.5, book: long_only}
+    rebalance: monthly
+    rules:
+      - Half of the weight goes to the valuation rank and half to price momentum (a twelve month and a one month rank, from the momentum alpha when it is registered).
+      - Hold the top quarter of the asset classes at equal weight.
+      - Adjust each yield by an estimate of the structural premium of its class so the ranking compares like with like.

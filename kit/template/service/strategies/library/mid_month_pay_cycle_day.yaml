@@ -1,0 +1,15 @@
+# Strategy rule written from scratch. Reference: LIB-038 in .notices/THIRD_PARTY.txt
+id: "mid_month_pay_cycle_day"
+name: "Hold a US equity index across the mid month pay date"
+ref: "LIB-038"
+asset_class: "equities"
+lines: [SWC]
+horizon: "days"
+rebalance: "monthly"
+universe: "A broad US equity index ETF."
+signal: "Calendar rule: the 15th of each month, moved to the previous Friday when it falls on a weekend."
+entry: "Buy at the close of the pay date."
+exit: "Sell at the close of the next session."
+sizing: "Full account for one day."
+risk_note: "A calendar effect with a one day holding period: the cost per round trip can eat the whole edge, so measure the net result."
+requires_event_study: true

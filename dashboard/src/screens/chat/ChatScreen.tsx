@@ -22,6 +22,7 @@ import { MessageItem } from "./Messages";
 import { ProjectScope } from "./ProjectScope";
 import { WorkingLine } from "./WorkingLine";
 import { OrderNoticeCards } from "./OrderNoticeCards";
+import { StrategyNotices } from "./StrategyNotices";
 import { initialState, reducer } from "./state";
 import type { AttachmentChip } from "./state";
 import type { ChatOptions, ModelId, ServerEvent } from "./types";
@@ -344,6 +345,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
           />
         ))}
         <OrderNoticeCards />
+        <StrategyNotices />
         <WorkingLine conversationId={state.id} running={state.running} />
       </div>
 

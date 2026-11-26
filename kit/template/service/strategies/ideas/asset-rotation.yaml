@@ -1,0 +1,54 @@
+id: asset_rotation
+title: Rotation between asset classes and sectors
+ref: idea-002
+lines: [LP, RF]
+asset_classes: [etf, bond]
+requires_premium_switch: false
+requires_event_study: false
+summary: >-
+  Hold only what is strong. Three flavors share one idea: rank a small set of funds by their recent return and hold the top few,
+  hold each fund only while its price is above its own long average, or compare two funds that move against each other (an equity
+  fund and a bond fund) and hold the better one for a quarter. The bond fund is the refuge when equities lose the ranking.
+needs: []
+data: [close]
+variants:
+  - line: LP
+    sleeve: asset-class ranking
+    vehicle: five ETFs, one per asset class (US stocks, foreign stocks, bonds, real estate, commodities)
+    alpha: historical_returns
+    params: {periods: 252, cap: 0.20}
+    rebalance: monthly
+    rules:
+      - Rank the ETFs by the twelve month return and hold the best three at equal weight; sell the rest.
+  - line: LP
+    sleeve: sector ranking
+    vehicle: ten sector ETFs
+    alpha: historical_returns
+    params: {periods: 252, cap: 0.20}
+    rebalance: monthly
+    rules:
+      - Same ranking on sectors; hold the strongest three at equal weight for a month.
+  - line: LP
+    sleeve: own trend filter
+    vehicle: the same five ETFs
+    planned_alpha: price_over_average
+    rebalance: monthly
+    rules:
+      - Hold an ETF only while its price is above its average of about ten months (210 daily bars); otherwise that share stays in cash.
+  - line: LP
+    sleeve: paired switching
+    vehicle: one equity ETF and one bond ETF
+    alpha: historical_returns
+    params: {periods: 63, cap: 0.10}
+    rebalance: quarterly
+    rules:
+      - Compare the return of the two funds over the last quarter and hold the better one for the next quarter, all in one fund.
+  - line: RF
+    sleeve: bond entry
+    vehicle: government and investment grade bond funds
+    alpha: historical_returns
+    params: {periods: 126, cap: 0.05}
+    rebalance: monthly
+    rules:
+      - A bond fund enters the rotation only when its six month return beats cash; otherwise the fixed income sleeve stays in cash.
+      - When equities lose the ranking, the bond fund with the best return takes the freed weight.

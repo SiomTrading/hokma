@@ -1,0 +1,324 @@
+{
+ "source": "NQ 12-25, 1 minute bars read from Trading Core (table velas_minuto_nq, origin HISTORICO), prices in points, times in UTC. Only the bars of the four acceptance scenarios, selected by hand; the series is not published.",
+ "instrument": {
+  "symbol": "NQZ5",
+  "tick_size": "0.25",
+  "multiplier": "20"
+ },
+ "commission_per_side_per_contract": "2.25",
+ "scenarios": {
+  "T1": {
+   "about": "Buy at the open of 15:00 and sell at the open of 15:30, one contract, one tick against on each side. The bars between 15:01 and 15:28 are not needed by the rule and are left out.",
+   "bars": [
+    {
+     "ts": "2025-11-10T14:58:00Z",
+     "open": "25642.50",
+     "high": "25653.00",
+     "low": "25637.25",
+     "close": "25652.00",
+     "volume": 2020
+    },
+    {
+     "ts": "2025-11-10T14:59:00Z",
+     "open": "25651.00",
+     "high": "25657.25",
+     "low": "25636.00",
+     "close": "25638.25",
+     "volume": 1955
+    },
+    {
+     "ts": "2025-11-10T15:00:00Z",
+     "open": "25637.25",
+     "high": "25647.00",
+     "low": "25623.50",
+     "close": "25634.75",
+     "volume": 2814
+    },
+    {
+     "ts": "2025-11-10T15:01:00Z",
+     "open": "25634.50",
+     "high": "25642.00",
+     "low": "25624.75",
+     "close": "25636.50",
+     "volume": 1932
+    },
+    {
+     "ts": "2025-11-10T15:28:00Z",
+     "open": "25657.00",
+     "high": "25665.75",
+     "low": "25651.75",
+     "close": "25660.75",
+     "volume": 976
+    },
+    {
+     "ts": "2025-11-10T15:29:00Z",
+     "open": "25660.00",
+     "high": "25664.25",
+     "low": "25639.00",
+     "close": "25642.75",
+     "volume": 1813
+    },
+    {
+     "ts": "2025-11-10T15:30:00Z",
+     "open": "25643.00",
+     "high": "25652.75",
+     "low": "25637.75",
+     "close": "25648.25",
+     "volume": 1896
+    },
+    {
+     "ts": "2025-11-10T15:31:00Z",
+     "open": "25648.50",
+     "high": "25650.00",
+     "low": "25642.00",
+     "close": "25649.00",
+     "volume": 859
+    }
+   ],
+   "decisions": {
+    "buy_after_close_of": "2025-11-10T14:59:00Z",
+    "sell_after_close_of": "2025-11-10T15:29:00Z"
+   },
+   "expected": {
+    "entry_price": "25637.50",
+    "exit_price": "25642.75",
+    "pnl_usd": "100.50",
+    "commission_usd": "4.50"
+   }
+  },
+  "T2": {
+   "about": "Entry at the open of 05:05 with stop and target 5 points away. The bar of 05:06 touches both: the stop must fill.",
+   "bars": [
+    {
+     "ts": "2025-11-05T05:03:00Z",
+     "open": "25478.25",
+     "high": "25481.25",
+     "low": "25473.50",
+     "close": "25473.75",
+     "volume": 65
+    },
+    {
+     "ts": "2025-11-05T05:04:00Z",
+     "open": "25473.50",
+     "high": "25476.50",
+     "low": "25469.00",
+     "close": "25474.25",
+     "volume": 108
+    },
+    {
+     "ts": "2025-11-05T05:05:00Z",
+     "open": "25471.75",
+     "high": "25475.75",
+     "low": "25471.00",
+     "close": "25473.25",
+     "volume": 62
+    },
+    {
+     "ts": "2025-11-05T05:06:00Z",
+     "open": "25472.25",
+     "high": "25478.50",
+     "low": "25465.25",
+     "close": "25477.50",
+     "volume": 81
+    },
+    {
+     "ts": "2025-11-05T05:07:00Z",
+     "open": "25478.00",
+     "high": "25485.50",
+     "low": "25476.50",
+     "close": "25484.50",
+     "volume": 103
+    }
+   ],
+   "decisions": {
+    "enter_after_close_of": "2025-11-05T05:04:00Z",
+    "stop_points": "5",
+    "target_points": "5"
+   },
+   "expected": {
+    "entry_ref": "25471.75",
+    "stop_level": "25466.75",
+    "target_level": "25476.75",
+    "ambiguous_bars": 1,
+    "long": {
+     "entry_price": "25472.00",
+     "exit_price": "25466.50",
+     "pnl_usd": "-114.50"
+    },
+    "short": {
+     "entry_price": "25471.50",
+     "exit_price": "25477.00",
+     "pnl_usd": "-114.50"
+    }
+   }
+  },
+  "T3": {
+   "about": "Short at the open of 21:58 on Friday with a stop 10 points above. The market reopens on Sunday at 23:00 far above the stop: the stop fills at that open plus one tick.",
+   "bars": [
+    {
+     "ts": "2025-11-07T21:56:00Z",
+     "open": "25217.25",
+     "high": "25220.00",
+     "low": "25217.25",
+     "close": "25219.00",
+     "volume": 55
+    },
+    {
+     "ts": "2025-11-07T21:57:00Z",
+     "open": "25218.75",
+     "high": "25219.50",
+     "low": "25217.75",
+     "close": "25218.25",
+     "volume": 79
+    },
+    {
+     "ts": "2025-11-07T21:58:00Z",
+     "open": "25218.50",
+     "high": "25220.25",
+     "low": "25217.50",
+     "close": "25220.00",
+     "volume": 71
+    },
+    {
+     "ts": "2025-11-07T21:59:00Z",
+     "open": "25220.25",
+     "high": "25228.25",
+     "low": "25220.25",
+     "close": "25226.75",
+     "volume": 302
+    },
+    {
+     "ts": "2025-11-09T23:00:00Z",
+     "open": "25320.75",
+     "high": "25391.50",
+     "low": "25320.75",
+     "close": "25351.75",
+     "volume": 1293
+    },
+    {
+     "ts": "2025-11-09T23:01:00Z",
+     "open": "25356.00",
+     "high": "25374.75",
+     "low": "25352.50",
+     "close": "25367.50",
+     "volume": 470
+    },
+    {
+     "ts": "2025-11-09T23:02:00Z",
+     "open": "25369.75",
+     "high": "25370.00",
+     "low": "25355.50",
+     "close": "25358.50",
+     "volume": 220
+    }
+   ],
+   "decisions": {
+    "enter_after_close_of": "2025-11-07T21:57:00Z",
+    "stop_points": "10"
+   },
+   "expected": {
+    "entry_ref": "25218.50",
+    "stop_level": "25228.50",
+    "sunday_open": "25320.75",
+    "entry_price": "25218.25",
+    "exit_price": "25321.00",
+    "pnl_usd": "-2059.50"
+   }
+  },
+  "T4": {
+   "about": "Signal at the close of 13:32; the order fills at the open of 13:33 plus one tick. The exit is decided at the close of 14:02 and fills at the open of 14:03 minus one tick.",
+   "bars": [
+    {
+     "ts": "2025-11-10T13:31:00Z",
+     "open": "25546.50",
+     "high": "25550.00",
+     "low": "25544.25",
+     "close": "25545.75",
+     "volume": 203
+    },
+    {
+     "ts": "2025-11-10T13:32:00Z",
+     "open": "25545.75",
+     "high": "25553.00",
+     "low": "25545.75",
+     "close": "25552.50",
+     "volume": 215
+    },
+    {
+     "ts": "2025-11-10T13:33:00Z",
+     "open": "25551.75",
+     "high": "25557.75",
+     "low": "25551.50",
+     "close": "25555.75",
+     "volume": 352
+    },
+    {
+     "ts": "2025-11-10T13:34:00Z",
+     "open": "25556.25",
+     "high": "25556.25",
+     "low": "25551.25",
+     "close": "25551.75",
+     "volume": 157
+    },
+    {
+     "ts": "2025-11-10T13:35:00Z",
+     "open": "25552.00",
+     "high": "25558.50",
+     "low": "25551.50",
+     "close": "25558.00",
+     "volume": 201
+    },
+    {
+     "ts": "2025-11-10T14:01:00Z",
+     "open": "25543.50",
+     "high": "25550.75",
+     "low": "25542.50",
+     "close": "25550.00",
+     "volume": 215
+    },
+    {
+     "ts": "2025-11-10T14:02:00Z",
+     "open": "25550.00",
+     "high": "25552.00",
+     "low": "25546.00",
+     "close": "25550.00",
+     "volume": 208
+    },
+    {
+     "ts": "2025-11-10T14:03:00Z",
+     "open": "25550.00",
+     "high": "25551.50",
+     "low": "25542.25",
+     "close": "25543.00",
+     "volume": 150
+    },
+    {
+     "ts": "2025-11-10T14:04:00Z",
+     "open": "25542.75",
+     "high": "25544.00",
+     "low": "25539.25",
+     "close": "25540.00",
+     "volume": 174
+    },
+    {
+     "ts": "2025-11-10T14:05:00Z",
+     "open": "25540.00",
+     "high": "25544.50",
+     "low": "25538.75",
+     "close": "25541.00",
+     "volume": 190
+    }
+   ],
+   "decisions": {
+    "buy_after_close_of": "2025-11-10T13:32:00Z",
+    "sell_after_close_of": "2025-11-10T14:02:00Z"
+   },
+   "expected": {
+    "entry_price": "25552.00",
+    "exit_price": "25549.75",
+    "pnl_usd": "-49.50",
+    "commission_usd": "4.50"
+   }
+  }
+ }
+}

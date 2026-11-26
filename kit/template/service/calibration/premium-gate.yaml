@@ -1,0 +1,24 @@
+# Defaults of the gate that a backtest of selling premium must pass before the switch of a desk opens (calibration of the premium selling
+# threshold). The owner can tighten any field: a higher minimum, a lower maximum, fewer structures, a narrower window of days to expiry.
+# Loosening a field asks the owner. The result is decided by the code from the evidence of the backtest; nothing here opens the switch.
+metric: iv_rv_ratio            # the one Caleb reads: iv_rv_ratio, iv_rank or iv_minus_rv
+structures:                    # values of the structure of an options proposal that sell premium
+  - cash_secured_put
+  - credit_put_spread
+dte: [21, 60]                  # days to expiry at which a position may open
+exits:                         # the mandate of the desk wins when it states them
+  profit_take_pct: 50          # close when half of the credit is kept
+  stop_loss_multiple: 2.0      # close when the loss reaches this multiple of the credit
+  close_at_dte: 14             # close when this many days to expiry are left (below the lowest dte a position opens at)
+min_oos_trades: 30             # closed trades outside the training windows
+min_dsr: 0.95                  # deflated Sharpe ratio, counting thresholds times structures as the tries
+max_pbo: 0.50                  # probability of backtest overfitting over the matrix of thresholds
+min_wf_efficiency: 0.50        # out of sample result per day over in sample result per day of the chosen thresholds
+folds: 5                       # walk forward windows
+max_drawdown_pct: null         # null: the limit of the desk; a number never goes above it
+legs:                          # where the short strikes sit, as a percent of the spot
+  short_otm_pct: 5
+  wing_pct: 5
+margin_use_pct: 10             # share of the capital that the margin of one position uses: its full loss stays inside the default drawdown limit
+fee_table: ibkr_options        # the commission table of the broker, with its cap when it has one
+min_history_days: 504          # snapshots of the chain needed before a calibration is tried

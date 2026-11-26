@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-017 in .notices/THIRD_PARTY.txt
+id: "volume_cluster_expected_announcers"
+name: "Expected earnings announcers with high announcement month volume"
+ref: "LIB-017"
+asset_class: "equities"
+lines: [SWO, LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "The 1000 most traded US stocks with a known history of announcement dates."
+signal: "Volume concentration ratio = volume in the last 16 announcement months divided by total volume of the last 48 months. Keep the top quintile. Split it into expected announcers (announced in the same calendar month last year) and expected non announcers."
+entry: "Go long the expected announcers and short the expected non announcers."
+exit: "Rebuild at the start of each month."
+sizing: "Value weighted inside each leg by market capitalisation."
+risk_note: "Announcement dates must be those known before the month starts, never the realised date."

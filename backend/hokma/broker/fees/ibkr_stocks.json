@@ -1,0 +1,26 @@
+{
+ "broker": "ibkr_stocks",
+ "currency": "USD",
+ "reference": "Interactive Brokers, US stocks and ETFs, per side: 0.005 per share with a minimum of 1.00 per order. Read from the fee schedule of the broker on 2026-11-22; not yet checked against a real statement. Exchange, clearing and regulatory fees are not included.",
+ "source": "Interactive Brokers public commission page for US stocks (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "omitted": [
+  "maximum per order as a share of the trade value: the loader applies a cap after the minimum, which differs from the price list for orders under 200 dollars, so no cap is written",
+  "exchange, clearing and regulatory fees",
+  "volume tiers",
+  "fixed price plan"
+ ],
+ "rules": {
+  "equity": {
+   "kind": "per_share",
+   "value": "0.005",
+   "minimum": "1"
+  },
+  "etf": {
+   "kind": "per_share",
+   "value": "0.005",
+   "minimum": "1"
+  }
+ }
+}

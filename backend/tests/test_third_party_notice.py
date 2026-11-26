@@ -23,3 +23,17 @@ def test_notice_is_in_the_source_package():
     assert listing.strip() == ".notices/THIRD_PARTY.txt"
     attributes = ROOT / ".gitattributes"
     assert not attributes.exists() or "export-ignore" not in attributes.read_text()
+
+
+def test_licenses_of_the_lgpl_mpl_and_apache_dependencies_are_given():
+    """Task 3324: the notices of the LGPL, MPL and Apache-2.0 material travel with the source package, with their license texts."""
+    notice = NOTICE.read_text(encoding="utf-8")
+    listing = (ROOT / "legal" / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
+    assert "There are no entries" not in listing
+    for name in ("psycopg", "python-telegram-bot", "portion", "certifi", "orjson", "tqdm", "QuantConnect"):
+        assert name in notice, name
+        assert name in listing, name
+    texts = {"LGPL-3.0.txt": "GNU LESSER GENERAL PUBLIC LICENSE", "GPL-3.0.txt": "GNU GENERAL PUBLIC LICENSE",
+             "MPL-2.0.txt": "Mozilla Public License Version 2.0", "Apache-2.0.txt": "Apache License"}
+    for name, heading in texts.items():
+        assert heading in (ROOT / "legal" / "licenses" / name).read_text(encoding="utf-8"), name

@@ -1,0 +1,21 @@
+# Skeleton of an intraday bot: a trend leg and a fade leg on short bars. The strategy composite adds the session, the size and
+# the exits; a bot of the owner replaces the two legs with its own alphas and keeps the rest.
+- id: intraday_bot_trend
+  kind: alpha
+  class: hokma.factory.alphas.ema_cross.EmaCross
+  line: DT
+  description: Trend leg of the intraday bot skeleton. A fast average above a slow one on short bars is a long view. ref idea-016
+  params:
+    fast: 9
+    slow: 21
+    scale: 0.002
+
+- id: intraday_bot_fade
+  kind: alpha
+  class: hokma.factory.alphas.rsi.RsiReversion
+  line: DT
+  description: Fade leg of the intraday bot skeleton. A stretched index on short bars leans against the last move. ref idea-016
+  params:
+    length: 7
+    oversold: 20.0
+    overbought: 80.0

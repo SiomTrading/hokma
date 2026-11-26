@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from hokma.quant import registry
+from hokma.quant import helpers, registry
 from hokma.quant.errors import BadInput
 from hokma.quant.metrics import _lib
 from hokma.quant.metrics.summary import _SERIES_IN, empty, finish, prepare_series, scalar
@@ -141,25 +141,31 @@ def outlier_ratios(returns: Any) -> QuantResult:
     return finish(name, value, unit="ratio", method=method, series=r, pieces=pieces, warnings=warns)
 
 
+KELLY_NOTICE = "cap, not a target: size from risk limits and use Kelly only as a ceiling"
+
+
 # --------------------------------------------------------------------------------------------------------------
 # QS-031: Kelly as a cap
 # --------------------------------------------------------------------------------------------------------------
 @registry.register("metrics.kelly_cap", module="metrics",
                    summary="Kelly fraction of the return series, reported as a ceiling for position size (never as the size). The fraction scales the ceiling.",
-                   inputs={"returns": _SERIES_IN, "fraction": {"type": "float", "required": False, "default": 1.0}}, piece_ids=("QS-031",))
+                   inputs={"returns": _SERIES_IN, "fraction": {"type": "float", "required": False, "default": 1.0}}, piece_ids=("QS-031", "B-22"))
 def kelly_cap(returns: Any, fraction: float = 1.0) -> QuantResult:
-    name, pieces, method = "metrics.kelly_cap", ("QS-031",), "(payoff * win rate - loss rate) / payoff; ceiling = max(0, kelly) * fraction"
+    name, pieces, method = "metrics.kelly_cap", ("QS-031", "B-22"), "(payoff * win rate - loss rate) / payoff; ceiling = max(0, kelly) * fraction"
     if not isinstance(fraction, (int, float)) or not 0.0 < fraction <= 1.0:
         raise BadInput("fraction must be in (0, 1]")
     r, warns = prepare_series(returns)
     if r is None:
         return empty(name, "fraction", method, warns, pieces, {"fraction": fraction})
     k = kelly_value(r)
-    warns = tuple(warns)
+    warns = tuple(warns) + (KELLY_NOTICE,)
     if k is not None and k < 0:
         warns += ("negative Kelly fraction: no edge, the ceiling is 0",)
     value = {"kelly": k, "position_cap": None if k is None else max(0.0, k) * fraction}
     return finish(name, value, unit="fraction", method=method, series=r, pieces=pieces, params={"fraction": fraction}, warnings=warns)
+
+
+kelly = kelly_cap          # B-22: one implementation under both names; the cap is never negative and always says it is not a target
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -257,3 +263,195 @@ def risk_of_ruin(returns: Any, ruin_level: float = 0.5) -> QuantResult:
     params = {"win_rate": p_win, "avg_win": avg_win, "avg_loss": avg_loss, "ruin_level": ruin_level}
     value = ruin_probability(p_win, avg_win, avg_loss, ruin_level)
     return finish(name, value, unit="prob", method=method, series=r, pieces=pieces, params=params, warnings=warns)
+
+
+# --------------------------------------------------------------------------------------------------------------
+# Trade level statistics (SPEC-020, 5.4.4): one row per closed trade, never per period.
+# Win rate, payoff and profit factor reuse the functions above on the result of each trade: one implementation.
+# --------------------------------------------------------------------------------------------------------------
+_TABLE_IN = {"type": "table", "required": True}
+
+
+def _clean_pnl(values: Any, label: str = "pnl") -> tuple[pd.Series, tuple[str, ...]]:
+    """Result of each trade as a clean float series (NaN and infinite values dropped, with a warning)."""
+    series = helpers.as_series(values, name=label)
+    cleaned = helpers.clean(series).reset_index(drop=True)
+    dropped = len(series) - len(cleaned)
+    return cleaned, ((f"dropped {dropped} NaN or infinite value(s)",) if dropped else ())
+
+
+def streak_runs(values: Any) -> tuple[int, int]:
+    """Longest run of winning trades and longest run of losing trades. A trade with zero result cuts both runs."""
+    best_win = best_loss = win = loss = 0
+    for v in helpers.as_series(values, name="pnl").tolist():
+        win = win + 1 if v > 0 else 0
+        loss = loss + 1 if v < 0 else 0
+        best_win, best_loss = max(best_win, win), max(best_loss, loss)
+    return best_win, best_loss
+
+
+def sqn_value(pnl: pd.Series) -> float | None:
+    """System quality number: square root of N times the mean result over its sample standard deviation."""
+    n = len(pnl)
+    if n < 2:
+        return None
+    sd = float(pnl.std(ddof=1))
+    if not math.isfinite(sd) or sd == 0.0:
+        return None
+    return helpers.finite_or_none(math.sqrt(n) * float(pnl.mean()) / sd)
+
+
+def expectancy_r(win_rate: float | None, payoff: float | None) -> float | None:
+    """Expected result per unit of average loss: win rate times payoff minus loss rate (losses and wins over non-zero trades)."""
+    if win_rate is None or payoff is None:
+        return None
+    return win_rate * payoff - (1.0 - win_rate)
+
+
+def mae_mfe(side: str, entry_price: Any, qty: Any, multiplier: Any, highs: Any, lows: Any) -> tuple[Any, Any]:
+    """Worst open loss (at most 0) and best open gain (at least 0) of a trade in USD, from the highs and lows of the bars it lived through.
+
+    The entry bar counts: a trade that is hurt in its first bar has a non-zero MAE. Numbers keep their type (Decimal in, Decimal out).
+    """
+    highs, lows = list(highs), list(lows)
+    if not highs or len(highs) != len(lows):
+        raise BadInput("mae_mfe needs the highs and lows of at least one bar, with the same length")
+    if side not in ("long", "short"):
+        raise BadInput("side must be 'long' or 'short'")
+    size = qty * multiplier
+    zero = size * 0
+    if side == "long":
+        adverse, favorable = (min(lows) - entry_price) * size, (max(highs) - entry_price) * size
+    else:
+        adverse, favorable = (entry_price - max(highs)) * size, (entry_price - min(lows)) * size
+    return min(zero, adverse), max(zero, favorable)
+
+
+def _trade_frame(trades: Any) -> pd.DataFrame:
+    if isinstance(trades, pd.DataFrame):
+        frame = trades.copy()
+    elif isinstance(trades, (list, tuple)) and all(isinstance(t, dict) for t in trades):
+        frame = pd.DataFrame(list(trades))
+    else:
+        raise BadInput("trades must be a table or a list of rows with a pnl_usd column")
+    if frame.empty and "pnl_usd" not in frame.columns:
+        frame = pd.DataFrame({"pnl_usd": []}, dtype=float)
+    if "pnl_usd" not in frame.columns:
+        raise BadInput("trades need a pnl_usd column")
+    for column in ("pnl_usd", "entry_price", "qty", "multiplier", "costs_usd", "mae_usd", "mfe_usd"):
+        if column in frame.columns:
+            try:
+                frame[column] = frame[column].astype(float)
+            except (TypeError, ValueError) as exc:
+                raise BadInput(f"trades: {column} is not numeric") from exc
+    for column in ("entry_at", "exit_at"):
+        if column in frame.columns:
+            try:
+                frame[column] = pd.to_datetime(frame[column], utc=True)
+            except (TypeError, ValueError) as exc:
+                raise BadInput(f"trades: {column} is not a date") from exc
+    return frame
+
+
+def _mean_or_none(series: pd.Series) -> float | None:
+    return helpers.finite_or_none(series.mean()) if len(series) else None
+
+
+def _exposure_share(entry: pd.Series, exit_: pd.Series) -> float | None:
+    """Share of the span between the first entry and the last exit during which at least one trade was open."""
+    spans = sorted(zip(entry.tolist(), exit_.tolist()))
+    if not spans:
+        return None
+    total = (max(e for _, e in spans) - spans[0][0]).total_seconds()
+    if total <= 0:
+        return None
+    covered, cursor = 0.0, spans[0][0]
+    for start, end in spans:
+        start = max(start, cursor)
+        if end > start:
+            covered += (end - start).total_seconds()
+            cursor = end
+    return covered / total
+
+
+def _duration_figures(frame: pd.DataFrame, wins: pd.Series, losses: pd.Series) -> dict[str, float | None]:
+    if "entry_at" not in frame.columns or "exit_at" not in frame.columns:
+        return {}
+    seconds = (frame["exit_at"] - frame["entry_at"]).dt.total_seconds()
+    return {"avg_duration_seconds": _mean_or_none(seconds), "avg_win_duration_seconds": _mean_or_none(seconds[wins.index]),
+            "avg_loss_duration_seconds": _mean_or_none(seconds[losses.index]), "exposure": _exposure_share(frame["entry_at"], frame["exit_at"])}
+
+
+@registry.register("metrics.trade_stats", module="metrics",
+                   summary="Statistics per closed trade: counts, win rate, payoff, profit factor, expectancy, SQN, streaks, durations, exposure, return per trade, MAE and MFE in USD.",
+                   inputs={"trades": _TABLE_IN}, piece_ids=("B-19", "B-23", "V-17", "L-34"))
+def trade_stats(trades: Any) -> QuantResult:
+    name, pieces = "metrics.trade_stats", ("B-19", "B-23", "V-17", "L-34")
+    method = "one row per closed trade; rates over non-zero trades; profit factor is gross profit over gross loss"
+    frame = _trade_frame(trades)
+    pnl_all = frame["pnl_usd"]
+    frame = frame[pnl_all.notna() & ~pnl_all.isin([float("inf"), float("-inf")])].reset_index(drop=True)
+    warns: list[str] = []
+    if len(frame) != len(pnl_all):
+        warns.append(f"dropped {len(pnl_all) - len(frame)} trade(s) with no finite result")
+    if frame.empty:
+        return empty(name, "mixed", method, tuple(warns) + ("no closed trades",), pieces)
+    pnl = frame["pnl_usd"]
+    wins, losses = pnl[pnl > 0], pnl[pnl < 0]
+    win_rate, payoff = win_rate_value(pnl), payoff_value(pnl)
+    profit_factor = profit_factor_value(pnl)
+    if profit_factor is None:
+        warns.append("profit factor is undefined: there are no losing trades (not reported as infinite)" if losses.empty
+                     else "profit factor is undefined for this input")
+    best_win_run, best_loss_run = streak_runs(pnl)
+    value: dict[str, Any] = {
+        "n_trades": int(len(pnl)), "n_wins": int(len(wins)), "n_losses": int(len(losses)),
+        "win_rate": win_rate, "loss_rate": None if win_rate is None else 1.0 - win_rate,
+        "total_pnl_usd": float(pnl.sum()), "gross_profit_usd": float(wins.sum()), "gross_loss_usd": float(losses.sum()),
+        "largest_win_usd": float(wins.max()) if len(wins) else 0.0, "largest_loss_usd": float(losses.min()) if len(losses) else 0.0,
+        "avg_pnl_usd": float(pnl.mean()), "avg_win_usd": _mean_or_none(wins), "avg_loss_usd": _mean_or_none(losses),
+        "payoff_ratio": payoff, "profit_factor": profit_factor, "expectancy_usd": avg_return_value(pnl),
+        "expectancy_r": expectancy_r(win_rate, payoff), "sqn": sqn_value(pnl),
+        "pnl_std_usd": helpers.finite_or_none(pnl.std(ddof=1)) if len(pnl) > 1 else None,
+        "max_consecutive_wins": best_win_run, "max_consecutive_losses": best_loss_run,
+    }
+    value.update(_duration_figures(frame, wins, losses))
+    if {"entry_price", "qty"} <= set(frame.columns):
+        notional = (frame["entry_price"] * frame["qty"] * (frame["multiplier"] if "multiplier" in frame.columns else 1.0)).abs()
+        returns = (pnl / notional).replace([float("inf"), float("-inf")], float("nan")).dropna()
+        value.update({"avg_return_per_trade": _mean_or_none(returns), "best_return_per_trade": float(returns.max()) if len(returns) else None,
+                      "worst_return_per_trade": float(returns.min()) if len(returns) else None})
+    if "costs_usd" in frame.columns:
+        value["total_costs_usd"] = float(frame["costs_usd"].sum())
+    for column, label, pick in (("mae_usd", "mae", min), ("mfe_usd", "mfe", max)):
+        if column in frame.columns and frame[column].notna().any():
+            values = frame[column].dropna()
+            value[f"avg_{label}_usd"], value[f"largest_{label}_usd"] = float(values.mean()), float(pick(values))
+    return finish(name, value, unit="mixed", method=method, series=pnl, pieces=pieces, warnings=tuple(warns))
+
+
+@registry.register("metrics.sqn", module="metrics",
+                   summary="System quality number of the result of each trade: sqrt(N) * mean / sample standard deviation. Needs at least 2 trades.",
+                   inputs={"pnl": _SERIES_IN}, piece_ids=("B-21", "V-17"))
+def sqn(pnl: Any) -> QuantResult:
+    name, pieces, method = "metrics.sqn", ("B-21", "V-17"), "sqrt(N) * mean(result per trade) / std(result per trade, ddof=1)"
+    series, warns = _clean_pnl(pnl)
+    if len(series) < 2:
+        return empty(name, "ratio", method, tuple(warns) + (f"need at least 2 trades, got {len(series)}",), pieces)
+    value = sqn_value(series)
+    if value is None:
+        return empty(name, "ratio", method, tuple(warns) + ("every trade has the same result: dispersion is zero",), pieces)
+    return finish(name, value, unit="ratio", method=method, series=series, pieces=pieces, warnings=warns)
+
+
+@registry.register("metrics.trade_streaks", module="metrics",
+                   summary="Longest run of winning trades and of losing trades (a trade with zero result cuts a run); they weigh on funded accounts.",
+                   inputs={"pnl": _SERIES_IN}, piece_ids=("V-18",))
+def streaks(pnl: Any) -> QuantResult:
+    name, pieces, method = "metrics.trade_streaks", ("V-18",), "longest consecutive trades with a result above zero and below zero"
+    series, warns = _clean_pnl(pnl)
+    if series.empty:
+        return empty(name, "count", method, tuple(warns) + ("no trades",), pieces)
+    wins, losses = streak_runs(series)
+    return finish(name, {"max_consecutive_wins": wins, "max_consecutive_losses": losses}, unit="count", method=method, series=series,
+                  pieces=pieces, warnings=warns)

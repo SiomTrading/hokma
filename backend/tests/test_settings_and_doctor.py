@@ -30,7 +30,8 @@ def test_settings_have_the_two_hooks_and_nothing_that_stops_installers(env):
     hook = s["hooks"]["PreToolUse"][0]
     assert hook["matcher"] == "Edit|MultiEdit|Write|NotebookEdit"
     assert hook["hooks"][0]["command"] == guard_command() and guard_command().endswith("|| exit 2")
-    assert s["hooks"]["PreToolUse"][1]["matcher"] == ".*"
+    assert s["hooks"]["PreToolUse"][1]["matcher"].startswith("Edit|MultiEdit|Write|NotebookEdit|mcp__hokma__strategy_")      # the first gate of the strategy creator
+    assert s["hooks"]["PreToolUse"][2]["matcher"] == ".*"
     assert s["disableAllHooks"] is False
 
 

@@ -18,6 +18,8 @@ SKILLS = SERVICE / "skills"
 AGENT = SERVICE / "agents" / "back-office-clerk.md"
 NAMES = ("account-reconciliation", "break-trace", "roll-forward", "accrual-schedule", "account-report", "setup-practice", "weekly-digest",
          "performance-attribution", "statement-pdf", "spreadsheet-export")
+IAN_NAMES = ("alpha-research", "backtest-audit", "big-move-study", "feature-engineering", "verify-before-claiming", "test-first-strategy",
+             "backtest-debugging", "research-loop", "paper-search", "strategy-pivot")      # the skills of the strategy researcher (SPEC-020), listed in test_ian_integrity
 AS_OF = datetime(2026, 1, 2, 15, 0, tzinfo=timezone.utc)
 _spec = importlib.util.spec_from_file_location("check_repo_rules", ROOT / "scripts" / "check_repo_rules.py")
 repo_rules = importlib.util.module_from_spec(_spec)
@@ -39,9 +41,11 @@ def test_each_skill_exists_in_the_skill_format_and_passes_the_repo_rules(name):
 
 
 def test_the_package_holds_exactly_these_skills_and_its_manifest_is_current():
-    assert sorted(p.parent.name for p in SKILLS.glob("*/SKILL.md")) == sorted(NAMES)
+    creator = ("source-to-strategy", "strategy-requirement", "strategy-code-contract", "code-test-first", "code-root-cause", "code-done-check", "review-reply", "strategy-code-review", "review-evidence")
+    expected = sorted((*NAMES, *IAN_NAMES, *creator))
+    assert sorted(p.parent.name for p in SKILLS.glob("*/SKILL.md")) == expected
     manifest = skill_format.read_manifest(SKILLS)
-    assert sorted(manifest["skills"]) == sorted(NAMES) and manifest["schema_version"] == skill_format.SCHEMA_VERSION
+    assert sorted(manifest["skills"]) == expected and manifest["schema_version"] == skill_format.SCHEMA_VERSION
     assert skill_format.verify_manifest(SKILLS) == []
 
 

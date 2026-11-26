@@ -14,12 +14,60 @@
    "digest": "d3ae754ec76689f185fcf50b5dc8fa03ff90f8679fa2b08d5a8db151331b12db",
    "version": "1.0.0"
   },
+  "alpha-research": {
+   "digest": "eb18fa1fcb5c7fce4beb01fc91be4957ae68a6c69d914d85cc0c9bc9c3cac3c9",
+   "version": "1.0.0"
+  },
+  "backtest-audit": {
+   "digest": "3ed83bba6b04112bf7c8923f9febcb87945b624d8f0e50a301d79c067e4f5564",
+   "version": "1.0.0"
+  },
+  "backtest-debugging": {
+   "digest": "9ca9d2fa7b27491c49aaf0f6d1bccd0110e690fea7a817141731ae707737153c",
+   "version": "1.0.0"
+  },
+  "big-move-study": {
+   "digest": "081cfef632495b90bf59e205c9a9456252e575eeeffd2ac38efd23ba21597663",
+   "version": "1.0.0"
+  },
   "break-trace": {
    "digest": "7171a0566addee83a898f29bbfbc1bbbd852ae203b7f8380aff56ae7a23d0d9f",
    "version": "1.0.0"
   },
+  "code-done-check": {
+   "digest": "19b035518331a8c4f66b570dde6232a347a3750c55d7fb56a47e67fd7a0b4cf1",
+   "version": "1.0.0"
+  },
+  "code-root-cause": {
+   "digest": "4ca623bc5d0c3579bb320ead88d8d367541a4e65757100896b52b08d31288173",
+   "version": "1.0.0"
+  },
+  "code-test-first": {
+   "digest": "243d221afbd0edd3732ca6a08fa1b1892a5f29371a1434698df24a9c4d75ad06",
+   "version": "1.0.0"
+  },
+  "feature-engineering": {
+   "digest": "ae0c1563ef6877af08a8d61d6c8275fb43db805a0fdaa5fb2fdbff650f99fadb",
+   "version": "1.0.0"
+  },
+  "paper-search": {
+   "digest": "37ab234a8989efcf8d38ef25b3cbd347350166b45330620b208836ac4ea08830",
+   "version": "1.0.0"
+  },
   "performance-attribution": {
    "digest": "8fef3aa57c8bbb2e90e646a1dcd542c9f105b92fc64a5f98c7f65c9fe9b091ed",
+   "version": "1.0.0"
+  },
+  "research-loop": {
+   "digest": "4622d384c5af30f9f689c7af7c104d10cc5f796f8fe4da36de7bdf6c7267aec0",
+   "version": "1.0.0"
+  },
+  "review-evidence": {
+   "digest": "15b5193e5d7e176f897d8947002a538e710ce1e863a0fa339f338af69539065d",
+   "version": "1.0.0"
+  },
+  "review-reply": {
+   "digest": "34631a9accccfb4588a0610fa0ca02def95f92ecf8ecc037790bd1a776285d28",
    "version": "1.0.0"
   },
   "roll-forward": {
@@ -30,12 +78,40 @@
    "digest": "c588dfb2ea12830fd8e73953e85f28d9b5196f1b0786134508d23144f940fb7e",
    "version": "1.0.0"
   },
+  "source-to-strategy": {
+   "digest": "7eee859c9a56e5275d6d99583ae3275ca2d8fbab185044ebe560ca2456b33bdb",
+   "version": "1.0.0"
+  },
   "spreadsheet-export": {
    "digest": "7038ccd24577b165c8d48f3d290ad4b5d4512f4c49971936cc2078b7abf2b22c",
    "version": "1.0.0"
   },
   "statement-pdf": {
    "digest": "e90c499b612f16981559bc568a62ccbbff5399266ea3b81d7f9e727eb1f9f826",
+   "version": "1.0.0"
+  },
+  "strategy-code-contract": {
+   "digest": "4ec517e6eb1c8cdb7e25f793f6a2b67db65611108442207a2c9b975e2a0f230c",
+   "version": "1.0.0"
+  },
+  "strategy-code-review": {
+   "digest": "36a346557aa61bef070df136397c151d6fd0edf5c611b2f220e85dc9fddcd0ac",
+   "version": "1.0.0"
+  },
+  "strategy-pivot": {
+   "digest": "b385fa87cac02f05000a51154d9b1009d574d71ce224d9ae0980770abfc17cb6",
+   "version": "1.0.0"
+  },
+  "strategy-requirement": {
+   "digest": "545335b4c21c49bc78182e8590854dd1b8b1dea8089d9c2e6a6eab322cf8d439",
+   "version": "1.0.0"
+  },
+  "test-first-strategy": {
+   "digest": "0892205d52e51934acda4c1d35c5c1d19c4a0e4df3e793b9589f8aa2143ced3a",
+   "version": "1.0.0"
+  },
+  "verify-before-claiming": {
+   "digest": "3a03e433fc592e93eeae371f3b828c8b1eb23220e6d0a504e7abacdd238885c7",
    "version": "1.0.0"
   },
   "weekly-digest": {

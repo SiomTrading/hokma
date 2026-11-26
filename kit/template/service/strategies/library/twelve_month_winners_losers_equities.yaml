@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-032 in .notices/THIRD_PARTY.txt
+id: "twelve_month_winners_losers_equities"
+name: "Classic winners minus losers on large stocks"
+ref: "LIB-032"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "The 500 most traded US stocks."
+signal: "Twelve month return of each stock; the paper idea skips the latest month to avoid short term reversal."
+entry: "Go long the top quintile and short the bottom quintile."
+exit: "Rebuild at the start of each month."
+sizing: "Equal weight inside each leg."
+risk_note: "Momentum crashes after sharp market rebounds; add a volatility scaled exposure limit."

@@ -1,0 +1,25 @@
+{
+ "broker": "ibkr_futures",
+ "currency": "USD",
+ "reference": "Interactive Brokers, US futures, per contract per side, all in: broker fee 0.85 + exchange fee 1.28 + regulatory fee 0.02 = 2.15 for the e-mini equity index contracts ES, NQ, YM, RTY. The micro contracts have their own table (ibkr_micro_futures). Read from the fee schedule of the broker on 2026-11-22; not yet checked against a real statement, so check it against the real account before trusting it. Exchange fees change: refresh the table when the broker changes them.",
+ "source": "Interactive Brokers public commission page for US futures (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "components": {
+  "broker": "0.85",
+  "exchange": "1.28",
+  "regulatory": "0.02"
+ },
+ "omitted": [
+  "volume tiers",
+  "delivery and exercise fees",
+  "market data fees",
+  "products other than the e-mini equity index contracts"
+ ],
+ "rules": {
+  "future": {
+   "kind": "per_contract",
+   "value": "2.15"
+  }
+ }
+}

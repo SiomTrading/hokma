@@ -1,0 +1,41 @@
+# Inflections: the view follows the change of a rate (growth, price momentum or a macro series) over a window.
+# Each line chooses its own window, in observations of its own series. A future uses only price and macro series, never statements.
+- id: inflection_lp_growth
+  kind: alpha
+  class: hokma.factory.alphas.inflection.Inflection
+  line: LP
+  description: Cycle inflection of the growth rate of a fundamental over four quarters, for the long term book. ref idea-014
+  params:
+    window: 4
+    cap: 0.05
+    source: growth
+
+- id: inflection_swo_growth
+  kind: alpha
+  class: hokma.factory.alphas.inflection.Inflection
+  line: SWO
+  description: Inflection of the growth rate over two quarters, a short window for the options desk, around reporting seasons. ref idea-014
+  params:
+    window: 2
+    cap: 0.05
+    source: growth
+
+- id: inflection_swc_price
+  kind: alpha
+  class: hokma.factory.alphas.inflection.Inflection
+  line: SWC
+  description: Inflection of the price rate of change over 63 daily bars for futures and CFDs. Price is the only input. ref idea-014
+  params:
+    window: 63
+    cap: 0.10
+    source: price_roc
+
+- id: inflection_swc_macro
+  kind: alpha
+  class: hokma.factory.alphas.inflection.Inflection
+  line: SWC
+  description: Inflection of a macro series over three monthly observations for futures and CFDs. Needs the vintage of the data fixed. ref idea-014
+  params:
+    window: 3
+    cap: 0.5
+    source: macro_change

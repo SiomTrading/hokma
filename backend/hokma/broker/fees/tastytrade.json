@@ -1,0 +1,25 @@
+{
+ "broker": "tastytrade",
+ "currency": "USD",
+ "reference": "Tastytrade, per side: 1.00 per option contract to open and nothing to close, 1.25 per futures contract. The table has one rule per asset type, so the option rule charges the opening rate on every side and a round trip is overstated by the closing side. Read from the fee schedule of the broker on 2026-11-22; not yet checked against a real statement.",
+ "source": "Tastytrade public pricing page (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "omitted": [
+  "the free closing of options",
+  "the cap per leg",
+  "futures options fees",
+  "regulatory and exchange fees",
+  "stock commission"
+ ],
+ "rules": {
+  "option": {
+   "kind": "per_contract",
+   "value": "1"
+  },
+  "future": {
+   "kind": "per_contract",
+   "value": "1.25"
+  }
+ }
+}

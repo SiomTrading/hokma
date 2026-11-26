@@ -1,5 +1,8 @@
 """No agent, tool or kit file imports a quantitative or data library: only the _lib.py of each module does (SPEC-017, rule 4)."""
 import ast
+import hashlib
+import importlib.util
+import re
 import subprocess
 from pathlib import Path
 
@@ -11,6 +14,7 @@ RESTRICTED = {
     "scipy", "sklearn", "skfolio", "quantstats", "ffn", "financetoolkit", "financedatabase", "edgar", "edgartools",
     "yfinance", "statsmodels", "arch", "cvxpy", "polars", "pyarrow", "matplotlib", "seaborn", "plotly", "sympy", "joblib",
     "yahooquery", "pandas_datareader", "talib", "ta", "empyrical", "pyfolio", "riskfolio", "pypfopt", "vectorbt", "numba",
+    "optuna",      # SPEC-020: the search library, only in backtest/_lib.py (the engine name is matched by hash below)
 }
 ALLOWED_FILES = {
     "backend/hokma/quant/metrics/_lib.py",
@@ -23,7 +27,25 @@ ALLOWED_FILES = {
     "backend/hokma/quant/stats/_lib.py",
     "backend/hokma/quant/portfolio/_lib.py",           # SPEC-019: the five modules of the SWO desk
     "backend/hokma/backoffice/_lib.py",          # SPEC-018: the back office portfolio functions and spreadsheets
+    "backend/hokma/backtest/_lib.py",            # SPEC-020: the backtest engine and optuna
 }
+
+
+def _engine_hashes() -> set[str]:
+    """The backtest engine is restricted too, but its name may not be written outside four files (N-43): the repository rules
+    script keeps it as hashes, and a module is the engine when a word of its name hashes to one of them."""
+    spec = importlib.util.spec_from_file_location("check_repo_rules", ROOT / "scripts" / "check_repo_rules.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return set(module.ENGINE_HASHES)
+
+
+ENGINE_HASHES = _engine_hashes()
+
+
+def _is_restricted(module: str) -> bool:
+    top = module.split(".")[0]
+    return top in RESTRICTED or any(hashlib.sha256(word.encode()).hexdigest() in ENGINE_HASHES for word in re.findall(r"[a-z0-9]+", top.lower()))
 
 
 def _tracked_python() -> list[Path]:
@@ -46,7 +68,7 @@ def _restricted_imports(path: Path) -> list[str]:
         elif isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", "")) in {"import_module", "__import__"}:
             if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
                 names = [node.args[0].value]
-        found += [n for n in names if n.split(".")[0] in RESTRICTED]
+        found += [n for n in names if _is_restricted(n)]
     return found
 
 

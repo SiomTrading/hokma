@@ -102,3 +102,39 @@ def test_the_script_runs_as_a_command_and_fails_on_a_violation(tmp_path):
 def test_a_dev_notes_folder_fails_the_check(tmp_path):
     problems = rules.check(repo(tmp_path, {"dev-notes/a/CONTRACT.md": "internal"}))
     assert any(line.startswith("dev-notes/") for line in problems)
+
+# The engine of the backtest service (SPEC-020, N-43): stored reversed here as well, in its two spellings.
+ENGINE_FORMS = [rev(x) for x in ["redart_sulituan", "redartsulituan", "redart sulituan", "redart-sulituan"]]
+ENGINE_HOMES = ("pyproject.toml", "uv.lock", "backend/hokma/backtest/_lib.py", ".notices/THIRD_PARTY.txt")
+
+
+@pytest.mark.parametrize("name", ENGINE_FORMS)
+def test_the_engine_name_is_caught_outside_its_four_homes(tmp_path, name):
+    for rel in ("backend/hokma/backtest/engine.py", "kit/template/service/a.md", "dashboard/src/a.ts", "backend/hokma/backtest/__init__.py"):
+        for text in (f"uses {name}", f"uses {name.upper()}", f"x\n{name}\ny"):
+            problems = rules.check(repo(tmp_path, {rel: text}))
+            assert problems and "engine name" in problems[0], (rel, text)
+            (tmp_path / rel).unlink()
+
+
+@pytest.mark.parametrize("name", ENGINE_FORMS)
+def test_the_engine_name_is_allowed_in_its_four_homes(tmp_path, name):
+    files = {rel: f"{name} 1.0" for rel in ENGINE_HOMES}
+    files[".notices/other.txt"] = name
+    assert rules.check(repo(tmp_path, files)) == []
+
+
+def test_the_engine_name_is_caught_in_a_path(tmp_path):
+    problems = rules.check(repo(tmp_path, {f"docs/{ENGINE_FORMS[0]}-notes.md": "neutral text"}))
+    assert problems and "engine name" in problems[0]
+
+
+def test_the_engine_hashes_are_the_hashes_of_its_words():
+    import hashlib
+    assert {hashlib.sha256(rev(x).encode()).hexdigest() for x in ("sulituan", "redartsulituan")} == rules.ENGINE_HASHES
+    assert not [h for h in rules.ENGINE_HASHES if h in rules.FORBIDDEN_HASHES]
+
+
+def test_the_check_script_does_not_contain_the_engine_name():
+    text = (ROOT / "scripts" / "check_repo_rules.py").read_text(encoding="utf-8")
+    assert not any(rev(x) in text.lower() for x in ("sulituan", "redartsulituan"))

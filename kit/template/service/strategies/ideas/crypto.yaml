@@ -1,0 +1,25 @@
+id: crypto
+title: Crypto held inside the long term book
+ref: idea-010
+lines: [LP]
+asset_classes: [crypto]
+requires_premium_switch: false
+requires_event_study: false
+summary: >-
+  Crypto is held, not traded, inside the long term line. One recipe turns that hold into a rule: a basket of liquid coins kept at
+  equal weights earns a premium over the same basket left to drift, because rebalancing sells what rose and buys what fell.
+  A second finding, a pattern in the hour of the day, is kept as a study topic only and is not a strategy of any desk.
+needs: [quant.portfolio]
+data: [close]
+variants:
+  - line: LP
+    sleeve: rebalancing premium
+    vehicle: a basket of liquid spot coins
+    planned_alpha: equal_weight_rebalance
+    rebalance: daily
+    rules:
+      - Compare two versions of the same basket, one rebalanced to equal weights each day and left to drift; the recipe holds the first.
+      - Include trading fees and the spread of every rebalancing trade; the premium must survive them.
+      - Coins with a gap in their history are left out of the basket, not filled.
+study_only:
+  - Return pattern by hour of the day for bitcoin, such as a long window late in the UTC evening. It needs an event study with a correction for the number of hours tried before anyone treats it as an edge.

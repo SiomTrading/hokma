@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-022 in .notices/THIRD_PARTY.txt
+id: "fx_rate_rank_carry"
+name: "Currencies ranked by short term interest rate"
+ref: "LIB-022"
+asset_class: "currencies"
+lines: [SWC, RF]
+horizon: "months"
+rebalance: "monthly"
+universe: "Eight currency futures against the US dollar with the three month interbank rate of each country."
+signal: "Rank currencies by short term rate."
+entry: "Go long the three highest rate currencies and short the three lowest."
+exit: "Rebuild monthly."
+sizing: "Equal weight inside each leg; idle cash earns the overnight rate."
+risk_note: "Carry loses in sudden risk off moves; keep a drawdown limit on the book."

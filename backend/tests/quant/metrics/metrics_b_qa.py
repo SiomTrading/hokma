@@ -45,12 +45,16 @@ EXPECTED: dict[str, tuple[str, ...]] = {
 }
 
 
+# Functions of trades.py added for the backtest result (SPEC-020): reloading that module registers them again, so they are cleared with the rest.
+EXTRA_IN_TRADES = ("metrics.trade_stats", "metrics.sqn", "metrics.trade_streaks")
+
+
 def ensure_registered() -> None:
     """The registry can be cleared by other test files; load the part B modules again when that happened."""
     if all(any(s.name == name for s in registry.list("metrics")) for name in EXPECTED):
         return
     with registry._LOCK:
-        for name in EXPECTED:
+        for name in (*EXPECTED, *EXTRA_IN_TRADES):
             registry._FUNCTIONS.pop(name, None)
     for mod in PART_B_MODULES:
         full = f"hokma.quant.metrics.{mod}"

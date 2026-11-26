@@ -16,7 +16,7 @@ SHARED = Path(__file__).parents[1] / "fixtures"
 STATS_MODULES = (
     "hokma.quant.stats.volatility", "hokma.quant.stats.hurst", "hokma.quant.stats.cointegration", "hokma.quant.stats.timeseries",
     "hokma.quant.stats.kalman", "hokma.quant.stats.regression", "hokma.quant.stats.causal", "hokma.quant.stats.events",
-    "hokma.quant.stats.sentiment",
+    "hokma.quant.stats.sentiment", "hokma.quant.stats.carry",
 )
 
 

@@ -16,6 +16,7 @@ MODULES = (
     "hokma.quant.indicators.screens.momentum_burst", "hokma.quant.indicators.screens.weekly_structure",
     "hokma.quant.indicators.screens.vcp", "hokma.quant.indicators.screens.distribution_days", "hokma.quant.indicators.screens.pead",
     "hokma.quant.indicators.screens.earnings_reaction", "hokma.quant.indicators.screens.episodic_pivot",
+    "hokma.quant.indicators.patterns", "hokma.quant.indicators.profile", "hokma.quant.indicators.zigzag", "hokma.quant.indicators.td_sequential",
 )
 
 

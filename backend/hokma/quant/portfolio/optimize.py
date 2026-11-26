@@ -1,4 +1,4 @@
-"""Portfolio optimizers (SK-001, SK-002, SK-003, SK-006, SK-014, SK-015).
+"""Portfolio optimizers (SK-001, SK-002, SK-003, SK-006, SK-014, SK-015, L-53).
 
 Every optimizer gets the returns panel and its own limits. A solver that does not converge never raises and never invents
 weights: the result carries status "failed", the reason and a labelled baseline (see `container.failed_payload`).
@@ -13,7 +13,7 @@ import pandas as pd
 from hokma.quant import registry
 from hokma.quant.errors import BadInput
 from hokma.quant.portfolio import _common as c
-from hokma.quant.portfolio import _lib
+from hokma.quant.portfolio import _lib, priors
 from hokma.quant.portfolio.container import FALLBACKS, failed_payload
 from hokma.quant.types import QuantResult
 
@@ -267,12 +267,91 @@ def baselines(returns: Any, kind: str = "inverse_volatility", seed: int | None =
                  compute=compute, inputs=(returns, params))
 
 
+@registry.register("portfolio.risk_parity", module="portfolio",
+                   summary="Risk parity: weights whose risk contributions match a budget (equal by default), under one risk measure, with weight bounds.",
+                   inputs={"returns": _RET, "risk_measure": {"type": "str", "required": False, "default": "variance"},
+                           "risk_budget": {"type": "dict", "required": False},
+                           "min_weights": {"type": "float_or_dict", "required": False, "default": 0.0},
+                           "max_weights": {"type": "float_or_dict", "required": False, "default": 1.0},
+                           "solver": {"type": "str", "required": False, "default": "CLARABEL"}},
+                   piece_ids=("L-53",))
+def risk_parity(returns: Any, risk_measure: str = "variance", risk_budget: Any = None, min_weights: Any = 0.0, max_weights: Any = 1.0,
+                solver: str = "CLARABEL") -> QuantResult:
+    name, pieces = "portfolio.risk_parity", ("L-53",)
+    params = {"risk_measure": risk_measure, "risk_budget": risk_budget, "min_weights": min_weights, "max_weights": max_weights, "solver": solver}
+
+    def compute() -> Any:
+        measure = c.choice("risk_measure", risk_measure, _lib.RISK_MEASURES)
+        kwargs: dict[str, Any] = {"risk_measure": _lib.RiskMeasure(measure), "solver": _solver(solver)}
+        panel, warns = _panel(returns, name, pieces)
+        if risk_budget is not None:
+            if not isinstance(risk_budget, dict) or not risk_budget:
+                raise BadInput("risk_budget must be a non-empty dict asset -> share")
+            shares = c.per_asset(risk_budget, panel.columns, "risk_budget", None)
+            if min(shares) <= 0.0:
+                raise c.Domain("every risk budget share must be above zero")
+            kwargs["risk_budget"] = shares
+        kwargs.update(_weight_bounds(panel, min_weights, max_weights))
+        value, more = _fit(panel, _lib.sk_optimization.RiskBudgeting(**kwargs), measure, "RiskBudgeting")
+        return value, warns + more
+
+    return c.run(name, unit="weights", method="RiskBudgeting", params=params, piece_ids=pieces, compute=compute, inputs=(returns, params))
+
+
+@registry.register("portfolio.black_litterman_weights", module="portfolio",
+                   summary="Weights from the Black-Litterman posterior (market prior mixed with views): the mean-risk optimizer run on the posterior returns and covariance.",
+                   inputs={"returns": _RET, "views": {"type": "list", "required": True}, "view_confidences": {"type": "list", "required": False},
+                           "tau": {"type": "float", "required": False, "default": 0.05},
+                           "risk_free_rate": {"type": "float", "required": False, "default": 0.0},
+                           "objective": {"type": "str", "required": False, "default": "max_utility"},
+                           "risk_aversion": {"type": "float", "required": False, "default": 1.0},
+                           "min_weights": {"type": "float_or_dict", "required": False, "default": 0.0},
+                           "max_weights": {"type": "float_or_dict", "required": False, "default": 1.0},
+                           "budget": {"type": "float", "required": False, "default": 1.0},
+                           "solver": {"type": "str", "required": False, "default": "CLARABEL"}},
+                   piece_ids=("L-53",))
+def black_litterman_weights(returns: Any, views: Any, view_confidences: Any = None, tau: float = 0.05, risk_free_rate: float = 0.0,
+                            objective: str = "max_utility", risk_aversion: float = 1.0, min_weights: Any = 0.0, max_weights: Any = 1.0,
+                            budget: Any = 1.0, solver: str = "CLARABEL") -> QuantResult:
+    name, pieces = "portfolio.black_litterman_weights", ("L-53",)
+    params = {"views": views, "view_confidences": view_confidences, "tau": tau, "risk_free_rate": risk_free_rate, "objective": objective,
+              "risk_aversion": risk_aversion, "min_weights": min_weights, "max_weights": max_weights, "budget": budget, "solver": solver}
+
+    def compute() -> Any:
+        obj = c.choice("objective", objective, tuple(_lib.OBJECTIVES))
+        rate = c.number("risk_free_rate", risk_free_rate)
+        kwargs: dict[str, Any] = {"objective_function": _lib.OBJECTIVES[obj], "risk_aversion": _positive("risk_aversion", risk_aversion),
+                                  "budget": None if budget is None else c.number("budget", budget), "risk_free_rate": rate,
+                                  "solver": _solver(solver)}
+        panel, warns = _panel(returns, name, pieces)
+        if not isinstance(views, (list, tuple)) or len(views) > priors.MAX_VIEWS:
+            raise BadInput(f"views must be a list of at most {priors.MAX_VIEWS} views")
+        texts = [priors.view_text(v, panel.columns, label=f"views[{i}]") for i, v in enumerate(views)]
+        if not texts:
+            raise c.Domain("at least one view is needed")
+        conf = None
+        if view_confidences is not None:
+            if not isinstance(view_confidences, (list, tuple)) or len(view_confidences) != len(texts):
+                raise BadInput("view_confidences must be a list with one value per view")
+            conf = [c.number("view confidence", v, low=0.0, high=1.0, low_open=True) for v in view_confidences]
+        kwargs["prior_estimator"] = _lib.sk_prior.BlackLitterman(views=texts, view_confidences=conf, risk_free_rate=rate,
+                                                                 tau=c.number("tau", tau, low=0.0, low_open=True))
+        kwargs.update(_weight_bounds(panel, min_weights, max_weights))
+        value, more = _fit(panel, _lib.sk_optimization.MeanRisk(**kwargs), "variance", "BlackLitterman + MeanRisk")
+        return value, warns + more
+
+    return c.run(name, unit="weights", method="BlackLitterman + MeanRisk", params=params, piece_ids=pieces, compute=compute,
+                 inputs=(returns, params))
+
+
 _OPTIMIZERS = {
     "mean_risk": ("MeanRisk", "portfolio.mean_risk"),
     "robust_cvar": ("DistributionallyRobustCVaR", "portfolio.robust_cvar"),
     "inverse_volatility": ("InverseVolatility", "portfolio.baselines"),
     "equal_weighted": ("EqualWeighted", "portfolio.baselines"),
     "random": ("Random", "portfolio.baselines"),
+    "risk_parity": ("RiskBudgeting", "portfolio.risk_parity"),
+    "black_litterman": ("MeanRisk", "portfolio.black_litterman_weights"),
 }
 
 

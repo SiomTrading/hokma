@@ -15,6 +15,7 @@ OPTIONS_MODULES = (
     "hokma.quant.options.pricing", "hokma.quant.options.iv", "hokma.quant.options.greeks", "hokma.quant.options.trees",
     "hokma.quant.options.payoff", "hokma.quant.options.surface", "hokma.quant.options.position_greeks", "hokma.quant.options.vol_analysis",
     "hokma.quant.options.liquidity", "hokma.quant.options.structures", "hokma.quant.options.exotic", "hokma.quant.options.chain",
+    "hokma.quant.options.margin", "hokma.quant.options.assignment",
     "hokma.quant.options.strategies", "hokma.quant.options.detail",
 )
 

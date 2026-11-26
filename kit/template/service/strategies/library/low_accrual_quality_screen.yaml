@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-003 in .notices/THIRD_PARTY.txt
+id: "low_accrual_quality_screen"
+name: "Low versus high balance sheet accruals"
+ref: "LIB-003"
+asset_class: "equities"
+lines: [LP]
+horizon: "years"
+rebalance: "yearly, in May"
+universe: "The 1000 largest US stocks that publish all balance sheet items needed."
+signal: "Accruals = (change in current assets minus change in cash) minus (change in current liabilities minus change in short debt minus change in taxes payable) minus depreciation, divided by average total assets. Use yearly figures."
+entry: "Go long the decile with the lowest accruals and short the decile with the highest accruals."
+exit: "Close and rebuild once a year, after the annual reports are public."
+sizing: "Equal weight inside each leg; the two legs have equal gross exposure."
+risk_note: "The filing lag matters: use only figures that were public on the trade date, never the period end date."

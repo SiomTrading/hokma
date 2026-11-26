@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-010 in .notices/THIRD_PARTY.txt
+id: "factor_momentum_blend_with_market"
+name: "Factor momentum blended with the market by moving average votes"
+ref: "LIB-010"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "Five long short factor return series (momentum, value, quality, size, volatility) and a small cap equity ETF as the market sleeve."
+signal: "Fast signal is the last one month return of a factor, slow signal the last twelve months. Weight of a factor is its rank by absolute signal divided by the sum of ranks, times the sign. Blend 75 percent fast and 25 percent slow. Then for window lengths 1 to 12 months compare the mean return of the factor book with the mean return of the market sleeve."
+entry: "Each window won by the factor book gives it one vote, otherwise the market sleeve gets the vote."
+exit: "Weights follow the vote share and are rebuilt monthly."
+sizing: "Capital split by vote share; inside the factor sleeve use the blended factor weights."
+risk_note: "Needs published factor return series with a one day publication lag; a factor series that is revised is a leak."

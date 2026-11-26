@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-048 in .notices/THIRD_PARTY.txt
+id: "volume_oi_filtered_weekly_reversal"
+name: "Futures reversal filtered by volume and open interest"
+ref: "LIB-048"
+asset_class: "multi_asset"
+lines: [SWC]
+horizon: "days"
+rebalance: "weekly in the paper idea"
+universe: "About twenty two futures across currencies, rates, grains, meats, softs, metals and energy; the nearest contract except the next one inside the delivery month."
+signal: "Last week return, change of detrended volume versus the week before (above the median is high volume) and change of open interest (below the median is low)."
+entry: "Among high volume and low open interest contracts, go long those with the lowest return and short those with the highest."
+exit: "Rebuild each period; the version that was read uses a 14 session window split in two halves and rebalances monthly."
+sizing: "Weight is proportional to return minus the group average return, scaled so that absolute weights sum to one."
+risk_note: "Needs open interest history per contract; without it the filter cannot be built and the idea is skipped."

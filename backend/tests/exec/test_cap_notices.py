@@ -7,7 +7,7 @@ import re
 from decimal import Decimal
 
 import pytest
-from dbsupport import db, env  # noqa: F401  (fixtures)
+from dbsupport import db, env, take_back_the_migrations_after_0033  # noqa: F401  (fixtures)
 from desks_support import desks_db  # noqa: F401  (fixtures)
 from exec_support import AGENT, NQ, SPY, proposal, ready  # noqa: F401  (fixtures)
 from test_desk_rules import OWNER
@@ -517,8 +517,9 @@ def test_0033_goes_back_to_32_and_forward_again(env, db):
     from hokma.db import db_path, migrate
     import sqlite3
 
+    take_back_the_migrations_after_0033(db_path())
     assert rollback_0033() == 32
     con = sqlite3.connect(str(db_path()))
     assert not con.execute("SELECT name FROM sqlite_master WHERE name = 'cap_notices'").fetchall()
     con.close()
-    assert migrate().applied == [33]
+    assert migrate().applied == [33, 34, 35, 36, 37, 38]

@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-060 in .notices/THIRD_PARTY.txt
+id: "cheap_country_cape_third"
+name: "Cheapest country equity markets by cyclically adjusted valuation"
+ref: "LIB-060"
+asset_class: "equities"
+lines: [LP]
+horizon: "years"
+rebalance: "yearly in December"
+universe: "Twenty five country ETFs and a yearly cyclically adjusted earnings multiple (CAPE) per country."
+signal: "Keep countries with a CAPE below 15, then rank them by CAPE. The version that was read ranked by ETF price, which is not a valuation measure."
+entry: "Buy the cheapest third of the remaining countries."
+exit: "Rebuild once a year; stay in cash when no country qualifies."
+sizing: "Equal weight among the chosen countries."
+risk_note: "The CAPE series must be as published each December, not the later revised history."

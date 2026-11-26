@@ -20,6 +20,8 @@ OWNER_CALLS = [
     ("post", "/api/checkpoints/abc/restore-deleted", {}),
     ("post", "/api/session/logout", None),
     ("post", "/api/session/handoff-code", None),
+    ("post", "/api/strategy-code/1/approve", {"confirm": True}),
+    ("post", "/api/strategy-code/1/reject", {}),
 ]
 
 

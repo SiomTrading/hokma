@@ -13,6 +13,7 @@ from exec_support import AGENT, NQ, SPY, db, desks_db, env, proposal, ready  # n
 from hokma import exec as hexec
 from hokma.broker import service
 from hokma.broker.service import BrokerError, Who
+from dbsupport import take_back_the_migrations_after_0033
 from hokma.db import db_path, migrate
 from hokma.db.downgrade import rollback_0029, rollback_0030, rollback_0031, rollback_0032, rollback_0033
 from hokma.db.timeutil import utc_in
@@ -483,6 +484,7 @@ def test_the_pending_api_path_also_asks_the_scope(ready):
 
 def test_0029_goes_back_to_28_and_forward_again(env):
     migrate()
+    take_back_the_migrations_after_0033(db_path())
     assert rollback_0033() == 32 and rollback_0032() == 31 and rollback_0031() == 30 and rollback_0030() == 29           # the newer steps first: a way back is one version at a time
     assert rollback_0029() == 28
     con = sqlite3.connect(str(db_path()))
@@ -490,7 +492,7 @@ def test_0029_goes_back_to_28_and_forward_again(env):
     assert "notice_json" not in cols and "notice_nonce" not in cols and "expires_at" not in cols
     assert not con.execute("SELECT name FROM sqlite_master WHERE name = 'notice_grants'").fetchall()
     con.close()
-    assert migrate().applied == [29, 30, 31, 32, 33]
+    assert migrate().applied == [29, 30, 31, 32, 33, 34, 35, 36, 37, 38]
 
 
 def test_a_bad_row_does_not_leave_the_next_ones_without_their_timer(ready, monkeypatch):

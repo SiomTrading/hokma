@@ -53,6 +53,16 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                     "exec_propose", "exec_status", "exec_pending", "exec_flatten", "desk_level_get", "desk_level_set", "contract_get",
                     "calendar_events", "calendar_windows", "schedule_run", "book_positions", "book_snapshot", "book_pnl", "recon_run",
                     "recon_breaks", "report_account", "report_weekly", "export_book",
+                    # SPEC-020 (H4): backtest, factory and research
+                    "backtest_run", "backtest_status", "backtest_result", "backtest_optimize", "backtest_walkforward", "backtest_montecarlo", "backtest_evidence",
+                    "premium_calibrate", "premium_switch_state",
+                    "factory_list", "factory_describe", "factory_draft", "factory_propose", "data_papers",
+                    # SPEC-032 (B14): the verdict of the optimizer and the shared library
+                    "optimizer_verdict", "optimizer_verdict_get", "audit_thresholds_get", "library_list", "library_request",
+                    # SPEC-030 (A1): the strategy creator
+                    "source_ingest", "bank_create", "bank_list", "bank_get", "bank_set_status",
+                    # SPEC-031 (A2): the strategy as code
+                    "strategy_brief_write", "strategy_code_save", "strategy_code_verdict", "strategy_code_list", "strategy_code_get",
                     # SPEC-019 (H3): the SWO desk
                     "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_status", "desk_cycle_learn", "desk_signals", "lessons_propose",
                     # SPEC-028 (delivery 4): the analysis of an asset

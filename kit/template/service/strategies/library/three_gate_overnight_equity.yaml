@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-027 in .notices/THIRD_PARTY.txt
+id: "three_gate_overnight_equity"
+name: "Overnight equity exposure after three agreeing gates"
+ref: "LIB-027"
+asset_class: "equities"
+lines: [SWC]
+horizon: "intraday"
+rebalance: "daily, held overnight"
+universe: "A broad US equity ETF, the equity volatility index and a market sentiment indicator."
+signal: "Three yes or no gates, each versus its own 20 day average: the equity ETF is above its average, the volatility index is below its average, the sentiment indicator is above its average."
+entry: "Sixteen minutes before the close, buy at the close for every gate that is open."
+exit: "Sell at the next open."
+sizing: "Each open gate puts one third of the account to work."
+risk_note: "The authors present it as a filter for other trades, not a stand alone system. The sentiment series is vendor data; without it use the first two gates only."

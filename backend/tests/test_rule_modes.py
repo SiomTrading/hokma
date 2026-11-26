@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from account_links_support import link_principal
-from dbsupport import env  # noqa: F401  (fixture)
+from dbsupport import env, take_back_the_migrations_after_0033  # noqa: F401  (fixture)
 from desks_support import db, desks_db, make_desk  # noqa: F401  (fixtures)
 from test_desk_rules import AGENT, NQ, OWNER, SPY, book, config, ctx, legacy, prop
 
@@ -305,6 +305,7 @@ def test_0027_turns_the_list_forced_by_the_system_into_a_notice_keeps_the_ones_b
     assert log == [(1, "notice"), (2, "restriction"), (5, "restriction")]
     assert migrate().applied == []
     con.close()
+    take_back_the_migrations_after_0033(db_path())
     assert rollback_0033() == 32 and rollback_0032() == 31 and rollback_0031() == 30 and rollback_0030() == 29 and rollback_0029() == 28 and rollback_0028() == 27 and rollback_0027() == 26
     con = sqlite3.connect(str(db_path()))
     assert "rule_modes" not in json.loads(con.execute("SELECT config FROM desk_limits WHERE desk_id = 1").fetchone()[0])
@@ -317,6 +318,7 @@ def test_the_way_back_refuses_while_a_rule_of_an_account_exists(env, db):
     account_rules.set_rule(desk, acc, "daily_loss", 100, OWNER, mode="notice", db=db)
     from hokma.db import db_path
 
+    take_back_the_migrations_after_0033(db_path())
     rollback_0033(db_path())
     rollback_0032(db_path())
     rollback_0031(db_path())

@@ -3,5 +3,6 @@ from __future__ import annotations
 
 # Importing the submodules registers their functions.
 from hokma.quant.options import (  # noqa: F401
-    chain, detail, exotic, greeks, iv, liquidity, payoff, position_greeks, pricing, strategies, structures, surface, trees, vol_analysis,
+    assignment, chain, detail, exotic, greeks, iv, liquidity, margin, payoff, position_greeks, pricing, strategies, structures, surface, trees,
+    vol_analysis,
 )

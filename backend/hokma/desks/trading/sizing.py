@@ -13,6 +13,9 @@ Rules, each with its test:
   refused, and the count has a hard cap.
 
 The module does not compute commissions or slippage (the budget does) and it does not know margin.
+
+Other ways to size, all in this module so the desk and the backtest share them: `fixed_risk` (a fixed amount at risk over a stop distance,
+through `contracts`), `vol_target` (contracts that carry a target volatility, in seven steps) and `buffer` (a dead band around the target).
 """
 from __future__ import annotations
 
@@ -186,3 +189,131 @@ def max_loss_per_unit_usd(structure: str, legs: Sequence[OptionLegInfo], net_pre
     if loss <= 0:
         raise SizingError("bad_premium", "the credit is as large as the most the structure can lose")
     return loss * multiplier
+
+
+# ---- fixed risk, volatility target and the dead band -----------------------------------------------------------------------
+
+def fixed_risk(*, risk_usd: Any, entry: Any, multiplier: Any, stop_distance: Any = None, stop_ticks: Any = None, tick_size: Any = None,
+               side: Literal["long", "short"] = "long", currency: str = "USD", fx_rate: Any = None,
+               max_contracts: int = HARD_MAX_CONTRACTS) -> SizeResult:
+    """Contracts (or CFD units) that risk a fixed amount: the risk over the stop distance times the multiplier, rounded down.
+
+    The stop is given as a distance in price units (`stop_distance`, the points of a CFD) or in ticks (`stop_ticks`, with `tick_size`).
+    The stop price is built from the side and handed to `contracts`, so the exact floor, the grid checks and the refusals are the same."""
+    if side not in ("long", "short"):
+        raise SizingError("bad_side", "side is long or short")
+    if (stop_distance is None) == (stop_ticks is None):
+        raise SizingError("bad_stop", "give the stop as a distance or as a number of ticks, not both and not neither")
+    entry_p = _price(entry, "entry")
+    if stop_ticks is not None:
+        if tick_size is None:
+            raise SizingError("bad_tick", "a stop in ticks needs the tick size")
+        if isinstance(stop_ticks, bool) or not isinstance(stop_ticks, int) or stop_ticks < 1:
+            raise SizingError("bad_stop", "stop_ticks must be a whole number of one or more")
+        distance = _amount(tick_size, "tick_size") * stop_ticks
+    else:
+        distance = _amount(stop_distance, "stop_distance")
+    if distance <= 0:
+        raise SizingError("bad_stop", "the stop distance must be above zero")
+    stop_p = entry_p - distance if side == "long" else entry_p + distance
+    return contracts(risk_budget_usd=risk_usd, entry=entry_p, stop=stop_p, multiplier=multiplier, tick_size=tick_size, currency=currency,
+                     fx_rate=fx_rate, max_contracts=max_contracts)
+
+
+@dataclass(frozen=True)
+class VolSize:
+    """The seven steps of a volatility target size, so the number of contracts can be audited line by line."""
+    contracts: int                       # signed: a negative forecast is a short
+    exact_position: Decimal              # step 6, before the rounding
+    annual_cash_target: Decimal          # step 1: capital times the target volatility
+    period_cash_target: Decimal          # step 2: the same target for one period
+    price_volatility: Decimal            # step 3: volatility in price units
+    contract_volatility: Decimal         # step 4: volatility of one contract in USD
+    scalar: Decimal                      # step 5: contracts that match the target at the average forecast
+    capped: bool = False                 # step 7: the cap (the prop firm limit) cut the size
+    code: str = "ok"
+
+
+MAX_TARGET_VOL = Decimal(5)
+MAX_PERIODS_PER_YEAR = 366
+
+
+def vol_target(*, capital: Any, target_vol: Any, price: Any, instrument_vol: Any, multiplier: Any, vol_basis: Literal["daily", "annual"] = "daily",
+               periods_per_year: int = 252, forecast: Any = None, average_forecast: Any = 10, currency: str = "USD", fx_rate: Any = None,
+               max_contracts: int = HARD_MAX_CONTRACTS) -> VolSize:
+    """Contracts that make the position carry the target volatility of the capital, in seven steps.
+
+    1. annual cash target = capital times `target_vol` (a fraction: 0.20 is 20 percent a year).
+    2. the target of one period = the annual one over the square root of `periods_per_year` (only when `vol_basis` is "daily").
+       DT passes the volatility of one session as "daily"; SWC passes the daily one with its annual objective.
+    3. price volatility = `price` times `instrument_vol` (a fraction of the price over the same horizon as step 2).
+    4. contract volatility = price volatility times the multiplier of the contract sheet times the exchange rate to USD.
+    5. scalar = the period cash target over the contract volatility.
+    6. position = scalar times `forecast` over `average_forecast` (no forecast: the full scalar, long).
+    7. the position is cut toward zero to whole contracts and capped at `max_contracts` (the prop firm limit for DT).
+
+    Rounding is toward zero so the volatility is never above the target. A position of less than one contract is 0."""
+    cap_usd = _amount(capital, "capital")
+    tv, px, iv, mult = (_amount(target_vol, "target_vol"), _amount(price, "price"), _amount(instrument_vol, "instrument_vol"),
+                        _amount(multiplier, "multiplier"))
+    if not Decimal(0) < cap_usd <= MAX_BUDGET:
+        raise SizingError("absurd_budget", "the capital must be above zero and below 1e12")
+    if not Decimal(0) < tv <= MAX_TARGET_VOL:
+        raise SizingError("bad_vol", f"target_vol is a fraction above zero and at most {MAX_TARGET_VOL}")
+    if px <= 0 or iv <= 0:
+        raise SizingError("bad_vol", "the price and the volatility of the instrument must be above zero")
+    if mult <= 0:
+        raise SizingError("bad_multiplier", "the multiplier of the contract sheet must be above zero")
+    if vol_basis not in ("daily", "annual"):
+        raise SizingError("bad_vol", "vol_basis is daily or annual")
+    if isinstance(periods_per_year, bool) or not isinstance(periods_per_year, int) or not 1 <= periods_per_year <= MAX_PERIODS_PER_YEAR:
+        raise SizingError("bad_periods", f"periods_per_year must be a whole number from 1 to {MAX_PERIODS_PER_YEAR}")
+    if isinstance(max_contracts, bool) or not isinstance(max_contracts, int) or not 1 <= max_contracts <= HARD_MAX_CONTRACTS:
+        raise SizingError("bad_cap", f"max_contracts must be a whole number from 1 to {HARD_MAX_CONTRACTS}")
+    avg = _amount(average_forecast, "average_forecast")
+    if avg <= 0:
+        raise SizingError("bad_forecast", "the average forecast must be above zero")
+    fc = avg if forecast is None else _amount(forecast, "forecast")
+    if currency != "USD":
+        if fx_rate is None:
+            raise SizingError("fx_missing", f"the currency {str(currency)[:8]} needs an exchange rate to USD")
+        fx = _amount(fx_rate, "fx_rate")
+        if fx <= 0:
+            raise SizingError("bad_fx", "the exchange rate must be above zero")
+    else:
+        fx = Decimal(1)
+    annual = cap_usd * tv
+    period = annual / Decimal(periods_per_year).sqrt() if vol_basis == "daily" else annual
+    price_vol = px * iv
+    contract_vol = price_vol * mult * fx
+    scalar = period / contract_vol
+    exact = scalar * fc / avg
+    whole = int(abs(exact) // 1)
+    capped = whole > max_contracts
+    count = max_contracts if capped else whole
+    return VolSize(-count if exact < 0 else count, exact, annual, period, price_vol, contract_vol, scalar, capped, "capped" if capped else "ok")
+
+
+@dataclass(frozen=True)
+class BufferResult:
+    traded: bool
+    position: Decimal                    # the position after the rebalance
+    trade: Decimal                       # signed change: zero when the position sits inside the band
+    lower: Decimal                       # the band around the target
+    upper: Decimal
+
+
+def buffer(*, position: Any, target: Any, band: Any = Decimal("0.10")) -> BufferResult:
+    """Dead band: no trade while the position is inside `target` plus or minus `band` times the size of the target.
+
+    Outside the band the position moves only to the nearest edge, not to the target, so a small drift never turns into a full trade.
+    `band` is a fraction (0.10 is 10 percent). A target of zero has no band: any position is traded to zero."""
+    pos, tgt, b = _amount(position, "position"), _amount(target, "target"), _amount(band, "band")
+    if not Decimal(0) <= b <= 1:
+        raise SizingError("bad_band", "the band is a fraction from 0 to 1")
+    half = abs(tgt) * b
+    lower, upper = tgt - half, tgt + half
+    if lower <= pos <= upper:
+        return BufferResult(False, pos, ZERO, lower, upper)
+    edge = lower if pos < lower else upper
+    return BufferResult(True, edge, edge - pos, lower, upper)

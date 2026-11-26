@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-028 in .notices/THIRD_PARTY.txt
+id: "high_vol_momentum_spread"
+name: "Winners and losers inside the high volatility group"
+ref: "LIB-028"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly in six overlapping tranches"
+universe: "The 1000 most traded US stocks above 5 dollars, keeping the larger half by market capitalisation."
+signal: "Return and annualised volatility over the last six months, skipping the most recent seven days. Sort both into quintiles."
+entry: "Go long the best return quintile inside the highest volatility quintile and short the worst return quintile inside the highest volatility quintile."
+exit: "Each tranche is held six months, so one sixth of the book turns over each month."
+sizing: "One sixth of equity per tranche, equal weight inside each leg."
+risk_note: "The intersection can be small; set a minimum name count and skip the tranche when it is not met."

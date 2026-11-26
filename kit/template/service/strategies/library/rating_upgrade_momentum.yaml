@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-020 in .notices/THIRD_PARTY.txt
+id: "rating_upgrade_momentum"
+name: "Stocks with the biggest rise in their sustainability rating"
+ref: "LIB-020"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly in three overlapping tranches"
+universe: "About 700 large stocks that have a monthly sustainability rating decile."
+signal: "Rating momentum = rating decile two months ago divided by rating decile fourteen months ago, minus one."
+entry: "Go long the top decile of momentum and short the bottom decile."
+exit: "Each tranche is held three months and then closed."
+sizing: "One third of equity per tranche; equal or market capitalisation weights inside the tranche."
+risk_note: "Rating providers revise history; use only the series as it was published at the time."

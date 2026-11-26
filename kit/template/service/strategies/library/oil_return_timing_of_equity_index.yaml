@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-012 in .notices/THIRD_PARTY.txt
+id: "oil_return_timing_of_equity_index"
+name: "Equity index timing from last month oil return"
+ref: "LIB-012"
+asset_class: "multi_asset"
+lines: [LP, SWC]
+horizon: "months"
+rebalance: "monthly"
+universe: "A stock index future and a crude oil future, both as continuous series; a short bond ETF as the cash leg."
+signal: "Regress next month index return on this month oil return with an expanding window, refit every month. Predict the next index return from the latest oil return."
+entry: "Hold the index when the predicted return is above the three month risk free rate."
+exit: "Move to the cash leg when the predicted return is below the risk free rate."
+sizing: "All in or all out, one unit of the index exposure."
+risk_note: "A single predictor with a thin sample: report the t statistic of the slope and keep the sample start fixed to avoid look ahead."

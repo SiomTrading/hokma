@@ -1,0 +1,57 @@
+SOURCES OF THE DATA FILES (SPEC-020, block B2: L-01, L-02, L-03, L-08)
+
+All files are public exchange facts (contract specifications, performance bonds, trading calendars) written down as plain tables. Nothing
+here is typed from memory: every value was transcribed by a script from the public data set named in .notices/THIRD_PARTY.txt (Apache-2.0
+licensed, reused as data with the notice), and the tests check the values that matter against hand computed expectations and against the
+exchange specification table of the contracts module (futures_specs.json).
+
+futures_properties.csv
+  One row per root: exchange, description, contract multiplier and minimum price variation (tick) in USD. Values as published by the
+  exchanges; numbers are written without trailing zeros (50.0 is 50). The history uses them for any past date; in live trading the sheet
+  of the provider decides (decision 1251) and contracts.history.differences compares the two.
+
+futures_roots.csv
+  One row per root: exchange, asset class, the listed contract months as month letters (cycle), what a month outside the cycle means
+  (yes: no contract; forward: moves to the next listed month; no: the month lists) and the name of the expiration rule that
+  contracts.expiry applies. The rules are the public contract specifications (last trading day of each product); the 355 vectors of
+  backend/tests/contracts/fixtures/expiry_vectors.csv check them.
+
+margins/<ROOT>.csv
+  Exchange initial and maintenance margin per contract in USD, one row each time the exchange changed it (date is the first day in force).
+  The series end in January 2022 for the equity index, metal and energy roots and earlier for some others; history.margin treats
+  2022-01-21 as the end of the series for every root (SPEC-020 L-02). After it, the margin is the current sheet value and the result carries
+  the warning historical_margin_missing. There is no data for 2022 to 2026: it is a gap, it is reported and it is never filled.
+  Coverage per root:
+    ES    38 rows  2012-03-26 to 2022-01-21  last value 11880 initial / 10800 maintenance
+    MES   14 rows  2019-05-03 to 2022-01-21  last value 1188 initial / 1080 maintenance
+    NQ    39 rows  2012-03-26 to 2022-01-21  last value 16500 initial / 15000 maintenance
+    MNQ   15 rows  2019-05-03 to 2022-01-21  last value 1650 initial / 1500 maintenance
+    YM    38 rows  2012-03-26 to 2022-01-21  last value 8800 initial / 8000 maintenance
+    MYM   15 rows  2019-05-03 to 2022-01-21  last value 880 initial / 800 maintenance
+    RTY   24 rows  2017-07-07 to 2022-01-07  last value 6050 initial / 5500 maintenance
+    M2K   17 rows  2019-05-03 to 2022-01-07  last value 605 initial / 550 maintenance
+    CL    99 rows  2009-01-12 to 2022-02-07  last value 7480 initial / 6800 maintenance
+    MCL    7 rows  2021-07-12 to 2022-02-07  last value 748 initial / 680 maintenance
+    NG   139 rows  2009-01-12 to 2022-02-07  last value 8250 initial / 7500 maintenance
+    GC    66 rows  2009-01-08 to 2022-01-21  last value 6600 initial / 6000 maintenance
+    MGC   51 rows  2013-01-02 to 2022-01-21  last value 660 initial / 600 maintenance
+    SI    76 rows  2009-01-08 to 2022-01-05  last value 10450 initial / 9500 maintenance
+    HG    50 rows  2012-02-13 to 2022-01-21  last value 5500 initial / 5000 maintenance
+    ZN    68 rows  2004-01-02 to 2021-11-12  last value 1650 initial / 1500 maintenance
+    ZB    79 rows  2004-01-02 to 2021-05-27  last value 3850 initial / 3500 maintenance
+    ZF    65 rows  2004-01-02 to 2021-11-30  last value 1018 initial / 925 maintenance
+    ZT   124 rows  2004-01-02 to 2022-02-11  last value 869 initial / 790 maintenance
+    6E    88 rows  2000-01-01 to 2021-04-16  last value 2420 initial / 2200 maintenance
+
+market_hours.json
+  Weekly trading segments in the exchange time zone (premarket and postmarket are the extended session, market is the regular session),
+  the dates the exchange is closed all day (the product's own list joined with the exchange's list), the early closes and the late opens
+  of each date, and the bank holidays that the expiration rules count as non-business days. Roots with identical tables share one
+  schedule. The equity index schedules (ES, MES, NQ, MNQ, RTY, M2K and YM, MYM) carry no bank holiday in October and November: the real
+  daily sessions of NQ 12-25 in Trading Core (tests/backtest/fixtures/nq_session.json, 2025-09-15 to 2025-12-19) show full sessions on
+  Columbus Day (2025-10-13) and Veterans Day (2025-11-11) and a session that ends at 13:00 New York time on Thanksgiving (2025-11-27, 46575
+  contracts against about 500000 on a normal day), so those days are business days of the product (Thanksgiving keeps its early close and its
+  evening reopening in the table). Only NQ is checked against real data; the other equity index roots share its schedule by family. The
+  schedules of rates (ZN, ZB, ZF, ZT), energy (CL, MCL, NG), metals (GC, MGC, SI, HG) and currencies (6E) keep their bank holidays and
+  early closes as transcribed: no real bars of those roots on those days exist in the repository, so they are unverified. contracts.sessions reads it: a day with only an early close ends at that time, a day with only a late open starts at that time,
+  a day with both closes early and reopens late.

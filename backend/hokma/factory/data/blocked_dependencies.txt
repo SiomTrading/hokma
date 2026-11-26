@@ -1,0 +1,40 @@
+# Libraries that must never become a dependency of Hokma (SPEC-020, AS-002, AS-003, AS-004).
+# They are listed as inactive, archived or no longer available by the public list that was reviewed for the factory.
+# One entry per line: name | state | since. Names are lower case package names. Blank lines and lines starting with # are ignored.
+# The test backend/tests/factory/test_blocked_dependencies.py reads uv.lock and fails when any name below appears in it.
+zipline | dormant | 2024-02
+backtrader | dormant | 2024-08
+sdoosa-algo-trade-python | dormant | 2023-09
+quanttrader | dormant | 2024-06
+openlimits | dormant | 2022-07
+crypto-crawler-rs | dormant | 2023-03
+cryptotrader-core | dormant | 2019-06
+r2 | dormant | 2023-04
+analyzingalpha | dormant | 2023-08
+pytrendfollow | dormant | 2018-04
+go-tart | dormant | 2021-06
+ta-rust | dormant | 2024-07
+deepdow | dormant | 2024-01
+pyfolio | dormant | 2023-12
+coinnect | dormant | 2021-11
+pendax | dormant | 2024-05
+tushare | dormant | 2024-03
+wallstreet | dormant | 2024-07
+gekko-datasets | dormant | 2018-05
+cryptoinscriber | dormant | 2018-03
+tectonicdb | dormant | 2024-01
+mdf | dormant | 2016-12
+graphkit | dormant | 2023-03
+mlfinlab | dormant | 2023-10
+tradinggym | dormant | 2024-02
+trading-bot | dormant | 2023-12
+mplfinance | dormant | 2024-08
+gobacktest | archived | -
+kelp | archived | -
+btrader | archived | -
+finta | archived | -
+ib-insync | archived | -
+quandl | archived | -
+blackbird | unavailable | -
+pandas-ta | unavailable | -
+marketstore | unavailable | -

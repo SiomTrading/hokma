@@ -1,0 +1,23 @@
+{
+ "broker": "kraken",
+ "currency": "USD",
+ "reference": "Kraken Pro, spot crypto, per side, first tier: 0.26 percent for an order that takes liquidity (rule crypto) and 0.16 percent for an order that adds it (rule crypto_maker). Read from the fee schedule of the exchange on 2026-11-22; not yet checked against a real statement.",
+ "source": "Kraken public fee schedule (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "omitted": [
+  "higher volume tiers",
+  "stablecoin and currency pairs, which have their own rate of 0.20 percent",
+  "margin and futures fees"
+ ],
+ "rules": {
+  "crypto": {
+   "kind": "bps",
+   "value": "26"
+  },
+  "crypto_maker": {
+   "kind": "bps",
+   "value": "16"
+  }
+ }
+}

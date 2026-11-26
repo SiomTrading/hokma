@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-029 in .notices/THIRD_PARTY.txt
+id: "commodity_twelve_month_quintiles"
+name: "Commodity futures by twelve month return"
+ref: "LIB-029"
+asset_class: "commodities"
+lines: [SWC]
+horizon: "months"
+rebalance: "monthly"
+universe: "About thirty liquid commodity futures: grains, oilseeds, livestock, metals, energy, softs and lumber."
+signal: "Rate of change over the last 252 sessions. Needs at least five markets with data."
+entry: "Go long the top quintile and short the bottom quintile."
+exit: "Rebuild monthly."
+sizing: "Equal weight inside each leg."
+risk_note: "The roll yield is part of the return; use a continuous series that carries it, and model the swap if traded as CFD."

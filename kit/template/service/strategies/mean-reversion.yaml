@@ -1,0 +1,35 @@
+# Mean reversion on the z-score of a price or a spread. The half-life of the reversion filters the view, and it is measured in the unit of the
+# line: minutes of session for the intraday line, days for the swing line. The range of the half-life and the z levels are grid values.
+- id: mean_reversion_dt
+  kind: alpha
+  class: hokma.factory.alphas.mean_reversion.MeanReversion
+  line: DT
+  description: Mean reversion on minute bars. The half-life is in minutes of session and must lie inside its range. A time exit leaves after 2.5 half-lives.
+  params:
+    entry_z: 2.0
+    exit_z: 0.5
+    stop_z: 4.0
+    window_half_lives: 2.0
+    time_stop_half_lives: 2.5
+    min_half_life: 5.0
+    max_half_life: 120.0
+    unit: session_minutes
+    bar_size: 1.0
+    history: 390
+
+- id: mean_reversion_swc
+  kind: alpha
+  class: hokma.factory.alphas.mean_reversion.MeanReversion
+  line: SWC
+  description: Mean reversion on daily bars. The half-life is in days and must lie inside its range. A time exit leaves after 2.5 half-lives.
+  params:
+    entry_z: 2.0
+    exit_z: 0.5
+    stop_z: 4.0
+    window_half_lives: 2.0
+    time_stop_half_lives: 2.5
+    min_half_life: 5.0
+    max_half_life: 60.0
+    unit: days
+    bar_size: 1.0
+    history: 250

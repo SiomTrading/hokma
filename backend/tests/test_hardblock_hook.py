@@ -111,8 +111,8 @@ def test_p8_the_settings_carry_the_hook_for_every_tool_and_pin_the_hooks_on(box,
     settings = build_settings()
     assert settings["disableAllHooks"] is False
     groups = settings["hooks"]["PreToolUse"]
-    assert [g["matcher"] for g in groups] == ["Edit|MultiEdit|Write|NotebookEdit", ".*"]
-    assert groups[1]["hooks"][0]["command"] == hardblock_command() and "{{" not in json.dumps(settings)
+    assert [g["matcher"] for g in groups] == ["Edit|MultiEdit|Write|NotebookEdit", "Edit|MultiEdit|Write|NotebookEdit|mcp__hokma__strategy_brief_write|mcp__hokma__strategy_code_save|mcp__hokma__strategy_code_verdict", ".*"]      # the middle one is the first gate of the strategy creator
+    assert groups[2]["hooks"][0]["command"] == hardblock_command() and "{{" not in json.dumps(settings)
     spec = prepare_claude_launch()
     assert spec.args[spec.args.index("--setting-sources") + 1] == "user"     # no project or local settings sources
     written = json.loads(Path(spec.args[1]).read_text())

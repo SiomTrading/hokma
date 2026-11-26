@@ -1,0 +1,37 @@
+id: time_series_momentum
+title: Trend of each instrument against its own past
+ref: idea-001
+lines: [SWC, LP]
+asset_classes: [future, cfd, etf]
+requires_premium_switch: false
+requires_event_study: false
+summary: >-
+  Every instrument is judged alone. If its return over the last twelve months is positive the view is long, if negative it is
+  short, and the weight is scaled so each instrument carries the same annual volatility. The published tests used a broad
+  basket of futures (commodities, currencies, equity indexes and government bonds) with a volatility target of ten percent a year.
+needs: []
+data: [close]
+variants:
+  - line: SWC
+    vehicle: futures and CFDs
+    alpha: tsmom
+    params: {periods: 252, vol_periods: 60, target_vol: 0.10, periods_per_year: 252}
+    rebalance: monthly
+    rules:
+      - Use continuous series with an explicit roll for futures and the CFD price for CFDs; never mix the two in one series.
+      - One view per instrument. No ranking across instruments, so the book can be net long or net short.
+      - The weight of an instrument is its view; the portfolio module applies the leverage cap of the desk.
+    costs:
+      - Futures pay commission and slippage per contract from the broker table.
+      - CFDs also pay the nightly financing, switched on with costs.cfd_swap in the backtest.
+  - line: LP
+    vehicle: ETFs
+    alpha: tsmom
+    params: {periods: 252, vol_periods: 60, target_vol: 0.10, periods_per_year: 252}
+    rebalance: monthly
+    rules:
+      - The universe is one liquid ETF per asset class (equity indexes, government bonds, commodities, currencies).
+      - The long term book does not sell short, so a negative view is flat and the weight is held in cash.
+      - Rebalance only when a weight moves by more than a tolerance band, to keep turnover low.
+    costs:
+      - ETF commission from the broker table plus the spread; no financing.

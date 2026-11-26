@@ -1,0 +1,23 @@
+{
+ "broker": "coinbase",
+ "currency": "USD",
+ "reference": "Coinbase Advanced, spot crypto, per side, first tier (volume of zero or more): 0.80 percent for an order that takes liquidity (rule crypto) and 0.60 percent for an order that adds it (rule crypto_maker). Read from the fee schedule of the exchange on 2026-11-22; not yet checked against a real statement.",
+ "source": "Coinbase Advanced public fee tiers page (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "omitted": [
+  "higher volume tiers",
+  "stable pairs, which have their own rates",
+  "spread of the simple buy and sell product"
+ ],
+ "rules": {
+  "crypto": {
+   "kind": "bps",
+   "value": "80"
+  },
+  "crypto_maker": {
+   "kind": "bps",
+   "value": "60"
+  }
+ }
+}

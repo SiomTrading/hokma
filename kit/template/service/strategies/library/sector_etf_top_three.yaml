@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-045 in .notices/THIRD_PARTY.txt
+id: "sector_etf_top_three"
+name: "Top three sector ETFs by twelve month return"
+ref: "LIB-045"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "Ten US sector ETFs: real estate, technology, energy, health care, financials, industrials, materials, consumer discretionary, consumer staples, utilities."
+signal: "Rate of change over the last 252 sessions of each ETF."
+entry: "Hold the three strongest."
+exit: "Sell an ETF when it leaves the top three at the next monthly check."
+sizing: "Equal weight of one third each."
+risk_note: "Sector weights change over time; check that the three picks are not one theme in disguise."

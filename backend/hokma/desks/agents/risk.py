@@ -151,6 +151,9 @@ class RiskLimits(BaseModel):
     max_weight_pct: float | None = None
     event_windows: list[EventWindowLimit] | None = None
     guards: list[str] | None = None
+    max_symbol_pct: float | None = None       # SPEC-020: exposure caps per symbol and per sector, and the sector of each root
+    max_sector_pct: float | None = None
+    sectors: dict[str, str] | None = None
     instructions: list[dict[str, Any]] | None = None       # the rules tab (SPEC-025): the guards ignore them
     proposed: list[dict[str, Any]] | None = None
     dismissed: list[str] | None = None

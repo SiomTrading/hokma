@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-033 in .notices/THIRD_PARTY.txt
+id: "fund_six_month_winners"
+name: "Equity funds with the best six month return"
+ref: "LIB-033"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "quarterly"
+universe: "No load equity mutual funds, about 850 names, with daily values."
+signal: "Return of each fund over the last 126 sessions. Needs at least ten funds with fresh data."
+entry: "Buy the top decile of funds."
+exit: "Rebuild each quarter end."
+sizing: "Equal weight, long only."
+risk_note: "Fund data starts late and funds close or merge; keep dead funds in the sample."

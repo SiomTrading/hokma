@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-008 in .notices/THIRD_PARTY.txt
+id: "low_beta_stocks_long_short"
+name: "Low beta versus high beta stocks"
+ref: "LIB-008"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "The 1000 most traded US stocks with a price above 5 dollars."
+signal: "Beta of each stock to a broad US equity ETF using the last 252 daily returns. Sort into deciles."
+entry: "Go long the lowest beta decile and short the highest beta decile at the first session of the month."
+exit: "Rebuild monthly."
+sizing: "Equal weight inside each leg; each leg is scaled by one over its average beta, capped at 2."
+risk_note: "A long only low beta sleeve is the practical LP version; the short leg is costly and crowded."

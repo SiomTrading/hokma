@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-004 in .notices/THIRD_PARTY.txt
+id: "five_etf_top_three_rotation"
+name: "Top three of five asset class ETFs by yearly return"
+ref: "LIB-004"
+asset_class: "multi_asset"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "Five ETFs: US stocks, foreign stocks, intermediate US bonds, listed real estate and broad commodities."
+signal: "Rate of change over the last 252 sessions of each ETF."
+entry: "Hold the three ETFs with the highest rate of change."
+exit: "Sell an ETF when it falls out of the top three at the next monthly check."
+sizing: "Equal weight of one third each, fully invested."
+risk_note: "Only five assets, so one asset class shock moves the whole book; test the ranking window on neighbours (200 to 300 sessions)."

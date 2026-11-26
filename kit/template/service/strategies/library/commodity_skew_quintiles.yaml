@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-049 in .notices/THIRD_PARTY.txt
+id: "commodity_skew_quintiles"
+name: "Commodities ranked by skewness of daily returns"
+ref: "LIB-049"
+asset_class: "commodities"
+lines: [SWC]
+horizon: "months"
+rebalance: "monthly"
+universe: "About twenty six commodity futures."
+signal: "Skewness (third moment) of the last 251 daily returns of each future."
+entry: "Buy the quintile with the lowest skewness and sell the quintile with the highest."
+exit: "Rebuild monthly."
+sizing: "Equal weight inside each leg."
+risk_note: "Skewness of one year of daily data is noisy; check stability over neighbouring windows."

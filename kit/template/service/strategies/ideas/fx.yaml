@@ -1,0 +1,55 @@
+id: fx
+title: Currencies, four sources of return
+ref: idea-006
+lines: [SWC, RF]
+asset_classes: [cfd, rate]
+requires_premium_switch: false
+requires_event_study: false
+summary: >-
+  Currencies pay or cost the holder the gap between two interest rates, drift with trend, and revert toward a price level that
+  matches purchasing power. Four recipes: carry (hold the currencies with the highest rates against those with the lowest),
+  the dollar against a basket (decided by whether the US rate is above the basket), twelve month momentum, and valuation
+  against purchasing power parity. The financing cost of a CFD is part of the result, not an afterthought.
+needs: []
+data: [close, rates, macro]
+variants:
+  - line: SWC
+    sleeve: carry
+    vehicle: currency pair CFDs
+    planned_alpha: rate_rank
+    rebalance: monthly
+    rules:
+      - Of ten to twenty currencies hold the three with the highest policy rates long and the three with the lowest short.
+      - The financing cost comes from costs.cfd_swap, with the nightly rates of the broker table; the carry is net of it.
+    costs:
+      - Nightly financing per pair, both sides, from the broker table.
+  - line: SWC
+    sleeve: dollar against a basket
+    vehicle: currency pair CFDs
+    planned_alpha: rate_rank
+    rebalance: monthly
+    rules:
+      - Compare the US short rate with the average short rate of the basket; be long the dollar against the basket when the US rate is higher and short when it is lower.
+  - line: SWC
+    sleeve: momentum
+    vehicle: currency pair CFDs
+    alpha: historical_returns
+    params: {periods: 252, cap: 0.15}
+    rebalance: monthly
+    rules:
+      - Rank against the dollar by the twelve month return; long the strongest three and short the weakest three.
+  - line: SWC
+    sleeve: valuation
+    vehicle: currency pair CFDs
+    planned_alpha: ppp_rank
+    rebalance: yearly
+    rules:
+      - Estimate fair value from a purchasing power figure moved forward with monthly price and rate changes; long the most undervalued three, short the most overvalued three.
+      - Macro inputs are read with the vintage fixed at the date of the decision.
+  - line: RF
+    sleeve: rate differential
+    vehicle: money market and short government bond funds in several currencies
+    planned_alpha: rate_rank
+    rebalance: monthly
+    rules:
+      - Hold the currency whose short rate, net of the cost of the currency hedge, is highest; otherwise stay in the home currency.

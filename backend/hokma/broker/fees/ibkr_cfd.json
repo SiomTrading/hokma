@@ -1,0 +1,20 @@
+{
+ "broker": "ibkr_cfd",
+ "currency": "USD",
+ "reference": "Interactive Brokers, CFDs quoted in US dollars, per side: 0.002 percent of the trade value (0.2 basis points) with a minimum of 1.00 per order. Read from the fee schedule of the broker on 2026-11-22; not yet checked against a real statement. Overnight financing is not in this table.",
+ "source": "Interactive Brokers public commission page for CFDs (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "omitted": [
+  "overnight financing (cfd_swap)",
+  "minimum fees for other quote currencies",
+  "market data fees"
+ ],
+ "rules": {
+  "cfd": {
+   "kind": "bps",
+   "value": "0.2",
+   "minimum": "1"
+  }
+ }
+}

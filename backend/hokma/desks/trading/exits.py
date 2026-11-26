@@ -11,6 +11,9 @@ R is the distance from the entry to the stop. The objective is `r_multiple` time
 Rounding goes against the trader: a stop is rounded away from the entry (the risk is never understated) and an objective toward
 it (the reward is never overstated). The risk of the plan is measured from the rounded stop.
 
+Trailing stops (`atr_trailing`, `trailing_pct`) follow the best price of the position and never move against it. The desk and the
+backtest import these two functions: there is no second implementation.
+
 Defaults (the premium share, the credit multiple, the profit share of a credit) are marked uncalibrated in the plan: a backtest
 replaces them.
 """
@@ -195,3 +198,65 @@ def stop_and_target(variant: Variant, **kwargs: Any) -> ExitPlan:
     if variant == "SWO":
         return swo_exit(**kwargs)
     raise ExitError("bad_variant", "variant is DT, SWC or SWO")
+
+
+# ---- trailing stops: one implementation for the desk and the backtest -------------------------------------------------------
+
+@dataclass(frozen=True)
+class TrailingStop:
+    """The state of a trailing stop after one price. Feed `stop` and `extreme` back in as `previous_stop` and `extreme`."""
+    side: Side
+    stop: Decimal
+    extreme: Decimal                     # the best price seen since the entry: the highest for a long, the lowest for a short
+    stopped: bool                        # the price touched or crossed the stop
+    basis: str                           # "atr" or "pct"
+    distance: Decimal                    # from the extreme to the stop before rounding
+
+
+def _trail(basis: str, side: Side, price: Any, distance: Decimal, extreme: Any, previous_stop: Any, tick: Any) -> TrailingStop:
+    if side not in ("long", "short"):
+        raise ExitError("bad_side", "side is long or short")
+    tk, px = _tick(tick), _d(price, "price")
+    if px <= 0:
+        raise ExitError("bad_price", "the price must be above zero")
+    best = px if extreme is None else _d(extreme, "extreme")
+    if best <= 0:
+        raise ExitError("bad_price", "the extreme must be above zero")
+    previous = None if previous_stop is None else _d(previous_stop, "previous_stop")
+    if previous is not None and previous <= 0:
+        raise ExitError("bad_stop", "the previous stop must be above zero")
+    best = max(best, px) if side == "long" else min(best, px)
+    # A long stop sits below the best price and is rounded down; a short one sits above and is rounded up: the risk is never understated.
+    raw = best - distance if side == "long" else best + distance
+    level = _round(raw, tk, "down" if side == "long" else "up")
+    if previous is not None:
+        level = max(level, previous) if side == "long" else min(level, previous)
+    if level <= 0:
+        raise ExitError("stop_not_positive", f"the stop would be at {level}: there is no price to leave at above zero")
+    stopped = px <= level if side == "long" else px >= level
+    return TrailingStop(side, level, best, stopped, basis, distance)
+
+
+def atr_trailing(side: Side, price: Any, *, atr: Any, atr_multiple: Any = Decimal(3), extreme: Any = None, previous_stop: Any = None,
+                 tick: Any = None) -> TrailingStop:
+    """A stop that follows the best price by `atr_multiple` times the ATR (DT: the ATR of short bars; SWC: the daily ATR).
+
+    The stop only moves in the favourable direction: for a long it never goes down, for a short it never goes up, even if the ATR
+    grows. Pass the first `extreme` as the entry price; afterwards pass back the `extreme` and the `stop` of the last result."""
+    a, m = _d(atr, "atr"), _d(atr_multiple, "atr_multiple")
+    if a <= 0 or m <= 0:
+        raise ExitError("bad_stop", "the ATR and its multiple must be above zero")
+    return _trail("atr", side, price, a * m, extreme, previous_stop, tick)
+
+
+def trailing_pct(side: Side, price: Any, *, pct: Any, extreme: Any = None, previous_stop: Any = None, tick: Any = None) -> TrailingStop:
+    """A stop `pct` percent away from the best price of the position (5 means 5 percent). It never moves against the position.
+
+    The extreme is the highest price for a long and the lowest for a short. The distance is taken from that extreme."""
+    p = _d(pct, "pct")
+    if not ZERO < p < 100:
+        raise ExitError("bad_stop", "pct is above zero and below 100")
+    px = _d(price, "price")
+    best = px if extreme is None else _d(extreme, "extreme")
+    best = max(best, px) if side == "long" else min(best, px)
+    return _trail("pct", side, price, best * p / 100, extreme, previous_stop, tick)

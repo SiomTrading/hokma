@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-040 in .notices/THIRD_PARTY.txt
+id: "crypto_equal_weight_rebalance_spread"
+name: "Daily rebalanced crypto basket against a drifting basket"
+ref: "LIB-040"
+asset_class: "crypto"
+lines: [LP]
+horizon: "days"
+rebalance: "daily for the long leg"
+universe: "Twenty six large crypto assets quoted against the dollar at one exchange."
+signal: "Two baskets: one rebalanced each day to equal weights, one bought once with equal weights and left to drift."
+entry: "Go long the daily rebalanced basket with the full account and short the drifting basket with 70 percent of the account."
+exit: "The short leg is never rebalanced; the long leg trades each day at 09:30 to restore equal weights."
+sizing: "Equal weight per coin on each leg."
+risk_note: "The short leg needs margin borrowing of many coins that is often unavailable; daily trading across 26 coins is costly. Treat as a study of the rebalancing effect."

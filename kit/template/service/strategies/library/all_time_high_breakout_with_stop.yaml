@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-056 in .notices/THIRD_PARTY.txt
+id: "all_time_high_breakout_with_stop"
+name: "Buy stocks at an all time closing high with an ATR trailing stop"
+ref: "LIB-056"
+asset_class: "equities"
+lines: [LP, SWC]
+horizon: "weeks"
+rebalance: "daily"
+universe: "The 100 most traded US stocks above 5 dollars."
+signal: "Today close is at or above the highest close in the stock history (about ten years in the version read)."
+entry: "Buy when the condition is met."
+exit: "Exit with a trailing stop at one average true range (10 sessions) below the price, moved up only."
+sizing: "Equal weight among all held names."
+risk_note: "The paper charges 0.5 percent per round trip; keep a cost model of at least that size."

@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-039 in .notices/THIRD_PARTY.txt
+id: "research_spend_to_value_quintiles"
+name: "Firms that spend most on research relative to their value"
+ref: "LIB-039"
+asset_class: "equities"
+lines: [LP]
+horizon: "years"
+rebalance: "yearly, after April"
+universe: "The 3000 largest US stocks above 5 dollars that report research spending."
+signal: "Weighted sum of the last five yearly research expenses (weights 1.0, 0.8, 0.6, 0.4, 0.2 from newest to oldest) divided by market capitalisation."
+entry: "Go long the top quintile and short the bottom quintile."
+exit: "Rebuild once a year."
+sizing: "Equal weight inside each leg."
+risk_note: "Needs five years of history per stock; a stock with a gap in its reports is left out, never filled."

@@ -206,3 +206,45 @@ def gjr_garch(returns: Any, horizon: int = 10) -> QuantResult:
                    inputs={"returns": _RET, "horizon": {"type": "int", "required": False, "default": 10}}, piece_ids=("FT-062",))
 def egarch(returns: Any, horizon: int = 10) -> QuantResult:
     return _garch_family("stats.egarch", "egarch", ("FT-062",), returns, horizon)
+
+
+# ---------------------------------------------------------------------------------------------- P-02: robust volatility
+@registry.register("stats.robust_vol", module="stats",
+                   summary="Robust volatility per period of a return series: exponentially weighted standard deviation (span 35 by default) that needs at least min_obs (10) returns, floored at the 5th percentile of its own last 500 values so that a calm stretch cannot send the estimate to zero. The floor needs floor_min_periods (100) values of volatility; before that it is not applied and the answer says so. Returns the last last_n values of the floored and the raw estimate. Not annualised.",
+                   inputs={"returns": _RET, "span": {"type": "int", "required": False, "default": 35}, "min_obs": {"type": "int", "required": False, "default": 10},
+                           "floor_window": {"type": "int", "required": False, "default": 500}, "floor_quantile": {"type": "float", "required": False, "default": 0.05},
+                           "floor_min_periods": {"type": "int", "required": False, "default": 100}, "last_n": {"type": "int", "required": False, "default": 60}},
+                   piece_ids=("P-02",))
+def robust_vol(returns: Any, span: int = 35, min_obs: int = 10, floor_window: int = 500, floor_quantile: float = 0.05,
+               floor_min_periods: int = 100, last_n: int = 60) -> QuantResult:
+    name, pieces = "stats.robust_vol", ("P-02",)
+    sizes = {"span": span, "min_obs": min_obs, "floor_window": floor_window, "floor_min_periods": floor_min_periods, "last_n": last_n}
+    for label, v in sizes.items():
+        limits.as_int(label, v)
+    limits.check_param("window", span)
+    limits.check_param("window", floor_window)
+    limits.check_param("min_periods", floor_min_periods)
+    limits.check_param("last_n", last_n)
+    if isinstance(floor_quantile, bool) or not isinstance(floor_quantile, (int, float)):
+        raise BadInput(f"floor_quantile must be a number, got {type(floor_quantile).__name__}")
+    quantile = float(floor_quantile)
+    params = {**{k: int(v) for k, v in sizes.items()}, "floor_quantile": quantile}
+
+    def compute() -> Any:
+        if span < 2 or min_obs < 2 or floor_min_periods < 1 or floor_window < floor_min_periods or last_n < 1 or not 0.0 < quantile < 1.0:
+            raise c.Domain("need span >= 2, min_obs >= 2, 1 <= floor_min_periods <= floor_window, last_n >= 1 and a floor_quantile in (0, 1)")
+        series, warns = c.clean_series(returns, name="returns", min_obs=min_obs)
+        raw = series.ewm(span=span, min_periods=min_obs).std().dropna()
+        floor = raw.rolling(floor_window, min_periods=floor_min_periods).quantile(quantile)
+        robust = raw.where(floor.isna(), np.maximum(raw, floor))
+        extra = ()
+        if pd.isna(floor.iloc[-1]):
+            extra = (f"floor not applied: fewer than {floor_min_periods} volatility values",)
+        tail = robust.iloc[-last_n:]
+        bound = None if pd.isna(floor.iloc[-1]) else float(floor.iloc[-1])
+        return ({"latest": float(robust.iloc[-1]), "raw_latest": float(raw.iloc[-1]), "floor": bound,
+                 "floor_binding": bool(bound is not None and raw.iloc[-1] < bound), "n_returns": len(series),
+                 "index": [str(i) for i in tail.index], "values": tail.to_numpy(), "raw_values": raw.iloc[-last_n:].to_numpy()}, warns + extra)
+
+    return c.run(name, unit="return", method="ewm_std_with_quantile_floor", params=params, piece_ids=pieces, compute=compute,
+                 inputs=(returns,) if isinstance(returns, pd.Series) else ())

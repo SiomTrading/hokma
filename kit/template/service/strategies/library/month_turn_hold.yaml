@@ -1,0 +1,15 @@
+# Strategy rule written from scratch. Reference: LIB-057 in .notices/THIRD_PARTY.txt
+id: "month_turn_hold"
+name: "Hold the index across the turn of the month"
+ref: "LIB-057"
+asset_class: "equities"
+lines: [SWC]
+horizon: "days"
+rebalance: "monthly"
+universe: "A broad US equity ETF."
+signal: "Calendar rule: the last trading day of a month and the third trading day of the next."
+entry: "Buy near the open on the last trading day of the month."
+exit: "Sell at the third trading day of the next month."
+sizing: "Full account for about four sessions."
+risk_note: "A calendar effect: run an event study first and compare with simply holding the index."
+requires_event_study: true

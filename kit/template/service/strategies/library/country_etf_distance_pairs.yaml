@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-036 in .notices/THIRD_PARTY.txt
+id: "country_etf_distance_pairs"
+name: "Convergence trades on the closest country ETF pairs"
+ref: "LIB-036"
+asset_class: "equities"
+lines: [SWC, LP]
+horizon: "days"
+rebalance: "daily, with 20 day trading periods"
+universe: "Twenty two country ETFs and a broad US ETF, all pairs."
+signal: "Normalise each price series to its start over a 120 day formation window. Pair distance is the sum of squared differences. Keep the five closest pairs. The spread is the difference of the normalised series."
+entry: "During the next 20 sessions open a pair when its spread is more than half a standard deviation (of the formation spread) from its mean: long the cheaper ETF, short the dearer."
+exit: "Close the pair when the spread returns inside the band, and close everything at the end of the 20 days."
+sizing: "One fifth of equity per pair, equal amounts on both legs."
+risk_note: "The half deviation trigger is loose and trades often: the cost model matters more here than the signal."

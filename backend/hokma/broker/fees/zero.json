@@ -1,0 +1,23 @@
+{
+ "broker": "zero",
+ "currency": "USD",
+ "reference": "No commission at all: the control table of tests and of runs that study price effects alone.",
+ "rules": {
+  "equity": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "option": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "future": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "cfd": {
+   "kind": "per_order",
+   "value": "0"
+  }
+ }
+}

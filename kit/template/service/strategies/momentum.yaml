@@ -1,0 +1,36 @@
+# Momentum. The swing line follows the sign of the return from 12 months ago to 1 month ago on futures and CFDs; the long term line holds an
+# ETF only while its return beats the risk-free return (dual momentum) and goes to the refuge otherwise. Both switch off when the
+# volatility is above the 90th percentile of its own history. Turnover cost is charged by the backtest, never assumed here.
+- id: momentum_swc
+  kind: alpha
+  class: hokma.factory.alphas.momentum.Momentum
+  line: SWC
+  description: Time series momentum on futures and CFDs. Sign of the 12 month return that skips the last month, weighted to 10 percent volatility.
+  params:
+    periods: 252
+    skip: 21
+    vol_periods: 60
+    target_vol: 0.10
+    periods_per_year: 252
+    vol_off_percentile: 90.0
+    vol_history: 756
+    absolute_filter: false
+    factor_gate: false
+    long_only: false
+
+- id: momentum_lp_dual
+  kind: alpha
+  class: hokma.factory.alphas.momentum.Momentum
+  line: LP
+  description: Dual momentum on one ETF. Long only, and the view is the refuge when the return does not beat the risk-free return.
+  params:
+    periods: 252
+    skip: 21
+    vol_periods: 60
+    target_vol: 0.10
+    periods_per_year: 252
+    vol_off_percentile: 90.0
+    vol_history: 756
+    absolute_filter: true
+    factor_gate: false
+    long_only: true

@@ -39,6 +39,7 @@ from hokma.setup import router as setup_router
 from hokma.status.api import oauth_router, router as status_router
 from hokma.terminal.api import router as terminal_router
 from hokma.update.api import router as update_router
+from hokma.verdict.api import router as verdict_router
 from hokma.update.state import UpdateState
 from hokma.voice.api import router as voice_router
 
@@ -147,6 +148,7 @@ def create_app(port: int | None = None, *, lifecycle: Lifecycle | None = None,
     app.include_router(schwab_router)
     app.include_router(agents_router)
     app.include_router(permissions_router)
+    app.include_router(verdict_router)
     features_0031.attach(app, agent_working)
 
     dist = dashboard_dist()

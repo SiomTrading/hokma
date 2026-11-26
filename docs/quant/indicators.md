@@ -28,6 +28,9 @@ data and the licenses lives only in `.notices/THIRD_PARTY.txt`.
 | `indicators.balance_of_power` | FT-078 | library | causal | n/a |
 | `indicators.bollinger` | FT-080 | library, own composition | causal | 9.5000 (middle band, window 20) |
 | `indicators.butterworth` | ECT-016 | own over library filter design | causal | 2.1763 (cutoff period 10, order 2) |
+| `indicators.candle_doji` | V-42 | own | causal | 1 bar (a pattern is known when its candle closes; act on the next open) |
+| `indicators.candle_engulfing` | V-42 | own | causal | 1 bar (a pattern is known when its candle closes; act on the next open) |
+| `indicators.candle_hammer` | V-42 | own | causal | 1 bar (a pattern is known when its candle closes; act on the next open) |
 | `indicators.catalog_value` | TA-74 | own (delegates to the indicators above) | causal | n/a |
 | `indicators.cci` | FT-078 | library | causal | n/a |
 | `indicators.chaikin_money_flow` | FT-077 | library | causal | n/a |
@@ -48,6 +51,7 @@ data and the licenses lives only in `.notices/THIRD_PARTY.txt`.
 | `indicators.kama` | FT-079 | library | causal | 1.2500 (window 10, fast 2, slow 30) |
 | `indicators.keltner` | FT-080 | library | causal | 9.5000 (middle line, window 20) |
 | `indicators.macd` | FT-078 | library, own histogram | causal | n/a |
+| `indicators.market_profile` | L-57 | own | causal | 0 bars (a summary of the closed bars up to the last one, no smoothing) |
 | `indicators.mcclellan` | FT-077 | own, EMA from library | causal | n/a |
 | `indicators.measure_lag` | ECT-016 | own | causal | n/a |
 | `indicators.mfi` | FT-078 | library | causal | n/a |
@@ -78,16 +82,20 @@ data and the licenses lives only in `.notices/THIRD_PARTY.txt`.
 | `indicators.stochastic_rsi` | FT-078 | library | causal | n/a |
 | `indicators.supertrend` | FT-080 | library | causal | n/a |
 | `indicators.support_resistance` | FT-079 | library | causal | n/a |
+| `indicators.td_sequential` | L-57 | own | causal | 0 bars (the count of a bar uses that bar and earlier bars) |
+| `indicators.time_profile` | L-57 | own | causal | 0 bars (a summary of the bars up to the last one, no smoothing) |
 | `indicators.trin` | FT-077 | library | causal | n/a |
 | `indicators.true_range` | FT-080 | library | causal | n/a |
 | `indicators.true_strength_index` | FT-078 | library | causal | n/a |
 | `indicators.ultimate_oscillator` | FT-078 | library | causal | n/a |
 | `indicators.volatility_cone` | FT-080 | own | causal | n/a |
+| `indicators.volume_profile` | L-57 | own | causal | 0 bars (a summary of the closed bars up to the last one, no smoothing) |
 | `indicators.vortex` | FT-078 | library | causal | n/a |
 | `indicators.vwma` | FT-079 | own | causal | 9.5000 (window 20, constant volume) |
 | `indicators.wavelet_denoise` | ECT-016 | own | causal | 2.5690 (window 64, level 3) |
 | `indicators.williams_r` | FT-078 | library | causal | n/a |
 | `indicators.wma` | FT-079 | library | causal | 6.3333 (window 20) |
+| `indicators.zigzag` | L-57 | own | causal | 1 bar at the least (a turn is confirmed after the pullback; each pivot reports its own confirmation lag) |
 
 ## Notes
 

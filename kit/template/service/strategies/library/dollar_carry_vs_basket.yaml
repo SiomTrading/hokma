@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-016 in .notices/THIRD_PARTY.txt
+id: "dollar_carry_vs_basket"
+name: "US dollar against a basket by rate gap"
+ref: "LIB-016"
+asset_class: "currencies"
+lines: [SWC]
+horizon: "months"
+rebalance: "monthly"
+universe: "Eight currency futures against the US dollar and the three month rate of each country, plus the US three month treasury rate."
+signal: "Average the short term rates of the basket currencies and compare the result with the US three month treasury rate."
+entry: "When the US rate is above the basket average, be long the dollar by shorting every basket currency. Otherwise be short the dollar by buying every basket currency."
+exit: "Flip at the monthly check when the comparison changes."
+sizing: "Equal weight across the eight currencies, all on the same side."
+risk_note: "Only one decision per month, so the result depends on few events; keep the sample long before trusting the t statistic."

@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-059 in .notices/THIRD_PARTY.txt
+id: "cheap_versus_dear_book_value"
+name: "Low versus high price to book stocks"
+ref: "LIB-059"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly in the paper idea, yearly in the version read"
+universe: "The 3000 largest US stocks with a positive price to book ratio."
+signal: "Price to book ratio. Sort into quintiles."
+entry: "Go long the lowest price to book quintile and short the highest."
+exit: "Rebuild at each rebalance date."
+sizing: "Equal weight inside each leg, full account on each side."
+risk_note: "Book value is stale and differs by sector; test sector neutral ranks."

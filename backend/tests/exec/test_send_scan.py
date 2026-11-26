@@ -18,6 +18,9 @@ SEND_FILES = {
     "backend/hokma/broker/ibkr/__init__.py",
     "backend/hokma/broker/sim.py",
 }
+# The backtest engine wrapper calls the order methods of the simulated engine inside a simulation: no broker, no connector and no
+# money are reachable from it. test_no_live_path (backend/tests/backtest) proves that file imports nothing from the connectors.
+SIMULATED_ENGINE_FILES = {"backend/hokma/backtest/_lib.py"}
 LIBRARY_FILES = {"alpaca": {"backend/hokma/broker/alpaca.py"}, "ccxt": {"backend/hokma/broker/crypto.py"}}
 
 
@@ -64,7 +67,7 @@ def test_no_module_outside_exec_and_the_connectors_sends_an_order():
     offenders = []
     for path in _python():
         rel = path.relative_to(ROOT).as_posix()
-        if rel in SEND_FILES:
+        if rel in SEND_FILES or rel in SIMULATED_ENGINE_FILES:
             continue
         offenders += [f"{rel}: {hit}" for hit in order_calls(path)]
     assert not offenders, "\n".join(offenders)

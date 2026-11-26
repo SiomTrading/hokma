@@ -49,6 +49,15 @@
         ]
       },
       {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit|mcp__hokma__strategy_brief_write|mcp__hokma__strategy_code_save|mcp__hokma__strategy_code_verdict",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{CREATOR_GATE_COMMAND}}"
+          }
+        ]
+      },
+      {
         "matcher": ".*",
         "hooks": [
           {

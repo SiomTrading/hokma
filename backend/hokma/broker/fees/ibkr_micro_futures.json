@@ -1,0 +1,25 @@
+{
+ "broker": "ibkr_micro_futures",
+ "currency": "USD",
+ "reference": "Interactive Brokers, US micro futures, per contract per side, all in: broker fee 0.25 + exchange fee 0.30 + regulatory fee 0.02 = 0.57 for MES, MNQ, MYM and M2K. Read from the fee schedule of the broker on 2026-11-22; not yet checked against a real statement, so check it against the real account before trusting it.",
+ "source": "Interactive Brokers public commission page for US futures (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "components": {
+  "broker": "0.25",
+  "exchange": "0.30",
+  "regulatory": "0.02"
+ },
+ "omitted": [
+  "volume tiers",
+  "delivery and exercise fees",
+  "market data fees",
+  "micro products with other exchange fees"
+ ],
+ "rules": {
+  "future": {
+   "kind": "per_contract",
+   "value": "0.57"
+  }
+ }
+}

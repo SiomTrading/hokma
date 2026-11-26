@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-024 in .notices/THIRD_PARTY.txt
+id: "btc_late_evening_two_hours"
+name: "Bitcoin held for two hours after 22:00 UTC"
+ref: "LIB-024"
+asset_class: "crypto"
+lines: [DT]
+horizon: "intraday"
+rebalance: "daily"
+universe: "Bitcoin against the dollar at one exchange, minute bars in UTC."
+signal: "Clock rule only: the hour of the day in UTC."
+entry: "Buy at 22:00 UTC."
+exit: "Sell at 00:00 UTC."
+sizing: "Full account in the code that was read; a real rule would size by risk."
+risk_note: "A study idea, not a desk strategy; it needs a seasonality test across years and exchanges before any use."

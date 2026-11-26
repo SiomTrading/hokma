@@ -8,7 +8,9 @@
    lives in the message catalogs (SPANISH_ALLOWED). Detected by accented letters, inverted punctuation and a
    list of common Spanish words.
 
-3. No internal developer notes in the repository: a `dev-notes/` folder fails the check, because the release
+3. The name of the backtest engine (SPEC-020, N-43) appears only in pyproject.toml, uv.lock, backend/hokma/backtest/_lib.py and
+   .notices/. It is stored as sha256 hashes of its normalised words, like the list above, so this file does not contain it.
+4. No internal developer notes in the repository: a `dev-notes/` folder fails the check, because the release
    package is a `git archive` of the tree and would publish it.
 
 Exit code 1 and one line per violation (path:line: rule: text) when something is found.
@@ -44,6 +46,13 @@ FORBIDDEN_HASHES = {
 }
 MAX_PHRASE_WORDS = 4
 
+# The engine of the backtest service: the name in its two spellings (separate words and one word), compared word by word.
+ENGINE_HASHES = {
+    "c4a417644614ac61ed4e53c8bd261014c21528aad4e7338fcf52dc4d50b8f010",
+    "d016f1f74246d3cd53a1401a3d75ff1defa824ecbf11b65c84127e80cc0e4f62",
+}
+ENGINE_ALLOWED = ("pyproject.toml", "uv.lock", "backend/hokma/backtest/_lib.py", ".notices/")
+
 # Message catalogs (what the student reads) and this checker with its test may contain Spanish.
 SPANISH_ALLOWED = (
     "backend/hokma/catalog/",
@@ -57,10 +66,14 @@ SPANISH_ALLOWED = (
     "dashboard/src/screens/library/libraryFolders.test.tsx",   # asserts real texts of the Spanish catalog
     "backend/tests/test_hokma_tools.py",       # two Spanish questions against a Spanish document: the same kind of data
     "backend/tests/test_hybrid_search.py",     # the questions a Spanish student asks: the data of a retrieval-quality test
+    "backend/hokma/sources/injection.py",      # injection patterns in Spanish: the data of the detector
+    "backend/tests/sources/test_injection.py",  # Spanish sentences a source could hold, against those patterns
 )
 # Not authored text: generated or third-party content.
 # The only place where names of third-party authors may appear: the license notices required by those licenses.
-ORIGIN_EXEMPT = ("legal/", ".notices/THIRD_PARTY.txt")
+ORIGIN_EXEMPT = ("legal/", ".notices/THIRD_PARTY.txt",
+                 "backend/hokma/factory/data/blocked_dependencies.txt",   # package names, as data
+                 "docs/research/reading-list.md")                         # a file of citations
 SKIPPED = ("dashboard/dist/", "uv.lock", "dashboard/package-lock.json")
 BINARY_SUFFIXES = {".svg", ".png", ".jpg", ".ico", ".woff", ".woff2", ".zip", ".gz"}
 
@@ -99,6 +112,10 @@ def origin_hits(text: str) -> list[tuple[int, str]]:
     return hits
 
 
+def engine_hits(text: str) -> list[tuple[int, str]]:
+    return [(line, "engine name") for word, line in words_with_lines(text) if hashlib.sha256(word.encode()).hexdigest() in ENGINE_HASHES]
+
+
 def spanish_hits(text: str) -> list[tuple[int, str]]:
     hits = []
     for number, line in enumerate(text.split("\n"), 1):
@@ -128,6 +145,9 @@ def check(root: Path, files: list[str] | None = None) -> list[str]:
             continue
         allowed_spanish = rel.startswith(SPANISH_ALLOWED)
         exempt = rel.startswith(ORIGIN_EXEMPT)
+        engine_ok = rel.startswith(ENGINE_ALLOWED)
+        for line, what in ([] if engine_ok else engine_hits(rel.replace("/", " ").replace(".", " "))):
+            problems.append(f"{rel}:0: the engine name is only allowed in pyproject.toml, uv.lock, backtest/_lib.py and .notices/ (path)")
         dotted = re.sub(r"(?<![\w-])\.claude(?![\w-])", "dotclaude", rel)         # the folder .claude of the kit is not an origin
         for line, what in ([] if exempt else origin_hits(dotted.replace("/", " ").replace(".", " "))):
             problems.append(f"{rel}:0: origin reference in the path: {what}")
@@ -140,6 +160,8 @@ def check(root: Path, files: list[str] | None = None) -> list[str]:
             continue
         for line, what in ([] if exempt else origin_hits(text)):
             problems.append(f"{rel}:{line}: origin reference: {what}")
+        for line, what in ([] if engine_ok else engine_hits(text)):
+            problems.append(f"{rel}:{line}: the engine name is only allowed in pyproject.toml, uv.lock, backtest/_lib.py and .notices/")
         if not allowed_spanish:
             for line, what in spanish_hits(text):
                 problems.append(f"{rel}:{line}: handwritten Spanish: {what}")

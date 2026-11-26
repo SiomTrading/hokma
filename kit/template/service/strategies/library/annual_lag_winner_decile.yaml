@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-001 in .notices/THIRD_PARTY.txt
+id: "annual_lag_winner_decile"
+name: "Winners and losers of the same month one year ago"
+ref: "LIB-001"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "Large and liquid US stocks (about the 500 most traded by dollar volume)."
+signal: "For each stock take the return of the single month that ended twelve months ago. Rank all stocks by that return into ten groups."
+entry: "Go long the top group and short the bottom group at each month end."
+exit: "Replace both legs at every monthly rebalance; a stock that leaves its group is closed."
+sizing: "Each leg is weighted by market capitalisation inside the leg; the legs have equal gross exposure."
+risk_note: "The short leg needs borrow and a margin account; the long only version for the LP line keeps just the top group."

@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-054 in .notices/THIRD_PARTY.txt
+id: "sign_of_year_return_vol_scaled"
+name: "Long assets that rose over twelve months, short those that fell"
+ref: "LIB-054"
+asset_class: "multi_asset"
+lines: [SWC, LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "About sixty futures: commodities, currency pairs, equity indices and government bonds."
+signal: "Sign of the last twelve month return of each future; volatility from the last 60 sessions."
+entry: "Go long when the sign is positive and short when it is negative."
+exit: "Rebuild monthly."
+sizing: "Weights inside each leg are inverse to volatility; each leg is then scaled to 10 percent annual volatility with leverage capped at 4."
+risk_note: "Use the shared tsmom alpha of the factory for the signal; the volatility estimate is historical, not a fitted model."

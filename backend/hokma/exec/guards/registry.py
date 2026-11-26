@@ -13,6 +13,7 @@ from hokma.exec.guards.account import AccountGuard
 from hokma.exec.guards.broker_rules import BrokerRulesGuard
 from hokma.exec.guards.cooldown import CooldownGuard
 from hokma.exec.guards.event_window import EventWindowGuard
+from hokma.exec.guards.exposure import ExposureGuard
 from hokma.exec.guards.limits_guard import LimitsGuard
 from hokma.exec.guards.live_loss import LiveLossGuard
 from hokma.exec.guards.max_position import MaxPositionSizeGuard
@@ -43,6 +44,7 @@ ORDER: tuple[tuple[str, Callable[[], Guard]], ...] = (
     ("event_window", EventWindowGuard),
     ("cooldown", CooldownGuard),
     ("max_position", MaxPositionSizeGuard),
+    ("exposure", ExposureGuard),
     ("monitor", MonitorGuard),
     ("live_loss", LiveLossGuard),
     ("account", AccountGuard),

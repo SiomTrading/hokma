@@ -1,0 +1,64 @@
+id: commodities
+title: Commodity sleeves, six ways
+ref: idea-003
+lines: [SWC]
+asset_classes: [cfd, future]
+requires_premium_switch: false
+requires_event_study: false
+summary: >-
+  Commodity returns have several small and different sources. Each sleeve is its own recipe so the backtest can price and test it
+  alone: past return, the shape of the term structure, the skew of daily returns, how lopsided the extreme days are, the gap
+  between two crude oil grades, and a one week reversal. Each sleeve ranks the commodities in fifths and holds the top fifth
+  long and the bottom fifth short, except the spread, which trades one pair.
+needs: [quant.stats.carry]
+data: [close, curve]
+variants:
+  - line: SWC
+    sleeve: momentum
+    vehicle: commodity CFDs
+    alpha: historical_returns
+    params: {periods: 252, cap: 0.30}
+    rebalance: monthly
+    rules:
+      - Rank by the twelve month return; long the top fifth, short the bottom fifth, equal weights.
+  - line: SWC
+    sleeve: term structure
+    vehicle: commodity CFDs priced from the futures curve
+    planned_alpha: carry_rank
+    rebalance: monthly
+    rules:
+      - Rank by roll yield, the carry of the curve computed by quant.stats.carry; long the highest, short the lowest.
+      - A commodity without a usable second contract is left out of the ranking, not filled.
+  - line: SWC
+    sleeve: skew
+    vehicle: commodity CFDs
+    planned_alpha: skew_rank
+    rebalance: monthly
+    rules:
+      - Take the skewness of the last twelve months of daily returns; long the most negative fifth, short the most positive fifth.
+  - line: SWC
+    sleeve: asymmetry
+    vehicle: commodity CFDs
+    planned_alpha: tail_count_rank
+    rebalance: monthly
+    rules:
+      - Over the last 260 days count the days above the mean by two deviations minus the days below it by two deviations.
+      - Long the lowest counts, short the highest.
+  - line: SWC
+    sleeve: crude oil grade spread
+    vehicle: two crude oil CFDs
+    alpha: pairs_correlation
+    params: {window: 20, min_corr: 0.7, entry_z: 1.0}
+    rebalance: daily
+    rules:
+      - Trade the spread against its 20 day average; short the spread when it is above and long when it is below.
+      - Close on the close of the day the spread crosses its average.
+  - line: SWC
+    sleeve: one week reversal
+    vehicle: commodity CFDs
+    alpha: historical_returns
+    params: {periods: 5, cap: 0.05}
+    rebalance: weekly
+    rules:
+      - Lean against last week's move; the view is the opposite sign of the five day return.
+      - Only for contracts whose volume rose and open interest fell in the last week.

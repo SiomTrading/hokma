@@ -121,8 +121,14 @@ def task_list(u, c: Caller, a: dict) -> str:
     return _dump([_row(r, *TASK_KEYS) for r in rows])
 
 
+CREATOR_SERVICES = ("strategy-researcher", "strategy-coder", "strategy-reviewer")      # the services of the strategy creator serve every desk (SPEC-031 A2)
+
+
 def _desk_member_check(u, project_id: int | None, agent: str | None, what: str) -> None:
-    """On a desk project, only an agent that is active on that desk's team may hold or take its tasks."""
+    """On a desk project, only an agent that is active on that desk's team may hold or take its tasks. The services of the strategy creator are the one exception:
+    they work for any desk without being on its team."""
+    if agent in CREATOR_SERVICES:
+        return
     desk = u.desks.by_project(project_id) if project_id is not None else None
     if desk is None:
         return
@@ -1852,10 +1858,15 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
 
 # Quant and data tools (SPEC-017, B9): few tools, access by name. They need no database unit.
 from hokma.kit import backoffice_tools as _backoffice_tools  # noqa: E402
+from hokma.kit import backtest_tools as _backtest_tools  # noqa: E402
 from hokma.kit import data_tools as _data_tools  # noqa: E402
 from hokma.kit import desk_tools as _desk_tools  # noqa: E402
 from hokma.kit import exec_tools as _exec_tools  # noqa: E402
+from hokma.kit import factory_tools as _factory_tools  # noqa: E402
 from hokma.kit import quant_tools as _quant_tools  # noqa: E402
+from hokma.kit import verdict_tools as _verdict_tools  # noqa: E402
+from hokma.kit import rule_tools as _rule_tools  # noqa: E402
+from hokma.kit import source_tools as _source_tools  # noqa: E402
 
 TOOLS.update(_quant_tools.TOOLS)
 TOOLS.update(_data_tools.TOOLS)
@@ -1864,6 +1875,20 @@ NO_UNIT |= set(_quant_tools.TOOLS) | set(_data_tools.TOOLS)
 TOOLS.update(_exec_tools.TOOLS)
 TOOLS.update(_backoffice_tools.TOOLS)
 NO_UNIT |= set(_exec_tools.TOOLS) | set(_backoffice_tools.TOOLS)
+# Backtest, factory and research tools (SPEC-020, B12): they run the service of history and never reach a broker; they need no database unit of their own.
+TOOLS.update(_backtest_tools.TOOLS)
+TOOLS.update(_factory_tools.TOOLS)
+NO_UNIT |= set(_backtest_tools.TOOLS) | set(_factory_tools.TOOLS)
+# Verdict of the optimizer (SPEC-032, B14): read the verdict, the limits of the audit and the shared library, ask for an indicator. No tool takes a check out, edits a limit or answers a question.
+TOOLS.update(_verdict_tools.TOOLS)
+NO_UNIT |= set(_verdict_tools.TOOLS)
+# Strategy creator (SPEC-030, A1): sources and the bank of strategies. They read and save sources and sheets and reach nothing that moves money.
+TOOLS.update(_source_tools.TOOLS)
+NO_UNIT |= set(_source_tools.TOOLS)
+# Strategy creator (SPEC-031, A2): the strategy as code, from its requirement to the bank. They keep and check code and reach nothing that moves money.
+TOOLS.update(_rule_tools.TOOLS)
+NO_UNIT |= set(_rule_tools.TOOLS)
+
 # SWO desk tools (SPEC-019, B13): create the desk, run its cycle, read its state and its signals, propose lessons.
 TOOLS.update(_desk_tools.TOOLS)
 NO_UNIT |= set(_desk_tools.TOOLS)

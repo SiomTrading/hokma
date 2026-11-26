@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-046 in .notices/THIRD_PARTY.txt
+id: "short_selling_ratio_deciles"
+name: "Stocks sorted by the share of short selling volume"
+ref: "LIB-046"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "The 100 largest US stocks with exchange reported daily short volume."
+signal: "Short volume divided by total volume, a proxy for short interest."
+entry: "Go long the decile with the lowest ratio and short the decile with the highest."
+exit: "Rebuild monthly."
+sizing: "Equal weight inside each leg."
+risk_note: "Short volume is not short interest: it is flow, not stock. Test the proxy against real short interest when available."

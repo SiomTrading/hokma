@@ -103,3 +103,13 @@ textarea.chat-input:focus { outline: none; }
 .chat-notice-actions { display: flex; flex-direction: column; gap: 6px; }
 .chat-notice-plan { white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-notice-error { color: var(--warn); }
+
+/* The notice of a strategy that the code reviewer approved (SPEC-031 A2, 7). */
+.strategy-notices { display: flex; flex-direction: column; gap: 10px; align-self: stretch; }
+.strategy-notice { border: 1px solid var(--line, rgba(255, 255, 255, 0.12)); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.strategy-notice h4 { margin: 0; font-size: 14px; }
+.strategy-notice p { margin: 0; overflow-wrap: anywhere; }
+.strategy-notice-origin { font-weight: 400; opacity: 0.75; }
+.strategy-notice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.strategy-notice-note { min-width: 220px; flex: 1; }
+.strategy-notice-code { margin: 0; max-height: 320px; overflow: auto; padding: 10px; border-radius: 8px; font-size: 12px; white-space: pre; background: rgba(0, 0, 0, 0.25); }

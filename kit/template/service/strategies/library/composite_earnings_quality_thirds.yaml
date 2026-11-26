@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-019 in .notices/THIRD_PARTY.txt
+id: "composite_earnings_quality_thirds"
+name: "Composite earnings quality score"
+ref: "LIB-019"
+asset_class: "equities"
+lines: [LP]
+horizon: "years"
+rebalance: "yearly in July"
+universe: "The 3000 largest non financial US stocks with complete statement data."
+signal: "Rank every stock on four quality measures: low accruals, high cash flow to earnings, low debt to assets, high return on equity. Add the four ranks into one score."
+entry: "Go long the top third by score and short the bottom third."
+exit: "Rebuild once a year."
+sizing: "Equal weight inside each leg in this version; the paper idea weights by market capitalisation."
+risk_note: "Accounting data errors in a single year can flip the book; a sanity check on the data before trading is part of the rule."

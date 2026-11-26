@@ -1,0 +1,15 @@
+# Strategy rule written from scratch. Reference: LIB-034 in .notices/THIRD_PARTY.txt
+id: "expiry_week_equity_exposure"
+name: "Long equities only in the monthly option expiry week"
+ref: "LIB-034"
+asset_class: "equities"
+lines: [SWO, SWC]
+horizon: "days"
+rebalance: "weekly check"
+universe: "A large cap US equity ETF with listed options."
+signal: "Calendar rule: the expiry date of the monthly options on the ETF."
+entry: "On the Monday, buy if the next expiry is within five days."
+exit: "Sell on the expiry day; hold cash the rest of the month."
+sizing: "Full account while invested."
+risk_note: "A calendar effect: it needs a significance test across years and a cost check, because it trades four times a year at most."
+requires_event_study: true

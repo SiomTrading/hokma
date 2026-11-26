@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-053 in .notices/THIRD_PARTY.txt
+id: "commodity_roll_yield_quintiles"
+name: "Commodities by roll yield"
+ref: "LIB-053"
+asset_class: "commodities"
+lines: [SWC]
+horizon: "months"
+rebalance: "monthly"
+universe: "About twenty commodity futures with at least two listed contracts."
+signal: "Roll return = price of the nearest contract divided by price of the next contract, minus one."
+entry: "Go long the quintile with the highest roll return and short the quintile with the lowest."
+exit: "Rebuild monthly; the contracts roll at expiry."
+sizing: "Equal weight inside each leg."
+risk_note: "The carry sits in the contract chain: a continuous series without the chain cannot be used."

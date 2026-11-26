@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-014 in .notices/THIRD_PARTY.txt
+id: "fx_purchasing_power_value"
+name: "Currencies cheap or dear against purchasing power parity"
+ref: "LIB-014"
+asset_class: "currencies"
+lines: [SWC]
+horizon: "years"
+rebalance: "yearly in January"
+universe: "Seven currency futures against the US dollar with a yearly purchasing power parity conversion rate for each country."
+signal: "Sort currencies by the latest published parity conversion rate. The lowest figure marks the most undervalued currency, the highest the most overvalued."
+entry: "Go long the three most undervalued and short the three most overvalued."
+exit: "Rebuild once a year when the new parity figures are public; the paper idea allows quarterly or monthly updates with inflation adjustments."
+sizing: "Equal weight inside each leg; idle cash earns the overnight rate."
+risk_note: "Parity figures are slow and revised: pin each figure to its first publication date."

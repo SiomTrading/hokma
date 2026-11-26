@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-026 in .notices/THIRD_PARTY.txt
+id: "calm_stocks_long_only"
+name: "Long the calmest quartile of large stocks"
+ref: "LIB-026"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "The 3000 largest US stocks with a full year of prices."
+signal: "Standard deviation of weekly returns over the last year (the paper idea uses three years), where weeks are blocks of five sessions."
+entry: "Go long the quartile with the lowest weekly volatility."
+exit: "Rebuild at each month end."
+sizing: "Equal weight; no short leg."
+risk_note: "A defensive tilt: it lags in strong rallies and holds rate sensitive sectors, so report sector weights."

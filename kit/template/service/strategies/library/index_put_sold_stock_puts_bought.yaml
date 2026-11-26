@@ -1,0 +1,15 @@
+# Strategy rule written from scratch. Reference: LIB-015 in .notices/THIRD_PARTY.txt
+id: "index_put_sold_stock_puts_bought"
+name: "Sell index puts and buy puts on belief disagreement stocks"
+ref: "LIB-015"
+asset_class: "derivatives"
+lines: [SWO]
+horizon: "months"
+rebalance: "monthly, rolled two days before expiry"
+universe: "About 100 liquid US stocks above 5 dollars with listed options, plus the broad US index options."
+signal: "The full idea ranks stocks by disagreement among analyst earnings forecasts and picks the top quintile; the simplified version used here takes all the liquid stocks."
+entry: "Sell an at the money index put and buy at the money puts on the selected stocks, all with 20 to 60 days to expiry, choosing the farthest expiry in that window."
+exit: "Close everything two days before the index option expires and open the next set."
+sizing: "The index put is sized to the full account value in notional terms; the account value is split equally among the stock puts."
+risk_note: "Short index puts have large tail loss and need margin; the premium selling switch must be open and a margin check must pass before any order."
+requires_premium_switch: true

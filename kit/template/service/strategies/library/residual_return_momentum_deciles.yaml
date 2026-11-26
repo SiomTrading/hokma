@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-041 in .notices/THIRD_PARTY.txt
+id: "residual_return_momentum_deciles"
+name: "Momentum of returns left after market, size and value"
+ref: "LIB-041"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "The 500 largest US stocks, real estate trusts excluded."
+signal: "Regress each stock monthly return on the market, a size factor and a value factor over 36 months. The residual momentum is the sum of the last twelve monthly residuals, skipping the latest month, divided by their standard deviation. The version that was read used the regression intercept of each month as the residual proxy."
+entry: "Go long the top decile and short the bottom decile."
+exit: "Rebuild monthly."
+sizing: "Equal weight inside each leg."
+risk_note: "Building size and value factors from the same universe is circular for a small universe; use published factor series when available."

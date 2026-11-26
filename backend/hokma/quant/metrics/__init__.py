@@ -47,9 +47,9 @@ def compute(returns: pd.Series, names: list[str], *, benchmark: pd.Series | None
     return out
 
 
-def summary(returns: Any, *, benchmark: Any = None, rf: float = 0.0) -> dict[str, QuantResult]:
+def summary(returns: Any, *, benchmark: Any = None, rf: float = 0.0, periods_per_year: int = 252) -> dict[str, QuantResult]:
     """The full table, block by block (header, returns, ratios, probabilistic Sharpe, drawdown, volatility, ...)."""
-    return _summary_module.build_summary(returns, benchmark=benchmark, rf=rf)
+    return _summary_module.build_summary(returns, benchmark=benchmark, rf=rf, periods_per_year=periods_per_year)
 
 
 def report_html(returns: Any, *, benchmark: Any = None, title: str) -> str:

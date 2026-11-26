@@ -8,6 +8,8 @@ The rules of the management plan are defaults from the playbook and are marked u
 from __future__ import annotations
 
 import math
+from collections import Counter, defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from hokma.quant import registry
@@ -316,3 +318,89 @@ def management_plan(structure: str, net_premium_usd: float, max_profit_usd: floa
 
     warns = ["management rules are playbook defaults, not backtested: calibrate them in H4 before relying on them"] if any(v is None for v in given.values()) else ()
     return c.guarded(name, unit, method, pieces, params, compute, warns)
+
+
+@dataclass(frozen=True)
+class StructureMatch:
+    structure: str                    # a key of STRUCTURES
+    premium_class: str                # "debit" or "credit"
+    strikes: tuple[float, ...]        # distinct strikes, low to high
+    quantity: float                   # contracts of every option leg
+
+
+def _match_inputs(legs: Any, multiplier: Any) -> tuple[dict[tuple[str, bool, float], float], list[tuple[str, float]], set[str], float | None]:
+    """Option legs summed by (position, put, strike), stock legs as (position, shares), expirations and the multiplier of the legs."""
+    if not isinstance(legs, (list, tuple)):
+        raise BadInput(f"legs must be a list of dicts, got {type(legs).__name__}")
+    if len(legs) > pay.MAX_LEGS:
+        raise BadInput(f"legs has more than {pay.MAX_LEGS} entries")
+    top = c.num("multiplier", multiplier, allow_none=True)
+    options: dict[tuple[str, bool, float], float] = defaultdict(float)
+    stocks: list[tuple[str, float]] = []
+    expirations: set[str] = set()
+    for i, leg in enumerate(legs):
+        if not isinstance(leg, dict):
+            raise BadInput(f"legs[{i}] must be a dict")
+        instrument, position = leg.get("instrument", "option"), leg.get("position")
+        if instrument not in ("option", "stock") or position not in ("long", "short"):
+            raise ValueError(f"legs[{i}]: position must be 'long' or 'short' and instrument 'option' or 'stock'")
+        qty = c.num(f"legs[{i}].quantity", leg.get("quantity", 1))
+        if not math.isfinite(qty) or qty <= 0:
+            raise ValueError(f"legs[{i}]: quantity must be a positive number")
+        if instrument == "stock":
+            stocks.append((position, qty))
+            continue
+        strike = c.num(f"legs[{i}].strike", leg.get("strike"))
+        kind = leg.get("kind", leg.get("type"))
+        put = c.kind_flag(kind) if isinstance(kind, str) else None
+        if put is None or not math.isfinite(strike) or strike <= 0:
+            raise ValueError(f"legs[{i}]: kind must be 'call' or 'put' and strike a positive number")
+        options[(position, put, strike)] += qty
+        if leg.get("expiration"):
+            expirations.add(str(leg["expiration"])[:10])
+    return dict(options), stocks, expirations, top
+
+
+def match(legs: Any, multiplier: Any = None) -> StructureMatch | None:
+    """Recognise the named structure of STRUCTURES from its legs, or None. Legs are the same dicts as classify_structure (position, kind,
+    strike, quantity, optional expiration); premiums are not needed. The legs must share one expiration and one quantity of contracts.
+    A covered call needs one long stock leg of at least quantity times multiplier shares (the share count is checked only when the multiplier
+    is given). Short put and cash secured put have the same legs: the answer is short_put."""
+    options, stocks, expirations, mult = _match_inputs(legs, multiplier)
+    if not options or len(expirations) > 1 or len({round(q, 9) for q in options.values()}) != 1:
+        return None
+    quantity = next(iter(options.values()))
+    strikes = tuple(sorted({key[2] for key in options}))
+    actual = Counter({key: 1 for key in options})
+    for name, spec in STRUCTURES.items():
+        wants_stock = any(leg[0] == "stock" for leg in spec["legs"])
+        if wants_stock != bool(stocks) or spec["strikes"] != len(strikes):
+            continue
+        expected = Counter({(pos, kind == "put", strikes[idx]): 1 for pos, kind, idx in spec["legs"] if pos != "stock"})
+        if expected != actual:
+            continue
+        if wants_stock and (len(stocks) != 1 or stocks[0][0] != "long" or (mult is not None and stocks[0][1] < quantity * mult)):
+            continue
+        return StructureMatch(name, spec["class"], strikes, quantity)
+    return None
+
+
+@registry.register("options.match_structure", module="options",
+                   summary="Name the structure of a set of legs (iron_condor, credit_put_spread, short_strangle, covered_call and the others of the structure matrix) or say that none matches. legs: [{instrument option or stock, position long or short, kind call or put, strike, quantity in contracts (shares for stock), optional expiration}]; premiums are not needed. The legs must share one expiration and one quantity. A covered call needs long shares of at least quantity times multiplier when the multiplier is given.",
+                   inputs={"legs": {"type": "list", "required": True}, "multiplier": {"type": "float", "required": False, "default": None}},
+                   piece_ids=("L-56",))
+def match_structure(legs: list, multiplier: float | None = None) -> QuantResult:
+    name, unit, method, pieces = "options.match_structure", "structure", "legs_to_structure", ("L-56",)
+    params = {"legs": legs if isinstance(legs, list) else [], "multiplier": multiplier}
+    if isinstance(legs, (list, tuple)) and not legs:
+        return c.empty(name, unit, method, "legs must contain at least one leg", params=params, piece_ids=pieces)
+
+    def compute() -> dict:
+        found = match(legs, multiplier)
+        if found is None:
+            return {"matched": False, "structure": None, "premium_class": None, "strikes": [], "quantity": None,
+                    "reason": "the legs are not one of the named structures (one expiration, one quantity, the strikes in the order of the structure)"}
+        return {"matched": True, "structure": found.structure, "premium_class": found.premium_class, "strikes": list(found.strikes),
+                "quantity": found.quantity, "reason": None}
+
+    return c.guarded(name, unit, method, pieces, params, compute)

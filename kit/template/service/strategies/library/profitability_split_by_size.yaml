@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-044 in .notices/THIRD_PARTY.txt
+id: "profitability_split_by_size"
+name: "Profitable versus unprofitable firms inside each size half"
+ref: "LIB-044"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "The 500 most traded US stocks above 5 dollars with sales above 10 million dollars."
+signal: "Split the universe into two halves by market capitalisation. Inside each half sort by return on assets into deciles."
+entry: "Go long the top three deciles of each half and short the bottom three."
+exit: "Rebuild monthly."
+sizing: "Equal weight inside each leg."
+risk_note: "Return on assets must be dated by the filing date to avoid look ahead."

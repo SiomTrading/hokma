@@ -1,0 +1,43 @@
+# Deep value: long only screen of names that look cheap on their own statements (or, for futures, on their own price history).
+# Each entry is one line and one asset class. The criteria exist only for the classes listed here: an equity has statements, an ETF
+# has look through values, a future has only its price. The statement values come from the fundamentals module.
+- id: deep_value_lp_equity
+  kind: alpha
+  class: hokma.factory.alphas.value_screen.ValueScreen
+  line: LP
+  description: Long term value book of equities. A name passes on earnings yield, free cash flow yield and book to price. Criteria exist for equity only. ref idea-012
+  params:
+    asset_class: equity
+    min_earnings_yield: 0.08
+    min_fcf_yield: 0.06
+    min_book_to_price: 1.0
+
+- id: deep_value_lp_etf
+  kind: alpha
+  class: hokma.factory.alphas.value_screen.ValueScreen
+  line: LP
+  description: Long term value book of ETFs. Earnings yield and book to price are the look through values of the holdings. ref idea-012
+  params:
+    asset_class: etf
+    min_earnings_yield: 0.07
+    min_book_to_price: 1.0
+
+- id: deep_value_swo_equity
+  kind: alpha
+  class: hokma.factory.alphas.value_screen.ValueScreen
+  line: SWO
+  description: Value filter for the underlyings of the options desk. It is an operating filter with no backtest of its own. ref idea-012
+  params:
+    asset_class: equity
+    min_earnings_yield: 0.08
+    min_fcf_yield: 0.06
+    min_book_to_price: 1.0
+
+- id: deep_value_swc_future
+  kind: alpha
+  class: hokma.factory.alphas.value_screen.ValueScreen
+  line: SWC
+  description: Value for futures and CFDs uses only the price over its long run average, because a future has no statements. ref idea-012
+  params:
+    asset_class: future
+    max_price_to_average: 0.8

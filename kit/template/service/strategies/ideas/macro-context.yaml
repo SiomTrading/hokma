@@ -1,0 +1,33 @@
+id: macro_context
+title: Macro readings as context, never as a signal alone
+ref: idea-008
+lines: [LP, SWC]
+asset_classes: [etf, future, cfd]
+requires_premium_switch: false
+requires_event_study: false
+summary: >-
+  Two macro readings are said to carry information about equity returns: the gap between the earnings yield of stocks and the
+  yield of long government bonds, and the recent move of crude oil. Each is a regime input. It may scale or switch off the view
+  of another alpha, but it does not open a position by itself. Macro series are revised, so every value is read with the vintage
+  that was known at the decision date.
+needs: []
+data: [macro]
+context_only: true
+variants:
+  - line: LP
+    sleeve: yield gap
+    vehicle: equity ETFs
+    planned_alpha: yield_gap_context
+    rebalance: monthly
+    rules:
+      - Gap = log(1 + earnings yield of the index) minus log(1 + ten year yield). Refit a one month ahead regression each month on all past data.
+      - When the forecast excess return is not positive, the equity weight of another view is cut to the risk free share.
+      - Macro values come from hokma.data.macro with the vintage fixed at the decision date.
+  - line: SWC
+    sleeve: crude oil move
+    vehicle: equity index futures and CFDs
+    planned_alpha: oil_context
+    rebalance: monthly
+    rules:
+      - A large rise or fall of crude oil over the last months tilts the weight of an equity view; it never creates one.
+      - Read the oil series with the same fixed vintage rule as any macro series.

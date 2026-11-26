@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-043 in .notices/THIRD_PARTY.txt
+id: "pre_earnings_three_day_reversal"
+name: "Short reversal around the earnings date"
+ref: "LIB-043"
+asset_class: "equities"
+lines: [SWO]
+horizon: "days"
+rebalance: "event driven, daily"
+universe: "Large US stocks with a known earnings date; the paper idea keeps the biggest size quintile."
+signal: "Average return of the three days from four to two days before the earnings date, compared with the 20th and 80th percentile of the same measure in the previous quarter."
+entry: "Go long a stock at or below the 20th percentile and short a stock at or above the 80th percentile, the day before earnings."
+exit: "Close after three days."
+sizing: "At most 20 longs and 20 shorts, each with one twentieth of equity."
+risk_note: "Earnings gaps are large: size each position by its own gap history and never hold through a second event."

@@ -1,0 +1,54 @@
+id: calendar_effects
+title: Calendar effects
+ref: idea-004
+lines: [SWC, SWO]
+asset_classes: [future, cfd, option]
+requires_premium_switch: false
+requires_event_study: true
+summary: >-
+  Returns are said to differ with the calendar: around the turn of the month, in the week options expire, on the day wages are
+  paid, after a strong or weak first month of the year, and overnight against the trading day. Calendar claims are easy to find in
+  any data, so none of these recipes may be used by a desk until an event study backs it with enough events and a test that
+  accounts for how many calendar effects were tried.
+needs: [quant.stats.events]
+data: [close, calendar]
+variants:
+  - line: SWC
+    sleeve: turn of the month
+    vehicle: equity index futures and CFDs
+    planned_alpha: calendar_window
+    rebalance: monthly
+    rules:
+      - Be long from the last trading day of the month until the close of the third trading day of the next one.
+      - The dates come from the calendar service, never from a hand written list.
+  - line: SWC
+    sleeve: pay day
+    vehicle: equity index futures and CFDs
+    planned_alpha: calendar_window
+    rebalance: monthly
+    rules:
+      - Be long only on the sixteenth day of each month (the next trading day when it is closed).
+  - line: SWC
+    sleeve: overnight bias
+    vehicle: equity index futures and CFDs
+    planned_alpha: overnight_filter
+    rebalance: daily
+    rules:
+      - Hold from the close to the next open only when the price is above its 20 day average, volatility is below its own average and a sentiment gauge is above its average.
+      - Use it as a filter on another view, not as a system of its own.
+    costs:
+      - CFDs pay financing for every night held, switched on with costs.cfd_swap.
+  - line: SWO
+    sleeve: expiration week
+    vehicle: equity index options
+    planned_alpha: calendar_window
+    rebalance: monthly
+    rules:
+      - The seasonal view applies only in the week the monthly options expire; the structure chosen is left to the desk.
+  - line: SWO
+    sleeve: first month gauge
+    vehicle: equity index options
+    planned_alpha: calendar_window
+    rebalance: yearly
+    rules:
+      - After a positive first month of the year keep the equity exposure for the rest of the year; after a negative one move to cash.

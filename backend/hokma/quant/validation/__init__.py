@@ -16,6 +16,7 @@ from hokma.quant.validation import (  # noqa: F401  (importing registers the fun
     cv,
     evidence as _evidence,
     fidelity,
+    multiple_testing,
     overfit,
     residual_edge,
     stat_tests,

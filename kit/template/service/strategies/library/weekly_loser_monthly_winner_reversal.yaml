@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-047 in .notices/THIRD_PARTY.txt
+id: "weekly_loser_monthly_winner_reversal"
+name: "Buy last week losers and sell last month winners"
+ref: "LIB-047"
+asset_class: "equities"
+lines: [SWC, LP]
+horizon: "days"
+rebalance: "weekly"
+universe: "The 100 largest US stocks (taken from the 500 most traded above 1 dollar)."
+signal: "Return of the last five sessions and return of the last 21 sessions for each stock."
+entry: "Go long the ten stocks with the lowest weekly return; short the ten stocks with the highest monthly return that are not in the long group."
+exit: "Rebuild every five sessions."
+sizing: "Equal weight inside each leg, full account on each side."
+risk_note: "Weekly turnover is high: the result is very sensitive to the cost model and the short borrow."

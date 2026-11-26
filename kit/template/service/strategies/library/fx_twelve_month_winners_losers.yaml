@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-013 in .notices/THIRD_PARTY.txt
+id: "fx_twelve_month_winners_losers"
+name: "Currency futures by twelve month return"
+ref: "LIB-013"
+asset_class: "currencies"
+lines: [SWC]
+horizon: "months"
+rebalance: "monthly"
+universe: "Eight currency futures against the US dollar: Australian dollar, pound, Canadian dollar, euro, yen, peso, New Zealand dollar and Swiss franc."
+signal: "Rate of change over the last 252 sessions of each currency future. Needs at least six with data."
+entry: "Go long the three strongest and short the three weakest."
+exit: "Rebuild monthly; a currency that leaves the top or bottom three is closed."
+sizing: "Equal weight, one third of the long leg and one third of the short leg each; idle cash earns the overnight rate."
+risk_note: "With CFDs the financing swap of each side is a real cost; use the cost model swap and not the futures roll."

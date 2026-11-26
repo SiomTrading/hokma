@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-021 in .notices/THIRD_PARTY.txt
+id: "yield_gap_equity_timing"
+name: "Equity index timing from the earnings yield minus bond yield gap"
+ref: "LIB-021"
+asset_class: "multi_asset"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "A broad US equity ETF, a short term bond ETF as cash, the index earnings yield and the ten year treasury yield."
+signal: "Yield gap = log of the earnings yield minus log of the ten year yield. Regress next month index return on the gap with an expanding window and forecast with the latest gap."
+entry: "Be fully in the equity ETF when the forecast is positive."
+exit: "Move fully to the cash ETF when the forecast is not positive."
+sizing: "All in or all out."
+risk_note: "A single regression on a short sample; require several years of data and report the t statistic of the slope."

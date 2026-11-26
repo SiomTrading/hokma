@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-009 in .notices/THIRD_PARTY.txt
+id: "strong_fundamentals_one_month_reversal"
+name: "Past losers with strong fundamentals, past winners with weak ones"
+ref: "LIB-009"
+asset_class: "equities"
+lines: [LP, SWO]
+horizon: "months"
+rebalance: "monthly"
+universe: "Large US stocks: the top 40 percent by market capitalisation of the 500 most traded, with a price above 5 dollars."
+signal: "Nine point quality score, one point each for: positive return on assets, positive operating cash flow, rising return on assets, cash flow above return on assets, lower long term debt to assets, higher current ratio, no rise in share count, higher gross margin, higher asset turnover. Also the last one month return."
+entry: "Go long stocks with score 7 to 9 and a negative last month return; short stocks with score 0 to 3 and a positive last month return."
+exit: "Rebuild each month end."
+sizing: "Equal weight inside each leg."
+risk_note: "Quarterly figures must be dated by their filing date; a stock without a full history of the nine inputs is skipped, not filled."

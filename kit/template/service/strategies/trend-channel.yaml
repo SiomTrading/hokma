@@ -1,0 +1,39 @@
+# Trend following by channel breakout. The swing line trades daily bars: a long entry channel and a shorter exit channel, with the rule
+# that passes over a breakout after a winner for the fast pair. The intraday line uses the trend strength (ADX) as its only filter.
+# Every level here is a grid value for the backtest. The quality gate is the surface of neighbor parameters: a result that falls when the
+# channel lengths move by a fifth is not accepted.
+- id: trend_channel_swc_fast
+  kind: alpha
+  class: hokma.factory.alphas.channel_breakout.ChannelBreakout
+  line: SWC
+  description: Channel breakout on daily bars. A 20 bar entry channel, a 10 bar exit channel, and a breakout after a winning breakout is passed over.
+  params:
+    entry_n: 20
+    exit_m: 10
+    skip_after_winner: true
+    adx_min: 0.0
+    history: 250
+
+- id: trend_channel_swc_slow
+  kind: alpha
+  class: hokma.factory.alphas.channel_breakout.ChannelBreakout
+  line: SWC
+  description: Channel breakout on daily bars with a 55 bar entry channel and a 20 bar exit channel. Every breakout is taken.
+  params:
+    entry_n: 55
+    exit_m: 20
+    skip_after_winner: false
+    adx_min: 0.0
+    history: 500
+
+- id: trend_regime_dt
+  kind: alpha
+  class: hokma.factory.alphas.channel_breakout.ChannelBreakout
+  line: DT
+  description: Channel breakout on minute bars. The trend strength is the only filter, and its level is a grid value to tune in the backtest.
+  params:
+    entry_n: 60
+    exit_m: 30
+    skip_after_winner: false
+    adx_min: 20.0
+    history: 400

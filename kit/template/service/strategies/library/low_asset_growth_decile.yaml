@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-006 in .notices/THIRD_PARTY.txt
+id: "low_asset_growth_decile"
+name: "Low versus high growth of total assets"
+ref: "LIB-006"
+asset_class: "equities"
+lines: [LP]
+horizon: "years"
+rebalance: "yearly, in June"
+universe: "The 3000 largest non financial US stocks on the main exchanges."
+signal: "Percentage change in total assets over the last year, from the latest annual balance sheet."
+entry: "Go long the decile with the lowest asset growth and short the decile with the highest."
+exit: "Rebuild once a year; names that change decile are replaced."
+sizing: "Equal weight inside each leg with equal gross exposure."
+risk_note: "Needs point in time fundamentals so a restated figure never leaks into the past."

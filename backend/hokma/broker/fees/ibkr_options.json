@@ -1,0 +1,21 @@
+{
+ "broker": "ibkr_options",
+ "currency": "USD",
+ "reference": "Interactive Brokers, US equity options, per side: 0.65 per contract with a minimum of 1.00 per order (the rate of an option whose premium is 0.10 or more in the lowest volume tier). Read from the fee schedule of the broker on 2026-11-22; not yet checked against a real statement. Exchange and regulatory fees are not included.",
+ "source": "Interactive Brokers public commission page for US options (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "omitted": [
+  "lower rates for premiums under 0.10",
+  "monthly volume tiers",
+  "maximum per order as a share of the trade value",
+  "exchange, clearing and regulatory fees"
+ ],
+ "rules": {
+  "option": {
+   "kind": "per_contract",
+   "value": "0.65",
+   "minimum": "1"
+  }
+ }
+}

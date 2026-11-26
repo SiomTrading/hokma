@@ -108,6 +108,29 @@ jobs:
           backend/tests/test_library_*.py backend/tests/test_folder_*.py backend/tests/test_folders_api.py
           backend/tests/test_model_download.py backend/tests/test_embedder.py backend/tests/test_vector_store.py
           backend/tests/test_hybrid_search.py
+  # Strategy user code (SPEC-031): the sandbox runs code the student's strategy creator generated, on the student's own
+  # PC. The Job Object layers only exist on Windows and the macOS layers only on macOS, so those tests (skipped on the
+  # other systems) must run on the real platform. Only on the final PR to main, not on intermediate PRs.
+  usercode-tests:
+    if: github.repository == 'SiomTrading/hokma-dev' && github.base_ref == 'main'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync --python 3.12
+      - name: Usercode tests
+        shell: bash
+        run: uv run pytest backend/tests/usercode
   dashboard:
     runs-on: ubuntu-latest
     steps:

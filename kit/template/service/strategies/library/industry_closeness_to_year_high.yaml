@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-002 in .notices/THIRD_PARTY.txt
+id: "industry_closeness_to_year_high"
+name: "Industries closest to their yearly high"
+ref: "LIB-002"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly with three overlapping tranches"
+universe: "Liquid US stocks (about the 500 most traded) grouped by industry group."
+signal: "For each stock divide the last close by the highest close of the last 252 sessions. Average that ratio per industry, weighting by market capitalisation."
+entry: "Go long every stock of the six industries with the highest average ratio and short every stock of the six with the lowest."
+exit: "Each monthly tranche is held three months and then closed, so one third of the book turns over each month."
+sizing: "One third of equity per tranche, split equally between long and short stocks of that tranche."
+risk_note: "The signal is an industry level read; with few liquid names per industry the legs can be concentrated in a few stocks."

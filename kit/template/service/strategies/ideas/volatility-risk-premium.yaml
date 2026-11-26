@@ -1,0 +1,35 @@
+id: volatility_risk_premium
+title: Selling the volatility premium and dispersion
+ref: idea-005
+lines: [SWO]
+asset_classes: [option]
+requires_premium_switch: true
+requires_event_study: false
+summary: >-
+  Implied volatility tends to sit above the volatility that follows, and the gap pays the seller of options. Two recipes: sell
+  a one month at-the-money straddle on an index and buy a deep out-of-the-money put as protection, or take the other side of
+  dispersion by trading single name options against index options when analysts disagree most. This is the base for the
+  calibration of the premium threshold: the ratio of implied to realized volatility is tested on a grid of percentiles.
+needs: [quant.options, quant.stats]
+data: [option_chain, close]
+variants:
+  - line: SWO
+    sleeve: protected straddle
+    vehicle: index options with about one month to expiry
+    alpha: premium_wheel_swo
+    params: {threshold: 1.2, cap: 0.6, lot: 100, requires_premium_switch: true}
+    rebalance: monthly
+    rules:
+      - Sell the at-the-money straddle at the bid and buy a put about fifteen percent out of the money at the ask.
+      - Sell only when the ratio of implied to realized volatility is above the threshold of the desk.
+      - Count margin by structure and the risk of early assignment in every backtest.
+    costs:
+      - Option commission with the cap of the broker table, and the cost of the bid ask spread on both legs.
+  - line: SWO
+    sleeve: dispersion
+    vehicle: single name options against index options
+    planned_alpha: disagreement_rank
+    rebalance: monthly
+    rules:
+      - Rank names by how much analysts disagree about earnings; buy puts on the top fifth and sell index puts of moderate delta.
+      - If analyst data is missing the recipe does not run; there is no stand in.

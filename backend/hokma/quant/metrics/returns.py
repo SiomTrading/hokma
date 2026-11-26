@@ -489,3 +489,73 @@ year_frac = scalar_function(
     summary="Years elapsed between two ISO dates.",
     inputs={"start": {"type": "str", "required": True}, "end": {"type": "str", "required": True}},
     compute=lambda start, end: float(_lib.ffn.year_frac(pd.Timestamp(start), pd.Timestamp(end))))
+
+
+# --------------------------------------------------------------------------------------------------------------
+# B-24: periods per year by asset type, bar and session (never a fixed 252 for intraday bars)
+# --------------------------------------------------------------------------------------------------------------
+# asset type -> (hours of the full session per day, trading days per year). The contract sheet has no session hours:
+# the table is the rule and `session_hours` overrides it for an instrument with another calendar.
+SESSIONS: dict[str, tuple[float, int]] = {
+    "future": (23.0, 252), "future_option": (23.0, 252), "equity": (6.5, 252), "etf": (6.5, 252), "option": (6.5, 252),
+    "bond": (6.5, 252), "bill": (6.5, 252), "crypto": (24.0, 365), "cfd": (24.0, 260),
+}
+RTH_HOURS = 6.5
+_BAR_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}
+_BARS_PER_YEAR_ONLY = {"1w": 52}
+
+
+def bars_per_year(asset_type: str, bar: str, *, session_hours: float | None = None, session: str | None = None) -> int:
+    """Observations per year of a return series sampled at `bar` for an instrument of `asset_type`.
+
+    Intraday bars: bars per session (a partial last bar counts) times trading days. "1d" is the trading days of the year (252, crypto 365),
+    "1w" is 52. `session` "RTH" limits futures and cfds to the 6.5 hour regular session.
+    """
+    if asset_type not in SESSIONS:
+        raise BadInput(f"unknown asset type {asset_type!r}; use one of {sorted(SESSIONS)}")
+    hours, days = SESSIONS[asset_type]
+    if session not in (None, "ETH", "RTH"):
+        raise BadInput("session must be ETH or RTH")
+    if session == "RTH":
+        hours = min(hours, RTH_HOURS)
+    if session_hours is not None:
+        if isinstance(session_hours, bool) or not isinstance(session_hours, (int, float)) or not 0.0 < float(session_hours) <= 24.0:
+            raise BadInput("session_hours must be a number above 0 and at most 24")
+        hours = float(session_hours)
+    if bar == "1d":
+        return days
+    if bar in _BARS_PER_YEAR_ONLY:
+        return _BARS_PER_YEAR_ONLY[bar]
+    if bar not in _BAR_MINUTES:
+        raise BadInput(f"unknown bar {bar!r}; use one of {sorted([*_BAR_MINUTES, '1d', *_BARS_PER_YEAR_ONLY])}")
+    return int(math.ceil(round(hours * 60.0 / _BAR_MINUTES[bar], 9))) * days
+
+
+periods_per_year = scalar_function(
+    "metrics.periods_per_year", piece_ids=("B-24", "V-32", "N-23"), unit="count",
+    method="bars per session times trading days of the year, by asset type and bar",
+    summary="Observations per year for annualizing a return series: by asset type, bar and session (futures 23 hours, stocks 6.5 hours, crypto 24 by 7).",
+    inputs={"asset_type": {"type": "str", "required": True}, "bar": {"type": "str", "required": True},
+            "session_hours": {"type": "float", "required": False, "default": None}, "session": {"type": "str", "required": False, "default": None}},
+    compute=lambda asset_type, bar, session_hours, session: bars_per_year(asset_type, bar, session_hours=session_hours, session=session))
+
+
+# --------------------------------------------------------------------------------------------------------------
+# B-48: CAGR with fractional years taken from the dates, never from the number of bars
+# --------------------------------------------------------------------------------------------------------------
+def _cagr_by_date(s: pd.Series, b: pd.Series | None, p: dict) -> float:
+    if not isinstance(s.index, pd.DatetimeIndex):
+        raise ValueError("a date based CAGR needs a date index")
+    days = (s.index[-1] - s.index[0]).days
+    if days <= 0:
+        raise ValueError("a date based CAGR needs at least two different dates")
+    total = float((1.0 + s).prod())
+    if total <= 0:
+        raise ValueError("terminal wealth is not positive")
+    return total ** (365.25 / days) - 1.0
+
+
+cagr_by_date = metric(
+    "metrics.cagr_by_date", piece_ids=("B-48",), unit="ratio", method="(1 + total return)^(365.25 / days from the first to the last date) - 1",
+    summary="Compound annual growth rate with years measured by calendar days between the first and the last date; right for any bar size (monthly, intraday, daily).",
+    need_dispersion=False, compute=_cagr_by_date)

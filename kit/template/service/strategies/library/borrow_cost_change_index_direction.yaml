@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-052 in .notices/THIRD_PARTY.txt
+id: "borrow_cost_change_index_direction"
+name: "Index direction from the daily change of stock borrow cost"
+ref: "LIB-052"
+asset_class: "equities"
+lines: [SWC]
+horizon: "days"
+rebalance: "daily"
+universe: "A broad US equity ETF and a daily aggregate of the synthetic borrow cost across about 4900 stocks and ETFs."
+signal: "Mean borrow intensity today minus yesterday."
+entry: "Go long the ETF when the change is positive and short when it is negative, near the close."
+exit: "Close at 15:58 the next session."
+sizing: "Full account on the chosen side."
+risk_note: "Needs a vendor series with a fixed timestamp; a signal measured after the entry time is a leak."

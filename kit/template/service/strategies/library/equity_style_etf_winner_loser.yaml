@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-030 in .notices/THIRD_PARTY.txt
+id: "equity_style_etf_winner_loser"
+name: "Best and worst of six equity style ETFs"
+ref: "LIB-030"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "Six style ETFs: mid cap value, mid cap growth, small cap value, small cap growth, large cap value, large cap growth."
+signal: "Twelve month price change of each ETF."
+entry: "Go long the strongest ETF and short the weakest."
+exit: "Rebuild monthly; the four middle ETFs are held at zero."
+sizing: "In the code that was read each side takes the full account value; a safer version uses half of the account on each side."
+risk_note: "Six assets and two positions: a data error in one ETF can dominate, so add a price sanity check."

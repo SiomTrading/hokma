@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-042 in .notices/THIRD_PARTY.txt
+id: "commodity_tail_asymmetry_count"
+name: "Commodities ranked by upside versus downside outlier days"
+ref: "LIB-042"
+asset_class: "commodities"
+lines: [SWC]
+horizon: "months"
+rebalance: "monthly"
+universe: "About twenty five commodity futures."
+signal: "Over the last 260 daily returns count the days above mean plus two standard deviations and subtract the count of days below mean minus two standard deviations."
+entry: "Buy the seven commodities with the lowest count and sell the seven with the highest."
+exit: "Rebuild at the start of each month."
+sizing: "Equal weight, one seventh per position."
+risk_note: "Counts are small integers with many ties; define a tie break rule before testing."

@@ -325,20 +325,23 @@ def test_a_calibration_needs_clean_evidence_a_run_reference_and_a_real_desk_ECT_
         assert u.session.one("SELECT count(*) AS n FROM premium_thresholds")["n"] == 0
 
 
+CALIBRATION_WRITERS = ("record_calibration", "retire_calibration")
+
+
 def test_premium_thresholds_is_written_only_by_record_calibration_and_only_the_backtest_may_call_it_ECT_042():
-    """The scan: no module outside backend/hokma/backtest/ calls record_calibration, and nothing but its own module writes the table."""
+    """The scan: no module outside backend/hokma/backtest/ calls record_calibration or retire_calibration, and nothing but its own module writes the table."""
     callers, writers = [], []
     for path in sorted(HOKMA.rglob("*.py")):
         rel = path.relative_to(HOKMA).as_posix()
         text = path.read_text(encoding="utf-8")
         tree = ast.parse(text)
-        uses_name = any((isinstance(n, ast.Name) and n.id == "record_calibration") or (isinstance(n, ast.Attribute) and n.attr == "record_calibration")
-                        or (isinstance(n, ast.alias) and n.name == "record_calibration") for n in ast.walk(tree))
+        uses_name = any((isinstance(n, ast.Name) and n.id in CALIBRATION_WRITERS) or (isinstance(n, ast.Attribute) and n.attr in CALIBRATION_WRITERS)
+                        or (isinstance(n, ast.alias) and n.name in CALIBRATION_WRITERS) for n in ast.walk(tree))
         if uses_name and rel != "exec/guards/premium_selling.py" and not rel.startswith("backtest/"):
             callers.append(rel)
         if "premium_thresholds" in text and rel not in ("exec/guards/premium_selling.py", "db/transfer.py") and not rel.startswith("db/migrations/"):
             writers.append(rel)
-    assert callers == [], f"record_calibration is for the backtest only: {callers}"
+    assert callers == [], f"record_calibration and retire_calibration are for the backtest only: {callers}"
     assert writers == [], f"premium_thresholds is written by premium_selling.py only: {writers}"
 
 
@@ -360,3 +363,50 @@ def test_there_is_no_manual_opening_of_the_switch_ECT_042():
     assert not [n for n in public if any(k in n for k in ("open_", "enable", "set_", "force", "write", "calibrat"))], public
     guard_source = Path(ps.__file__).read_text(encoding="utf-8")
     assert guard_source.count("INSERT") + guard_source.count('"premium_thresholds", {') == 0 or "record_calibration" in guard_source
+
+
+# ---- retire_calibration and calibrated_rows (SPEC-020, 4.9 step 7) -------------------------------------------------------------------
+
+def test_retiring_a_calibrated_row_closes_the_switch_and_keeps_the_reason_and_the_run_in_its_evidence_ECT_042(swo):
+    row_id = calibrate(swo.desk_id, swo.db)
+    assert switch_state(swo.desk_id, "SPY", db=swo.db).is_open
+    ps.retire_calibration(row_id, reason="recalibration_failed:dsr_below_min:0.4<0.95", backtest_run_ref="calibration-9", db=swo.db)
+    state = switch_state(swo.desk_id, "SPY", db=swo.db)
+    assert not state.is_open and state.reason == "no_calibrated_threshold"
+    with swo.db.read() as u:
+        row = u.session.one("SELECT status, retired_at, evidence_json FROM premium_thresholds WHERE id = :i", {"i": row_id})
+    body = json.loads(row["evidence_json"])
+    assert row["status"] == "retired" and row["retired_at"] is not None
+    assert body["retired"]["reason"] == "recalibration_failed:dsr_below_min:0.4<0.95" and body["retired"]["backtest_run_ref"] == "calibration-9"
+    assert body["n_observations"] == 252 and body["dsr"] == 0.9                              # the evidence that opened it is still there
+    out = hexec.submit(OrderProposal(swo.desk_id, "SWO", "desk", (leg(C610, "sell"),), "market", created_by="desk-chief", thesis="sell premium"), who=AGENT, db=swo.db)
+    assert (out.status, out.code) == ("refused", "premium_selling_closed")
+
+
+def test_a_row_that_is_retired_or_that_does_not_exist_cannot_be_retired_ECT_042(swo):
+    row_id = calibrate(swo.desk_id, swo.db)
+    ps.retire_calibration(row_id, reason="first", backtest_run_ref="calibration-1", db=swo.db)
+    for bad_id in (row_id, 9999):
+        with pytest.raises(ValueError):
+            ps.retire_calibration(bad_id, reason="again", backtest_run_ref="calibration-2", db=swo.db)
+
+
+def test_retire_calibration_refuses_bad_arguments_and_changes_nothing_ECT_042(swo):
+    row_id = calibrate(swo.desk_id, swo.db)
+    good = dict(reason="why", backtest_run_ref="calibration-1", db=swo.db)
+    for bad in ({"threshold_id": 0}, {"threshold_id": True}, {"threshold_id": "1"}, {"reason": ""}, {"reason": "x" * 201}, {"reason": "line\nbreak"}, {"reason": 5},
+                {"backtest_run_ref": ""}, {"backtest_run_ref": "has space"}, {"backtest_run_ref": "r" * 129}, {"backtest_run_ref": None}):
+        args = {"threshold_id": row_id, **good, **bad}
+        with pytest.raises(ValueError):
+            ps.retire_calibration(args.pop("threshold_id"), **args)
+    assert switch_state(swo.desk_id, "SPY", db=swo.db).is_open
+
+
+def test_a_recalibration_that_passes_replaces_the_row_and_only_the_latest_one_counts_ECT_042(swo):
+    first = calibrate(swo.desk_id, swo.db)
+    second = calibrate(swo.desk_id, swo.db, threshold=Decimal("3.5"), backtest_run_ref="bt-2026-11-22-0002")
+    rows = ps.calibrated_rows(swo.desk_id, db=swo.db)
+    assert [(r.row_id, r.underlying, r.metric, r.threshold, r.backtest_run_ref) for r in rows] == [(second, "SPY", "iv_minus_rv", Decimal("3.5"), "bt-2026-11-22-0002")]
+    assert first != second and ps.calibrated_rows(swo.desk_id + 1, db=swo.db) == []
+    with pytest.raises(ValueError):
+        ps.calibrated_rows(0, db=swo.db)

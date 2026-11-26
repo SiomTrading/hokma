@@ -1,0 +1,32 @@
+{
+ "broker": "tradestation",
+ "currency": "USD",
+ "reference": "TradeStation, US residents, per side: no commission on stocks and ETFs, 0.60 per option contract, 1.50 per futures contract. Read from the fee schedule of the broker on 2026-11-22; not yet checked against a real statement.",
+ "source": "TradeStation public pricing page (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "omitted": [
+  "the extra 1.00 per index option contract",
+  "the 5.00 per order of non US residents",
+  "stocks above 10000 shares per order",
+  "regulatory and exchange fees"
+ ],
+ "rules": {
+  "equity": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "etf": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "option": {
+   "kind": "per_contract",
+   "value": "0.60"
+  },
+  "future": {
+   "kind": "per_contract",
+   "value": "1.50"
+  }
+ }
+}

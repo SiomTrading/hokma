@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from test_db_migrate import _desk, _desk_project, raw
 
+from dbsupport import take_back_the_migrations_after_0033
+from hokma.db import db_path
 from hokma.db.downgrade import rollback_0026, rollback_0027, rollback_0028, rollback_0029, rollback_0030, rollback_0031, rollback_0032, rollback_0033
 from hokma.db.migrate import discover
 from hokma.db.migrate import MIGRATIONS_DIR, current_version, migrate
@@ -44,6 +46,7 @@ def test_the_migration_adds_a_null_layout_and_the_way_back_takes_it_off(env):
     con.execute("UPDATE desks SET layout = ? WHERE id = ?", (panels.dump(["company", "rules", "agents", "config"]), desk))
     con.commit()
     con.close()
+    take_back_the_migrations_after_0033(db_path())
     assert rollback_0033() == 32 and rollback_0032() == 31 and rollback_0031() == 30 and rollback_0030() == 29 and rollback_0029() == 28 and rollback_0028() == 27 and rollback_0027() == 26 and rollback_0026() == 25 and current_version() == 25
     con = raw()
     assert "layout" not in [r[1] for r in con.execute("PRAGMA table_info(desks)")]

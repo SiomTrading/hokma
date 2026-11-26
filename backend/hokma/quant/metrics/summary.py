@@ -228,10 +228,16 @@ def summary_psr_row(returns: Any, sr_benchmark: float = 0.0) -> QuantResult:
 # --------------------------------------------------------------------------------------------------------------
 # QS-041: drawdown
 # --------------------------------------------------------------------------------------------------------------
-def drawdown_episodes(r: pd.Series) -> pd.DataFrame:
-    """Every underwater episode: first underwater date, valley, recovery date (or last date), calendar days and depth."""
+def underwater(r: pd.Series) -> pd.Series:
+    """Drawdown of the compounded path at every date; differences below 1e-12 are rounding noise of the product and count as zero."""
     wealth = (1.0 + r).cumprod()
     dd = wealth / wealth.cummax() - 1.0
+    return dd.where(dd.abs() > 1e-12, 0.0)
+
+
+def drawdown_episodes(r: pd.Series) -> pd.DataFrame:
+    """Every underwater episode: first underwater date, valley, recovery date (or last date), calendar days and depth."""
+    dd = underwater(r)
     rows = []
     start: int | None = None
     n = len(dd)
@@ -395,7 +401,7 @@ def summary_periods(returns: Any) -> QuantResult:
     span = (end - r.index[0]).days / 365.25
     total = float((1.0 + r).prod())
     value["all_time_annualised"] = total ** (1.0 / span) - 1.0 if span > 0 and total > 0 else None
-    return finish(name, value, unit="pct", method=method, series=r, pieces=pieces, params={"anchor": end}, warnings=warns)
+    return finish(name, value, unit="pct", method=method, series=r, pieces=pieces, params={"anchor": end.isoformat()[:10]}, warnings=warns)
 
 
 # --------------------------------------------------------------------------------------------------------------

@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-023 in .notices/THIRD_PARTY.txt
+id: "filing_text_density_deciles"
+name: "Stocks sorted by the word density of their annual filing"
+ref: "LIB-023"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "The 500 largest US stocks with a recent annual filing, refreshed every three months."
+signal: "Two text measures of the latest annual filing: share of content words and share of specific terms. Use only filings published in the last 30 days of data."
+entry: "For each measure go long the top tenth and short the bottom tenth."
+exit: "Rebuild monthly."
+sizing: "Half of the capital to each measure, equal weight inside each leg."
+risk_note: "Own text processing is needed; vendor scores cannot be redistributed. The edge is untested, so treat it as research only."

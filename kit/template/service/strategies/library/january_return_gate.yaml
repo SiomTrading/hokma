@@ -1,0 +1,15 @@
+# Strategy rule written from scratch. Reference: LIB-025 in .notices/THIRD_PARTY.txt
+id: "january_return_gate"
+name: "Stay in equities only after a positive January"
+ref: "LIB-025"
+asset_class: "equities"
+lines: [LP, SWC]
+horizon: "years"
+rebalance: "yearly: January and the first session of February"
+universe: "A broad US equity ETF and a short term treasury bill ETF."
+signal: "Return of the equity ETF from the first session of January to the first session of February."
+entry: "Buy the equity ETF in January."
+exit: "At the first February check stay in equities if the January return is positive, otherwise sell and hold bills until the next January."
+sizing: "Full account in one of the two assets."
+risk_note: "One decision a year: the sample is a few dozen observations at most, so a calendar study with a significance test is a pre condition."
+requires_event_study: true

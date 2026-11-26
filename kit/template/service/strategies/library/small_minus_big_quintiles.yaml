@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-050 in .notices/THIRD_PARTY.txt
+id: "small_minus_big_quintiles"
+name: "Smallest versus biggest stocks"
+ref: "LIB-050"
+asset_class: "equities"
+lines: [LP]
+horizon: "years"
+rebalance: "yearly in December in the version read"
+universe: "The 3000 largest US stocks by market capitalisation."
+signal: "Market capitalisation. The paper idea uses deciles; the version that was read uses quintiles."
+entry: "Go long the smallest quintile and short the biggest quintile."
+exit: "Rebuild each year."
+sizing: "Equal weight inside each leg, full account on each side."
+risk_note: "Small stocks are costly to trade and hard to borrow; the premium shrinks after costs."

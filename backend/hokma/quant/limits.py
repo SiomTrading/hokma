@@ -35,6 +35,14 @@ PARAM_CAPS: dict[str, int] = {
     "mean_block": 100_000,
     "window": 100_000,
     "lags": 1_000,
+    "n_workers": 32,                 # processes of one backtest job (queue.py)
+    "n_packages": 100_000,           # work packages of one job
+    "n_instruments": 100,            # instruments of one multi instrument run
+    "desk_steps": 1_000_000,         # steps of one desk loop (backtest runner)
+    "n_combinations": 20_000,        # configurations of one search space (SPEC-020: grid, TPE and refine)
+    "opt_trials": 5_000,             # proposals of one TPE or refine search
+    "top_k": 1_000,                  # points of a fast sweep that are confirmed in the engine
+    "refine_steps": 100,             # moves of the step by step refinement around the best point
     "max_lag": 1_000,                # longest lag of a test or an exponent (stats module)
     "weekly_window": 100_000,        # HAR-RV windows (stats module)
     "monthly_window": 100_000,
@@ -69,6 +77,7 @@ MAX_INPUT_CELLS = 5_000_000          # rows x columns of any series or table pas
 MAX_SECONDS = 120.0                  # wall time of one registry call
 MAX_DEPTH_NO_PANEL = 64
 MAX_CONCURRENT = 2                   # quant calls running at the same time
+MAX_OPEN_JOBS = 8                    # backtest jobs queued or running at the same time
 
 
 def as_int(name: str, value: Any) -> int:

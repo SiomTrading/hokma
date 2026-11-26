@@ -1,0 +1,32 @@
+id: equity_factors
+title: Equity factors, slow and around reports
+ref: idea-011
+lines: [LP, SWO]
+asset_classes: [equity]
+requires_premium_switch: false
+requires_event_study: true
+summary: >-
+  A list of company traits that have been linked to later returns: price strength (also net of market moves), low volatility,
+  low beta, closeness to the 52 week high, low accruals, high quality of earnings, return on assets, slow growth of assets,
+  a score of nine accounting checks, and low short interest. For the long term book they are slow ranks held for years. For the
+  options desk the same traits are filters, and the days around earnings reports are treated as events that need their own study.
+needs: [quant.fundamentals, quant.stats.events]
+data: [close, fundamentals, short_interest, earnings_dates]
+variants:
+  - line: LP
+    vehicle: stocks
+    alpha: fundamental_ls_lp
+    params: {weight_value: 0.2, weight_quality: 0.6, weight_momentum: 0.2, book: long_only}
+    rebalance: yearly
+    rules:
+      - Build the quality rank from accruals, return on assets, growth of assets and the nine check score, all from quant.fundamentals.
+      - Build the momentum rank from the twelve month return without the last month, and a second one from the residual return after market and style moves.
+      - Rebalance after annual reports are public, never before; every ratio is read as it was known at that date.
+  - line: SWO
+    vehicle: options on stocks
+    planned_alpha: report_window_filter
+    rebalance: weekly
+    rules:
+      - Use the factors only as a filter on the underlyings an options structure may use.
+      - Avoid opening premium structures across a report date unless an event study supports it.
+      - Reports dates come from the earnings calendar of the data module; a name without a date is not eligible.

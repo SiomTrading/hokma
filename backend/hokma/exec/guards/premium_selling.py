@@ -14,8 +14,9 @@ The code decides, never the text of an agent (decision 1260). Every fact is deri
   structure split in several proposals, or hidden in the children of a nested order, is refused leg by leg.
 
 The switch is open for one desk and one underlying only while `premium_thresholds` holds a `calibrated` row with a
-backtest reference for them. The table is empty in H3. `record_calibration` is the only writer: it has no API route and no
-MCP tool, and a scan test fails if a module outside `hokma/backtest/` calls it. There is no manual opening.
+backtest reference for them. The table is empty in H3. `record_calibration` opens the switch and `retire_calibration` closes it again
+(a recalibration that fails): they are the only writers, they have no API route and no MCP tool, and a scan test fails if a module
+outside `hokma/backtest/` calls either. There is no manual opening.
 
 Any error reading the table or the contracts closes the switch: the order is refused, never let through.
 """
@@ -136,6 +137,61 @@ def record_calibration(desk_id: int, underlying: str, *, metric: str, threshold:
         return int(u.session.insert("premium_thresholds", {
             "desk_id": desk_id, "underlying": name, "metric": metric, "threshold": str(threshold), "evidence_json": body,
             "backtest_run_ref": backtest_run_ref, "status": "calibrated", "calibrated_at": now}))
+
+
+_REASON = re.compile(r"^[\x20-\x7e]{1,200}$")
+
+
+def retire_calibration(threshold_id: int, *, reason: str, backtest_run_ref: str, db: Database | None = None) -> None:
+    """Retire a calibrated row, so the switch of its desk and underlying closes. Written by H4 only (a recalibration that fails).
+
+    The reason and the run that proved it are kept inside the evidence of the row, which is never deleted. Reading the row and retiring
+    it happen in one transaction; a row that is already retired, or that does not exist, is a ValueError."""
+    if isinstance(threshold_id, bool) or not isinstance(threshold_id, int) or threshold_id < 1:
+        raise ValueError("threshold_id must be the id of a calibrated row")
+    if not isinstance(reason, str) or not _REASON.match(reason):
+        raise ValueError("reason is 1 to 200 printable characters")
+    if not isinstance(backtest_run_ref, str) or not _REF.match(backtest_run_ref):
+        raise ValueError(f"backtest_run_ref is 1 to {MAX_REF} printable characters with no spaces")
+    with (db or get_database()).write() as u:
+        row = u.session.one("SELECT status, evidence_json FROM premium_thresholds WHERE id = :i", {"i": threshold_id})
+        if row is None:
+            raise ValueError("there is no such calibration")
+        if row["status"] != "calibrated":
+            raise ValueError("the calibration is already retired")
+        now = utcnow()
+        body = json.loads(row["evidence_json"])
+        body = {**body, "retired": {"reason": reason, "backtest_run_ref": backtest_run_ref, "at": str(now)}} if isinstance(body, dict) \
+            else {"evidence": body, "retired": {"reason": reason, "backtest_run_ref": backtest_run_ref, "at": str(now)}}
+        u.session.update("premium_thresholds", {"id": threshold_id}, {"status": "retired", "retired_at": now,
+                                                                     "evidence_json": json.dumps(body, sort_keys=True, default=str)})
+
+
+@dataclass(frozen=True)
+class CalibratedRow:
+    """A row that keeps the switch open: what the recalibration of H4 reads to know what to measure again."""
+
+    row_id: int
+    underlying: str
+    metric: str
+    threshold: Decimal
+    backtest_run_ref: str
+    calibrated_at: str
+
+
+def calibrated_rows(desk_id: int, *, db: Database | None = None) -> list[CalibratedRow]:
+    """The calibrated rows of a desk, one per underlying, in the order of the underlyings. Read only."""
+    if isinstance(desk_id, bool) or not isinstance(desk_id, int) or desk_id < 1:
+        raise ValueError("desk_id must be a desk id")
+    with (db or get_database()).read() as u:
+        rows = u.session.query("SELECT id, underlying, metric, threshold, backtest_run_ref, calibrated_at FROM premium_thresholds "
+                               "WHERE desk_id = :d AND status = 'calibrated' AND backtest_run_ref IS NOT NULL AND length(backtest_run_ref) > 0 "
+                               "ORDER BY underlying, id DESC", {"d": desk_id})
+    seen: dict[str, CalibratedRow] = {}
+    for r in rows:
+        seen.setdefault(r["underlying"], CalibratedRow(int(r["id"]), r["underlying"], str(r["metric"]), Decimal(str(r["threshold"])),
+                                                       str(r["backtest_run_ref"]), str(r["calibrated_at"])))
+    return list(seen.values())
 
 
 # ---- what is premium selling -----------------------------------------------------------------------------------------

@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-035 in .notices/THIRD_PARTY.txt
+id: "quarterly_stock_bond_switch"
+name: "Switch between a stock ETF and a bond ETF each quarter"
+ref: "LIB-035"
+asset_class: "multi_asset"
+lines: [LP, RF]
+horizon: "months"
+rebalance: "quarterly"
+universe: "A broad US equity ETF and an aggregate bond ETF."
+signal: "Return of each ETF over the previous quarter."
+entry: "Buy the ETF with the higher return."
+exit: "Hold one quarter, then compare again."
+sizing: "Full account in one ETF."
+risk_note: "Only two assets and four decisions a year: the result is dominated by a few quarters."

@@ -22,7 +22,7 @@ EM_DASH = chr(0x2014)
 # One piece id per row of the block. CC-10 and SK-119 are not functions: the first is the import scope, the second the recipes.
 PIECES = {"AH-16", "SK-001", "SK-002", "SK-003", "SK-006", "SK-014", "SK-015", "SK-051", "SK-053", "SK-055", "SK-056", "SK-058", "SK-059",
           "SK-060", "SK-077", "SK-079", "SK-080", "SK-085", "SK-086", "SK-087", "SK-088", "SK-089", "SK-106", "SK-108", "SK-109", "SK-111",
-          "SK-112", "SK-115", "SK-116"}
+          "SK-112", "SK-115", "SK-116", "L-53", "P-09", "P-10"}
 
 
 def _imports(path: Path) -> set[str]:

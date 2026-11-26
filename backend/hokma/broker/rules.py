@@ -35,6 +35,8 @@ LIMIT_KEYS = ("max_order_pct", "max_daily_loss_pct", "assets_only", "options_all
               # SPEC-018 (H2): the limits that the filter of hokma.exec applies by code
               "max_position_pct", "cooldown_seconds", "max_drawdown_pct", "capital_floor_usd", "funding", "max_premium_usd",
               "max_margin_pct", "max_weight_pct", "event_windows", "guards",
+              # SPEC-020 (H4): exposure caps per symbol and per sector, and the sector of each root
+              "max_symbol_pct", "max_sector_pct", "sectors",
               # SPEC-026 (A8): a loss or a drawdown in USD that scales with the equity (see hokma.exec.thresholds)
               "daily_loss_steps", "drawdown_steps",
               # SPEC-025: what the rules tab keeps next to the limits; no guard reads them (see hokma.broker.desk_rules)
@@ -85,6 +87,12 @@ def validate_limits(changes: Any, current: Mapping[str, Any] | None = None) -> d
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_ORDERS_PER_DAY:
                 raise ValueError(f"max_orders_per_day must be a whole number from 1 to {MAX_ORDERS_PER_DAY}")
             merged[key] = value
+        elif key in ("max_symbol_pct", "max_sector_pct"):
+            if not _is_number(value) or not 0 < value <= 100:
+                raise ValueError(f"{key} must be a number above 0 and up to 100")
+            merged[key] = float(value)
+        elif key == "sectors":
+            merged[key] = _validate_sectors(value)
         elif key in ("max_position_pct", "max_margin_pct", "max_weight_pct", "max_premium_usd"):
             top = MAX_ORDER_PCT if key == "max_position_pct" else (100 if key in ("max_weight_pct", "max_margin_pct") else 1e12)
             if not _is_number(value) or not 0 < value <= top:
@@ -140,6 +148,22 @@ def _validate_funding(value: Any) -> dict[str, Any]:
     return out
 
 
+MAX_SECTOR_ROOTS = 500
+
+
+def _validate_sectors(value: Any) -> dict[str, str]:
+    """The sector of each root (`{"AAPL": "technology"}`): names of 1 to 40 letters, digits, - and _, at most MAX_SECTOR_ROOTS roots."""
+    if not isinstance(value, Mapping) or not 1 <= len(value) <= MAX_SECTOR_ROOTS:
+        raise ValueError(f"sectors is an object with 1 to {MAX_SECTOR_ROOTS} roots")
+    out: dict[str, str] = {}
+    for root, sector in value.items():
+        if not isinstance(root, str) or not 1 <= len(root.strip()) <= 40 or not isinstance(sector, str) \
+                or not sector.replace("-", "").replace("_", "").isalnum() or not 1 <= len(sector) <= 40:
+            raise ValueError("a sector entry is a root of 1 to 40 characters and a sector name of 1 to 40 letters, digits, - and _")
+        out[root.strip().upper()] = sector.lower()
+    return out
+
+
 def _validate_windows(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list) or len(value) > MAX_EVENT_WINDOWS:
         raise ValueError(f"event_windows must be a list of at most {MAX_EVENT_WINDOWS} windows")
@@ -188,7 +212,7 @@ def _validate_meta(key: str, value: Any) -> Any:
 
 
 NUMERIC_LIMITS = ("max_order_pct", "max_daily_loss_pct", "max_orders_per_day")      # smaller is stricter; absent is off
-SMALLER_IS_STRICTER = ("max_position_pct", "max_drawdown_pct", "max_premium_usd", "max_margin_pct", "max_weight_pct")
+SMALLER_IS_STRICTER = ("max_position_pct", "max_drawdown_pct", "max_premium_usd", "max_margin_pct", "max_weight_pct", "max_symbol_pct", "max_sector_pct")
 LARGER_IS_STRICTER = ("cooldown_seconds", "capital_floor_usd")      # a longer pause and a higher floor are stricter; absent is off
 FLAG_LIMITS = {"assets_only": True, "options_allowed": False, "short_allowed": False, "extended_hours_allowed": False}
 # for a flag limit the value that turns it ON (assets_only is on when True; the three *_allowed are on when False)
@@ -236,6 +260,13 @@ def loosened_limits(before: Mapping[str, Any] | None, after: Mapping[str, Any] |
         was, now = old.get(key), new.get(key)
         if was is not None and (now is None or now < was):
             out.append(key)
+    old_sectors, new_sectors = old.get("sectors") or {}, new.get("sectors") or {}
+    cap_active = old.get("max_sector_pct") is not None or new.get("max_sector_pct") is not None
+    # moving a root to another sector, or out of the map, hides its weight from the cap; with a sector cap active a root that was not in
+    # the map is a loosening too (it enters a sector the owner did not choose): only the owner adds roots
+    if any(new_sectors.get(root) != sector for root, sector in old_sectors.items()) or \
+            (cap_active and any(root not in old_sectors for root in new_sectors)):
+        out.append("sectors")
     for fixed, steps_key, key in (("daily_loss_usd", "daily_loss_steps", "daily_loss"), ("trailing_drawdown_usd", "drawdown_steps", "drawdown")):
         if _loss_loosened(old, new, fixed, steps_key):
             out.append(steps_key if old.get(steps_key) or new.get(steps_key) else f"funding.{fixed}")

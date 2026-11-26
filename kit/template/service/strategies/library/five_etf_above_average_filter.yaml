@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-005 in .notices/THIRD_PARTY.txt
+id: "five_etf_above_average_filter"
+name: "Five asset class ETFs held only above their ten month average"
+ref: "LIB-005"
+asset_class: "multi_asset"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "Five ETFs: US stocks, foreign stocks, intermediate US bonds, listed real estate and broad commodities."
+signal: "Compare the last price with the simple average of the last 210 daily closes of the same ETF."
+entry: "Hold an ETF while its price is above its average."
+exit: "Move to cash when the price is below its average at the monthly check."
+sizing: "Equal weight among the ETFs that pass; the paper idea gives one fifth to each asset and keeps cash for the rest, which lowers risk in weak months."
+risk_note: "Whipsaw around the average costs spread; a monthly check keeps turnover low but delays exits."

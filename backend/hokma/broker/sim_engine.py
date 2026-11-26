@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 
 from hokma.broker import costs
+from hokma.contracts.ticks import tick_scheme
 from hokma.exec.money import ZERO, dec, round_to_tick
 
 DEFAULT_MAX_QUOTE_AGE = 15.0           # seconds: an older quote is not a price
@@ -118,11 +119,12 @@ def fresh(quote: Quote | None, now: float, max_age: float) -> bool:
     return quote is not None and now - quote.ts <= max_age and quote.side_price("buy") is not None
 
 
-def slipped(side: str, price: Decimal, slippage_bps: float, tick: Decimal | None) -> Decimal:
-    """Worse for the trader by the slippage, then on the grid of the tick (a buy rounds up, a sell down)."""
+def slipped(side: str, price: Decimal, slippage_bps: float, tick: Decimal | None, asset_type: str | None = None) -> Decimal:
+    """Worse for the trader by the slippage, then on the grid of the tick (a buy rounds up, a sell down). The grid is the scheme of the
+    contract at that price (`hokma.contracts.ticks`), the one the backtest reads."""
     bps = Decimal(str(slippage_bps)) / Decimal(10_000)
     raw = price * (1 + bps) if side == "buy" else price * (1 - bps)
-    return round_to_tick(raw, tick, direction="up" if side == "buy" else "down")
+    return round_to_tick(raw, tick_scheme(asset_type, raw, tick), direction="up" if side == "buy" else "down")
 
 
 def leg_commission(price: Decimal, qty: Decimal, multiplier: Decimal, cfg: Mapping[str, Any]) -> Decimal:
@@ -155,7 +157,7 @@ def fill_leg(leg: Mapping[str, Any], *, order_type: str, limit: Decimal | None, 
     ref = quote.side_price(side)
     if ref is None:
         raise Refused("no_market_price", f"{leg['contract_id']} has no price in the stream")
-    price = slipped(side, ref, slippage_bps, tick)
+    price = slipped(side, ref, slippage_bps, tick, leg.get("asset_type"))
     if order_type in ("limit", "stop_limit") and limit is not None:          # never worse than the limit
         price = min(price, limit) if side == "buy" else max(price, limit)
     commission = leg_commission(price, qty, multiplier, commission_cfg)

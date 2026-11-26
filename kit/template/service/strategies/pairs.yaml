@@ -1,0 +1,36 @@
+# Pairs trading. The pairs themselves come from the selection pipeline (a correlation prefilter, the cointegration test corrected for the number of
+# pairs tested, a half-life range, a Hurst bound and an economic reason); these entries are the spread alpha that trades a selected pair.
+# The view turns flat when the relationship breaks: a z-score past the extreme level, a failed monthly re-test or a corporate event.
+- id: pairs_spread_swc
+  kind: alpha
+  class: hokma.factory.alphas.pairs_pipeline.PairsSpread
+  line: SWC
+  description: Spread of a selected pair of CFDs with a least squares hedge ratio. Flat when the monthly re-test fails or a corporate event hits a leg.
+  params:
+    window: 60
+    entry_z: 2.0
+    exit_z: 0.5
+    stop_z: 4.0
+    time_stop_half_lives: 3.0
+    hedge: ols
+    use_retest: true
+    retest_alpha: 0.05
+    use_events: true
+    history: 250
+
+- id: pairs_spread_lp
+  kind: alpha
+  class: hokma.factory.alphas.pairs_pipeline.PairsSpread
+  line: LP
+  description: Spread of a selected pair of ETFs with a dynamic hedge ratio from the causal filter. Flat when the monthly re-test fails.
+  params:
+    window: 60
+    entry_z: 2.0
+    exit_z: 0.5
+    stop_z: 4.0
+    time_stop_half_lives: 3.0
+    hedge: kalman
+    use_retest: true
+    retest_alpha: 0.05
+    use_events: false
+    history: 250

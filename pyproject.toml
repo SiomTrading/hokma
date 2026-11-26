@@ -1,6 +1,6 @@
 [project]
 name = "hokma"
-version = "1.1.1"
+version = "1.2.0"
 description = "Hokma: installable harness by SiomTrading"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -46,6 +46,12 @@ dependencies = [
     # backend/hokma/broker/crypto.py.
     "alpaca-py==0.45.0",
     "ccxt==4.5.64",
+    # Backtest service (SPEC-020, H4). nautilus_trader is imported only in backend/hokma/backtest/_lib.py (LGPL-3.0, used as an
+    # installed library and never modified); optuna is imported only there too.
+    # The engine publishes no wheel for macOS Intel (5th required environment): there the marker leaves it out and the
+    # backtest answers engine_unavailable (SPEC-020 risk, reported to the owner). Its arm64 macOS wheel targets macOS 26.
+    "nautilus_trader==1.231.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "optuna==5.1.0",
 ]
 
 [project.scripts]

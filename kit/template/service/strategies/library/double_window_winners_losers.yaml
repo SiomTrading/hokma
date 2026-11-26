@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-011 in .notices/THIRD_PARTY.txt
+id: "double_window_winners_losers"
+name: "Stocks that were winners in two overlapping windows"
+ref: "LIB-011"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "every six months after a one month gap"
+universe: "The 500 most traded US stocks, real estate trusts excluded."
+signal: "Return from seven months ago to one month ago and return from six months ago to now. Rank both into deciles."
+entry: "Go long stocks in the top decile of both windows and short stocks in the bottom decile of both."
+exit: "Skip one month after the ranking, hold six months with no rebalancing, then rebuild."
+sizing: "Equal weight inside each leg."
+risk_note: "The intersection of two deciles can leave very few names; require a minimum count before trading."

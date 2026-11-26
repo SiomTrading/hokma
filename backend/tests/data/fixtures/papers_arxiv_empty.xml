@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title type="html">ArXiv Query: search_query=all:zzzz</title>
+  <id>http://arxiv.org/api/fixture-empty</id>
+  <updated>2024-04-10T00:00:00-04:00</updated>
+</feed>

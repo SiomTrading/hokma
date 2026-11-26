@@ -36,6 +36,237 @@ is included or loaded.
 
 ---
 
+Backtest engine (SPEC-020, block H4). Hokma's backtest service runs on the event driven trading engine Nautilus Trader 1.231.0
+(copyright Nautech Systems Pty Ltd), published under the GNU Lesser General Public License v3.0 or later (LGPL-3.0-or-later).
+The full license text is in the licenses folder of the installed package and at https://www.gnu.org/licenses/lgpl-3.0.txt.
+Source code of the library: https://github.com/nautechsystems/nautilus_trader
+
+How Hokma uses it, in line with the license:
+- The library is installed as a separate package with pip and is never modified: no file of the library is edited, copied or
+  redistributed inside Hokma. The student can replace it with another version of the same library at any time.
+- Everything that changes its behavior lives in Hokma's own code (backend/hokma/backtest/): the order of the ticks of a bar, the fill
+  rules, the costs and the switch-off in memory of its portfolio statistics. None of that code is a copy of the library.
+- Only one Hokma file imports the library (backend/hokma/backtest/_lib.py); the rest of Hokma reaches it through that wrapper.
+
+Brand rule: the name of the engine is not used in the interface of Hokma, in the kit or in any text the student reads. It appears
+only in pyproject.toml, uv.lock, backend/hokma/backtest/_lib.py and in this folder; scripts/check_repo_rules.py fails otherwise.
+
+Futures history data (SPEC-020, block B2). Contract properties, margin series, trading hours and expiration vectors under backend/hokma/contracts/data/ are public exchange facts transcribed from an Apache-2.0 licensed data set (https://www.apache.org/licenses/LICENSE-2.0); the values are data, no code was copied. See backend/hokma/contracts/data/SOURCES.txt.
+
+---
+
+Strategy ideas (SPEC-020, block B10a). The files under kit/template/service/strategies/ are Hokma's own recipes: new names, new words and
+Hokma's own parameters. Nothing is copied from the sources below; they gave the idea and the published setting, and the recipe says
+how Hokma tests it. A recipe points to its line here with a ref id. The numbers of a source are gross of costs; Hokma's backtest adds
+the costs.
+
+Sources: the public list of systematic strategies awesome-systematic-trading (no license file, so ideas only), the strategy summaries
+it points to, and the strategy files of the open project ai-hedge-fund (MIT License, ideas only).
+
+- idea-001: time series momentum. List entry time-series-momentum-effect (https://quantpedia.com/strategies/time-series-momentum-effect/). Basket of 24 commodity futures, 12 currency crosses, 9 equity indexes and 13 government bond futures; twelve month sign; size inverse to volatility; ten percent volatility target.
+- idea-002: asset class and sector rotation, paired switching. List entries asset-class-momentum-rotational-system, asset-class-trend-following, sector-momentum-rotational-system and paired-switching (pages https://quantpedia.com/strategies/asset-class-momentum-rotational-system/, https://quantpedia.com/strategies/asset-class-trend-following/, https://quantpedia.com/strategies/sector-momentum-rotational-system/ and https://quantpedia.com/strategies/paired-switching/).
+- idea-003: commodities. List entries term-structure-effect-in-commodities, momentum-effect-in-commodities, skewness-effect-in-commodities, return-asymmetry-effect-in-commodity-futures, trading-wti-brent-spread and short-term-reversal-with-futures (pages under https://quantpedia.com/strategies/ with the same names).
+- idea-004: calendar effects. List entries turn-of-the-month-in-equity-indexes, payday-anomaly, option-expiration-week-effect, january-barometer and market-sentiment-and-an-overnight-anomaly (pages under https://quantpedia.com/strategies/ with the same names).
+- idea-005: volatility risk premium and dispersion. List entries volatility-risk-premium-effect and dispersion-trading (pages under https://quantpedia.com/strategies/ with the same names).
+- idea-006: currencies. List entries fx-carry-trade, dollar-carry-trade, currency-momentum-factor and currency-value-factor-ppp-strategy (pages under https://quantpedia.com/strategies/ with the same names).
+- idea-007: pairs of country ETFs and stocks. List entries pairs-trading-with-country-etfs and pairs-trading-with-stocks (page https://quantpedia.com/strategies/pairs-trading-with-country-etfs/).
+- idea-008: macro readings as context. List entries fed-model and crude-oil-predicts-equity-returns (pages under https://quantpedia.com/strategies/ with the same names).
+- idea-009: value and momentum across asset classes. List entry value-and-momentum-factors-across-asset-classes (page https://quantpedia.com/strategies/value-and-momentum-factors-across-asset-classes/).
+- idea-010: crypto. List entries rebalancing-premium-in-cryptocurrencies and intraday-seasonality-in-bitcoin (pages under https://quantpedia.com/strategies/ with the same names).
+- idea-011: equity factors. List entries momentum-factor-effect-in-stocks, low-volatility-factor-effect-in-stocks, betting-against-beta-factor-in-stocks, 52-weeks-high-effect-in-stocks, accrual-anomaly, earnings-quality-factor, roa-effect-within-stocks, asset-growth-effect, combining-fundamental-fscore-and-equity-short-term-reversals, short-interest-effect-long-short-version, residual-momentum-factor, earnings-announcement-premium and reversal-during-earnings-announcements (pages under https://quantpedia.com/strategies/ with the same names).
+- idea-012: deep value. Strategy file deep-value of the project ai-hedge-fund (MIT License): a long biased value blend with a margin of safety. Hokma keeps only the idea of a screen on cheapness and writes its own criteria.
+- idea-013: fundamental long short. Strategy file fundamental-ls of the project ai-hedge-fund (MIT License): a market neutral sleeve that ranks the universe and takes both ends. Hokma writes its own ranks and leaves the dollar balance to its portfolio module.
+- idea-014: inflections. Strategy file inflections of the project ai-hedge-fund (MIT License): the change of a rate before the price reprices it. Hokma writes its own series and a window for each line.
+- idea-015: premium wheel. The options bot ThetaGang, listed in the trading bots table of awesome-systematic-trading: cash secured puts, then covered calls. Hokma writes its own recipe and always requires its premium switch.
+- idea-016: intraday bot skeleton. The trading bots Intelligent Trading Bot, TradeSight and PRISM-INSIGHT, listed in the trading bots table of awesome-systematic-trading: signals from features on short bars with a scan of several symbols. Hokma writes its own two legs from its own alphas.
+
+---
+
+Strategy library, edge table, reading list and table scripts (SPEC-020, block B10, AS-002 to AS-004, AS-018, AS-019, AS-021 to AS-023).
+The source is a public list of systematic trading resources (awesome-systematic-trading) that carries no license file, so nothing from it is copied: only
+the idea of each rule was read, and Hokma's text, names, YAML and code are written from scratch. The strategy files of that list are written for a cloud
+research platform (QuantConnect) and describe rules first described in published papers. The reference ids below are the ones used in the files of
+kit/template/service/strategies/library/ (LIB), in backend/hokma/factory/data/literature_edges.csv (LIT), in docs/research/reading-list.md (READ)
+and in scripts/factory_build_table.py (SCR).
+
+- READ-001: the book, video, blog and course lists of the same public list. Only titles and authors are listed; the affiliate parameters of its book links are removed and no link of a book is kept.
+- SCR-001: the scripts of the list that regenerate its strategy table and check its links. They were read for the idea (build a table from data, flag dead links). scripts/factory_build_table.py and .github/workflows/links.yml are written from scratch.
+- Blocked dependencies (backend/hokma/factory/data/blocked_dependencies.txt): the libraries that the list marks as dormant, archived or no longer available. Only their package names are stored, as data, so that a test can refuse them.
+
+Library rules (LIB). One line per source strategy file in the public list (static/strategies/), with the id of Hokma's own rewritten rule:
+- LIB-001: file "12-month-cycle-in-cross-section-of-stocks-returns" -> rule annual_lag_winner_decile
+- LIB-002: file "52-weeks-high-effect-in-stocks" -> rule industry_closeness_to_year_high
+- LIB-003: file "accrual-anomaly" -> rule low_accrual_quality_screen
+- LIB-004: file "asset-class-momentum-rotational-system" -> rule five_etf_top_three_rotation
+- LIB-005: file "asset-class-trend-following" -> rule five_etf_above_average_filter
+- LIB-006: file "asset-growth-effect" -> rule low_asset_growth_decile
+- LIB-007: file "betting-against-beta-factor-in-country-equity-indexes" -> rule low_beta_countries_long_short
+- LIB-008: file "betting-against-beta-factor-in-stocks" -> rule low_beta_stocks_long_short
+- LIB-009: file "combining-fundamental-fscore-and-equity-short-term-reversals" -> rule strong_fundamentals_one_month_reversal
+- LIB-010: file "combining-smart-factors-momentum-and-market-portfolio" -> rule factor_momentum_blend_with_market
+- LIB-011: file "consistent-momentum-strategy" -> rule double_window_winners_losers
+- LIB-012: file "crude-oil-predicts-equity-returns" -> rule oil_return_timing_of_equity_index
+- LIB-013: file "currency-momentum-factor" -> rule fx_twelve_month_winners_losers
+- LIB-014: file "currency-value-factor-ppp-strategy" -> rule fx_purchasing_power_value
+- LIB-015: file "dispersion-trading" -> rule index_put_sold_stock_puts_bought
+- LIB-016: file "dollar-carry-trade" -> rule dollar_carry_vs_basket
+- LIB-017: file "earnings-announcement-premium" -> rule volume_cluster_expected_announcers
+- LIB-018: file "earnings-announcements-combined-with-stock-repurchases" -> rule buyback_before_earnings_window
+- LIB-019: file "earnings-quality-factor" -> rule composite_earnings_quality_thirds
+- LIB-020: file "esg-factor-momentum-strategy" -> rule rating_upgrade_momentum
+- LIB-021: file "fed-model" -> rule yield_gap_equity_timing
+- LIB-022: file "fx-carry-trade" -> rule fx_rate_rank_carry
+- LIB-023: file "how-to-use-lexical-density-of-company-filings" -> rule filing_text_density_deciles
+- LIB-024: file "intraday-seasonality-in-bitcoin" -> rule btc_late_evening_two_hours
+- LIB-025: file "january-barometer" -> rule january_return_gate
+- LIB-026: file "low-volatility-factor-effect-in-stocks" -> rule calm_stocks_long_only
+- LIB-027: file "market-sentiment-and-an-overnight-anomaly" -> rule three_gate_overnight_equity
+- LIB-028: file "momentum-and-reversal-combined-with-volatility-effect-in-stocks" -> rule high_vol_momentum_spread
+- LIB-029: file "momentum-effect-in-commodities" -> rule commodity_twelve_month_quintiles
+- LIB-030: file "momentum-factor-and-style-rotation-effect" -> rule equity_style_etf_winner_loser
+- LIB-031: file "momentum-factor-combined-with-asset-growth-effect" -> rule momentum_inside_high_growth_firms
+- LIB-032: file "momentum-factor-effect-in-stocks" -> rule twelve_month_winners_losers_equities
+- LIB-033: file "momentum-in-mutual-fund-returns" -> rule fund_six_month_winners
+- LIB-034: file "option-expiration-week-effect" -> rule expiry_week_equity_exposure
+- LIB-035: file "paired-switching" -> rule quarterly_stock_bond_switch
+- LIB-036: file "pairs-trading-with-country-etfs" -> rule country_etf_distance_pairs
+- LIB-037: file "pairs-trading-with-stocks" -> rule stock_pairs_distance_bands
+- LIB-038: file "payday-anomaly" -> rule mid_month_pay_cycle_day
+- LIB-039: file "rd-expenditures-and-stock-returns" -> rule research_spend_to_value_quintiles
+- LIB-040: file "rebalancing-premium-in-cryptocurrencies" -> rule crypto_equal_weight_rebalance_spread
+- LIB-041: file "residual-momentum-factor" -> rule residual_return_momentum_deciles
+- LIB-042: file "return-asymmetry-effect-in-commodity-futures" -> rule commodity_tail_asymmetry_count
+- LIB-043: file "reversal-during-earnings-announcements" -> rule pre_earnings_three_day_reversal
+- LIB-044: file "roa-effect-within-stocks" -> rule profitability_split_by_size
+- LIB-045: file "sector-momentum-rotational-system" -> rule sector_etf_top_three
+- LIB-046: file "short-interest-effect-long-short-version" -> rule short_selling_ratio_deciles
+- LIB-047: file "short-term-reversal-in-stocks" -> rule weekly_loser_monthly_winner_reversal
+- LIB-048: file "short-term-reversal-with-futures" -> rule volume_oi_filtered_weekly_reversal
+- LIB-049: file "skewness-effect-in-commodities" -> rule commodity_skew_quintiles
+- LIB-050: file "small-capitalization-stocks-premium-anomaly" -> rule small_minus_big_quintiles
+- LIB-051: file "soccer-clubs-stocks-arbitrage" -> rule club_match_day_short
+- LIB-052: file "synthetic-lending-rates-predict-subsequent-market-return" -> rule borrow_cost_change_index_direction
+- LIB-053: file "term-structure-effect-in-commodities" -> rule commodity_roll_yield_quintiles
+- LIB-054: file "time-series-momentum-effect" -> rule sign_of_year_return_vol_scaled
+- LIB-055: file "trading-wti-brent-spread" -> rule crude_spread_mean_reversion
+- LIB-056: file "trend-following-effect-in-stocks" -> rule all_time_high_breakout_with_stop
+- LIB-057: file "turn-of-the-month-in-equity-indexes" -> rule month_turn_hold
+- LIB-058: file "value-and-momentum-factors-across-asset-classes" -> rule twelve_vehicle_value_momentum_rank
+- LIB-059: file "value-book-to-market-factor" -> rule cheap_versus_dear_book_value
+- LIB-060: file "value-factor-effect-within-countries" -> rule cheap_country_cape_third
+- LIB-061: file "volatility-risk-premium-effect" -> rule straddle_sale_with_crash_put
+
+Literature edges (LIT). The Sharpe ratio, t statistic and years tested of backend/hokma/factory/data/literature_edges.csv are the figures of the replication table of the same list. Per its own note they are measured on each strategy's own active window and are gross of trading costs, so Hokma stores them marked gross and never derives a net value. Each reference is the title of the published paper as written in that table:
+- LIT-001: A Study Of Differences In Returns Between Large And Small Companies In Europe
+- LIT-002: The Investment CAPM
+- LIT-003: Important Characteristics, Weaknesses and Errors in German Equity Data from Thomson
+- LIT-004: The Role of Beta and Size in the Cross-Section of European Stock Returns
+- LIT-005: Systematic Abnormal Return Variation and Global Market Inefficiencies
+- LIT-006: Value and Size Effect: Now You See It, Now You Don’t
+- LIT-007: Properties of the Most Diversified Portfolio
+- LIT-008: Understanding Momentum and Reversal?
+- LIT-009: Fact, Fiction, and the Size Effect
+- LIT-010: The cross-section of returns in frontier equity markets: Integrated or segmented pricing?
+- LIT-011: Analytical Solution for Kelly’s Criterion for Multiple Outcomes
+- LIT-012: End-To-End Large Portfolio Optimization For Variance Minimization With Neural Networks Through Covariance Cleaning
+- LIT-013: Statistical and Economic Benefits of Whitening Residuals in Bond Yields
+- LIT-014: Dynamic Risk-Aware Yield Search: A Useful Tool for Fixed Income Investors
+- LIT-015: Out-performing corporate bonds indices with factor investing
+- LIT-016: Priced risk in corporate bonds
+- LIT-017: Sitting Bucks: Stale Pricing in Fixed Income Funds
+- LIT-018: Frontier and Emerging Government Bond Markets
+- LIT-019: Regime-based portfolio optimisation:  A Hidden Markov Model approach for fixed  income portfolios
+- LIT-020: Price Effects of Sovereign Debt Auctions in the Euro-zone: The Role of the Crisis
+- LIT-021: Are Bond Returns Predictable with Real-Time Macro Data?
+- LIT-022: Trading the Term Premium
+- LIT-023: Banks’ exposure to interest rate risk, their earnings from term transformation, and the dynamics of the term structure
+- LIT-024: Predictable End-of-Month Treasury Returns
+- LIT-025: How to Improve Commodity Momentum Using Intra-Market Correlation
+- LIT-026: Long-Run Reversal in Commodity Returns: Insights from Seven Centuries of Evidence
+- LIT-027: Rolling vs. Expanding Windows in Mean-Reversion Strategies: Evidence from Gold-Silver and Cross-Asset Validation
+- LIT-028: Good Carry, Bad Carry
+- LIT-029: The Time-Varying Systematic Risk of
+- LIT-030: Lessons from the Evolution of Foreign Exchange Trading Strategies
+- LIT-031: Optimal Currency Shares In International Reserves The Impact Of The Euro And The Prospects For The Dollar
+- LIT-032: How to Design a Simple Multi-Timeframe Trend Strategy on Bitcoin
+- LIT-033: ‘Know When to Hodl ‘Em, Know When to Fodl ‘Em’: An Investigation of Factor Based Investing in the Cryptocurrency Space
+- LIT-034: Seasonality, Trend-following, and Mean reversion in Bitcoin
+- LIT-035: Do Risk Preferences Drive Momentum in Cryptocurrencies?
+- LIT-036: The Blockchain Risk Parity Line: Moving From The Efficient Frontier To The Final Frontier Of Investments
+- LIT-037: Price Overreactions in the Cryptocurrency Market
+- LIT-038: Proof-of-What? Detecting original consensus algorithms in cryptocurrencies with a four-factor model
+- LIT-039: Cryptocurrency as money: A trading strategy solution
+- LIT-040: Media Tone Goes Viral: Global Evidence from the Currency Market
+- LIT-041: Robust Portfolio Optimization with Value-At-Risk Adjusted Sharpe Ratios
+- LIT-042: When Factor Timing Makes Sense
+- LIT-043: Rational Decision-Making Under Uncertainty: Observed Betting Patterns on a Biased Coin
+- LIT-044: Can Financial Innovation Succeed by Catering to Behavioral Preferences? Evidence from a Callable Options Market
+- LIT-045: A Theory of Model Sophistication and Operational Risk
+- LIT-046: Tail-Risk Protection Trading Strategies
+- LIT-047: Is Media Tone just a Tone? Time-Series and Cross-Sectional Evidence from the Currency Market
+- LIT-048: The Temporal Pattern of Trading Rule Returns and Central Bank Intervention: Intervention Does Not Generate Technical Trading Rule Profits
+- LIT-049: Arbitrage in the Foreign Exchange Market: Turning on the Microscope
+- LIT-050: Optimal Annuity Risk Management
+- LIT-051: Explaining low annuity demand: an optimal portfolio application to Japan
+- LIT-052: Diverging roads: Theory-based vs. machine learning-implied stock risk premia
+- LIT-053: The Anomalous Behavior of the S&P Covered Call Closed End Fund
+- LIT-054: Any role for mean reversion in short term asset
+- LIT-055: Inconsistent investment and consumption problems
+- LIT-056: Heuristic Portfolio Rules with Labor Income
+- LIT-057: Investing for the Long-Run in European Real Estate
+- LIT-058: Regime-Aware Risk Management in Concentrated Equity Portfolios: Evidence from the Magnificent Seven
+- LIT-059: Are Heuristics Better than Theory if Market Crashes Are
+- LIT-060: Risk Parity Portfolios with Risk Factors
+- LIT-061: A Risk Based Approach to Tactical Asset Allocation
+
+Backtest engine ideas (SPEC-020, AS-005, B-49). Idea references for docs/backtest/engine-choice.md. Nothing from these projects is copied, imported or installed by Hokma. The letters of that page map as follows. The licenses are the ones their repositories state; the measurements are those of the internal engine comparison of 2026-11-17 and 2026-11-18.
+- Candidate A: backtesting.py, AGPL-3.0, measured.
+- Candidate B: vectorbt, Apache-2.0 with the Commons Clause, measured.
+- Candidate D: Lean, Apache-2.0, evaluated by reading its code.
+- Candidate E: pysystemtrade, GPL-3.0, evaluated by reading its code.
+- Listed in the index of the factory and not measured (commit dates not verified): vnpy, HFTBacktest, PyBroker, qf-lib, bt, PineForge.
+
+Strategy research skills and studies (SPEC-020, block B11a: ECT-006, ECT-036, ECT-052 to ECT-055, ECT-069, CTS-018). Ideas only, rewritten in English in the words of Hokma; no text, code or value is copied. The licenses are the ones the repositories state.
+- everything-claude-trading, MIT: the backtesting engineer agent, and the skills alpha-research, trend-following, mean-reversion, momentum-strategies, pairs-trading and feature-engineering. The numbers of their worked examples were recomputed and the faulty ones corrected in the Hokma files.
+- claude-trading-skills, MIT: the stockbee-20pct-study skill (the idea of the daily study of 20 percent movers, its horizons and its survivorship flag).
+
+---
+
+Recipes (SPEC-020, block B7: B-38, B-39, B-40, V-26, FT-102, AS-014, AS-015). The files under kit/template/service/strategies/recipes/ are Hokma's own text and code,
+written in English from the idea of each source. Nothing is copied: the code of every recipe is new, calls only the modules of Hokma and runs against the real fixtures of
+the tests. A recipe points to its source here with a ref id. The licenses are the ones the repositories state. The example folder of the vectorbt project also holds a notebook that
+pushes signals to a messaging group: it was read in full and no recipe is made from it, because Hokma does not publish or sell signals.
+- rec-001: multi-timeframe. The backtesting.py example "Multiple Time Frames" (AGPL-3.0, no code used): reading the RSI of a slower frame from a strategy of a faster one. Hokma writes its own frames with the closed bar rule of factory/timeframes.py.
+- rec-002: optimize-and-surface. The backtesting.py example "Parameter Heatmap & Optimization" (AGPL-3.0, no code used): a grid search and a heat map of two parameters. Hokma adds the trial ledger and the deflated Sharpe ratio.
+- rec-003: signal-plus-exit. The backtesting.py example "Strategies Library" (AGPL-3.0, no code used): an entry signal combined with a trailing exit. Hokma adds the hard stop of the order and the time limit.
+- rec-004: stop-exit-study. The vectorbt example StopSignals and the article it accompanies (Apache-2.0 with the Commons Clause, no code used): stop loss, trailing stop, take profit, random exit and holding over many windows.
+- rec-005: pairs-spread-zscore. The vectorbt example PairsTrading (Apache-2.0 with the Commons Clause, no code used): the z-score of the rolling regression spread of two assets and its two signals.
+- rec-006: macd-parameter-cube. The vectorbt example MACDVolume (Apache-2.0 with the Commons Clause, no code used): a grid of three MACD lengths over time ranges. The word volume in its name is the volume of a 3D chart, not trading volume.
+- rec-007: parity-check. The vectorbt example PortingBTStrategy (Apache-2.0 with the Commons Clause, no code used): comparing the same rule in two implementations, signals first and then fills and costs.
+- rec-008: weight-search-portfolio. The vectorbt example PortfolioOptimization (Apache-2.0 with the Commons Clause, no code used): a random search of portfolio weights and a rebalance rule, compared with an optimizer.
+- rec-009: moving-average-heatmap. The vectorbt examples BitcoinDMAC and the crypto part of PortingBTStrategy (Apache-2.0 with the Commons Clause, no code used): a dual moving average on a grid of lengths against holding and against random trading.
+- rec-010: risk-report. The FinanceToolkit example notebook "Risk Module" (MIT, no code used): value at risk, expected shortfall, drawdown measures, volatility and the idea of testing the value at risk model.
+- rec-011: risk-adjusted-performance. The FinanceToolkit example notebook "Performance Module" (MIT, no code used): Sharpe, Sortino, Treynor, alpha, the capital asset pricing model, rolling ratios and factor exposures.
+- rec-012: period-statistics. The FinanceToolkit example notebooks "README Examples" and "Getting Started" (MIT, no code used): period views, growth against a lag, trailing, rolling and standardized figures.
+- rec-013: universe-screen. The FinanceToolkit example notebook "Discovery Module" (MIT, no code used): screening a universe and listing gainers, losers and the most active.
+- rec-014: regime-filter. The volatility and Hurst exponent parts of the FinanceToolkit example notebook "Risk Module" (MIT, no code used): a volatility that reacts to recent returns and a test of trending against mean reverting.
+- rec-015: statistical-tests. The FinanceToolkit example notebook "Econometrics Module" (MIT, no code used): regression, residual checks, Granger causality, unit roots and cointegration.
+- rec-016: ledger-pnl. The FinanceToolkit example notebook "Portfolio Module" (MIT, no code used): from a list of transactions to positions and profit and loss by first in first out, last in first out and average cost.
+- rec-017: own-data-adapter. The FinanceToolkit example notebook "Using External Datasets" (MIT, no code used): feeding the tools from your own data with the dates in the right order and the names mapped once.
+- rec-018: ml-signal. The index of machine learning projects of the plan (AI Hedge Fund, Qlib, FinGPT, Machine Learning for Trading, Qbot, FinRL and AlphaGen) and the backtesting.py example "Trading with Machine Learning" (AGPL-3.0). Ideas only; several of these projects state no license, so nothing is copied or installed. Hokma writes its own labels, features and walk forward.
+- rec-019: time-series-forecast. The index of time series libraries of the plan (Prophet, statsmodels, tsfresh and pmdarima). Ideas only: the forecasts of Hokma come from its own statistics module and are judged against simple baselines.
+- rec-020: fundamental-ratios. The FinanceToolkit example notebook "Ratios Module" (MIT, no code used): the five families of ratios, growth, trailing and custom ratios.
+- rec-021: valuation-scores. The FinanceToolkit example notebook "Models Module" (MIT, no code used): DuPont, enterprise value, discounted cash flow, and the Altman, Piotroski and Beneish scores.
+- rec-022: option-greeks. The FinanceToolkit example notebook "Options Module" (MIT, no code used): Black-Scholes and binomial prices, greeks across strikes and expirations, option chains and implied volatility.
+- rec-023: indicator-panel. The FinanceToolkit example notebook "Technicals Module" (MIT, no code used): overlap, momentum, volatility and breadth indicators.
+- rec-024: macro-context. The FinanceToolkit example notebook "Economics Module" (MIT, no code used): growth, inflation, unemployment, rates, confidence and house prices as context, with rolling and trailing windows.
+- rec-025: bond-statistics. The FinanceToolkit example notebook "Fixed Income Module" (MIT, no code used): bond price, yield, duration and convexity, derivative pricing, curves, spreads and central bank rates.
+
+Broker commission tables (SPEC-020, L-16 and L-17: backend/hokma/broker/fees/). The amounts are public prices of each broker (per contract, per share, per order or a share of the value). They were read from
+the fee models of the Lean project (Apache-2.0), which cite the public price list of each broker; no code of that project is used, and the tables are plain data in Hokma's own JSON format. Each table
+says in its header the source and the date it was read (2026-11-22), that it was not yet checked against a real statement, and which parts of the price list it leaves out. Interactive Brokers futures, stocks, options and CFDs:
+ibkr_futures, ibkr_micro_futures, ibkr_stocks, ibkr_options and ibkr_cfd. Alpaca (stocks, options and crypto), Coinbase Advanced and Kraken Pro (crypto), Tastytrade and TradeStation: one table each.
+
 Derivative pricing (SVC-options, SPEC-019 block B1; recipe in docs/quant/options-pricing.md). The recipe and the code are Hokma's own; nothing is copied.
 The models follow their published papers, cited here as the origin of the formulas: Black and Scholes (1973) and Merton (1973) for the option price with a
 dividend yield; Garman and Kohlhagen (1983) for currency options; Cox, Ross and Rubinstein (1979), Jarrow and Rudd (1983), Tian (1993) and Leisen and Reimer
@@ -49,3 +280,52 @@ Replication statistics (SPEC-019 block B9, rule "realistic expectations" of the 
 The figures it quotes (a median Sharpe ratio of 0.37 and 48 percent of results with a t statistic above 1.96, out of 4,843 academic papers coded and run) are
 self-declared by the maintainer of a public index of replicated academic trading results. They have not been verified here and carry medium confidence.
 Hokma uses them only as a prior for the judge, never as a threshold.
+
+---
+
+Libraries under the GNU Lesser General Public License v3 (SPEC-020, block H4, task 3324). Hokma uses three more libraries published under the LGPL-3.0, in the same way as the backtest engine above:
+- psycopg 3.3.8 and psycopg-binary 3.3.8 (LGPL-3.0-only; author Daniele Varrazzo; https://psycopg.org/). Used by backend/hokma/db/postgres.py and db/probe.py for the connection to PostgreSQL.
+- python-telegram-bot 22.8 (LGPL-3.0-only, offered by its author Leandro Toledo under GPL-3.0 or LGPL-3.0; Hokma uses it under the LGPL-3.0; https://github.com/python-telegram-bot/python-telegram-bot). Used by backend/hokma/telegram/.
+- portion 2.6.3 (LGPL-3.0-or-later; author Alexandre Decan; https://github.com/AlexandreDecan/portion). A dependency of the backtest engine; Hokma's own code does not import it.
+The full text of the LGPL-3.0 and of the GPL-3.0 it refers to are in legal/licenses/LGPL-3.0.txt and legal/licenses/GPL-3.0.txt. As with the engine: each one is installed as a separate package with uv, is never modified, no file of it is copied or redistributed inside Hokma, and the student can replace it with another version of the same package. Source code at the addresses above.
+
+---
+
+Libraries under the Mozilla Public License 2.0 (SPEC-020, block H4, task 3324). Used without modification and installed as separate packages; MPL-2.0 applies per file and the source code of each one is public at the address given. Full text: legal/licenses/MPL-2.0.txt.
+- certifi 2026.10.23: MPL-2.0, Kenneth Reitz (author named in its metadata), https://github.com/certifi/python-certifi
+- orjson 3.13.0: MPL-2.0 AND (Apache-2.0 OR MIT), ijl, copyright 2018 - 2026, https://github.com/ijl/orjson
+- tqdm 4.70.1: MPL-2.0 AND MIT, Casper da Costa-Luis 2015-2026 (MPL-2.0 files), Noam Yorav-Raphael 2013 and Google Inc. 2016 (MIT files), https://tqdm.github.io
+
+---
+
+Futures history data, notice of the Apache License 2.0 (SPEC-020, block B2, task 3324). This completes the paragraph "Futures history data" above. The data set is the public data files of the Lean project, Copyright 2014 QuantConnect, published under the Apache License, Version 2.0 (full text in legal/licenses/Apache-2.0.txt and at https://www.apache.org/licenses/LICENSE-2.0). The files under backend/hokma/contracts/data/ carry values transcribed by a script into Hokma's own CSV files; the values were checked against exchange specifications. No source code of that project is included. No NOTICE file of that project was found. The license text, as Apache-2.0 requires, travels with Hokma in legal/licenses/Apache-2.0.txt.
+
+---
+
+Prompt injection detector of the strategy creator (SPEC-030, backend/hokma/sources/injection.py). The five base rules (instruction override, system prompt
+exfiltration, role or channel claim, secret exfiltration and tool abuse), their severities, and the neutralization of chat template control tokens with a
+zero width space are adapted from the file agent/src/security/scanner.py of the open source project Vibe-Trading
+(https://github.com/HKUDS/Vibe-Trading), commit 2134f408b1cd715c74fa8c5021f4402d50b00ea8, published under the MIT License. Hokma adds the patterns in Spanish,
+the rule trade_instruction, one finding per rule, a ceiling on the time of a scan and its own tests. The license of that project follows:
+
+MIT License
+
+Copyright (c) 2026 Vibe-Trading Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

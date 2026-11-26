@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-037 in .notices/THIRD_PARTY.txt
+id: "stock_pairs_distance_bands"
+name: "Closest stock pairs traded when the spread stretches"
+ref: "LIB-037"
+asset_class: "equities"
+lines: [LP, SWC]
+horizon: "days"
+rebalance: "daily monitoring, pairs re-picked yearly"
+universe: "The 500 most traded US stocks above 5 dollars."
+signal: "Normalise each price to its start over a 252 day formation window. Pair distance is the sum of squared differences between two normalised series. Keep the 20 closest pairs. The spread is the difference of the normalised series."
+entry: "Open a pair when the spread is more than two standard deviations (of the formation spread) from its mean: long the cheaper stock, short the dearer. At most 5 pairs at once."
+exit: "Close the pair when the spread is back inside the band; close all pairs when the pairs are re-picked."
+sizing: "One fifth of equity per pair, equal amounts on both legs."
+risk_note: "Pairs found only by distance drift apart when a company event hits one leg; add a stop on the spread and a maximum holding time."

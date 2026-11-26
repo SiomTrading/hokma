@@ -1,0 +1,13 @@
+# Premium wheel: sell cash secured puts while the account holds no lot of the underlying, then covered calls once it holds one.
+# It sells option premium, so it always requires the premium switch of the desk. Its backtest runs; a desk cannot send it while
+# the switch is closed. The threshold is a grid value for the backtest: a desk uses the calibrated threshold.
+- id: premium_wheel_swo
+  kind: alpha
+  class: hokma.factory.alphas.premium_wheel.PremiumWheel
+  line: SWO
+  description: Premium selling wheel on one underlying. The view grows when implied volatility is rich against realized volatility. Requires the premium switch. ref idea-015
+  params:
+    threshold: 1.2
+    cap: 0.6
+    lot: 100
+    requires_premium_switch: true

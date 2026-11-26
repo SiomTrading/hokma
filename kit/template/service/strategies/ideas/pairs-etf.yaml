@@ -1,0 +1,42 @@
+id: pairs_etf
+title: Pairs of country ETFs and of stocks
+ref: idea-007
+lines: [SWC, LP]
+asset_classes: [etf, equity, cfd]
+requires_premium_switch: false
+requires_event_study: false
+summary: >-
+  Two assets that moved together tend to come back together. Over a formation window every pair of a universe is measured by
+  how far apart their normalized price paths are; the closest pairs are traded for a short period. A pair opens when the gap
+  is wide against its own history and closes when the gap closes or the time is up. The selection must be corrected for the
+  number of pairs tested, because with enough pairs some always look good.
+needs: []
+data: [close]
+variants:
+  - line: LP
+    sleeve: country ETFs
+    vehicle: about twenty country ETFs
+    alpha: pairs_correlation
+    params: {window: 120, min_corr: 0.7, entry_z: 0.5}
+    rebalance: daily
+    rules:
+      - Formation window of 120 days; keep the five closest pairs for the next 20 trading days.
+      - Open when the gap is wider than half its historical deviation; close on convergence or after 20 days.
+      - The selection goes through the multiple testing correction of the factory pipeline.
+  - line: LP
+    sleeve: stocks
+    vehicle: stocks of one sector
+    alpha: pairs_correlation
+    params: {window: 60, min_corr: 0.8, entry_z: 2.0}
+    rebalance: daily
+    rules:
+      - Same pipeline on stocks of one sector; close a pair at once if one leg has a corporate event.
+      - Pairs need borrowable shares on the short leg; if the broker cannot lend them the pair is dropped.
+  - line: SWC
+    sleeve: CFD pairs
+    vehicle: CFDs of related instruments
+    alpha: pairs_correlation
+    params: {window: 60, min_corr: 0.7, entry_z: 2.0}
+    rebalance: daily
+    rules:
+      - Both legs are CFDs of the same broker, so both pay financing, which costs.cfd_swap includes in the backtest.

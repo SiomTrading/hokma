@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from account_links_support import link_principal
-from dbsupport import db, env  # noqa: F401  (fixtures)
+from dbsupport import db, env, take_back_the_migrations_after_0033  # noqa: F401  (fixtures)
 from desks_support import desks_db, make_desk  # noqa: F401  (fixtures)
 from exec_support import NQ, SPY, proposal, ready  # noqa: F401  (fixtures)
 from test_desk_rules import OWNER
@@ -423,6 +423,7 @@ def test_the_session_table_has_no_columns_of_prices_and_the_way_back_of_0031_res
     from hokma.db import db_path
     from hokma.db.migrate import current_version
 
+    take_back_the_migrations_after_0033(db_path())
     con = sqlite3.connect(db_path())
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     cols = _columns(con, "account_live_session")
@@ -440,6 +441,7 @@ def test_the_way_back_of_0028_drops_its_two_tables(env, db):
 
     from hokma.db import db_path
 
+    take_back_the_migrations_after_0033(db_path())
     assert rollback_0033(db_path()) == 32 and rollback_0032(db_path()) == 31 and rollback_0031(db_path()) == 30
     assert rollback_0030(db_path()) == 29 and rollback_0029(db_path()) == 28
     assert rollback_0028(db_path()) == 27

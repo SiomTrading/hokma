@@ -1,0 +1,35 @@
+{
+ "broker": "alpaca",
+ "currency": "USD",
+ "reference": "Alpaca, per side: no commission on stocks, ETFs and options; crypto charges 0.25 percent for an order that takes liquidity (rule crypto) and 0.15 percent for an order that adds it (rule crypto_maker), the first volume tier. Read from the fee schedule of the broker on 2026-11-22; not yet checked against a real statement. Regulatory fees on sales are not included, and the broker charges the crypto fee in the base currency on a buy: the table takes it on the trade value, which is the same amount.",
+ "source": "Alpaca public crypto fee page (fee schedule read on 2026-11-22).",
+ "checked_on": "2026-11-22",
+ "verified_against_broker": false,
+ "omitted": [
+  "regulatory fees on stock sales",
+  "crypto volume tiers",
+  "option contract regulatory fees"
+ ],
+ "rules": {
+  "equity": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "etf": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "option": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "crypto": {
+   "kind": "bps",
+   "value": "25"
+  },
+  "crypto_maker": {
+   "kind": "bps",
+   "value": "15"
+  }
+ }
+}

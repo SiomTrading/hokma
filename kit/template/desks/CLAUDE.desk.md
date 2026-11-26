@@ -21,6 +21,10 @@ waits for the owner's approval. Nothing in this folder can change that.
 The capital is the amount the desk may commit in its account. An order that would open or increase exposure past it
 waits for the owner. Closing or reducing a position is always allowed.
 
+## Strategies
+
+The agents that write strategies as code serve every desk. What they create from this desk is registered in this desk, and the bank shows every strategy with the place where it was created.
+
 ## Team
 
 The desk's agents and the model each one uses are set on the desk's Agents tab, not here. The

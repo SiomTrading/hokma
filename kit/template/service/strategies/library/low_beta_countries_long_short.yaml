@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-007 in .notices/THIRD_PARTY.txt
+id: "low_beta_countries_long_short"
+name: "Low beta versus high beta country ETFs"
+ref: "LIB-007"
+asset_class: "equities"
+lines: [LP]
+horizon: "months"
+rebalance: "monthly"
+universe: "Twenty three single country equity ETFs, with a broad US equity ETF as the market reference."
+signal: "Beta of each country ETF to the market reference using the last 252 daily returns. Split the group at the median beta."
+entry: "Go long the low beta half and short the high beta half."
+exit: "Rebuild monthly."
+sizing: "Weights inside a leg grow with the distance of the beta from the median. Each leg is scaled so its beta is one (leverage equals one over the average leg beta, capped at 5), which gives a market neutral book."
+risk_note: "Leverage needed to equalise betas can be large; the cap and the financing cost must be in the cost model."

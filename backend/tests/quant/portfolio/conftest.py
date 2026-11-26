@@ -11,7 +11,7 @@ import pytest
 from hokma.quant import registry
 
 SHARED = Path(__file__).resolve().parents[1] / "fixtures"
-PORTFOLIO_MODULES = ("container", "optimize", "priors", "factors", "uncertainty", "preselect", "alpha", "weights", "ic", "blend")
+PORTFOLIO_MODULES = ("container", "optimize", "priors", "factors", "uncertainty", "preselect", "alpha", "weights", "ic", "blend", "forecasts", "overlay")
 
 
 @pytest.fixture(autouse=True)

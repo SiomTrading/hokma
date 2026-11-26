@@ -191,6 +191,8 @@ def registration_intact(text: str, protect: list[str] | None = None) -> bool:
             return False
         found = set()
         extra = False
+        known = ("hardblock.py", "guard.py", "creator_gate.py")
+        required = {"hardblock", "guard"} | ({"creator"} if protect and any(os.path.basename(p) == "creator_gate.py" for p in protect) else set())
         for group in data["hooks"]["PreToolUse"]:
             matcher = group.get("matcher", "")
             for hook in group.get("hooks", []):
@@ -200,15 +202,16 @@ def registration_intact(text: str, protect: list[str] | None = None) -> bool:
                     continue
                 before = len(found)
                 for key, name, wanted in (("hardblock", "hardblock.py", matcher == ".*"),
-                                          ("guard", "guard.py", "Edit" in matcher and "Write" in matcher)):
+                                          ("guard", "guard.py", "Edit" in matcher and "Write" in matcher),
+                                          ("creator", "creator_gate.py", "Edit" in matcher and "Write" in matcher and "strategy_code_verdict" in matcher)):
                     script = _script_of(command, name)
                     if script and wanted and (protect is None or under_any(script, protect)):
                         found.add(key)
                 if len(found) == before and not any(
                         _script_of(command, n) and (protect is None or under_any(_script_of(command, n), protect))
-                        for n in ("hardblock.py", "guard.py")):
+                        for n in known):
                     extra = True            # a hook that is not one of ours
-        return found == {"hardblock", "guard"} and not extra
+        return required <= found <= {"hardblock", "guard", "creator"} and not extra
     except (KeyError, TypeError, AttributeError, ValueError):
         return False
 

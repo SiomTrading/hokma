@@ -1,0 +1,15 @@
+# Strategy rule written from scratch. Reference: LIB-051 in .notices/THIRD_PARTY.txt
+id: "club_match_day_short"
+name: "Short listed football clubs before big matches"
+ref: "LIB-051"
+asset_class: "equities"
+lines: [SWC]
+horizon: "days"
+rebalance: "event driven, daily"
+universe: "Ten listed football clubs on European and US exchanges."
+signal: "Calendar rule: a club plays a major match the next day, from a match calendar."
+entry: "Sell short the club shares at the close of the day before the match."
+exit: "Cover at the next close."
+sizing: "Equal weight among the clubs with a match that day."
+risk_note: "Illiquid shares, borrow cost and a small number of events: a research idea until an event study with costs supports it."
+requires_event_study: true

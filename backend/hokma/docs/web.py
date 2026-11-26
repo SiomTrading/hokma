@@ -433,6 +433,40 @@ def download(url: str, title: str | None = None, *, resolver: Resolver | None = 
     return name, data, opened.url
 
 
+@dataclass(frozen=True)
+class Page:
+    """What a link gave back (SPEC-030): `kind` is `html` (`html` holds the bytes read, at most 5 MB, and `title` the page title) or `pdf`
+    (nothing was read: the caller downloads the document). `url` is the final address after the redirects."""
+
+    kind: str
+    url: str
+    html: bytes = b""
+    title: str | None = None
+
+
+def fetch_page(url: str, *, resolver: Resolver | None = None, connector: Connector | None = None) -> Page:
+    """The page behind a link, with the same rules as every other fetch here (public addresses only, 5 redirects, 20 seconds, 5 MB of HTML, a
+    second between requests to one host). A link to a PDF comes back as `kind="pdf"` without being read; anything that is neither a page nor
+    a PDF is `link_not_document`. 401, 403 and 429 are `link_blocked`."""
+    _pace(check_url(url)[1])
+    opened = _open(url, resolver, connector)
+    declared = _declared(opened)
+    if declared not in HTML_TYPES:
+        head = _read(opened, 16, strict=False)
+        if declared == "application/pdf" or _looks_pdf(head):
+            return Page("pdf", opened.url)
+        raise LinkError("link_not_document", 422, "not_a_document")
+    raw = _read(opened, MAX_HTML_BYTES, strict=False)
+    if _looks_pdf(raw):
+        return Page("pdf", opened.url)
+    try:
+        html = raw.decode(_charset(opened), errors="replace")
+    except LookupError:
+        html = raw.decode("utf-8", errors="replace")
+    title, _items = parse_page(html, opened.url)
+    return Page("html", opened.url, raw, (title or None))
+
+
 _ADD_REASONS = {"doc_duplicate": "duplicate", "doc_unsupported": "not_a_document", "doc_too_large": "too_large"}
 
 

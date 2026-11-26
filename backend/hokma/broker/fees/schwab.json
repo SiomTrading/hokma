@@ -1,0 +1,19 @@
+{
+ "broker": "schwab",
+ "currency": "USD",
+ "reference": "Public price list of the broker, per side. Exchange and regulatory fees are not included. Check it against the real account statement.",
+ "rules": {
+  "equity": {
+   "kind": "per_order",
+   "value": "0"
+  },
+  "option": {
+   "kind": "per_contract",
+   "value": "0.65"
+  },
+  "future": {
+   "kind": "per_contract",
+   "value": "2.25"
+  }
+ }
+}

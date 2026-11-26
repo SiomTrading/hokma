@@ -52,6 +52,9 @@ NAN_CALLS = {
     "options.structure_matrix": {"direction": "sideways", "vol_view": "flat"}, "options.classify_structure": {"legs": []},
     "options.structure_profile": {"structure": "long_call", "strikes": [NAN], "premiums": [1.0], "quantity": 1, "multiplier": 100},
     "options.management_plan": {"structure": "long_call", "net_premium_usd": NAN, "max_profit_usd": 1.0, "max_loss_usd": 1.0, "days_to_expiration": 5.0, "equity_usd": 1000.0},
+    "options.strategy_margin": {"legs": [LEG], "multiplier": NAN, "spot": 100.0},
+    "options.match_structure": {"legs": []},
+    "options.assignment_risk": {"legs": [], "spot": 100.0, "as_of": "2026-11-20T15:30:00-05:00", "rate": 0.03},
     "options.profit_probability": {"structure": "long_call", "strikes": [100.0], "premiums": [NAN], "quantity": 1, "multiplier": 100, "spot": 100.0, "volatility": 0.3,
                                    "time_to_expiration": 0.25},
     "options.strategy_cards": {"rows": [], "spot": NAN, "view": "bullish", "expiration": "2026-12-25", "years": 0.1, "multiplier": 100},
@@ -103,7 +106,7 @@ def test_only_the_lib_file_imports_restricted_libraries_and_no_file_has_an_em_da
     restricted = {"scipy", "financetoolkit", "yfinance", "statsmodels", "skfolio"}
     for path in OPTIONS_DIR.glob("*.py"):
         text = path.read_text(encoding="utf-8")
-        assert "—" not in text, path.name
+        assert "\u2014" not in text, path.name
         if path.name == "_lib.py":
             continue
         for node in ast.walk(ast.parse(text)):

@@ -1,0 +1,14 @@
+# Strategy rule written from scratch. Reference: LIB-055 in .notices/THIRD_PARTY.txt
+id: "crude_spread_mean_reversion"
+name: "Crude oil spread against its 20 day average"
+ref: "LIB-055"
+asset_class: "commodities"
+lines: [SWC]
+horizon: "days"
+rebalance: "daily"
+universe: "Two crude oil futures: the US benchmark and the Brent benchmark."
+signal: "Spread = US benchmark price minus Brent price, compared with its simple average of the last 20 sessions."
+entry: "When the spread is above its average short the US benchmark and buy Brent; when below, do the opposite."
+exit: "Flip or close at the close when the spread crosses its average."
+sizing: "The version that was read uses the full account on each leg; size legs by contract value in a real test."
+risk_note: "The two contracts have different expiries and delivery points; the spread has structural breaks, so add a stop on the spread."

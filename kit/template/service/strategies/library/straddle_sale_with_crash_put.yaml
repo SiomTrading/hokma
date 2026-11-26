@@ -1,0 +1,15 @@
+# Strategy rule written from scratch. Reference: LIB-061 in .notices/THIRD_PARTY.txt
+id: "straddle_sale_with_crash_put"
+name: "Sell an at the money straddle, hedge with a deep out of the money put"
+ref: "LIB-061"
+asset_class: "derivatives"
+lines: [SWO]
+horizon: "months"
+rebalance: "monthly"
+universe: "A broad US equity ETF and its listed options with about 30 days to expiry."
+signal: "Calendar and strike rule: the strike nearest to spot for the straddle, and the strike nearest to 85 percent of spot for the hedge put."
+entry: "Sell the at the money call and put and buy the 15 percent out of the money put, all in the same expiry; hold the ETF with the rest of the capital."
+exit: "Hold to expiry and repeat; close the ETF when no option position is open."
+sizing: "Contract count from the remaining margin divided by the notional of one contract."
+risk_note: "Short straddles have large tail loss; the premium selling switch must be open and the margin check must pass before any order."
+requires_premium_switch: true
