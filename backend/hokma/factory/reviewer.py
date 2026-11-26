@@ -10,4 +10,5 @@ AGENT_SLUG = "strategy-reviewer"
 DEFAULT_MODEL = "opus"
 DEFAULT_TIER = "deep"
 ENGINE_TOOLS: tuple[str, ...] = ("Read", "Glob", "Grep")
-TOOLS: tuple[str, ...] = ("strategy_code_get", "strategy_code_list", "strategy_code_verdict", "bank_get")
+TOOLS: tuple[str, ...] = ("strategy_code_get", "strategy_code_list", "strategy_code_verdict", "bank_get",
+         "task_show", "task_list", "task_claim", "task_heartbeat", "task_review_approve", "task_request_changes", "task_comment", "bug_report", "bug_list", "journal_write", "journal_search", "ips_read")

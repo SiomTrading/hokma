@@ -9,8 +9,8 @@ import type { CodeRow } from "@/api/strategyCode";
 import { locators, ruleLines } from "./rules";
 
 /** What the owner sends to the chat to optimize a strategy of the bank: the chat launches backtest_optimize with it. */
-export function optimizeText(detail: Pick<BankDetail, "bank_id" | "title"> & { version: { version: number } }): string {
-  return `Run backtest_optimize for the strategy of the bank with bank_id ${detail.bank_id} (${detail.title}, version ${detail.version.version}) and tell me the verdict when it ends.`;
+export function optimizeText(detail: Pick<BankDetail, "bank_id"> & { version: { version: number } }): string {
+  return `Run backtest_optimize for the strategy of the bank with bank_id ${detail.bank_id} (version ${detail.version.version}) and tell me the verdict when it ends.`;
 }
 
 export function StrategyDetail({ bankId, onBack }: { bankId: number; onBack: () => void }) {

@@ -57,7 +57,7 @@ from hokma.sources.ingest import SourceError
 SLUG = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 APPROVED = ("generated", "owner_reviewed")
 MAX_REJECTIONS = 3
-RESEARCHER, CODER, REVIEWER = "strategy-researcher", "strategy-coder", "strategy-reviewer"      # the only slugs that may write each door (checked here, not only by the hook)
+RESEARCHER, CODER, REVIEWER = "strategy-researcher", "strategy-coder", "strategy-reviewer"      # the usual agents of each step; any agent may take a step (1.2.2)
 STRATEGY_FOLDER_FILES = frozenset({"strategy.py", "test_strategy.py"})
 CHECK_TIMEOUT = 120
 STRATEGY_FILE = "strategy.py"
@@ -96,9 +96,10 @@ def _db(db: Database | None) -> Database:
 
 
 def require_role(caller: Any, allowed: str, what: str) -> str:
-    """The slug of the caller, which the server took from the environment of the engine, must be the one this door belongs to."""
-    if caller != allowed:
-        raise UserRuleError("blocked", f"{what} belongs to {allowed}, not to {caller!r}")
+    """Any agent or chat may start and carry the flow (1.2.2): the caller only has to be named. The order rules stay: no code without a requirement, no version without an approved verdict,
+    and the one that saved a version never gives its verdict."""
+    if not isinstance(caller, str) or not caller.strip():
+        raise UserRuleError("blocked", f"{what} needs the name of the agent that makes it")
     return caller
 
 

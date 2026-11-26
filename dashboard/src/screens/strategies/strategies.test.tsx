@@ -105,6 +105,7 @@ describe("the Strategies screen", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText.mock.calls[0]![0]).toContain("backtest_optimize");
     expect(writeText.mock.calls[0]![0]).toContain("bank_id 1");
+    expect(writeText.mock.calls[0]![0]).not.toContain("EMA cross morning");          // the title of the strategy is text of the owner: it never goes in the request
   });
 });
 

@@ -70,10 +70,9 @@ RULES: tuple[InjectionRule, ...] = (
     ),
     _rule(
         "trade_instruction", "high", "The text appears to order an order, a trade or a change to a desk or a broker.",
-        # An order aimed at the assistant says to do it now or says how much. The description of a rule of a strategy ("cancel the limit order if it is
-        # not filled in 3 bars") has neither, so it is not a finding. The gaps stop at the end of the sentence.
-        r"\b(?:place|send|submit|fire|cancel)\w*\b[^.!?\n]{0,30}\borders?\b[^.!?\n]{0,60}\b(?:\d[\d,.]*\s*(?:contracts?|shares?|lots?|units?)|right\s+now|right\s+away|immediately|now)\b",
-        r"\b(?:mand|env[i\u00ed]|coloc|cancel|ejecut|lanz|emit)\w*\b[^.!?\n]{0,30}\b[o\u00f3]rden(?:es)?\b[^.!?\n]{0,60}\b(?:\d[\d,.]*\s*(?:contratos?|acciones|lotes|unidades)|ya|ahora|inmediatamente|de\s+inmediato)\b",
+        # Wide detection (1.2.1 narrowed it and 1.2.2 restored it). The only exemption is in scan(): a sentence that carries the marks of a conditional rule ("if", "when", "within 3 bars").
+        r"\b(?:place|send|submit|fire|cancel)\w*\b.{0,30}\b(?:orders?)\b",
+        r"\b(?:mand|env[i\u00ed]|coloc|cancel|ejecut|lanz|emit)\w*\b.{0,30}\b[o\u00f3]rden(?:es)?\b",
         r"\b(?:buy|sell|short|compra|vende|compre|venda)\b\s+\d[\d,.]*\s*(?:contracts?|shares?|lots?|units?|contratos?|acciones|lotes)\b",
         r"\b(?:buy|sell|compra|vende)\s+(?:\w+\s+){0,2}(?:right\s+now|immediately|now|ya|ahora|inmediatamente)\b",
         r"\b(?:connect|link|approve|authorize|enable|activate|turn\s+on|switch\s+on|conect|aprueb|autoriz|activ|enciend|prend)\w*\b.{0,40}\b(?:desks?|brokers?|br[o\u00f3]kers?|mesas?)\b",
@@ -115,6 +114,28 @@ def _compact(text: str) -> str:
     return one_line if len(one_line) <= 120 else one_line[:117] + "..."
 
 
+# A sentence with these marks describes a rule of a strategy ("cancel the order if it is not filled within 3 bars"), it does not order anything now.
+_CONDITIONAL = re.compile(
+    r"\b(?:if|when|whenever|unless|once|si|cuando|siempre\s+que|en\s+caso\s+de)\b"
+    r"|\bwithin\s+\d+\s+(?:bars?|candles?|minutes?|sessions?|days?)\b"
+    r"|\b(?:en|dentro\s+de)\s+(?:menos\s+de\s+)?\d+\s+(?:velas?|barras?|minutos?|sesiones?|d[i\u00ed]as?)\b", _FLAGS)
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)|\n")      # a point inside a number ("1.5 ATR") does not end a sentence
+_EXEMPT_RULES = ("trade_instruction",)
+
+
+def _first_hit(rule: InjectionRule, window: str):
+    """The first match of the rule in the window that is not exempt: for the trade instruction, a match inside a conditional sentence is a rule of a strategy."""
+    for found in rule.pattern.finditer(window):
+        if rule.rule_id not in _EXEMPT_RULES:
+            return found
+        before = [m.end() for m in _SENTENCE_END.finditer(window, 0, found.start())]
+        after = _SENTENCE_END.search(window, found.end())
+        sentence = window[(before[-1] if before else 0):(after.start() if after else len(window))]
+        if _CONDITIONAL.search(sentence) is None:
+            return found
+    return None
+
+
 def scan(text: str, *, field: str | None = None) -> list[dict[str, str]]:
     """The findings of the rules in `text`: at most one per rule, in the order of `RULES`. The text is not changed."""
     findings: list[dict[str, str]] = []
@@ -122,7 +143,7 @@ def scan(text: str, *, field: str | None = None) -> list[dict[str, str]]:
         return findings
     windows = [text] if len(text) <= SCAN_LIMIT else [text[i:i + SCAN_LIMIT] for i in range(0, len(text) - SCAN_OVERLAP, SCAN_LIMIT - SCAN_OVERLAP)]
     for rule in RULES:
-        hit = next((found for window in windows if (found := rule.pattern.search(window)) is not None), None)
+        hit = next((found for window in windows if (found := _first_hit(rule, window)) is not None), None)
         if hit is None:
             continue
         finding = {"type": "prompt_injection", "rule_id": rule.rule_id, "severity": rule.severity, "message": rule.message,

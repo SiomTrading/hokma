@@ -55,17 +55,18 @@ def test_with_a_current_requirement_the_two_files_may_be_written_and_nothing_els
     assert other.returncode == 2 and "no_requirement" in other.stderr           # a path that walks to another folder is judged by where it lands
 
 
-def test_a_write_in_strategies_that_does_not_say_who_makes_it_is_blocked_even_with_a_requirement(db):
+def test_any_agent_or_chat_may_write_the_two_files_when_the_requirement_exists_whether_or_not_the_event_names_it(db):
     with_requirement(db)
-    for blank in (None, ""):
+    for blank in (None, "", "hokma", "desk-chief", "joel", "strategy-researcher"):
         payload = write_to(target("inside_bar"))
         if blank is None:
             del payload["agent_type"]
         else:
             payload["agent_type"] = blank
-        done = run_gate(payload)
-        assert done.returncode == 2 and "no_agent" in done.stderr, repr(blank)
-    assert run_gate(write_to(target("inside_bar"))).returncode == 0              # the coder named: it goes through
+        assert run_gate(payload).returncode == 0, repr(blank)
+    nothing = write_to(target("other_one"))
+    del nothing["agent_type"]
+    assert run_gate(nothing).returncode == 2 and "no_requirement" in run_gate(nothing).stderr          # the order rule stays for everyone
 
 
 def test_a_replaced_requirement_still_opens_the_gate_and_one_of_another_strategy_does_not(db):
@@ -92,21 +93,17 @@ def test_a_base_it_cannot_read_is_a_block_never_a_pass(db, tmp_path):
     assert broken.returncode == 2 and "HOKMA_BLOCKED error" in broken.stderr
 
 
-def test_when_the_event_says_who_calls_only_the_coder_writes_and_each_bank_tool_goes_to_its_agent(db):
+def test_no_agent_is_refused_by_name_and_the_bank_tools_pass_the_hook_for_everyone(db):
     with_requirement(db)
-    assert run_gate(write_to(target("inside_bar"), agent_type=CODER)).returncode == 0
-    for agent in ("strategy-reviewer", "strategy-researcher", "hokma"):
-        done = run_gate(write_to(target("inside_bar"), agent_type=agent))
-        assert done.returncode == 2 and "wrong_agent" in done.stderr, agent
-    assert run_gate(write_to(hokma_home() / "notes.md", agent_type="hokma")).returncode == 0          # outside strategies/ it is not its business
-    owners = {"mcp__hokma__strategy_brief_write": "strategy-researcher", "mcp__hokma__strategy_code_save": CODER, "mcp__hokma__strategy_code_verdict": "strategy-reviewer"}
-    for tool, owner in owners.items():
-        assert run_gate({"tool_name": tool, "tool_input": {}, "agent_type": owner}).returncode == 0
-        missing = run_gate({"tool_name": tool, "tool_input": {}})                                    # the event does not say who calls: fail closed
-        assert missing.returncode == 2 and "no_agent" in missing.stderr, tool
-        assert run_gate({"tool_name": tool, "tool_input": {}, "agent_type": ""}).returncode == 2
-        wrong = run_gate({"tool_name": tool, "tool_input": {}, "agent_type": "hokma"})
-        assert wrong.returncode == 2 and "wrong_agent" in wrong.stderr, tool
+    for agent in ("strategy-coder", "strategy-reviewer", "strategy-researcher", "hokma", "desk-chief"):
+        assert run_gate(write_to(target("inside_bar"), agent_type=agent)).returncode == 0, agent
+    for tool in ("mcp__hokma__strategy_brief_write", "mcp__hokma__strategy_code_save", "mcp__hokma__strategy_code_verdict"):
+        for agent in (None, "", "hokma", "general-purpose", "desk-chief"):
+            payload = {"tool_name": tool, "tool_input": {}}
+            if agent is not None:
+                payload["agent_type"] = agent
+            assert run_gate(payload).returncode == 0, (tool, agent)
+    assert run_gate(write_to(target("inside_bar", "notes.md"), agent_type="hokma")).returncode == 2          # the folder rule stays
 
 
 def test_the_hook_is_registered_next_to_the_other_two_and_its_file_and_registration_are_protected(env):

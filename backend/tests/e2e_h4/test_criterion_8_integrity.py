@@ -42,7 +42,7 @@ def test_the_file_of_ian_is_english_names_no_origin_and_lists_exactly_the_tools_
     text = AGENT.read_text(encoding="utf-8")
     assert text.isascii() and "\u2014" not in text and rules.check(ROOT, [rel(AGENT)]) == []
     meta = parse_frontmatter(text)
-    assert [t.strip() for t in meta["tools"].split(",")] == [researcher.MCP_PREFIX + t for t in researcher.TOOLS]
+    assert [t.strip() for t in meta["tools"].split(",")] == [*researcher.ENGINE_TOOLS, *(researcher.MCP_PREFIX + t for t in researcher.TOOLS)]
     for name in SKILLS_OF_THE_SPEC:
         assert f"`{name}`" in text, name
     assert skill_format.verify_manifest(SKILLS) == []
@@ -57,6 +57,8 @@ def test_the_skills_and_the_agent_reach_no_other_agent_no_desk_role_and_no_clerk
         for name in (*SKILLS_OF_THE_SPEC, researcher.AGENT_SLUG):
             if (rel(path), name) == IRIS:
                 continue                                                                     # her own skill, bundled before this spec, shares the name
+            if name == researcher.AGENT_SLUG and rel(path) in ("kit/template/CLAUDE.md", "kit/template/desks/CLAUDE.desk.md", "kit/template/agents/desk-chief.md", "kit/template/agents/hokma.md"):
+                continue          # 1.2.2: they name the agent to launch it
             assert name not in content, (rel(path), name)
     composer = prompt_rules.PromptComposer()
     from datetime import datetime, timezone

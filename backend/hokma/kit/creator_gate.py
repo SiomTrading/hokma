@@ -1,8 +1,7 @@
 """PreToolUse hook, the first gate of the strategy creator (SPEC-031 6.6): without a current requirement nothing is programmed.
 
 It blocks, with exit code 2, a write to strategies/<slug>/ when the base has no current requirement for that slug, and a write to anything under strategies/ that is
-not strategy.py or test_strategy.py of a slug folder (the delivery of the creator is the code, never a document). It also refuses a write to strategies/ from an agent that is not the coder, and the three tools that write the bank (the requirement, the code and the
-verdict) from an agent that is not the one each belongs to, or from an event with no agent_type (fail closed). Outside strategies/ it does not interfere.
+not strategy.py or test_strategy.py of a slug folder (the delivery of the creator is the code, never a document). Since 1.2.2 any agent or chat may take any step of the flow: the gate no longer looks at who writes, only at what is written. Outside strategies/ it does not interfere.
 
 It fails CLOSED: a base it cannot read is a block. It only reads: SQLite opens in read only mode and Postgres sets the session read only. Standard library plus psycopg when the base
 is Postgres; it must not import the database layer of Hokma (only the server may), so it reads the two columns it needs with its own query.
@@ -22,7 +21,6 @@ FILE_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
 ALLOWED_NAMES = ("strategy.py", "test_strategy.py")
 SLUG = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 CODER = "strategy-coder"
-BANK_TOOLS = {"mcp__hokma__strategy_brief_write": "strategy-researcher", "mcp__hokma__strategy_code_save": CODER, "mcp__hokma__strategy_code_verdict": "strategy-reviewer"}
 DB_FILE = "hokma.db"
 QUERY = "SELECT 1 FROM user_rules r JOIN user_rule_briefs b ON b.rule_id = r.id AND b.status = 'current' WHERE r.slug = {mark} AND r.kind = 'strategy' LIMIT 1"
 
@@ -67,12 +65,6 @@ def decide(payload: dict, data: str, workdir: str) -> None:
     tool = payload.get("tool_name", "")
     agent = payload.get("agent_type")
     agent = agent if isinstance(agent, str) and agent else None
-    if tool in BANK_TOOLS:
-        if agent is None:                                  # fail closed: a call to the bank that does not say who makes it is not allowed
-            raise Denied("no_agent", f"{tool} needs the agent that calls it: the event carries no agent_type")
-        if agent != BANK_TOOLS[tool]:
-            raise Denied("wrong_agent", f"{tool} belongs to {BANK_TOOLS[tool]}, not to {agent}")
-        return
     if tool not in FILE_TOOLS:
         return
     tool_input = payload.get("tool_input") or {}
@@ -90,10 +82,6 @@ def decide(payload: dict, data: str, workdir: str) -> None:
         raise Denied("file_not_allowed", "the path leads out of strategies/ by a link")
     real = os.path.realpath(joined)
     parts = os.path.relpath(real, folder).replace("\\", "/").split("/")
-    if agent is None:                                      # fail closed, as with the bank tools: a write in strategies/ that does not say who makes it is not allowed
-        raise Denied("no_agent", "a write in strategies/ needs the agent that makes it: the event carries no agent_type")
-    if agent != CODER:
-        raise Denied("wrong_agent", f"only the strategy coder writes in strategies/, not {agent}")
     if len(parts) != 2 or parts[1] not in ALLOWED_NAMES or not SLUG.match(parts[0]):
         raise Denied("file_not_allowed", "strategies/<slug>/ holds strategy.py and test_strategy.py and nothing else: the delivery is the code, not a document")
     try:

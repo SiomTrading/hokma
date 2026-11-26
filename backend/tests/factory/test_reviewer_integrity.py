@@ -19,7 +19,10 @@ AS_OF = datetime(2026, 1, 2, 15, 0, tzinfo=timezone.utc)
 _spec = importlib.util.spec_from_file_location("check_repo_rules", ROOT / "scripts" / "check_repo_rules.py")
 repo_rules = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(repo_rules)
-FORBIDDEN_TOOLS = r"exec|order|desk|broker|submit|approve|flatten|premium_calibrate|backtest|task_|journal|coder_write|coder_test|rule_contract|review_run|rule_brief_check"
+FORBIDDEN_TOOLS = r"exec|order|desk|broker|submit|approve|flatten|premium_calibrate|backtest|coder_write|coder_test|rule_contract|review_run|rule_brief_check"
+
+
+NEW_TOOLS = {reviewer.MCP_PREFIX + n for n in ("task_show", "task_list", "task_claim", "task_heartbeat", "task_review_approve", "task_request_changes", "task_comment", "bug_report", "bug_list", "journal_write", "journal_search", "ips_read",)}      # 1.2.2: the tools of tasks, journal and policy that the desks ask of every agent
 
 
 def rel(path):
@@ -72,9 +75,10 @@ def test_the_frontmatter_has_exactly_the_tools_of_the_spec_and_cannot_write_or_s
     assert (meta["model"], meta["hokma-tier"]) == (reviewer.DEFAULT_MODEL, reviewer.DEFAULT_TIER) == ("opus", "deep")
     tools = [t.strip() for t in meta["tools"].split(",")]
     assert tools == [*reviewer.ENGINE_TOOLS, *(reviewer.MCP_PREFIX + t for t in reviewer.TOOLS)]
-    assert tools == ["Read", "Glob", "Grep", "mcp__hokma__strategy_code_get", "mcp__hokma__strategy_code_list", "mcp__hokma__strategy_code_verdict", "mcp__hokma__bank_get"]
+    assert tools[:7] == ["Read", "Glob", "Grep", "mcp__hokma__strategy_code_get", "mcp__hokma__strategy_code_list", "mcp__hokma__strategy_code_verdict", "mcp__hokma__bank_get"]
+    assert set(tools[7:]) == NEW_TOOLS and "Bash" not in tools and not any(re.search(r"task_create|task_request_review|task_complete|task_block", t) for t in tools)
     assert not {"Write", "Edit", "MultiEdit", "NotebookEdit", "Agent"} & set(tools) and "strategy_code_save" not in " ".join(tools)
-    assert not any(re.search(FORBIDDEN_TOOLS, t) for t in tools)
+    assert not any(re.search(FORBIDDEN_TOOLS, t) for t in tools if t not in NEW_TOOLS)
 
 
 def test_the_agent_names_its_skills_its_tools_and_what_it_cannot_do():
@@ -100,5 +104,5 @@ def test_the_skills_say_the_severities_the_evidence_and_who_approves():
 def test_the_skills_of_ben_reach_no_other_agent_no_desk_role_and_not_the_main_agent():
     skills_reach_no_one_else(NAMES, AGENT)
     text = (ROOT / "kit" / "template" / "CLAUDE.md").read_text(encoding="utf-8")
-    for name in (*NAMES, reviewer.AGENT_SLUG, "Ben", coder.AGENT_SLUG):
+    for name in NAMES:          # 1.2.2: the main agent names the three agents to launch them, never the skills
         assert not re.search(rf"\b{re.escape(name)}\b", text), name

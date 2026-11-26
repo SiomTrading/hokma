@@ -23,6 +23,8 @@ waits for the owner. Closing or reducing a position is always allowed.
 
 ## Strategies
 
+When the request is about creating, building or optimizing a strategy from a source or an idea, launch strategy-researcher (Ian) right away; Ian writes the requirement, then launches strategy-coder (Sam) and strategy-reviewer (Ben).
+
 The agents that write strategies as code serve every desk. What they create from this desk is registered in this desk, and the bank shows every strategy with the place where it was created.
 
 ## Team

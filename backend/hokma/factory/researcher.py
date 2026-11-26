@@ -21,12 +21,14 @@ AGENT_SLUG = "strategy-researcher"
 DEFAULT_MODEL = "opus"                      # the large model; the token budget is the one of the service (desks.token_budget)
 DEFAULT_TIER = "deep"
 
+ENGINE_TOOLS: tuple[str, ...] = ("Read", "Grep", "Glob", "Agent")      # he reads files, never writes one (no Write, Edit or Bash), and launches Sam and Ben
 TOOLS: tuple[str, ...] = (
     "factory_list", "factory_describe", "factory_draft", "factory_propose",
     "source_ingest", "bank_create", "bank_list", "bank_get", "bank_set_status", "strategy_brief_write", "strategy_code_list", "strategy_code_get",
     "backtest_run", "backtest_status", "backtest_result", "backtest_optimize", "backtest_walkforward", "backtest_montecarlo", "backtest_evidence",
     "quant_call", "data_bars", "data_snapshot", "data_papers",
     "optimizer_verdict", "optimizer_verdict_get", "audit_thresholds_get", "library_list", "library_request",      # the verdict of the optimizer (SPEC-032): the limits are read here and edited only by the owner
+    "task_show", "task_list", "task_claim", "task_heartbeat", "task_complete", "task_block", "task_comment", "journal_write", "journal_search", "ips_read",      # his tasks, the journal and the policy he reads (1.2.2)
 )
 RUN_TOOLS: tuple[str, ...] = ("backtest_run", "backtest_optimize", "backtest_walkforward", "backtest_montecarlo")
 VERSIONED_TOOLS: tuple[str, ...] = (*RUN_TOOLS, "backtest_evidence")      # the tools that work on a version: only the latest saved one

@@ -19,44 +19,24 @@ def road(db):
     return bank_id, made, user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
 
 
-def test_the_requirement_is_written_only_by_the_researcher_in_the_server_itself(db):
+def test_any_agent_writes_the_requirement_and_saves_the_code_but_the_order_rules_stay(db):
     bank_id = make_bank(db)
-    for who in (CODER, REVIEWER, "hokma", "agent", "joel"):
-        with pytest.raises(UserRuleError, match="belongs to strategy-researcher"):
-            user_rules.write_brief(bank_id=bank_id, slug=SLUG, title="t", brief=BRIEF, caller=who, db=db)
-        refused = failed("strategy_brief_write", {"bank_id": bank_id, "slug": SLUG, "title": "t", "brief": BRIEF}, caller(who))
-        assert refused["error_code"] == "blocked", who
-    assert rows(db, "SELECT id FROM user_rules") == []
-    assert ok("strategy_brief_write", {"bank_id": bank_id, "slug": SLUG, "title": "t", "brief": BRIEF}, caller(RESEARCHER))["rule_id"]
-
-
-def test_the_code_is_saved_only_by_the_coder_in_the_server_itself(db):
-    bank_id = make_bank(db)
-    made = user_rules.write_brief(bank_id=bank_id, slug=SLUG, title="t", brief=BRIEF, caller=RESEARCHER, db=db)
+    unsaved = user_rules.write_brief(bank_id=bank_id, slug=SLUG, title="t", brief=BRIEF, caller="hokma", db=db)          # the main agent itself, no subagent
+    assert ok("strategy_brief_write", {"rule_id": unsaved["rule_id"], "brief": BRIEF}, caller("desk-chief"))["rule_id"] == unsaved["rule_id"]      # a desk chief, the next version
+    with pytest.raises(UserRuleError, match="needs the name"):
+        user_rules.write_brief(bank_id=bank_id, slug="no_name", title="t", brief=BRIEF, caller="", db=db)
     put_files(SLUG)
-    for who in (RESEARCHER, REVIEWER, "hokma", "agent"):
-        with pytest.raises(UserRuleError, match="belongs to strategy-coder"):
-            user_rules.save_code(rule_id=made["rule_id"], caller=who, db=db)
-        assert failed("strategy_code_save", {"rule_id": made["rule_id"]}, caller(who))["error_code"] == "blocked", who
-    assert rows(db, "SELECT id FROM user_rule_versions") == []
-    assert ok("strategy_code_save", {"rule_id": made["rule_id"]}, caller(CODER))["saved"] is True
+    assert ok("strategy_code_save", {"rule_id": unsaved["rule_id"]}, caller("joel"))["saved"] is True
 
 
-def test_the_verdict_is_given_only_by_the_reviewer_and_never_by_the_one_that_saved_the_version(db):
+def test_the_one_that_saved_a_version_never_gives_its_verdict_and_another_agent_does(db):
     _bank, _made, out = road(db)
     version = out["rule_version_id"]
-    for who in (CODER, RESEARCHER, "hokma", "agent"):
-        with pytest.raises(UserRuleError, match="belongs to strategy-reviewer"):
-            user_rules.verdict(rule_version_id=version, verdict="approved", findings=[], reviewer=who, db=db)
-        assert failed("strategy_code_verdict", {"rule_version_id": version, "verdict": "approved"}, caller(who))["error_code"] == "blocked", who
-    with db.write() as u:                                              # even when the saver and the reviewer are one name, the verdict is refused
-        u.session.execute("UPDATE user_rule_versions SET created_by = :r WHERE id = :i", {"r": REVIEWER, "i": version})
     with pytest.raises(UserRuleError, match="never gives its verdict"):
-        user_rules.verdict(rule_version_id=version, verdict="approved", findings=[], reviewer=REVIEWER, db=db)
+        user_rules.verdict(rule_version_id=version, verdict="approved", findings=[], reviewer=CODER, db=db)
+    assert failed("strategy_code_verdict", {"rule_version_id": version, "verdict": "approved"}, caller(CODER))["error_code"] == "blocked"
     assert rows(db, "SELECT status FROM user_rule_versions")[0]["status"] == "draft" and rows(db, "SELECT id FROM user_rule_reviews") == []
-    with db.write() as u:
-        u.session.execute("UPDATE user_rule_versions SET created_by = :r WHERE id = :i", {"r": CODER, "i": version})
-    assert ok("strategy_code_verdict", {"rule_version_id": version, "verdict": "approved"}, caller(REVIEWER))["status"] == "generated"
+    assert ok("strategy_code_verdict", {"rule_version_id": version, "verdict": "approved"}, caller("vera"))["status"] == "generated"          # any other agent
 
 
 def test_a_folder_with_anything_besides_the_two_files_is_not_saved_and_not_checked(db):

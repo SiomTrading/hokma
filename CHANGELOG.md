@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2
+
+- Changed: Ian, Sam and Ben can read files with Read, Grep and Glob (Ian), work on their tasks (show, list, claim, heartbeat, complete, block, comment; Sam asks for review, Ben approves or asks for changes), write to the journal, read the policy and, Ben, report and list bugs. They still cannot place orders, use a desk, edit limits or run commands.
+- Changed: Any agent or chat can start and carry the strategy creator flow. The order stays: no code without a saved requirement, no version without an approved verdict, the author of the code never gives its verdict, the folder only holds strategy.py and test_strategy.py, and the owner approves for real money.
+- New: The main agent and the desk chief hold the creator tools and launch Ian on their own when the request is about creating, building or optimizing a strategy; Ian launches Sam and Ben.
+- Fixed: The request that Optimize copies carries only the bank id and the version, no strategy title.
+- Fixed: The source check finds again an order to the assistant ("send an order") and skips it only in a sentence with a conditional mark (if, when, within 3 bars).
+
 ## 1.2.1
 
 - New: A new Strategies screen in the left menu shows the bank: name, origin, state, version and source with a search, and each strategy opens with its rules and their citation, its versions, the code of the version (read only) and the buttons Optimize and Approve.

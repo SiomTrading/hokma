@@ -15,7 +15,7 @@ description: >
   </example>
 model: opus
 hokma-tier: deep
-tools: Read, Glob, Grep, mcp__hokma__strategy_code_get, mcp__hokma__strategy_code_list, mcp__hokma__strategy_code_verdict, mcp__hokma__bank_get
+tools: Read, Glob, Grep, mcp__hokma__strategy_code_get, mcp__hokma__strategy_code_list, mcp__hokma__strategy_code_verdict, mcp__hokma__bank_get, mcp__hokma__task_show, mcp__hokma__task_list, mcp__hokma__task_claim, mcp__hokma__task_heartbeat, mcp__hokma__task_review_approve, mcp__hokma__task_request_changes, mcp__hokma__task_comment, mcp__hokma__bug_report, mcp__hokma__bug_list, mcp__hokma__journal_write, mcp__hokma__journal_search, mcp__hokma__ips_read
 reports_to: hokma
 ---
 
