@@ -36,6 +36,8 @@ interface ComposerProps {
   ref?: Ref<ComposerHandle>;
   model: ModelId;
   running: boolean;
+  /** Agents started in the background still work while the chat is free: the owner can write and can also stop them (bug 1257). */
+  agentsBusy?: boolean;
   stopping: boolean;
   options: ChatOptions | null;
   /** Bumps each time the engine asks to open the model menu (`/model` with no argument). */
@@ -61,7 +63,7 @@ function uploadReason(cause: unknown): AttachmentChip["reason"] {
 const TIER_OF: Record<ModelId, "fast" | "balanced" | "deep"> = { haiku: "fast", sonnet: "balanced", opus: "deep" };
 const MODEL_DOT: Record<ModelId, string> = { haiku: "var(--ok)", sonnet: "var(--acc)", opus: "var(--org)" };
 
-export function Composer({ ref, model, running, stopping, options, modelMenuRequest, usagePct = null, conversationId = null, onModel, onSend, onStop, host }: ComposerProps) {
+export function Composer({ ref, model, running, agentsBusy = false, stopping, options, modelMenuRequest, usagePct = null, conversationId = null, onModel, onSend, onStop, host }: ComposerProps) {
   const { t } = useI18n();
   const shell = useShell();
   const [text, setText] = useState("");
@@ -391,9 +393,16 @@ export function Composer({ ref, model, running, stopping, options, modelMenuRequ
             {stopping ? t("chat.composer.stopping") : t("chat.composer.stop")}
           </Button>
         ) : (
-          <button type="button" className="ib chat-send" aria-label={t("chat.composer.send")} disabled={sendDisabled} onClick={() => submit()}>
-            <Icon name="send" size={16} strokeWidth={2.2} />
-          </button>
+          <>
+            {agentsBusy ? (
+              <Button variant="danger" size="sm" disabled={stopping} onClick={onStop} data-testid="stop-agents">
+                {stopping ? t("chat.composer.stopping") : t("chat.composer.stop")}
+              </Button>
+            ) : null}
+            <button type="button" className="ib chat-send" aria-label={t("chat.composer.send")} disabled={sendDisabled} onClick={() => submit()}>
+              <Icon name="send" size={16} strokeWidth={2.2} />
+            </button>
+          </>
         )}
       </div>
       <div className="chat-help">

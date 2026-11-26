@@ -53,7 +53,7 @@ def counts(db):
 def test_the_tools_are_declared_with_strict_schemas_and_templates_match_the_service():
     listed = {d["name"]: d for d in hokma_tools.definitions()}
     create, configure = listed["desk_create"]["inputSchema"], listed["desk_configure"]["inputSchema"]
-    assert create["required"] == ["name", "capital"] and create["additionalProperties"] is False
+    assert create["required"] == ["name"] and "capital" in create["properties"] and create["additionalProperties"] is False
     assert configure["required"] == ["desk_id"] and configure["additionalProperties"] is False
     assert hokma_tools.TOOLS["desk_create"][4] and hokma_tools.TOOLS["desk_configure"][4]
     assert create["properties"]["template"]["enum"] == ["minimal", "standard", "debate"]

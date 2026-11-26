@@ -23,6 +23,8 @@ sys.path.insert(0, str(REPO / "backend" / "tests"))
 
 dist, port = Path(sys.argv[1]), int(sys.argv[2])
 
+from hokma.core import processguard  # noqa: E402
+processguard._role = processguard.SERVER                # e2e only: this script plays the server (the hokma.db package refuses any other process)
 import hokma.core.app as app_module  # noqa: E402
 from docs_support import make_pdf  # noqa: E402
 from hokma.core import session  # noqa: E402

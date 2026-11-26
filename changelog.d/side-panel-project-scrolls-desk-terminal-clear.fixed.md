@@ -1,0 +1,1 @@
+The Project section of the side panel now takes only its own room and scrolls inside it, so with several projects its list, tree and drop zone no longer cover Agents in this session, In the background and Results. On a short window the desk terminal keeps its list of assets clear of the quote: the list is taller and the account line of the desk bar takes less height.

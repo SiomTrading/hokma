@@ -177,6 +177,8 @@ await runSuite("conversations", { script: "serve.py" }, async ({ page: A, server
 
   // More than one project (point 4): Strategy, Beta and General. Old chat, new chat and terminal each time.
   const seed = `
+from hokma.core import processguard
+processguard._role = processguard.SERVER                # e2e only: this seed plays the server
 from hokma.db import open_database
 db = open_database()
 with db.write() as u:

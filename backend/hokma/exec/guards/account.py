@@ -8,6 +8,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from hokma.exec.guards import GuardContext, GuardResult, base_of, blocked, passed
+from hokma.exec import thresholds
 from hokma.exec.money import ZERO
 
 
@@ -27,10 +28,18 @@ class AccountGuard:
 
         loss_usd = funding.get("daily_loss_usd")
         loss_pct = limits.get("max_daily_loss_pct")
-        if loss_usd is not None or loss_pct is not None:
+        loss_steps = limits.get("daily_loss_steps")
+        if loss_usd is not None or loss_pct is not None or loss_steps:
             if book.day_pnl is None:
                 return blocked(self.name, "book_unavailable", "the day result of the account is unknown, so a daily loss limit cannot be checked")
             numbers["day_pnl"] = book.day_pnl
+            if loss_steps:                              # the USD is worked out from the equity now (SPEC-026, A8); with no equity it cannot be measured
+                if base is None:
+                    return blocked(self.name, "book_unavailable", "the equity is unknown, so the daily loss that scales with it cannot be worked out")
+                cap = thresholds.usd_for(loss_steps, base)
+                if book.day_pnl <= -cap:
+                    return blocked(self.name, "daily_loss", f"the loss of the day is {-book.day_pnl:,.2f} and the step of {base:,.2f} allows {cap:,.2f}",
+                                   day_pnl=book.day_pnl, daily_loss_usd=cap)
             if loss_usd is not None and book.day_pnl <= -_d(loss_usd):
                 return blocked(self.name, "daily_loss", f"the loss of the day is {-book.day_pnl:,.2f} and the funded account allows {_d(loss_usd):,.2f}",
                                day_pnl=book.day_pnl, daily_loss_usd=loss_usd)
@@ -39,11 +48,17 @@ class AccountGuard:
                                max_daily_loss_pct=loss_pct)
 
         dd_pct, dd_usd = limits.get("max_drawdown_pct"), funding.get("trailing_drawdown_usd")
-        if dd_pct is not None or dd_usd is not None:
+        dd_steps = limits.get("drawdown_steps")
+        if dd_pct is not None or dd_usd is not None or dd_steps:
             if book.equity is None or book.peak_equity is None:
                 return blocked(self.name, "book_unavailable", "the equity or its peak is unknown, so the drawdown cannot be checked")
             drop = book.peak_equity - book.equity
             numbers["drawdown_usd"] = drop
+            if dd_steps:
+                cap = thresholds.usd_for(dd_steps, book.equity)
+                if drop >= cap:
+                    return blocked(self.name, "trailing_drawdown", f"the account is {drop:,.2f} below its peak; the step of {book.equity:,.2f} allows {cap:,.2f}",
+                                   drawdown_usd=drop, trailing_drawdown_usd=cap)
             if dd_pct is not None and book.peak_equity > 0 and drop / book.peak_equity * Decimal(100) > _d(dd_pct):
                 return blocked(self.name, "max_drawdown_pct", f"the account is {drop / book.peak_equity * 100:.1f}% below its peak; the limit is {dd_pct}%",
                                drawdown_pct=drop / book.peak_equity * 100, max_drawdown_pct=dd_pct)

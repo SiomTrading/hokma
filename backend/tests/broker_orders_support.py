@@ -19,6 +19,7 @@ from hokma.connections.service import ConnectionService
 from hokma.connections.store import ConnectionSettings, KeyStore
 from hokma.market.providers import get_catalog
 from hokma.schwab import accounts, http
+from hokma.broker import desk_accounts
 
 TR = "/trader/v1"
 ACCOUNT = f"{TR}/accounts/{FAKE_HASH}"
@@ -148,7 +149,7 @@ def ready(desks_db, fake, connections):
         broker = next(r for r in u.broker.list_brokers() if r.kind == "schwab")
         account = u.broker.list_accounts(broker.id)[0]
     desk = make_desk(desks_db)
-    service.assign_account(desk["id"], account.id, db=desks_db)
+    desk_accounts.add_account(desk["id"], account.id, db=desks_db)
     service.set_orders_enabled(broker.id, True, db=desks_db)
     fake.calls.clear()                      # what the connection made (account list, nicknames) is not part of the flow
     return SimpleNamespace(db=desks_db, desk_id=desk["id"], project_id=desk["project_id"], account_id=account.id,

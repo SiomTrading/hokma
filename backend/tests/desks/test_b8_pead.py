@@ -28,6 +28,7 @@ from hokma.desks.core.skills import split_frontmatter
 from hokma.desks.plantel import SEATS, seats_for
 from hokma.desks.swo.create import create_swo_desk
 from hokma.quant import registry
+from account_links_support import link_principal
 
 _spec = importlib.util.spec_from_file_location("check_repo_rules", ROOT / "scripts" / "check_repo_rules.py")
 repo_rules = importlib.util.module_from_spec(_spec)
@@ -392,7 +393,7 @@ def test_AH_33_the_same_method_adapts_to_a_future_and_its_order_goes_through_the
     desk = create_swo_desk("Drift futures", 1_000_000, variant="pead", kit_root=build_kit(tmp_path / "kit"), db=ready.db)["id"]
     with ready.db.write() as u:
         account = u.broker.create_account(ready.broker_id, "Sim B", 1_000_000)
-        u.broker.link_desk(desk, account.id)
+        link_principal(u, desk, account.id)
     levels.set_level(desk, 2, who=ready.owner, db=ready.db)
     run = pead.run_pead_strategy(desk, symbol="NQ", as_of=FRIDAY, inputs=pead.PeadInputs(event(), asset_class="future"), db=ready.db)
     assert run.asset_class == "future" and run.signal.value == 0.65 and run.signal.symbol == "NQ"

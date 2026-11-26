@@ -1,5 +1,7 @@
 import { openSocket } from "@/api";
 import type { Socket } from "@/api";
+import { ActivityStore } from "./activity";
+import { NoticeStore } from "./orderNotices";
 import type { ServerEvent } from "./types";
 
 export type HubStatus = "connecting" | "open" | "closed";
@@ -22,6 +24,10 @@ type Watcher = (event: ServerEvent) => void;
 /** A single /ws/chat connection shared by every chat tab and by the conversation list. */
 export class ChatHub {
   status: HubStatus = "connecting";
+  /** What the side panel shows: every event of every conversation, whether a tab is open on it or not. */
+  readonly activity = new ActivityStore();
+  /** The orders that wait for the owner because a rule in notice mode tripped: the cards of the chat, and the amber of the minimized strip (count > 0). */
+  readonly notices = new NoticeStore();
   private socket: Socket | null = null;
   private readonly clients = new Set<HubClient>();
   private readonly watchers = new Set<Watcher>();
@@ -35,6 +41,7 @@ export class ChatHub {
       reconnect: true,
       onOpen: () => {
         this.setStatus("open");
+        void this.notices.refresh();
         this.clients.forEach((client) => client.onOpen());
       },
       onClose: () => this.setStatus("closed"),
@@ -67,6 +74,7 @@ export class ChatHub {
   }
 
   send(message: Record<string, unknown>): boolean {
+    if (message.type === "send") this.activity.noteSend(message);
     this.ensure();
     return this.socket?.send(message) ?? false;
   }
@@ -80,7 +88,14 @@ export class ChatHub {
   private route(data: unknown): void {
     if (!data || typeof data !== "object" || typeof (data as { type?: unknown }).type !== "string") return;
     const event = data as ServerEvent;
+    this.activity.apply(event);
     this.watchers.forEach((watcher) => watcher(event));
+    if (event.type === "order_notice" || event.type === "order_notice_closed" || event.type === "cap_notice" || event.type === "cap_notice_closed") {
+      this.notices.apply(event);           // not of one conversation: no tab claims it
+      return;
+    }
+    // The progress of an analysis (SPEC-028) belongs to the panel that watches the desk, not to any conversation.
+    if ((event as { type: string }).type === "analysis" || (event as { type: string }).type === "watching") return;
     const ref = "client_ref" in event && typeof event.client_ref === "string" ? event.client_ref : undefined;
     const cid = "conversation_id" in event ? event.conversation_id : undefined;
     if (ref) {

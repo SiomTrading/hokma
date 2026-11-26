@@ -88,3 +88,33 @@ def test_projects_and_agents_come_from_the_database(env):
     assert os.path.realpath(last["cwd"]) == os.path.realpath(folder) and "analyst" in last["argv"]
     with db.read() as u:
         assert u.conversations.get(int(conv_id)).project_id == project.id
+
+
+def test_the_summary_of_a_background_agent_keeps_its_origin_in_sqlite(env):
+    """Bug 1257: the message the CLI opens by itself has no user message before it; the origin must survive a reopen."""
+    engine, db, store = db_engine(env, group_window=1.0)
+    with make_client(engine) as client, connect(client) as ws:
+        first = turn(ws, "[bgagent] investiga")
+        conv_id = first[0]["conversation_id"]
+        events = []
+        while not events or events[-1]["type"] != "done":
+            events.append(ws.receive_json())
+    rows = store.list_messages(conv_id)
+    assert [(m.role, m.text, m.meta.get("origin")) for m in rows] == [
+        ("user", "[bgagent] investiga", None), ("assistant", "launched", None), ("assistant", "agent A finished", "agents")]
+
+
+def test_the_end_of_a_background_agent_is_saved_in_sqlite_with_the_message_that_launched_it(env):
+    """Bug 1257: the agents travel with the saved answer and their end rewrites it, so a reopened chat has no spinner."""
+    engine, db, store = db_engine(env, group_window=1.0)
+    with make_client(engine) as client, connect(client) as ws:
+        first = turn(ws, "[bgagent] investiga")
+        conv_id = first[0]["conversation_id"]
+        events = []
+        while not events or events[-1]["type"] != "done":
+            events.append(ws.receive_json())
+    launched = store.list_messages(conv_id)[1]
+    assert launched.text == "launched" and [a["status"] for a in launched.meta["agents"]] == ["done"]
+    store.update_message_meta(conv_id, launched.id, agents=[{**launched.meta["agents"][0], "status": "working"}])
+    assert store.list_messages(conv_id)[1].meta["agents"][0]["status"] == "working"
+    assert "origin" not in store.list_messages(conv_id)[1].meta

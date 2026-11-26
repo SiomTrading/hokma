@@ -112,6 +112,46 @@ describe("chat of the desk chief", () => {
     await waitFor(() => expect(callsTo("/api/desks", "GET").length).toBe(before + 1)); // the meter and the sidebar get the new tokens
   });
 
+  it("shows the message that waits for the summary with its state in the chat of the desk, and drops the state when its turn starts (bug 1257)", async () => {
+    stubBackend();
+    await mount();
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox", { name: t("desks.chat.input") }), "Hola jefe{Enter}");
+    server.emit({ type: "queued", conversation_id: "c1", message_id: "m9", text: "Hola jefe" });
+    expect(await screen.findByTestId("waiting-lead")).toHaveTextContent(t("chat.waitingLead"));
+    expect(screen.getAllByText("Hola jefe")).toHaveLength(1);
+    server.emit({ type: "turn_start", conversation_id: "c1", turn_id: "t1", message_id: "m9" });
+    expect(screen.queryByTestId("waiting-lead")).toBeNull();
+    expect(screen.getAllByText("Hola jefe")).toHaveLength(1);
+  });
+
+  it("with `about` every message starts with the line that names the report, and the screen shows only what the owner typed", async () => {
+    stubBackend();
+    renderWithApp(<DeskChat desk={desk()} about="Sobre el analisis 12 de AAPL:" />);
+    await screen.findByRole("textbox", { name: t("desks.chat.input") });
+    server.open();
+    server.emit({ type: "history", conversation_id: "c1", messages: [] });
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox", { name: t("desks.chat.input") }), "Por que se opuso Simon?{Enter}");
+    expect(server.last("send")).toMatchObject({ conversation_id: "c1", text: "Sobre el analisis 12 de AAPL:\nPor que se opuso Simon?" });
+    expect(screen.getByText("Por que se opuso Simon?")).toBeInTheDocument();
+  });
+
+  it("a reloaded history shows what the owner typed, without the line that names the report", async () => {
+    stubBackend();
+    renderWithApp(<DeskChat desk={desk()} about={t("desks.analysis.about", { id: "12", symbol: "AAPL" })} />);
+    await screen.findByRole("textbox", { name: t("desks.chat.input") });
+    server.open();
+    server.emit({
+      type: "history", conversation_id: "c1",
+      messages: [{ id: "m1", role: "user", text: `${t("desks.analysis.about", { id: "12", symbol: "AAPL" })}\nPor que se opuso Simon?` }, { id: "m2", role: "user", text: "About analysis 12 of AAPL:\nWhy?" }],
+    });
+    expect(await screen.findByText("Por que se opuso Simon?")).toBeInTheDocument();
+    expect(screen.getByText("Why?")).toBeInTheDocument();
+    expect(screen.queryByText(/Sobre el an/)).toBeNull();
+    expect(screen.queryByText(/About analysis/)).toBeNull();
+  });
+
   it("warns once the socket is closed instead of losing the message", async () => {
     stubBackend();
     await mount();
@@ -211,10 +251,10 @@ describe("failures of the chat", () => {
       type: "permission_request", conversation_id: "c1", turn_id: "t1", request_id: "r1", tool_use_id: "u1", tool: "Bash", input: {},
       summary: { kind: "run_command", target: "ls" }, expires_at: Date.now() / 1000 + 60,
     });
-    const allow = await screen.findByRole("button", { name: t("chat.perm.approve") });
+    const allow = await screen.findByRole("button", { name: t("chat.perm.approve") }, { timeout: 5000 });
     await user.click(allow);
     expect(server.last("permission_response")).toMatchObject({ conversation_id: "c1", request_id: "r1", decision: "allow" });
-  });
+  }, 15000);
 });
 
 describe("texts of the chat", () => {

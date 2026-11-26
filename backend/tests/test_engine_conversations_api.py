@@ -149,3 +149,23 @@ def test_saving_never_follows_a_symlink_out_of_the_project(env, monkeypatch):
         res = client.post(f"/api/conversations/{conv}/save", json={"message_id": answer_id}, headers=AUTH)
     assert res.status_code >= 400
     assert list(outside.iterdir()) == []
+
+
+def test_the_token_ledger_of_the_strategies_panel_is_not_listed_restored_or_deleted(env, monkeypatch):
+    from hokma.db.repos.conversations import LEDGER_TITLE
+    monkeypatch.setattr("hokma.engine.api.database_ready", lambda: True)
+    db, engine, client = build(env)
+    with db.write() as u:
+        ledger = u.conversations.create(engine="claude_code", title=LEDGER_TITLE)
+        u.conversations.archive(ledger.id, True)
+        u.messages.add(ledger.id, "assistant", LEDGER_TITLE, tokens_in=3, tokens_out=3)
+    with client:
+        for flag in ("true", "false"):
+            rows = client.get("/api/conversations", params={"archived": flag}, headers=AUTH).json()["conversations"]
+            assert all(r["title"] != LEDGER_TITLE for r in rows)
+        assert client.get("/api/conversations", params={"archived": "true", "q": "strategies"}, headers=AUTH).json()["conversations"] == []
+        assert client.patch(f"/api/conversations/{ledger.id}", json={"archived": False}, headers=AUTH).status_code == 404
+        assert client.patch(f"/api/conversations/{ledger.id}", json={"title": "mine"}, headers=AUTH).status_code == 404
+        assert client.delete(f"/api/conversations/{ledger.id}", headers=AUTH).status_code == 404
+    with db.read() as u:
+        assert u.conversations.get(ledger.id).archived is True

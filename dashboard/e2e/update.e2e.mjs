@@ -92,7 +92,7 @@ async function startApp(launcher, env, port) {
   const once = /#t=[\w-]+&o=([\w-]+)/.exec(out)?.[1];
   assert.ok(once, "the start link carries the one-time code of the owner registration");
   const base = `http://127.0.0.1:${port}/`;
-  await until(async () => (await fetch(`${base}health`)).ok, "the updated app health");
+  await until(async () => (await fetch(`${base}health`)).ok, "the updated app health", 120000);   // a cold start of a fresh copy takes 4 to 40 s on a busy machine
   const api = async (p) => (await fetch(`${base}${p.replace(/^\//, "")}`, { headers: { "X-Hokma-Token": token } })).json();
   return {
     base,

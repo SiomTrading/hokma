@@ -3,6 +3,9 @@ import { api } from "@/api";
 /** One order that waits for the owner, as `GET /api/desks/{id}/orders/pending` returns it. `order` is the Schwab order request (no account number in it). */
 export interface PendingOrder {
   decision_id: number;
+  /** Set when the order waits because a rule in notice mode tripped: it has its own three answers (Follow, No, Close). */
+  proposal_id?: number;
+  notice?: { rules: string[]; whys: string[]; timeout_min: number | null; stage: string } | null;
   action: string;
   agent: string | null;
   reason: string | null;

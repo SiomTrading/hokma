@@ -380,6 +380,13 @@ class MarketHub:
             await runtime.source.unsubscribe([feed.upstream])
         self._broadcast_connection(runtime)
 
+    async def watch_activity(self, provider_id: str, on: bool) -> bool:
+        """Ask a provider's source to follow the activity of the owner's account by its own stream (only a source that has one: `watch_account_activity`).
+        False when the provider has no such stream or its session is not open."""
+        runtime = self._runtimes.get(provider_id)
+        asker = getattr(runtime.source, "watch_account_activity", None) if runtime is not None else None
+        return bool(asker(on)) if asker is not None else False
+
     # ------------------------------------------------------------------ attaching a subscription
 
     async def _attach(self, sub: Sub, exclude: frozenset[str]) -> None:

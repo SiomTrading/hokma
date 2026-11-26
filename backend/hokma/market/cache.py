@@ -65,6 +65,14 @@ class RateLimiter:
         self._events: deque[float] = deque()
         self._lock = threading.Lock()
 
+    def used(self) -> int:
+        """Events counted in the current window (what is already taken, without taking one)."""
+        now = self._clock()
+        with self._lock:
+            while self._events and now - self._events[0] >= self.window:
+                self._events.popleft()
+            return len(self._events)
+
     def allow(self) -> bool:
         now = self._clock()
         with self._lock:

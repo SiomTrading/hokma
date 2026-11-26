@@ -1,5 +1,4 @@
 import { api } from "@/api";
-import type { DeskAccount } from "./types";
 
 export interface Broker {
   id: number;
@@ -22,7 +21,8 @@ export interface Account {
   initial_capital: number;
   currency: string;
   status: string;
-  desk_id: number | null;
+  /** Every desk that holds the account (it may be in several, or in none). */
+  desk_ids: number[];
   cash: number | null;
   equity: number | null;
   as_of: string;
@@ -45,6 +45,11 @@ export const accountsApi = {
   createAccount: (brokerId: number, name: string, capital: number) =>
     api.post<Account>(`/api/brokers/${brokerId}/accounts`, { name, capital }),
   reset: (accountId: number) => api.post<Account>(`/api/accounts/${accountId}/reset`, { confirmed: true }),
-  unassign: (deskId: number) => api.delete<{ desk_id: number; account: null }>(`/api/desks/${deskId}/account`),
-  assign: (deskId: number, accountId: number) => api.put<DeskAccount>(`/api/desks/${deskId}/account`, { account_id: accountId }),
+  /** Puts an account that exists in a desk. The first account of a desk also becomes the account of its main strategy. */
+  addToDesk: (deskId: number, accountId: number) => api.post<Account>(`/api/desks/${deskId}/accounts`, { account_id: accountId }),
+  /** Creates a demo account and puts it in the desk, in one step: if anything fails nothing is left. */
+  addDemoToDesk: (deskId: number, name: string, initialCapital: number) =>
+    api.post<Account>(`/api/desks/${deskId}/accounts`, { demo: { name, initial_capital: initialCapital } }),
+  removeFromDesk: (deskId: number, accountId: number) =>
+    api.delete<{ desk_id: number; account_id: number; accounts: number[] }>(`/api/desks/${deskId}/accounts/${accountId}`),
 };

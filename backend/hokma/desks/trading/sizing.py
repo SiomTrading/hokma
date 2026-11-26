@@ -153,6 +153,13 @@ def max_loss_per_unit_usd(structure: str, legs: Sequence[OptionLegInfo], net_pre
         raise SizingError("bad_multiplier", "the multiplier of the contract sheet must be above zero")
     credit = -net_premium
     strikes = sorted(leg.strike for leg in legs)
+    if structure == "protective_put":
+        # the shares at their price plus the put paid, down to the strike of the put: what is left below is the most the pair can lose
+        if net_premium <= 0:
+            raise SizingError("bad_premium", "a debit structure has a net premium above zero")
+        if stock_price is None or stock_price <= 0:
+            raise SizingError("bad_price", "a protective put needs the price of the shares")
+        return max(stock_price + net_premium - strikes[0], Decimal(0)) * multiplier
     if structure in ("long_call", "long_put", "debit_call_spread", "debit_put_spread"):
         if net_premium <= 0:
             raise SizingError("bad_premium", "a debit structure has a net premium above zero")
@@ -164,7 +171,7 @@ def max_loss_per_unit_usd(structure: str, legs: Sequence[OptionLegInfo], net_pre
     if structure in ("credit_call_spread", "credit_put_spread"):
         width = strikes[-1] - strikes[0]
         loss = width - credit
-    elif structure == "iron_condor":
+    elif structure in ("iron_condor", "iron_butterfly"):
         puts = sorted(leg.strike for leg in legs if leg.kind == "P")
         calls = sorted(leg.strike for leg in legs if leg.kind == "C")
         loss = max(puts[-1] - puts[0], calls[-1] - calls[0]) - credit

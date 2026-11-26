@@ -27,6 +27,7 @@ def rows(r, table, where="1=1"):
 
 
 def test_an_absent_guards_list_means_every_guard_so_an_agent_cannot_narrow_it(ready):
+    service.set_limits(ready.desk_id, {"guards": None}, db=ready.db)             # a desk that already existed has no list: every guard runs
     for narrowed in (["cooldown"], ["contract"], []):
         with pytest.raises(service.BrokerError) as e:
             service.set_limits(ready.desk_id, {"guards": narrowed}, db=ready.db, tighten_only=True)

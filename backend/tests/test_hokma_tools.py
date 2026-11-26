@@ -38,7 +38,7 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                 "desk_list", "desk_show", "desk_create", "desk_configure", "desk_money_set", "trash_move", "market_quote",
                 "market_candles", "options_chain", "company_profile", "company_news", "earnings_calendar", "earnings_surprises",
                 "basic_financials", "economic_calendar", "market_news", "watchlist_all", "today_show", "today_configure",
-                "broker_list", "account_create", "account_reset", "desk_assign_account", "desk_unassign_account",
+                "broker_list", "account_create", "account_reset", "desk_add_demo_account", "desk_add_account", "desk_remove_account", "desk_bind_strategy", "desk_rule_propose", "desk_panel_add", "desk_panel_remove", "desk_calendar_show", "desk_strategies_suggest", "desk_option_detail", "desk_strategy_propose",
                 "gmail_search", "gmail_read", "gmail_send",
                 "schwab_quotes", "schwab_quote", "schwab_option_chain", "schwab_expirations", "schwab_price_history",
                 "schwab_movers", "schwab_market_hours", "schwab_instruments", "schwab_instrument_by_cusip",
@@ -54,7 +54,9 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                     "calendar_events", "calendar_windows", "schedule_run", "book_positions", "book_snapshot", "book_pnl", "recon_run",
                     "recon_breaks", "report_account", "report_weekly", "export_book",
                     # SPEC-019 (H3): the SWO desk
-                    "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_status", "desk_cycle_learn", "desk_signals", "lessons_propose"}
+                    "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_status", "desk_cycle_learn", "desk_signals", "lessons_propose",
+                    # SPEC-028 (delivery 4): the analysis of an asset
+                    "desk_analysis_start", "desk_analysis_get", "desk_analysis_list"}
     assert names == promised
     assert not [n for n in names if "approve_decision" in n or "permission" in n or "restore" in n]
     assert all(t["inputSchema"]["additionalProperties"] is False for t in listed)
@@ -650,8 +652,8 @@ def test_desk_tools_are_declared_with_strict_schemas():
     assert listed["desk_list"]["inputSchema"]["properties"] == {}
     assert listed["desk_show"]["inputSchema"]["required"] == []
     assert {n for n in hokma_tools.TOOLS if n.startswith("desk_") and hokma_tools.TOOLS[n][4]} == {
-        "desk_create", "desk_configure", "desk_money_set", "desk_assign_account", "desk_unassign_account", "desk_level_set",
-        "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_learn"}
+        "desk_create", "desk_configure", "desk_money_set", "desk_add_demo_account", "desk_add_account", "desk_remove_account", "desk_bind_strategy", "desk_level_set", "desk_rule_propose", "desk_panel_add", "desk_panel_remove", "desk_calendar_show", "desk_strategies_suggest", "desk_option_detail", "desk_strategy_propose",
+        "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_learn", "desk_analysis_start"}
 
 
 def test_desk_list_gives_id_name_and_status_and_leaves_archived_out(two_desks, db):

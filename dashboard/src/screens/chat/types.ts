@@ -1,3 +1,4 @@
+import type { CapNotice, OrderNotice } from "./orderNotices";
 /** Wire types of the chat engine and of the conversation REST API. */
 
 export const MODELS = ["haiku", "sonnet", "opus"] as const;
@@ -29,6 +30,8 @@ export interface Usage {
 
 export interface PermissionBody {
   conversation_id?: string;
+  /** The subagent whose step asks (SPEC-013); absent when the main thread asks. */
+  agent?: { id: string; slug: string };
   turn_id: string;
   request_id: string;
   tool_use_id: string;
@@ -70,11 +73,52 @@ export interface StoredAttachment {
   kind: "image" | "file";
 }
 
+/** A step of a subagent, as the server keeps it (SPEC-013). */
+export interface StoredStep {
+  id: string;
+  name: string;
+  kind: SummaryKind;
+  target: string;
+  is_error: boolean | null;
+  result: string | null;
+}
+
+/** Who opened a turn when it was not the owner: "agents" is the turn the CLI opens by itself when an agent started in the background ends (bug 1257). */
+export type TurnOrigin = "agents";
+
+export type AgentStatus = "working" | "done" | "error" | "stopped";
+
+/** A subagent of a turn, live in a snapshot and saved with the answer (`meta.agents`). */
+export interface StoredAgent {
+  id: string;
+  slug: string;
+  description: string;
+  /** The id of the agent that launched it; empty when the main thread did. */
+  parent: string;
+  status: AgentStatus;
+  started_at: number;
+  ended_at: number | null;
+  step: string | null;
+  steps: StoredStep[];
+  result: string | null;
+}
+
+/** A command the CLI runs in the background. */
+export interface StoredShell {
+  id: string;
+  command: string;
+  status: "running" | AgentStatus;
+  started_at: number;
+  ended_at: number | null;
+}
+
 /** The answer of a turn that is still running, for a socket that reconnects in the middle of it. */
 export interface PartialTurn {
   turn_id: string;
   text: string;
   tools: StoredTool[];
+  agents?: StoredAgent[];
+  shells?: StoredShell[];
 }
 
 export interface HistoryMessage {
@@ -86,19 +130,33 @@ export interface HistoryMessage {
   tokens_out: number;
   created_at: number;
   tools?: StoredTool[];
+  agents?: StoredAgent[];
   attachments?: StoredAttachment[];
   blocks?: GuardBlock[];
+  /** Set on an answer nobody asked for: the summary the assistant gave when its background agents ended. */
+  origin?: TurnOrigin;
+  /** Set on a message of the owner that never reached the engine (Hokma closed while it waited). */
+  unsent?: boolean;
 }
 
 /** Everything the server can send on /ws/chat. */
 export type ServerEvent =
   | { type: "conversation"; conversation_id: string; title: string; model: string; agent: string | null; project: ProjectRef | null; created: boolean; project_mode?: "follow" | "fixed"; client_ref?: string }
-  | { type: "turn_start"; conversation_id: string; turn_id: string; message_id: string }
+  | { type: "turn_start"; conversation_id: string; turn_id: string; message_id: string | null; origin?: TurnOrigin }
+  /** The owner's message was saved while the lead still writes the summary of its agents: it goes through the pipe when that ends (bug 1257). Its `turn_start` carries the same message_id. */
+  | { type: "queued"; conversation_id: string; message_id: string; text: string }
+  /** That waiting message will not be sent (Hokma closed, or the conversation was busy): it stays saved, marked as not sent. */
+  | { type: "queued_dropped"; conversation_id: string; message_id: string }
   | { type: "engine_notice"; conversation_id: string; message: string }
   | { type: "delta"; conversation_id: string; turn_id: string; text: string }
   | { type: "tool_use"; conversation_id: string; turn_id: string; tool_use_id: string; name: string; input: Record<string, unknown>; summary: ToolSummary }
   | { type: "tool_result"; conversation_id: string; turn_id: string; tool_use_id: string; is_error: boolean; text: string }
   | { type: "tool_output"; conversation_id: string; turn_id: string; tool_use_id: string; text: string }
+  | { type: "agent_start"; conversation_id: string; turn_id: string; agent_id: string; slug: string; description: string; parent: string; started_at: number }
+  | { type: "agent_step"; conversation_id: string; turn_id: string; agent_id: string; step: Pick<StoredStep, "id" | "name" | "kind" | "target" | "is_error"> }
+  | { type: "agent_end"; conversation_id: string; turn_id: string; agent_id: string; status: Exclude<AgentStatus, "working">; ended_at: number; result: string }
+  | { type: "shell_start"; conversation_id: string; turn_id: string; shell_id: string; command: string; started_at: number }
+  | { type: "shell_end"; conversation_id: string; turn_id: string; shell_id: string; status: Exclude<AgentStatus, "working">; ended_at: number }
   | ({ type: "permission_request" } & PermissionBody)
   | { type: "permission_resolved"; conversation_id: string; request_id: string; decision: "allow" | "deny"; by: "human" | "timeout" | "stop" | "engine" }
   | ({ type: "guard_block"; conversation_id: string; turn_id?: string } & GuardBlock)
@@ -107,6 +165,10 @@ export type ServerEvent =
   | { type: "command_result"; conversation_id?: string; name: "model" | "agent" | "project"; ok: boolean; value: unknown; options?: string[] }
   | { type: "history"; conversation_id: string; messages: HistoryMessage[] }
   | { type: "state"; conversation_id: string; state: "idle" | "running"; pending_permissions: PermissionBody[]; partial?: PartialTurn }
+  | ({ type: "order_notice" } & OrderNotice)
+  | { type: "order_notice_closed"; proposal_id: number; outcome: string }
+  | ({ type: "cap_notice" } & CapNotice)
+  | { type: "cap_notice_closed"; cap_id: number; outcome: string }
   | { type: "pong" };
 
 export interface ConversationSummary {

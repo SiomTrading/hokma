@@ -90,8 +90,9 @@ def _marks(p: OrderProposal, positions: tuple[Any, ...]) -> dict[str, Decimal]:
 
 
 def load_context(desk_id: int, p: OrderProposal, *, db: Database | None = None, now: datetime | None = None, preview: Any = None,
-                 sheets: Mapping[str, Any] | None = None) -> GuardContext:
-    """Everything the guards read, gathered once. Blocking (the broker's positions may be a network call): call it from a thread."""
+                 sheets: Mapping[str, Any] | None = None, account_id: int | None = None) -> GuardContext:
+    """Everything the guards read, gathered once, about the account the order goes out by: `account_id` (the one the submit resolved) or,
+    without it, the account of the strategy of the proposal. Blocking (the broker's positions may be a network call): call it from a thread."""
     from hokma.backoffice import snapshot as snapshot_module
     from hokma.broker import service
     from hokma.contracts import discipline
@@ -103,40 +104,61 @@ def load_context(desk_id: int, p: OrderProposal, *, db: Database | None = None, 
     positions: tuple[Any, ...] = ()
     open_orders: tuple[Any, ...] = ()
     book = None
+    resolved_account: int | None = None
     with database.read() as u:                      # the broker lives as long as this unit: its reads happen inside it
-        ctx = service._load(u, desk_id)
-        pair = service.broker_of_desk(u, desk_id)
+        ctx = service._load(u, desk_id, account_id, p.strategy_key)
+        pair = None if ctx.account is None or ctx.broker is None else (ctx.broker, ctx.account)
         limits = dict(ctx.limits)
         today = u.broker.count_sent_orders(desk_id, _day_start(now))
-        assets, capital, status = tuple(ctx.assets), Decimal(str(ctx.desk.capital)), ctx.desk.status
+        assets, capital, status = tuple(ctx.assets), Decimal(str(ctx.desk.capital or 0)), ctx.desk.status
         enabled, account_ok = ctx.enabled, ctx.trading
+        day_closed = None
+        if ctx.account is not None:
+            from hokma.broker import day_close
+
+            closed_state = day_close.state_of(u, ctx.account.id)
+            day_closed = closed_state if closed_state["state"] == "day_closed" else None
         if pair is not None:
             broker, account = pair
+            resolved_account = account.id
             if broker.capabilities.positions:
                 positions = _normalize_positions(broker.positions(account.id))
             if broker.capabilities.orders:
                 open_orders = tuple(broker.orders(account.id) or ())
             balance = broker.balance(account.id) if broker.kind != "sim" else None
             book = snapshot_module.snapshot(account.id, db=database, positions=positions, balance=balance, prices=_marks_of(positions))
+    live_state: dict[str, Any] = {}
+    if book is not None and resolved_account is not None:
+        # SPEC-026 v2: the loss of the day is the one the BROKER reports (its equity of the start of the session minus its equity now, `hokma.broker.pnl`), and
+        # what the broker did not give stays unknown (None), so the account guard blocks instead of letting it pass.
+        from hokma.exec import live
+
+        measure, evals = live.evaluations(database, resolved_account, desk_id, now=now)
+        missing = {k: v for k, v in book.missing.items() if k != "day_unrealized"}
+        if not measure.measured:
+            missing["day_loss"] = measure.reason or "unknown"
+        book = dataclasses.replace(book, day_pnl=measure.day_pnl, missing=missing, equity=book.equity if book.equity is not None else measure.equity_live)
+        with database.read() as u:
+            stop = live.active_stop(u, desk_id, resolved_account, now)
+        live_state = {**live_state, "live:evals": tuple(evals), **({"live:stop": dict(stop)} if stop else {})}
     if book is None:
         book = snapshot_module.AccountSnapshot(0, now.strftime("%Y-%m-%d %H:%M:%S"), None, None, None, None,
-                                              missing={"account": "the desk has no account"})
+                                              missing={"account": "the order has no account"})
     contract_sheets = dict(sheets) if sheets is not None else {k: v for k, v in discipline.load_sheets([g.contract_id for g in p.legs]).items() if v is not None}
     return GuardContext(
         proposal=p, contracts=contract_sheets, positions=positions, book=book, limits=limits, level=level,
         windows=event_windows.windows(desk_id, at=now, limits=limits, db=database), now=now, desk_id=desk_id, assets=assets, capital=capital,
-        desk_status=status, marks=_marks(p, positions), state=_state(desk_id, database),
+        desk_status=status, marks=_marks(p, positions), state={**_state(desk_id, database), **({"account:day_closed": day_closed} if day_closed else {}), **live_state},
         orders_enabled=enabled, account_ok=account_ok, preview=preview, open_orders=open_orders, orders_today=today)
 
 
-def clip_reduce_only(p: OrderProposal, positions: tuple[Any, ...]) -> tuple[OrderProposal | None, list[dict[str, Any]]]:
+def clip_reduce_only(p: OrderProposal, positions: tuple[Any, ...], open_orders: tuple[Any, ...] = ()) -> tuple[OrderProposal | None, list[dict[str, Any]]]:
     """OA-56: a `reduce_only` order never opens the opposite position. A leg bigger than the position is cut to it (the cut is recorded);
-    a leg with nothing to reduce is dropped; no leg left gives None."""
-    held: dict[str, Decimal] = {}
-    for x in positions:
-        cid = getattr(x, "contract_id", None)
-        if cid:
-            held[cid] = held.get(cid, ZERO) + (dec_or_none(getattr(x, "qty", None)) or ZERO)
+    a leg with nothing to reduce is dropped; no leg left gives None. The position is NET of what the live orders of the account already take out of it:
+    a broker that ignores the flag (Schwab) would otherwise take a second close of the same unit and open the opposite side."""
+    from hokma.exec.guards import _held
+
+    held = _held(positions, open_orders)
     legs, clamps = [], []
     for leg in p.legs:
         qty, clipped = clip_to_position(leg.side, leg.qty, held.get(leg.contract_id, ZERO))
@@ -150,9 +172,9 @@ def clip_reduce_only(p: OrderProposal, positions: tuple[Any, ...]) -> tuple[Orde
 
 def run(desk_id: int, p: OrderProposal, *, db: Database | None = None, now: datetime | None = None, preview: Any = None,
         sheets: Mapping[str, Any] | None = None, skip: tuple[str, ...] = (), virtual: tuple[Any, ...] = (),
-        exit_budget: Mapping[str, Decimal] | None = None) -> PrefilterResult:
-    """PASS or BLOCK for a proposal, with the clamped proposal and every guard result."""
-    ctx = load_context(desk_id, p, db=db, now=now, preview=preview, sheets=sheets)
+        exit_budget: Mapping[str, Decimal] | None = None, account_id: int | None = None) -> PrefilterResult:
+    """PASS or BLOCK for a proposal, with the clamped proposal and every guard result. `account_id` is the account the order resolved to."""
+    ctx = load_context(desk_id, p, db=db, now=now, preview=preview, sheets=sheets, account_id=account_id)
     if p.reduce_only and p.origin == "chat" and EMERGENCY_CLOSE.get() == (desk_id, "owner") and ctx.account_ok:
         # the owner's flatten: a PAUSED desk and the switch of the broker do not stop this close. An archived desk, or any other state, still refuses.
         ctx = dataclasses.replace(ctx, desk_status="active" if ctx.desk_status == "paused" else ctx.desk_status, orders_enabled=True)
@@ -174,9 +196,13 @@ def run(desk_id: int, p: OrderProposal, *, db: Database | None = None, now: date
     cuts: list[dict[str, Any]] = []
     ctx = dataclasses.replace(ctx, proposal=normalize_effects(ctx.proposal, ctx.positions, ctx.open_orders))
     if p.reduce_only:
-        reduced, cuts = clip_reduce_only(p, ctx.positions)
+        reduced, cuts = clip_reduce_only(p, ctx.positions, ctx.open_orders or ())
         if reduced is None:
             return PrefilterResult("BLOCK", p, (blocked("reduce_only", "nothing_to_reduce", "there is no position to reduce"),), tuple(cuts), False, True)
         ctx = dataclasses.replace(ctx, proposal=reduced)
     result = dataclasses.replace(run_pipeline([g for g in build(ctx.limits) if g.name not in skip], ctx), marks=ctx.marks)
+    if account_id is not None and result.needs_owner:
+        from hokma.exec import notices
+
+        result = notices.apply_grants(result, desk_id, account_id, db)     # "follow for the rest of the day": notice rules the owner already covered do not ask again
     return dataclasses.replace(result, clamps=tuple(cuts) + result.clamps) if cuts else result

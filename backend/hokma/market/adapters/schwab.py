@@ -12,6 +12,7 @@ symbol: LEVELONE_EQUITIES for the price and the fields of the day, CHART_EQUITY 
   `connections.*` code; the hub shows it and does NOT move the symbols to another source (SPEC-016 3.7).
 * The session lives in `hokma.schwab.auth` and the socket in `hokma.schwab.stream`: nothing secret is kept or logged here.
 """
+import logging
 import math
 import time
 
@@ -20,6 +21,8 @@ from hokma.market.providers import ProviderSpec
 from hokma.market.stream import (BarUpdate, LimitReached, LiveSource, OptionQuote, Quote, Rollover, SourceCapabilities,
                                  SourceStatus, SymbolError)
 from hokma.schwab import stream as streamer
+
+log = logging.getLogger("hokma.market.schwab")
 
 UNKNOWN_SYMBOL_CODE = "market." + UNKNOWN_SYMBOL
 
@@ -138,7 +141,7 @@ class SchwabSource(LiveSource):
         self._queue = self._queue or asyncio.Queue(20000)
         if self._streamer is None:
             self._streamer = streamer.SchwabStreamer(self._config, self._data, self._status, on_limit=self._limit,
-                                                     on_unavailable=self._unavailable, backoff=self._backoff)
+                                                     on_unavailable=self._unavailable, backoff=self._backoff, on_activity=self._activity)
         await self._streamer.start()
 
     async def subscribe(self, symbols: list[str]) -> None:
@@ -188,6 +191,28 @@ class SchwabSource(LiveSource):
         if self._streamer is not None:
             for service, keys in added.items():
                 self._streamer.drop(service, keys)
+
+    def watch_account_activity(self, on: bool) -> bool:
+        """Follow (or stop following) the activity of the account by the Streamer (ACCT_ACTIVITY): a signal that a fill may be waiting, so the live
+        freeze pulls the fills at once. False when the session is not open (it is asked again on the next pass). The session repeats it after a reconnection."""
+        if self._streamer is None:
+            return False
+        if on:
+            self._streamer.want(streamer.ACCT_ACTIVITY, [streamer.ACTIVITY_KEY])
+        else:
+            self._streamer.drop(streamer.ACCT_ACTIVITY, [streamer.ACTIVITY_KEY])
+        return True
+
+    def _activity(self, message_type: str) -> None:
+        try:
+            from hokma.exec import live
+
+            from hokma.broker import pnl
+
+            live.on_account_activity("schwab", message_type)
+            pnl.on_account_activity("schwab", message_type)                 # one more read of the accounts of Schwab, at most one per second
+        except Exception:                                                  # noqa: BLE001  (a failure of the freeze never stops the market)
+            log.warning("the account activity could not be passed to the live freeze")
 
     async def subscribe_options(self, keys: list[str]) -> None:
         """Option contracts to follow (keys as `/chains` gives them: they are put in the Streamer's form)."""

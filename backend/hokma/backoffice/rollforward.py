@@ -119,7 +119,7 @@ def for_account(account_id: int, *, start: Any, end: Any, desk_id: int | None = 
                 base = dec(last.amount) if last is not None else ZERO
             else:
                 row = u.session.one("SELECT capital FROM desks WHERE id = :d", {"d": desk_id})
-                base = dec(row["capital"]) if row is not None else ZERO
+                base = dec(row["capital"]) if row is not None and row["capital"] is not None else ZERO
         opening = capital_at(items, base=base, before=book_module._stamp(start))
     return roll_forward(items, opening=opening, start=start, end=end, account_id=account_id, desk_id=desk_id,
                         reported_closing=dec_or_none(reported_closing))

@@ -4,6 +4,7 @@ without the filter. An order that cannot be read as a proposal (a symbol with no
 what cannot be checked does not go. The guards that clamp cannot cut a native order silently, so a clamp is a refusal that says the limit."""
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -25,6 +26,14 @@ ALL_SHARES_INSTRUCTIONS = frozenset({"SELL", "SELL_TO_CLOSE", "BUY_TO_CLOSE", "B
 
 class Unconvertible(ValueError):
     pass
+
+
+class StopInvalid(Unconvertible):
+    """The STOP exit of a TRIGGER entry does not cover the quantity of the entry (SPEC-026, 3390d): refused `stop_invalid`, not `cannot_check`."""
+
+    def __init__(self, contract: str, qty: Decimal, stop_qty: Decimal) -> None:
+        super().__init__("the STOP exit does not cover the entry")
+        self.contract, self.qty, self.stop_qty = contract, qty, stop_qty
 
 
 def _nodes(order: Any, depth: int = 0) -> list[dict[str, Any]]:
@@ -173,7 +182,24 @@ def _walked(desk_id: int, order: Any, *, created_by: str, line: str) -> list[tup
             credit[g.contract_id] = _signed(g)
         groups = _exit_nodes(tree)
         budget = _exit_budget(groups, root_side)
-        out += [(p, {}, None, s) for p, s in tree.props]
+        stops: dict[str, Decimal] = {}                        # the stop of each contract: the farthest one when there are several (the one that can lose the most)
+        covered: dict[str, Decimal] = {}                      # what the STOP exits cover: the groups add up, an OCO counts its biggest stop
+        for group in groups:
+            in_group: dict[str, Decimal] = {}
+            for b in group:
+                for p, _s in b.props:
+                    if p.order_type in ("stop", "stop_limit") and p.stop_price is not None:
+                        for g in p.legs:
+                            in_group[g.contract_id] = max(in_group.get(g.contract_id, Decimal(0)), g.qty)
+                            far = min if root_side.get(g.contract_id) == "buy" else max
+                            stops[g.contract_id] = far(stops[g.contract_id], p.stop_price) if g.contract_id in stops else p.stop_price
+            for cid, q in in_group.items():
+                covered[cid] = covered.get(cid, Decimal(0)) + q
+        for g in tree.legs:                                    # a stop that does not cover the whole entry is not a stop of this entry
+            if g.contract_id in covered and covered[g.contract_id] < g.qty:
+                raise StopInvalid(g.contract_id.split(":", 1)[-1].replace(":", " "), g.qty, covered[g.contract_id])
+        # SPEC-026, 3390d: the stop of an entry written as a TRIGGER is the STOP exit it carries: Hokma reads it, it never writes one
+        out += [(dataclasses.replace(p, stop_loss=stops.get(p.legs[0].contract_id)) if len(p.legs) == 1 and p.stop_loss is None else p, {}, None, s) for p, s in tree.props]
         for group in groups:
             for b in group:
                 out += [(p, dict(credit), budget, s) for p, s in b.props]
@@ -187,13 +213,17 @@ def to_proposals(desk_id: int, order: Any, *, created_by: str, line: str) -> lis
     return [p for p, *_rest in _walked(desk_id, order, created_by=created_by, line=line)]
 
 
-def check(desk_id: int, order: Any, *, preview: Any, who: Any, db: Database | None = None) -> dict[str, Any] | None:
+def check(desk_id: int, order: Any, *, preview: Any, who: Any, db: Database | None = None, account_id: int | None = None) -> dict[str, Any] | None:
     """None when the order may go on to the rules of SPEC-015; otherwise the refusal in the shape of `rules.evaluate`."""
     database = db or get_database()
     with database.read() as u:
         row = u.session.one("SELECT line FROM desk_profile WHERE desk_id = :d", {"d": desk_id})
     try:
         walked = _walked(desk_id, order, created_by=getattr(who, "agent", None) or "owner", line=row["line"] if row else "DT")
+    except StopInvalid as exc:
+        from hokma.i18n import t
+
+        return _refused("stop_invalid", t("risk.stop_qty", contract=exc.contract, qty=exc.qty, stop_qty=exc.stop_qty))
     except Unconvertible as exc:
         return _refused("cannot_check", f"the order cannot be checked against the limits, so it is not sent: {exc}")
     for proposal, credit, budget, _synthetic in walked:
@@ -201,7 +231,8 @@ def check(desk_id: int, order: Any, *, preview: Any, who: Any, db: Database | No
         # (the symbol list included) runs for every node. An exit reads the live positions plus what its ROOT opens (never what a sibling
         # opens) and is held to the budget of the whole tree.
         virtual = tuple(SimpleNamespace(contract_id=c, qty=q, market_value=None, multiplier=None, day_pl=None) for c, q in credit.items() if q != 0)
-        result = prefilter.run(desk_id, proposal, db=database, preview=preview, skip=("broker_rules",), virtual=virtual, exit_budget=budget)
+        result = prefilter.run(desk_id, proposal, db=database, preview=preview, skip=("broker_rules",), virtual=virtual, exit_budget=budget,
+                               account_id=account_id)
         if result.verdict == "BLOCK":
             block = result.blocked_by
             return _refused(block.code if block else "blocked", block.why if block else "")

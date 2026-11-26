@@ -44,9 +44,10 @@ def test_every_key_used_in_the_code_exists_and_every_key_is_used():
     for path in [*(ROOT / "backend" / "hokma").rglob("*.py"), *(ROOT / "cli").rglob("*.py")]:
         used |= set(KEY_USE.findall(path.read_text(encoding="utf-8")))
     known = set(load("en"))
-    assert used - known == set(), "keys used in the code but missing from the catalogs"
+    computed = ("exec.notice.close_keep_", "telegram.notice_answer.")   # looked up by a computed key: why a line of the close list stays and the answer to a notice by Telegram (SPEC-026, 3390b)
+    assert {k for k in used - known if not k.startswith(computed)} == set(), "keys used in the code but missing from the catalogs"
     # `docs.detail.reason.<code>` is looked up by a computed key; the test below checks it against every code
-    assert {k for k in known - used if not k.startswith(("docs.detail.reason.", "power.wake.", "github.", "mail.", "telegram.reset_"))} == set(), "catalog keys that no code uses"
+    assert {k for k in known - used if not k.startswith(("docs.detail.reason.", "power.wake.", "github.", "mail.", "telegram.reset_", "telegram.cap_answer.", *computed))} == set(), "catalog keys that no code uses"
 
 
 def test_every_unreadable_code_has_a_reason_in_both_catalogs():

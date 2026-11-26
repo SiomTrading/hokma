@@ -35,12 +35,18 @@ export function relatedTrash(items: TrashItem[], at: string | undefined): TrashI
   });
 }
 
+/** The key of the title and the reason of a block: its rule, or "dynamic_code" for code assembled at run time. */
+export function blockTextKey(block: BlockData): string {
+  const rule = isRule(block.rule) ? block.rule : "other";
+  return block.reason === "dynamic_code" && rule === "real_money" ? "dynamic_code" : rule;
+}
+
 /** "Blocked: deleting files" in the thread: what was tried, why it never happens, and where the file went. */
 export function BlockCard({ block }: { block: BlockData }) {
   const { t } = useI18n();
   const shell = useShell();
   const rule = isRule(block.rule) ? block.rule : "other";
-  const textKey = block.reason === "dynamic_code" && rule === "real_money" ? "dynamic_code" : rule;
+  const textKey = blockTextKey(block);
   const [inTrash, setInTrash] = useState(false);
   useEffect(() => {
     if (block.rule !== "delete") return;

@@ -6,6 +6,7 @@ loses a file. Steps are idempotent: running one on data that is already migrated
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -84,4 +85,65 @@ def remove_stored_files(paths: list[Path]) -> list[Path]:
     return failed
 
 
-STEPS: dict[int, Callable[[object], list[Path]]] = {8: move_documents_to_student_library}
+_CAPITAL_NOT_NULL = re.compile(r"(\bcapital\s+INTEGER)\s+NOT\s+NULL", re.IGNORECASE)
+
+
+def _rewrite_desks_definition(session, change) -> bool:
+    """Change the stored text of the definition of `desks` in SQLite and bump the schema cookie (SQLite manual, "Making Other Kinds Of
+    Table Schema Changes": allowed for adding or removing a NOT NULL, a CHECK or a default). The data is not touched. Returns False when
+    the text already has the wanted shape."""
+    sql = session.scalar("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'desks'")
+    if sql is None:
+        raise ValueError("the table desks does not exist")
+    new = change(sql)
+    if new == sql:
+        return False
+    cookie = int(session.scalar("PRAGMA schema_version"))
+    session.execute("PRAGMA writable_schema = ON")
+    try:
+        session.execute("UPDATE sqlite_master SET sql = :s WHERE type = 'table' AND name = 'desks'", {"s": new})
+        session.execute(f"PRAGMA schema_version = {cookie + 1}")
+    finally:
+        session.execute("PRAGMA writable_schema = OFF")
+    return True
+
+
+def desk_capital_optional(session) -> list[Path]:
+    """Version 25: `desks.capital` accepts NULL. Postgres does it in the SQL of the migration; here SQLite. Idempotent."""
+    if session.engine == "sqlite":
+        _rewrite_desks_definition(session, lambda sql: _CAPITAL_NOT_NULL.sub(r"\1", sql, count=1))
+        if any(r["name"] == "capital" and r["notnull"] for r in session.query("PRAGMA table_info(desks)")):
+            raise ValueError("desks.capital is still NOT NULL after the rewrite")
+    return []
+
+
+def assets_list_to_notice(session) -> list[Path]:
+    """Version 27 (SPEC-026): the list of assets that the SYSTEM forced into a desk stops blocking and becomes a notice. A desk whose
+    `guards` lists `whitelist` gets `rule_modes.assets_only = notice`, unless the owner set it by hand (`rule_sources.assets_only` says so, or `assets_only` is true in the limits):
+    that one is written as an explicit restriction. A desk that already has an entry is left alone (idempotent). Every desk it changes
+    leaves a row in `rule_mode_migrations`; the way back (hokma.db.downgrade.rollback_0027) takes the entries out and the list blocks again."""
+    import json
+
+    for row in session.query("SELECT desk_id, config FROM desk_limits ORDER BY desk_id"):
+        try:
+            config = json.loads(row["config"] or "{}")
+        except ValueError:
+            continue
+        guards = config.get("guards")
+        if not isinstance(guards, list) or "whitelist" not in guards:
+            continue
+        modes = dict(config.get("rule_modes") or {})
+        if "assets_only" in modes:
+            continue
+        # the system only forces the list through `guards`; `assets_only: true` is a limit the owner set, with or without a record of its source
+        by_hand = config.get("assets_only") is True or (config.get("rule_sources") or {}).get("assets_only") == "hand"
+        after = "restriction" if by_hand else "notice"
+        modes["assets_only"] = {"mode": after, **({} if by_hand else {"timeout_min": 30})}
+        config["rule_modes"] = modes
+        session.execute("UPDATE desk_limits SET config = :c WHERE desk_id = :d", {"c": json.dumps(config, ensure_ascii=False), "d": row["desk_id"]})
+        session.execute("INSERT INTO rule_mode_migrations (desk_id, rule_id, before_mode, after_mode, reason) VALUES (:d, 'assets_only', 'restriction', :a, :r)",
+                        {"d": row["desk_id"], "a": after, "r": "set by hand: kept" if by_hand else "forced by the system: now a notice"})
+    return []
+
+
+STEPS: dict[int, Callable[[object], list[Path]]] = {8: move_documents_to_student_library, 25: desk_capital_optional, 27: assets_list_to_notice}

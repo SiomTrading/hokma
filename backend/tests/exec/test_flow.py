@@ -121,7 +121,7 @@ def test_a_market_order_without_a_fresh_quote_is_rejected_and_no_price_is_made_u
 def test_a_limit_order_waits_and_fills_when_the_stream_crosses(ready):
     from hokma.broker import sim
     levels.set_level(ready.desk_id, 3, rules={"id": "r", "max_qty": 5, "order_types": ["limit"]}, who=ready.owner, db=ready.db)
-    out = hexec.submit(proposal(ready, order_type="limit", limit="20990"), who=AGENT, db=ready.db)
+    out = hexec.submit(proposal(ready, order_type="limit", limit="20990", stop_loss=Decimal("20980")), who=AGENT, db=ready.db)
     assert out.status == "sent"                                           # working at the simulated broker
     assert rows(ready, "sim_fills") == []
     ready.board.listeners.append(sim.on_quote)

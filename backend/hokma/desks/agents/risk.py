@@ -151,6 +151,13 @@ class RiskLimits(BaseModel):
     max_weight_pct: float | None = None
     event_windows: list[EventWindowLimit] | None = None
     guards: list[str] | None = None
+    instructions: list[dict[str, Any]] | None = None       # the rules tab (SPEC-025): the guards ignore them
+    proposed: list[dict[str, Any]] | None = None
+    dismissed: list[str] | None = None
+    rule_sources: dict[str, str] | None = None
+    rule_modes: dict[str, dict[str, Any]] | None = None
+    daily_loss_steps: list[dict[str, float]] | None = None          # SPEC-026 (A8): a USD that scales with the equity
+    drawdown_steps: list[dict[str, float]] | None = None
 
     @model_validator(mode="after")
     def _in_range(self) -> "RiskLimits":
@@ -424,6 +431,9 @@ class PortfolioContext:
     expirations: tuple[ExpirationBucket, ...] = ()
     exposure_by_underlying: Mapping[str, Decimal] = field(default_factory=dict)
     missing: Mapping[str, str] = field(default_factory=dict)
+    account_id: int | None = None                       # the account this context reads (SPEC-027): the equity is the whole account's, the positions are this desk's
+    shared_with: tuple[int, ...] = ()                   # the other desks that hold that account
+    sections: tuple[Mapping[str, Any], ...] = ()        # one summary per account linked to the desk, marked shared when another desk holds it
 
     @property
     def footprint(self) -> str:
@@ -443,7 +453,16 @@ class PortfolioContext:
             "greeks": None if self.greeks is None else dict(self.greeks), "worst_case": None if self.worst_case is None else dict(self.worst_case),
             "expirations": [{"expiration": b.expiration.isoformat(), "positions": b.positions, "contracts": str(b.contracts)} for b in self.expirations],
             "exposure_by_underlying": {k: str(v) for k, v in self.exposure_by_underlying.items()},
-            "missing": dict(self.missing)}
+            "missing": dict(self.missing), **self._account_facts()}
+
+    def _account_facts(self) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if self.account_id is not None:
+            out.update({"account_id": self.account_id, "account_shared": bool(self.shared_with), "shared_with_desks": list(self.shared_with),
+                        "positions_scope": "this desk only; equity is the whole account"})
+        if self.sections:
+            out["accounts"] = [dict(s) for s in self.sections]
+        return out
 
 
 def _row_of(item: Mapping[str, Any], sheet: Any) -> PositionRow:
@@ -528,25 +547,63 @@ def _portfolio_greeks(rows: Sequence[PositionRow], as_of: str, vols: Mapping[str
     return totals, worst
 
 
-def load_portfolio_context(desk_id: int, sheets: Mapping[str, Any] | None = None, *, line: str = "SWO", db: Database | None = None,
-                           prices: Mapping[str, Decimal] | None = None, **greek_inputs: Any) -> PortfolioContext:
-    """The context of the desk portfolio read from the back office. A desk with no account, or an unreadable book, is not provided."""
+def _desk_snapshot(database: Database, desk_id: int, account_id: int, prices: Mapping[str, Decimal] | None) -> Any:
+    """The snapshot of an account where the money (cash, equity) is the whole account's and the positions are the lots of this desk only:
+    two desks in one account do not read each other's positions as their own. A desk that is the only holder sees the same as before."""
+    from dataclasses import replace
+
+    from hokma.backoffice import desk_owner, valuation
     from hokma.backoffice import book as book_module
     from hokma.backoffice import snapshot as snapshot_module
+
+    snap = snapshot_module.snapshot(account_id, db=database, prices=prices or {})
+    entries = book_module.entries(account_id, db=database)
+    with database.read() as u:
+        mine = desk_owner.of_desk(u.session, account_id, entries, desk_id)
+    valued, _errors = valuation.value_all(book_module.Book(mine).cost_positions().values(), dict(prices or {}))
+    rows = tuple({"contract_id": v.contract_id, "qty": str(v.qty), "price": str(v.price), "market_value": str(v.market_value)} for v in valued)
+    return replace(snap, positions=rows)
+
+
+def load_portfolio_context(desk_id: int, sheets: Mapping[str, Any] | None = None, *, line: str = "SWO", db: Database | None = None,
+                           prices: Mapping[str, Decimal] | None = None, account_id: int | None = None, strategy_key: str = "principal",
+                           **greek_inputs: Any) -> PortfolioContext:
+    """The context of the desk portfolio read from the back office (SPEC-027): the account of the strategy (or the one named; the only one when
+    the desk has one), with the lots of this desk and the equity of the whole account, plus one section per linked account marked shared when
+    another desk holds it. A desk with no account, an unreadable book, or several accounts and none chosen is not provided, never flat."""
+    from hokma.backoffice import book as book_module
     from hokma.contracts import discipline
 
     database = db or get_database()
     try:
         with database.read() as u:
-            account = u.broker.account_of_desk(desk_id)
-        if account is None:
+            linked = u.broker.accounts_of_desk(desk_id)
+            bound = u.broker.account_of_strategy(desk_id, strategy_key)
+            holders = {a.id: [d for d in u.broker.desks_of_account(a.id) if d != desk_id] for a in linked}
+        if not linked:
             return build_portfolio_context(None, {}, line=line)
-        ids = list(book_module.Book.load(account.id, db=database).cost_positions())
-        snap = snapshot_module.snapshot(account.id, db=database, prices=prices or {})
+        if account_id is not None:
+            account = next((a for a in linked if a.id == account_id), None)
+        else:
+            account = bound or (linked[0] if len(linked) == 1 else None)
+        sections = tuple({"account_id": a.id, "shared": bool(holders[a.id]), "shared_with_desks": holders[a.id], "chosen": account is not None and a.id == account.id}
+                         for a in linked)
+        if account is None:
+            reason = "the account is not one of the desk" if account_id is not None else "the desk has several accounts and the strategy has none"
+            return replace_context(build_portfolio_context(None, {}, line=line), missing={"portfolio": reason}, sections=sections)
+        snap = _desk_snapshot(database, desk_id, account.id, prices)
+        ids = [p["contract_id"] for p in snap.positions]
         found = dict(sheets) if sheets is not None else {k: v for k, v in discipline.load_sheets(ids).items() if v is not None}
     except Exception:                                               # noqa: BLE001  (no back office data: not provided, never flat)
         return build_portfolio_context(None, {}, line=line)
-    return build_portfolio_context(snap, found, line=line, **greek_inputs)
+    built = build_portfolio_context(snap, found, line=line, **greek_inputs)
+    return replace_context(built, account_id=account.id, shared_with=tuple(holders[account.id]), sections=sections)
+
+
+def replace_context(ctx: PortfolioContext, **changes: Any) -> PortfolioContext:
+    from dataclasses import replace
+
+    return replace(ctx, **changes)
 
 
 # ---- prompts: the agent file, its skills, the line (TA-10, TA-11, TA-12) ---------------------------------------------
@@ -689,9 +746,10 @@ def risk_toolbox(seat_code: str, desk_id: int, *, db: Database | None = None, ac
         kwargs = {key: to_input(value, kinds.get(key, "")) for key, value in dict(arguments or {}).items()}
         return registry.call(name, **kwargs).to_dict()
 
-    def book_snapshot() -> dict[str, Any]:
-        reader = account_snapshot or (lambda d: _read_snapshot(d, db))
-        return dict(reader(desk_id))
+    def book_snapshot(account_id: int | None = None) -> dict[str, Any]:
+        if account_snapshot is not None:
+            return dict(account_snapshot(desk_id))
+        return dict(_read_snapshot(desk_id, db, account_id))
 
     def desk_configure(limits: Mapping[str, Any]) -> dict[str, Any]:
         outcome = apply_limit_changes(desk_id, limits, db=db)
@@ -701,8 +759,8 @@ def risk_toolbox(seat_code: str, desk_id: int, *, db: Database | None = None, ac
     catalog.register(ToolSpec("quant_call", "Run one registered calculation of your modules with named arguments and get its value, unit, method and warnings.",
                               {"type": "object", "properties": {"name": {"type": "string"}, "arguments": {"type": "object"}}, "required": ["name"]},
                               quant_call, example={"name": "risk.var", "arguments": {}}))
-    catalog.register(ToolSpec("book_snapshot", "The snapshot of the desk account: cash, positions value, equity, day result and peak. A figure that is not known is null with its reason in missing.",
-                              {"type": "object", "properties": {}}, book_snapshot, example={}))
+    catalog.register(ToolSpec("book_snapshot", "The snapshot of the desk account: cash, positions value, equity, day result and peak of the whole account. A desk with more than one account says account_id. A figure that is not known is null with its reason in missing.",
+                              {"type": "object", "properties": {"account_id": {"type": "integer"}}}, book_snapshot, example={}))
     catalog.register(ToolSpec("desk_configure", "Tighten the limits of the desk: add a limit or make a number smaller. A change that loosens a limit saves nothing and asks the owner.",
                               {"type": "object", "properties": {"limits": {"type": "object"}}, "required": ["limits"]}, desk_configure,
                               example={"limits": {}}, mutates=True))
@@ -710,20 +768,26 @@ def risk_toolbox(seat_code: str, desk_id: int, *, db: Database | None = None, ac
     return catalog.toolbox_for(seat.slug)
 
 
-def _read_snapshot(desk_id: int, db: Database | None) -> dict[str, Any]:
+def _read_snapshot(desk_id: int, db: Database | None, account_id: int | None = None) -> dict[str, Any]:
     from hokma.backoffice import book as book_module
     from hokma.backoffice import snapshot as snapshot_module
     from hokma.broker import sim_engine
 
     database = db or get_database()
     with database.read() as u:
-        account = u.broker.account_of_desk(desk_id)
-    if account is None:
+        linked = u.broker.accounts_of_desk(desk_id)
+        holders = {a.id: [d for d in u.broker.desks_of_account(a.id) if d != desk_id] for a in linked}
+    if not linked:
         raise ToolFailure("no_data", "the desk has no account")
+    if account_id is None and len(linked) > 1:
+        raise ToolFailure("bad_input", f"the desk has {len(linked)} accounts: say account_id ({', '.join(str(a.id) for a in linked)})")
+    account = linked[0] if account_id is None else next((a for a in linked if a.id == account_id), None)
+    if account is None:
+        raise ToolFailure("bad_input", f"account {account_id} is not an account of the desk")
     ids = list(book_module.Book.load(account.id, db=database).cost_positions())
     snap = snapshot_module.snapshot(account.id, db=database, prices=dict(sim_engine.mark_source(ids)))
     keys = ("account_id", "as_of", "cash", "positions_value", "equity", "day_pnl", "peak_equity", "realized_pnl", "total_profit", "open_contracts", "positions", "missing")
-    return json.loads(json.dumps({k: getattr(snap, k) for k in keys}, default=str))
+    return json.loads(json.dumps({**{k: getattr(snap, k) for k in keys}, "shared_with": holders[account.id], "positions_scope": "account"}, default=str))
 
 
 # ---- running a voice -------------------------------------------------------------------------------------------------

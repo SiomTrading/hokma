@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from hokma.backoffice import desk_owner
 from hokma.backoffice import book as book_module
 from hokma.backoffice import decisions, provenance
 from hokma.broker.types import Fill
@@ -152,13 +153,13 @@ def apply(u: Any, got: Collected, open_rows: dict[str, dict[str, Any]]) -> SyncR
     if kind not in provenance.SOURCES:
         report.unresolved.append(f"broker kind {kind!r} is not a source of the book")
         return report
-    desk_id = u.broker.desk_of_account(got.account_id)
     known = {str(r["broker_order_id"]) for r in u.session.query("SELECT broker_order_id FROM broker_orders WHERE account_id = :a AND broker_order_id IS NOT NULL", {"a": got.account_id})}
     by_id = {str(o.order_id): o for o in got.orders if getattr(o, "order_id", None) is not None}
     by_id.update(got.looked_up)
     for oid, order in sorted(by_id.items()):
         if oid not in known:                                    # an order Hokma never sent is not booked here: it is the reconciliation's to find
             continue
+        desk_id, _strategy = desk_owner.owner_of_fill(u.session, got.account_id, oid)       # the desk of the order Hokma sent, not the account's first desk
         complete = _book_order(u, kind, got.account_id, desk_id, oid, order, report)
         row = open_rows.get(oid)
         status = final_status(order)
@@ -233,20 +234,46 @@ def sync(account_id: int, *, broker: Any, db: Database | None = None) -> SyncRep
         open_rows = open_order_ids(u, account_id)
     got = collect(broker, account_id, list(open_rows))
     with database.write() as u:
-        return apply(u, got, open_rows)
+        report = apply(u, got, open_rows)
+    _fills_booked(account_id, report)
+    return report
 
 
-def sync_desk(desk_id: int, *, db: Database | None = None) -> SyncReport:
-    """The sync of the account of a desk: the broker is opened for the reads and closed before anything is written."""
+def _fills_booked(account_id: int, report: "SyncReport") -> None:
+    """A fill that came by the sync is an event of the live freeze (SPEC-026, 3390c): it is measured at once."""
+    if report.booked:
+        from hokma.exec import live
+
+        live.after_fill(account_id)
+
+
+def sync_desk(desk_id: int, *, account_id: int | None = None, db: Database | None = None) -> SyncReport:
+    """The sync of one account of a desk: the broker is opened for the reads and closed before anything is written. A desk with one account
+    syncs it; with several, `account_id` says which (use `sync_desk_accounts` for all). It never picks "the first"."""
     from hokma.broker import service
 
     database = db or get_database()
     with database.read() as u:
-        pair = service.broker_of_desk(u, desk_id)
-        if pair is None:
+        linked = [a.id for a in u.broker.accounts_of_desk(desk_id)]
+        if not linked:
             raise SyncError(f"desk {desk_id} has no account")
-        broker, account = pair
+        if account_id is None and len(linked) > 1:
+            raise SyncError(f"desk {desk_id} has {len(linked)} accounts: say which one ({', '.join(map(str, linked))})")
+        try:
+            broker, account = service.broker_of(u, desk_id, linked[0] if account_id is None else account_id)
+        except service.BrokerError as exc:
+            raise SyncError(f"account {account_id} is not an account of desk {desk_id}") from exc
         open_rows = open_order_ids(u, account.id)
         got = collect(broker, account.id, list(open_rows))
     with database.write() as u:
-        return apply(u, got, open_rows)
+        report = apply(u, got, open_rows)
+    _fills_booked(account.id, report)
+    return report
+
+
+def sync_desk_accounts(desk_id: int, *, db: Database | None = None) -> list[SyncReport]:
+    """The sync of every account of a desk, one account at a time (an account shared with another desk is synced once per call, whoever asks)."""
+    database = db or get_database()
+    with database.read() as u:
+        linked = [a.id for a in u.broker.accounts_of_desk(desk_id)]
+    return [sync_desk(desk_id, account_id=aid, db=database) for aid in linked]

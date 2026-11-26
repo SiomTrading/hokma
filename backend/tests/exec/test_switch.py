@@ -12,6 +12,8 @@ from hokma.broker import service
 from hokma.broker.service import Who, owner_who
 from hokma.exec import levels, prefilter
 from hokma.exec.proposal import Leg, OrderProposal
+from account_links_support import unlink_all
+from hokma.broker import desk_accounts
 
 AGENT = Who(agent="desk-chief")
 
@@ -42,7 +44,8 @@ def test_the_same_proposal_goes_out_by_schwab_after_assign_account_and_no_file_o
     with ready.db.write() as u:
         sim_broker = next(b for b in u.broker.list_brokers() if b.kind == "sim")
         account = u.broker.create_account(sim_broker.id, "Sim", 10_000)
-    service.unassign_account(ready.desk_id, db=ready.db)
-    service.assign_account(ready.desk_id, account.id, db=ready.db)
+    with ready.db.write() as u:
+        unlink_all(u, ready.desk_id)
+    desk_accounts.add_account(ready.desk_id, account.id, db=ready.db)
     with ready.db.read() as u:
-        assert u.broker.account_of_desk(ready.desk_id).id == account.id
+        assert u.broker.account_of_strategy(ready.desk_id, "principal").id == account.id

@@ -19,6 +19,7 @@ from typing import Any
 
 import yaml
 
+from hokma.backoffice import desk_owner
 from hokma.backoffice import book as book_module
 from hokma.backoffice import provenance
 from hokma.contracts import identity
@@ -283,7 +284,7 @@ def import_into(account_id: int, broker: str, content: str | bytes, *, desk_id: 
     report = ImportReport(broker, rows=len({line.row_number for line in lines}) + len(repeated), duplicates=list(repeated))
     with (db or get_database()).write() as u:
         u.broker.get_account(account_id)
-        owner = desk_id if desk_id is not None else u.broker.desk_of_account(account_id)
+        owner = desk_id if desk_id is not None else desk_owner.sole_desk(u.session, account_id)
         for line in lines:
             made = book_module.append_in(u.session, account_id, kind=line.kind, amount=line.amount, source=source, source_ref=line.ref,
                                          occurred_at=line.occurred_at, desk_id=owner, contract_id=line.contract_id, qty=line.qty, price=line.price,

@@ -1,6 +1,6 @@
 import { api, ApiError } from "@/api";
 import { t } from "@/i18n";
-import type { AddAnswer, ConnectionCard, ConnectionsList, DiagnosticAnswer, FinishAnswer, SchwabAccountPanel, TestResult, UseKey } from "./types";
+import type { AddAnswer, ConnectionCard, ConnectionsList, DiagnosticAnswer, FinishAnswer, SampleAnswer, SampleProvider, SchwabAccountPanel, TestResult, UseKey } from "./types";
 
 const enc = encodeURIComponent;
 const base = (id: string) => "/api/connections/" + enc(id);
@@ -41,6 +41,12 @@ export const schwabApi = {
   /** One measuring run of the data Schwab sends (reads only, no orders): it listens for about `seconds` seconds and saves a file. */
   diagnostic: (seconds: number) =>
     api.post<DiagnosticAnswer>("/api/schwab/diagnostic/streaming", { symbol: "QQQ", seconds }, { timeoutMs: (seconds + 90) * 1000 }),
+};
+
+/** The anonymous sample of the account: one read of what Schwab or Alpaca answers for the accounts, saved in the downloads folder with every id as XXXX. */
+export const sampleApi = {
+  save: (provider: SampleProvider = "schwab") =>
+    api.post<SampleAnswer>(provider === "alpaca" ? "/api/alpaca/account-sample" : "/api/schwab/diagnostic/account-sample", {}, { timeoutMs: 30_000 }),
 };
 
 /** Catalog text of a `connections.*` or `market.*` code in the active language; the server text when the code is new. */

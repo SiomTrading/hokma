@@ -23,7 +23,10 @@ LEGS = {
     "iron_condor": [(P170, "buy"), (P180, "sell"), (C200, "sell"), (C210, "buy")],
     "short_straddle": [(C200, "sell"), (P200, "sell")], "short_strangle": [(P190, "sell"), (C200, "sell")],
     "covered_call": [(STOCK, "buy"), (C200, "sell")],
+    "iron_butterfly": [(P190, "buy"), (P200, "sell"), (C200, "sell"), (C210, "buy")],
+    "protective_put": [(STOCK, "buy"), (P190, "buy")],
 }
+SHARES_AND_OPTIONS = ("covered_call", "protective_put")        # shares plus an option: the door refuses a stop or a target on them, their exits are orders apart (decision 1264)
 SHEETS = {**trader_sheets(), P200: sheet(P200), C220: sheet(C220)}
 
 
@@ -38,7 +41,8 @@ def proposal(structure: str, *, exits: bool) -> SWOProposal:
 
 def test_every_structure_has_legs_in_this_test_and_the_premium_split_matches_the_switch():
     assert set(LEGS) == set(STRUCTURES) == set(ALL_STRUCTURES)
-    assert set(PURCHASE_STRUCTURES) == {"long_call", "long_put", "debit_call_spread", "debit_put_spread"}
+    assert set(PURCHASE_STRUCTURES) == {"long_call", "long_put", "debit_call_spread", "debit_put_spread", "protective_put"}
+    assert "iron_butterfly" in SELLING_STRUCTURES                                    # it is a credit: premium selling, closed with the switch
     assert set(SELLING_STRUCTURES) == set(STRUCTURES) - set(PURCHASE_STRUCTURES)
 
 
@@ -52,7 +56,7 @@ def test_the_entry_of_every_structure_fits_the_single_form_of_the_native_filter(
 
 @pytest.mark.parametrize("structure", sorted(STRUCTURES))
 def test_the_entry_with_a_stop_and_a_target_fits_the_trigger_form_with_an_exit_oco(structure):
-    if structure == "covered_call":                                                 # decision 1264: the door refuses shares plus a call with exits; they are orders apart
+    if structure in SHARES_AND_OPTIONS:                                              # decision 1264: the door refuses shares plus a call with exits; they are orders apart
         with pytest.raises(Refusal) as refused:
             exits_apart(proposal(structure, exits=True).to_order(), SHEETS)
         assert refused.value.code == "exits_apart_required"
@@ -72,7 +76,7 @@ def test_the_entry_with_a_stop_and_a_target_fits_the_trigger_form_with_an_exit_o
             assert g.effect == ("open" if g.contract_id == STOCK else "close")
 
 
-@pytest.mark.parametrize("structure", sorted(set(STRUCTURES) - {"covered_call"}))
+@pytest.mark.parametrize("structure", sorted(set(STRUCTURES) - set(SHARES_AND_OPTIONS)))
 def test_a_single_exit_child_also_fits_and_an_exit_that_is_not_the_root_contract_does_not(structure):
     only_stop = proposal(structure, exits=True)
     order = to_native(only_stop.to_order(), SHEETS, "schwab")
@@ -93,7 +97,7 @@ def test_a_shape_the_native_filter_does_not_read_is_cannot_check_and_the_desk_ne
     with pytest.raises(Unconvertible):
         native._walked(7, nested, created_by="isaac-7", line="SWO")
     # the exits of the desk are an OCO of two singles or one single: no structure the desk can propose builds anything else
-    for structure in set(STRUCTURES) - {"covered_call"}:
+    for structure in set(STRUCTURES) - set(SHARES_AND_OPTIONS):
         order = to_native(proposal(structure, exits=True).to_order(), SHEETS, "schwab")
         assert order["childOrderStrategies"][0]["orderStrategyType"] == "OCO"
         assert all(branch["orderStrategyType"] == "SINGLE" and "childOrderStrategies" not in branch for branch in order["childOrderStrategies"][0]["childOrderStrategies"])

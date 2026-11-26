@@ -71,6 +71,35 @@ await runSuite("projects", { script: "serve.py" }, async ({ page, server, root, 
   assert.ok(fs.readFileSync(stored, "utf8").includes("real content of the note"));
   await until(() => gitLog(created.path).length >= 1, "the upload committed in the project's Git");
 
+  // 3b. bug 1261: the Project section takes only its own room and scrolls inside it. On a short window (more content than room) the tree
+  // and the drop zone never paint over the sections below, and the first row of the tree is the thing a mouse reaches at its own coordinates.
+  for (const height of [940, 560]) {
+    await page.setViewportSize({ width: 1440, height });
+    const overlap = await page.evaluate(() => {
+      const sections = [...document.querySelectorAll("aside.right section.pn-sec")];
+      const project = sections.find((x) => x.dataset.section === "project");
+      const box = project.getBoundingClientRect();
+      const stray = [...project.querySelectorAll(".pn-body *")].filter((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const visibleTop = Math.max(r.top, box.top), visibleBottom = Math.min(r.bottom, box.bottom);
+        const hit = visibleBottom > visibleTop ? document.elementFromPoint(r.left + r.width / 2, (visibleTop + visibleBottom) / 2) : null;
+        return hit !== null && !project.contains(hit) && sections.some((other) => other !== project && other.contains(hit));
+      });
+      return stray.length;
+    });
+    assert.equal(overlap, 0, `nothing of the Project section sits on top of another section at 1440x${height}`);
+    const item = tree.getByRole("treeitem", { name: msg("projects.open", { name: "note.md" }) });
+    await item.scrollIntoViewIfNeeded();
+    const reached = await item.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return top !== null && el.contains(top);
+    });
+    assert.ok(reached, `the tree row is reachable by mouse at 1440x${height}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 940 });
+
   // 4. preview shows the real text; Escape closes it
   await tree.getByRole("treeitem", { name: msg("projects.open", { name: "note.md" }) }).click();
   const preview = dialogNamed("projects.preview.title");

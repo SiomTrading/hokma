@@ -108,6 +108,14 @@ def test_CTS_011_the_most_a_structure_can_lose_by_hand():
     assert f("short_put", [_leg("P", "sell", 100)], D("-3"), D(100)) == D(9700)
     assert f("covered_call", [_leg("C", "sell", 210)], D("-2"), D(100), D(200)) == D(19800)
     assert f("short_strangle", [_leg("P", "sell", 180), _leg("C", "sell", 220)], D("-2"), D(100)) is None
+    butterfly = [_leg("P", "buy", 190), _leg("P", "sell", 200), _leg("C", "sell", 200), _leg("C", "buy", 210)]
+    assert f("iron_butterfly", butterfly, D("-3.70"), D(100)) == D(630)                                      # the width of a wing less the credit
+    assert f("protective_put", [_leg("P", "buy", 190)], D("2.50"), D(100), D(200)) == D(1250)                # the shares at 200 and the put paid, down to 190
+    assert f("protective_put", [_leg("P", "buy", 210)], D("2.50"), D(100), D(200)) == D(0)                   # a strike above the price: the loss is locked out
+    with pytest.raises(sizing.SizingError):
+        f("protective_put", [_leg("P", "buy", 190)], D("2.50"), D(100))                                       # the shares need their price
+    with pytest.raises(sizing.SizingError):
+        f("protective_put", [_leg("P", "buy", 190)], D("-2.50"), D(100), D(200))
     with pytest.raises(sizing.SizingError):
         f("debit_call_spread", [_leg("C", "buy", 200), _leg("C", "sell", 210)], D("-1"), D(100))
     with pytest.raises(sizing.SizingError):

@@ -189,13 +189,13 @@ def test_a_desk_chief_operates_only_the_desk_of_its_project(ready):
 def test_desk_configure_sets_merges_and_clears_the_limits_and_desk_show_returns_them(ready):
     d = ready.desk_id
     shown, err = run("desk_configure", {"desk_id": d, "limits": {"max_order_pct": 5, "short_allowed": False}})
-    assert not err and shown["limits"] == {"max_order_pct": 5.0, "short_allowed": False}
+    assert not err and shown["limits"] == {"max_order_pct": 5.0, "short_allowed": False, "guards": []}
     assert run("desk_configure", {"desk_id": d, "limits": {"max_order_pct": None}})[1]                  # turning off is the owner's
     shown, err = run("desk_money_set", {"desk_id": d, "limits": {"max_order_pct": None, "max_orders_per_day": 3}})
-    assert not err and shown["limits"] == {"short_allowed": False, "max_orders_per_day": 3}
-    assert run("desk_show", {"desk_id": d})[0]["limits"] == {"short_allowed": False, "max_orders_per_day": 3}
-    assert service.get_limits(d, db=ready.db) == {"short_allowed": False, "max_orders_per_day": 3}
-    assert desks.get_desk(d, ready.db)["limits"] == {"short_allowed": False, "max_orders_per_day": 3}
+    assert not err and shown["limits"] == {"short_allowed": False, "max_orders_per_day": 3, "guards": []}
+    assert run("desk_show", {"desk_id": d})[0]["limits"] == {"short_allowed": False, "max_orders_per_day": 3, "guards": []}
+    assert service.get_limits(d, db=ready.db) == {"short_allowed": False, "max_orders_per_day": 3, "guards": []}
+    assert desks.get_desk(d, ready.db)["limits"] == {"short_allowed": False, "max_orders_per_day": 3, "guards": []}
 
 
 def test_a_bad_limit_changes_nothing_at_all(ready):
@@ -204,7 +204,7 @@ def test_a_bad_limit_changes_nothing_at_all(ready):
         text, err = run("desk_configure", {"desk_id": d, "name": "Nombre nuevo", "mandate": "otro", "limits": bad})
         assert err and "limits" in text, bad
     desk = desks.get_desk(d, ready.db)
-    assert desk["name"] == "Futuros NQ" and desk["limits"] == {} and desk["mandate"] != "otro"
+    assert desk["name"] == "Futuros NQ" and desk["limits"] == {"guards": []} and desk["mandate"] != "otro"
     text, err = run("desk_configure", {"desk_id": d})
     assert err and "limits" in text                                                                # the help names the new field
 
@@ -215,6 +215,6 @@ def test_a_desk_chief_changes_the_limits_of_its_own_desk_only(ready):
     other = make_desk(ready.db, name="Otra mesa")
     chief = as_desk(ready.desk_id)
     ok, err = call_as(chief, "desk_configure", {"desk_id": ready.desk_id, "limits": {"assets_only": True}})
-    assert not err and ok["limits"] == {"assets_only": True}
+    assert not err and ok["limits"] == {"assets_only": True, "guards": ["whitelist"]}
     text, err = call_as(chief, "desk_configure", {"desk_id": other["id"], "limits": {"assets_only": True}})
-    assert err and "not the desk of this project" in text and service.get_limits(other["id"], db=ready.db) == {}
+    assert err and "not the desk of this project" in text and service.get_limits(other["id"], db=ready.db) == {"guards": []}

@@ -15,7 +15,7 @@ function readDetail(body: RawDetail, id: number): DeskDetail {
     id: src.id ?? id,
     name: src.name ?? "",
     focus: src.focus ?? null,
-    capital: src.capital ?? 0,
+    capital: src.capital ?? null,
     objective_pct: src.objective_pct ?? null,
     mandate: src.mandate ?? null,
     token_budget: src.token_budget ?? null,

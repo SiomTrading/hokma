@@ -54,6 +54,8 @@ for interval in ("1m", "5m", "15m", "1h", "1d"):
     (replay / f"chart_BTC_USD_{interval}.json").write_text(json.dumps(raw), encoding="utf-8")
 os.environ["HOKMA_MARKET_REPLAY_DIR"] = str(replay)
 
+from hokma.core import processguard  # noqa: E402
+processguard._role = processguard.SERVER                # e2e only: this script plays the server (the hokma.db package refuses any other process)
 from hokma.connections import runtime  # noqa: E402
 import hokma.core.app as app_module  # noqa: E402
 from hokma.core.config import hokma_home  # noqa: E402

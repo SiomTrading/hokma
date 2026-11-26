@@ -45,7 +45,7 @@ def test_migrations_0003_and_0004_keep_the_data_and_the_migrated_owner_stays_in_
         u.profile.complete_setup()
         u.guard_events.record("permission", "blocked", "an old block", tool="Write")
     result = migrate(path)
-    assert result.applied == list(range(3, LATEST + 1)) and result.version == LATEST and result.backup is not None and result.backup.exists()
+    assert result.applied == [v for v, _, _ in discover() if v >= 3] and result.version == LATEST and result.backup is not None and result.backup.exists()
     with db.read() as u:
         profile = u.profile.get()
         events = u.guard_events.list()

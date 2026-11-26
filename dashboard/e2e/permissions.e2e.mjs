@@ -59,7 +59,7 @@ await runSuite("permissions", { script: "permissions-serve.py" }, async ({ page,
   await notice.getByRole("button", { name: msg("permissions.notice.turnOn") }).click();
   const modal = page.getByRole("dialog", { name: msg("permissions.modal.title") });
   await modal.waitFor();
-  assert.ok((await modal.innerText()).includes(msg("permissions.modal.body")));
+  assert.ok((await modal.innerText()).includes(msg("permissions.modal.body2")));
   assert.equal(await mode(), "ask", "nothing changes before the owner confirms");
   await modal.getByRole("button", { name: msg("permissions.modal.confirm") }).click();
   await until(async () => (await pill.getAttribute("data-mode")) === "auto", "the pill follows");
@@ -91,7 +91,7 @@ await runSuite("permissions", { script: "permissions-serve.py" }, async ({ page,
   await list.waitFor();
   assert.equal(await list.getByRole("listitem").count(), 5, "five protections");
   for (const rule of ["delete", "hokma_internal", "outside_workdir", "secrets", "real_money"]) {
-    assert.ok((await list.innerText()).includes(msg(`protections.${rule}`)), `${rule} listed`);
+    assert.ok((await list.innerText()).includes(msg(`protections.${rule === "real_money" ? "real_money2" : rule}`)), `${rule} listed`);
   }
   assert.equal(await list.locator("input, button, select, [role=switch], [role=checkbox]").count(), 0, "no control inside the protections");
   assert.equal(await section.getByRole("switch").count(), 1, "the only switch of the section is the mode");
@@ -138,7 +138,7 @@ await runSuite("permissions", { script: "permissions-serve.py" }, async ({ page,
   assert.equal(fs.readFileSync(path.join(project, "informes", "viejo.md"), "utf8"), "old report\n");
   await closeSettings();
 
-  // the "Blocked" card: live, with "View in Trash", and still there after a reload
+  // the "Blocked" card: live, and still there after a reload
   await turn("please delete the notes [block]");
   const card = page.getByTestId("block-card");
   await card.waitFor({ timeout: 20000 });
@@ -146,10 +146,9 @@ await runSuite("permissions", { script: "permissions-serve.py" }, async ({ page,
   const cardText = await card.innerText();
   assert.ok(cardText.includes(msg("block.title.delete")), "title of the rule");
   assert.ok(cardText.includes(msg("block.wanted", { target: "rm informes/viejo.md" })), "what it tried");
-  assert.ok(cardText.includes(msg("block.why.delete")), "why in one line");
-  await card.getByRole("button", { name: msg("block.viewTrash") }).click();
-  await page.getByRole("dialog", { name: msg("settings.title") }).getByRole("heading", { name: msg("settings.trash"), exact: true }).waitFor();
-  await closeSettings();
+  // nothing went to the Trash after this block (P7 restored the only item), so the card says it was blocked and offers no "View in Trash"
+  assert.ok(cardText.includes(msg("block.why.deleteBlocked")), "why in one line");
+  assert.equal(await card.getByRole("button", { name: msg("block.viewTrash") }).count(), 0, "no Trash link when nothing went to the Trash");
   assert.equal((await server.api("/api/guard-events")).events.length >= 1, true, "the refusal is stored");
 
   await reloadWithHandoff(page);

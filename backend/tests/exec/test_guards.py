@@ -171,7 +171,7 @@ def test_registry_resolves_by_type_and_an_unknown_type_fails_when_the_configurat
 
     assert [g.name for g in registry.build({})] == [n for n, _ in registry.ORDER]
     chosen = [g.name for g in registry.build({"guards": ["cooldown"]})]
-    assert chosen == ["contract", "cooldown", "monitor", "premium_selling", "broker_rules"]   # the contract guard, the monitor, the premium switch and the rules of the broker always run
+    assert chosen == ["contract", "cooldown", "monitor", "live_loss", "premium_selling", "stop", "broker_rules"]   # the contract guard, the monitor, the live freeze, the premium switch, the stop of an entry and the rules of the broker always run
     with pytest.raises(service.BrokerError) as e:
         service.set_limits(ready.desk_id, {"guards": ["nope"]}, db=ready.db)
     assert e.value.code == "bad_limits"
@@ -195,3 +195,16 @@ def test_reduce_only_never_opens_the_opposite_position(ready):
 
 
 from exec_support import db, desks_db, env, ready  # noqa: E402,F401  (fixtures)
+
+
+def test_the_broker_rules_guard_measures_percent_limits_of_a_desk_without_capital_on_the_equity_and_fails_closed_without_it():
+    """The same answer as the service path (SPEC-027 027c): capital 0 means the desk has none; the base is the equity of the account."""
+    from hokma.exec.guards.broker_rules import BrokerRulesGuard
+
+    limits = {"max_order_pct": 0.0001}
+    sized = BrokerRulesGuard().check(ctx(capital=Decimal(0), limits=limits, book=book(equity=Decimal(1000)), orders_enabled=True, account_ok=True,
+                                         preview={"orderBalance": {"orderValue": 5000.0}}))
+    assert sized.verdict == "pass" and "max_order_pct" in sized.flags and "pct_base" not in sized.flags
+    blind = BrokerRulesGuard().check(ctx(capital=Decimal(0), limits=limits, book=book(equity=None), orders_enabled=True, account_ok=True,
+                                         preview={"orderBalance": {"orderValue": 5000.0}}))
+    assert "pct_base" in blind.flags

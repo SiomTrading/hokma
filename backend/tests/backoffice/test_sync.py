@@ -1,4 +1,5 @@
 """Sync by listing: one call of orders and positions reconciles the local state (SPEC-018: OA-42, with TA-48 for the decision it closes)."""
+from decimal import Decimal
 import json
 from decimal import Decimal as D
 
@@ -11,6 +12,7 @@ from hokma.backoffice import book, decisions, sync
 from hokma.broker import sim
 from hokma.broker.types import Order, Position
 from hokma.exec import levels
+from account_links_support import link_principal, unlink_all
 
 FINGERPRINT = "f" * 64
 
@@ -45,10 +47,10 @@ def order(oid, status, side="BUY", filled=0.0, executions=(), symbol="AAPL"):
 def real(ready):
     """The desk now trades through an account of a real broker (kind schwab); four of its proposals were sent and none is closed."""
     with ready.db.write() as u:
-        u.broker.unlink_desk(ready.desk_id)
+        unlink_all(u, ready.desk_id)
         broker = u.broker.create_broker("schwab", "Schwab test", {"orders_enabled": False})
         account = u.broker.create_account(broker.id, "Real A", 1_000_000)
-        u.broker.link_desk(ready.desk_id, account.id)
+        link_principal(u, ready.desk_id, account.id)
         ready.real_account = account.id
         ready.proposals = {}
         for oid in ("1001", "1002", "1003", "1004"):
@@ -127,7 +129,7 @@ def test_a_filled_order_with_no_executions_and_nothing_booked_is_reported_OA_42(
 
 def test_the_sync_of_a_desk_on_the_simulated_broker_closes_a_working_order_without_duplicating_the_fill_OA_42_TA_48(ready):
     levels.set_level(ready.desk_id, 3, rules={"id": "r", "max_qty": 5, "order_types": ["limit"]}, who=ready.owner, db=ready.db)
-    out = hexec.submit(proposal(ready, order_type="limit", limit="20990"), who=AGENT, db=ready.db)
+    out = hexec.submit(proposal(ready, order_type="limit", limit="20990", stop_loss=Decimal("20980")), who=AGENT, db=ready.db)
     assert out.status == "sent"
     decision_id = decisions.record(ready.desk_id, "Buy one NQ on a pullback to 20990", proposal_id=out.proposal_id, db=ready.db)
     assert decisions.of_proposal(out.proposal_id, db=ready.db)["status"] == "proposed"        # pending until the order ends
@@ -148,6 +150,6 @@ def test_the_sync_of_a_desk_on_the_simulated_broker_closes_a_working_order_witho
 
 def test_a_desk_without_an_account_cannot_be_synced_OA_42(ready):
     with ready.db.write() as u:
-        u.broker.unlink_desk(ready.desk_id)
+        unlink_all(u, ready.desk_id)
     with pytest.raises(sync.SyncError):
         sync.sync_desk(ready.desk_id, db=ready.db)

@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from hokma.core.contenthash import content_hash
+from hokma.db.repos.broker import PRINCIPAL as DEFAULT_STRATEGY
 from hokma.desks.core.signal import LINES, Line
 from hokma.exec.money import MoneyError, dec, dec_or_none, text
 
@@ -66,6 +67,7 @@ class OrderProposal:
     thesis: str = ""
     decision_id: int | None = None
     created_by: str = "owner"
+    strategy_key: str = DEFAULT_STRATEGY
 
     def __post_init__(self) -> None:
         if isinstance(self.desk_id, bool) or not isinstance(self.desk_id, int) or self.desk_id < 1:
@@ -95,14 +97,19 @@ class OrderProposal:
             raise ProposalError("thesis is text of at most 4000 characters")
         if not isinstance(self.created_by, str) or not 1 <= len(self.created_by) <= 80:
             raise ProposalError("created_by is 1 to 80 characters")
+        if not isinstance(self.strategy_key, str) or not 1 <= len(self.strategy_key) <= 80:
+            raise ProposalError("strategy_key is 1 to 80 characters")
 
     def canonical(self) -> dict[str, Any]:
         """Sorted, Decimal as text, without the thesis, the decision and the author: what is hashed."""
-        return {"desk_id": self.desk_id, "line": self.line, "origin": self.origin,
+        body = {"desk_id": self.desk_id, "line": self.line, "origin": self.origin,
                 "legs": [g.canonical() for g in self.legs], "order_type": self.order_type,
                 "limit_price": text(self.limit_price), "stop_price": text(self.stop_price), "tif": self.tif,
                 "stop_loss": text(self.stop_loss), "take_profit": text(self.take_profit), "reduce_only": self.reduce_only,
                 "risk_usd": text(self.risk_usd)}
+        if self.strategy_key != DEFAULT_STRATEGY:       # the principal strategy leaves the hash of every earlier proposal as it was
+            body["strategy_key"] = self.strategy_key
+        return body
 
     def fingerprint(self) -> str:
         """The only fingerprint of an order in Hokma (`desks.core.hashing.content_hash` of `canonical()`)."""
@@ -138,7 +145,7 @@ class OrderProposal:
             for name in ("limit_price", "stop_price", "stop_loss", "take_profit", "risk_usd"):
                 if body.get(name) is not None:
                     kwargs[name] = dec(body[name], name)
-            for name in ("tif", "reduce_only", "thesis", "decision_id", "created_by"):
+            for name in ("tif", "reduce_only", "thesis", "decision_id", "created_by", "strategy_key"):
                 if name in body:
                     kwargs[name] = body[name]
             return cls(legs=parsed, **kwargs)

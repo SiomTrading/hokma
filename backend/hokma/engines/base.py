@@ -21,20 +21,28 @@ class EngineCaps(TypedDict):
 
 class EngineEvent(TypedDict, total=False):
     type: Literal["session", "text", "message_break", "tool_use", "tool_result", "permission_request", "usage",
-                  "done", "error"]
+                  "task_start", "task_end", "done", "error",
+                  "bg_notice", "continuation", "quiet", "init_timeout", "timeout", "closed"]
     ref: str                  # session
     text: str                 # text, tool_result
-    id: str                   # tool_use, tool_result
+    id: str                   # tool_use, tool_result, task_start, task_end (the tool_use id the task belongs to)
+    parent: str               # tool_use, tool_result: the tool_use id of the agent that did the step, "" on the main thread
+    launched: bool            # tool_result: the agent was started in the background; this is the receipt, not its answer
+    task_type: str            # task_start: "local_agent" | "local_bash"
     name: str                 # tool_use
     input: dict[str, Any]     # tool_use, permission_request
     is_error: bool            # tool_result
     request_id: str           # permission_request
     tool: str                 # permission_request
     usage: dict[str, Any]     # done: tokens_in, tokens_out, cache_read, cost_usd
-    status: str               # done: "complete" | "stopped"
+    status: str               # done: "complete" | "stopped"; task_end: "completed" | "failed" | "killed" ...
     result: str               # done: the final text when the engine sends one
     code: str                 # error
     message: str              # error
+    owed: int                 # bg_notice, continuation, init_timeout: turns the CLI announced and has not opened yet
+    # bg_notice / continuation / quiet / init_timeout / timeout / closed: only `follow()` sends them (bug 1257). A background task of
+    # the main thread ended, the CLI began a turn of its own, nothing more came for a while, the wait ran out, the
+    # process closed.
 
 
 @dataclass

@@ -10,6 +10,7 @@ import json
 import math
 import re
 import statistics
+from pathlib import Path
 
 import pytest
 
@@ -234,9 +235,19 @@ def test_the_read_tools_and_the_internal_schwab_routes_never_write():
     assert not [n for n in names if n.startswith("schwab_") and re.search(r"place|preview|cancel|replace|submit", n)]
     assert {n for n in names if n.startswith("order_")} == {
         "order_preview", "order_place", "order_replace", "order_cancel", "order_status", "order_list", "order_log"}
-    # Every route is a GET but one: the measuring run (POST), which opens subscriptions of market data and sends no order (SPEC-016 T1)
-    assert all(route.methods == {"GET"} for route in router.routes if route.path != "/api/schwab/diagnostic/streaming")
-    assert next(r for r in router.routes if r.path == "/api/schwab/diagnostic/streaming").methods == {"POST"}
+    # Every route is a GET but two: the measuring run (POST), which opens subscriptions of market data and sends no order (SPEC-016 T1), and the
+    # anonymous sample of the account (POST, SPEC-026 3390e1), which only writes a file in the downloads folder (checked below)
+    posts = {"/api/schwab/diagnostic/streaming", "/api/schwab/diagnostic/account-sample"}
+    assert all(route.methods == {"GET"} for route in router.routes if route.path not in posts)
+    assert {r.path for r in router.routes if r.methods == {"POST"}} == posts
+    # The condition of the second one, verified in its source: it reads with GET only, touches no database and no order module, and its only write is
+    # the file of the sample (written to the downloads folder).
+    from hokma.schwab import sample
+
+    source = Path(sample.__file__).read_text(encoding="utf-8")
+    assert re.findall(r"http\.(\w+)\(", source) == ["get"] and "orders" not in source.replace("ACCT_ACTIVITY", "")
+    assert not re.search(r"hokma\.(db|broker)|\.write\(|sqlite|INSERT|UPDATE", source)
+    assert source.count("write_text(") == 1 and "target / " in source and "downloads_dir()" in source
 
 
 # ------------------------------------------------------------------------------- tools: one call per endpoint

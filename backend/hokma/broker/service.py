@@ -19,10 +19,11 @@ from hokma.broker.schwab import KIND as SCHWAB_KIND
 from hokma.broker.schwab import SchwabBroker
 from hokma.broker.sim import SimBroker
 from hokma.db import Actor, Database, IntegrityViolation, NotFound, RuleViolation, ValidationError, get_database
-from hokma.db.repos.broker import BrokerAccount, BrokerRow, NameTaken
+from hokma.db.repos.broker import PRINCIPAL, BrokerAccount, BrokerRow, NameTaken
 from hokma.db.timeutil import from_db_time, to_db_time, utcnow
 from hokma.exec import approvals as exec_approvals
 from hokma.exec import native as exec_native
+from hokma.exec.submit import account_lock
 from hokma.exec.submit import dispatch as exec_dispatch
 from hokma.exec.proposal import fingerprint_of
 from hokma.i18n import t
@@ -43,13 +44,16 @@ _MESSAGES: dict[str, Callable[[], str]] = {      # one literal t(...) per messag
     "invalid": lambda: t("broker.err.invalid"),
     "name_taken": lambda: t("broker.err.name_taken"),
     "not_confirmed": lambda: t("broker.err.not_confirmed"),
-    "account_in_use": lambda: t("broker.err.account_in_use"),
-    "desk_has_account": lambda: t("broker.err.desk_has_account"),
+    "start_known": lambda: t("broker.err.start_known"),
+    "bad_equity": lambda: t("broker.err.bad_equity"),
+    "equity_confirm": lambda: t("broker.err.equity_confirm"),
     "desk_without_account": lambda: t("broker.err.desk_without_account"),
     "not_supported": lambda: t("broker.err.not_supported"),
     "orders_off": lambda: t("broker.err.orders_off"),
     "desk_inactive": lambda: t("broker.err.desk_inactive"),
     "no_trading_account": lambda: t("broker.err.no_trading_account"),
+    "needs_account": lambda: t("broker.err.needs_account"),
+    "account_not_in_desk": lambda: t("broker.err.account_not_in_desk"),
     "rejected": lambda: t("broker.err.rejected", reason=""),      # always raised with the text that carries Schwab's reason
     "not_editable": lambda: t("broker.err.not_editable"),
     "order_not_found": lambda: t("broker.err.order_not_found"),
@@ -60,6 +64,10 @@ _MESSAGES: dict[str, Callable[[], str]] = {      # one literal t(...) per messag
     "decision_expired": lambda: t("broker.err.decision_expired", minutes=str(PENDING_MINUTES)),
     "bad_limits": lambda: t("broker.err.bad_limits", detail=""),
     "owner_required": lambda: t("broker.err.owner_required"),
+    "cancel_unconfirmed": lambda: t("broker.err.cancel_unconfirmed"),
+    "stale": lambda: t("broker.err.stale"),
+    "wrong_stage": lambda: t("broker.err.wrong_stage"),
+    "not_a_notice": lambda: t("broker.err.not_a_notice"),
 }
 
 
@@ -74,6 +82,11 @@ class BrokerError(Exception):
     @property
     def message(self) -> str:
         return self.text or _MESSAGES[self.code]()
+
+    @property
+    def readable(self) -> str:
+        """The text for a person when the code may have no message of its own (a notice to the owner): the code itself is the last resort."""
+        return self.text or (_MESSAGES[self.code]() if self.code in _MESSAGES else self.code)
 
 
 def owner_only(what: str) -> BrokerError:
@@ -103,10 +116,44 @@ def orders_enabled(row: BrokerRow) -> bool:
     return row.config.get("orders_enabled") is True
 
 
-def broker_of_desk(u, desk_id: int) -> tuple[Broker, BrokerAccount] | None:
-    """The broker and the account of a desk, or None while it has no account (the rules of 18.3 start here)."""
-    account = u.broker.account_of_desk(desk_id)
-    return None if account is None else (_broker(u, account.broker_id), account)
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """Which account an order of a desk goes out by (SPEC-027 section 5). `state` is `ok` (`account` is set), `analysis_only` (the desk has no
+    account: nothing is sent and it is not an error) or `needs_account` (the desk has accounts but the strategy has none: the owner is asked).
+    `accounts` are the ids of the accounts of the desk, so the question can offer them."""
+    state: str
+    account: BrokerAccount | None = None
+    accounts: tuple[int, ...] = ()
+
+
+def resolve_account(u, desk_id: int, strategy_key: str = PRINCIPAL, account_id: int | None = None) -> Resolution:
+    """The resolution of section 5, in its order: the desk has no account (analysis only), the owner named an account of the desk
+    (`account_id`, only code that checked the owner passes it), the strategy has its account, or the owner must say. It never picks
+    `the first account`: a strategy without an account is a question, not a guess."""
+    linked = u.broker.accounts_of_desk(desk_id)
+    ids = tuple(a.id for a in linked)
+    if not linked:
+        return Resolution("analysis_only")
+    if account_id is not None:
+        chosen = next((a for a in linked if a.id == account_id), None)
+        if chosen is None:
+            raise BrokerError("account_not_in_desk", 409)
+        return Resolution("ok", chosen, ids)
+    bound = u.broker.account_of_strategy(desk_id, strategy_key or PRINCIPAL)
+    return Resolution("ok", bound, ids) if bound is not None else Resolution("needs_account", None, ids)
+
+
+def broker_of(u, desk_id: int, account_id: int) -> tuple[Broker, BrokerAccount]:
+    """The broker and the account of an order. The account must be one of the desk's: another is 409 `account_not_in_desk`."""
+    if account_id not in {a.id for a in u.broker.accounts_of_desk(desk_id)}:
+        raise BrokerError("account_not_in_desk", 409)
+    return _account(u, account_id)
+
+
+def broker_of_resolved(u, desk_id: int, strategy_key: str = PRINCIPAL, account_id: int | None = None) -> tuple[Broker, BrokerAccount] | None:
+    """The pair of the resolution, or None when it is not `ok` (analysis only, or the owner must choose)."""
+    found = resolve_account(u, desk_id, strategy_key, account_id)
+    return None if found.account is None else (_broker(u, found.account.broker_id), found.account)
 
 
 def _broker(u, id: int) -> Broker:
@@ -141,19 +188,8 @@ def _account_view(u, b: Broker, account: BrokerAccount) -> dict[str, Any]:
     return {"id": account.id, "broker_id": b.id, "broker": b.row.name, "name": account.name,
             "mask": link.mask if link else None, "can_reset": b.capabilities.reset,
             "initial_capital": account.initial_capital, "currency": account.currency, "status": account.status,
-            "desk_id": u.broker.desk_of_account(account.id),
+            "desk_ids": u.broker.desks_of_account(account.id),
             "cash": bal.cash, "equity": bal.equity, "as_of": bal.as_of}
-
-
-def desk_account(u, desk_id: int) -> dict[str, Any] | None:
-    """What a desk summary carries: `{id, name, broker, initial_capital, balance, as_of}`, or None while it has no account."""
-    account = u.broker.account_of_desk(desk_id)
-    if account is None:
-        return None
-    b = _broker(u, account.broker_id)
-    bal = b.balance(account.id)
-    return {"id": account.id, "name": account.name, "broker": b.row.name, "initial_capital": account.initial_capital,
-            "balance": {"cash": bal.cash, "equity": bal.equity, "currency": bal.currency}, "as_of": bal.as_of}
 
 
 def _guard(fn):
@@ -245,36 +281,6 @@ def reset_account(account_id: int, confirmed: Any, db: Database | None = None) -
         return _account_view(u, b, b.reset(account.id))
 
 
-def assign_account(desk_id: int, account_id: Any, db: Database | None = None) -> dict[str, Any]:
-    """One account serves one desk and a desk has one account: both refusals are 409 with their own code."""
-    try:
-        with _db(db).write() as u:
-            if u.desks.find(desk_id) is None:
-                raise BrokerError("desk_not_found", 404)
-            _account(u, account_id if isinstance(account_id, int) and not isinstance(account_id, bool) else 0)
-            owner = u.broker.desk_of_account(account_id)
-            if owner == desk_id:
-                return desk_account(u, desk_id)                  # same assignment again: nothing changes
-            if owner is not None:
-                raise BrokerError("account_in_use", 409)
-            if u.broker.account_of_desk(desk_id) is not None:
-                raise BrokerError("desk_has_account", 409)
-            u.broker.link_desk(desk_id, account_id)
-            return desk_account(u, desk_id)
-    except IntegrityViolation as exc:                            # two assignments at once: the second loses
-        raise BrokerError("account_in_use", 409) from exc
-
-
-def unassign_account(desk_id: int, db: Database | None = None) -> dict[str, Any]:
-    with _db(db).write() as u:
-        if u.desks.find(desk_id) is None:
-            raise BrokerError("desk_not_found", 404)
-        if u.broker.account_of_desk(desk_id) is None:
-            raise BrokerError("desk_without_account", 404)
-        u.broker.unlink_desk(desk_id)
-        return {"desk_id": desk_id, "account": None}
-
-
 # ---------------------------------------------------------------------------------------------------------------------
 # Orders of a desk (SPEC-015 18.2 to 18.6). The tools of the chat and the routes of the app call these functions. They block
 # (network): call them from a thread. The rules are in hokma.broker.rules; the four calls to Schwab are in hokma.schwab.orders
@@ -282,7 +288,7 @@ def unassign_account(desk_id: int, db: Database | None = None) -> dict[str, Any]
 # journal entry, a decision, a log line or an answer: an account is its `account_ref` and its mask.
 # ---------------------------------------------------------------------------------------------------------------------
 
-_REFUSAL_STATUS = {"orders_off": 409, "desk_inactive": 409, "no_trading_account": 409, "rejected": 422,
+_REFUSAL_STATUS = {"orders_off": 409, "desk_inactive": 409, "no_trading_account": 409, "needs_account": 409, "rejected": 422,
                    "not_editable": 409, "order_not_found": 404}
 _JOURNAL: dict[str, Callable[..., str]] = {         # one literal t(...) per message, for the catalog check
     "sent": lambda **p: t("broker.journal.sent", **p),
@@ -375,6 +381,8 @@ class _Out:
     account_id: int | None = None
     broker_kind: str = "none"
     notes: list = field(default_factory=list)
+    want_account: int | None = None            # the account the caller asked for (it must be one of the desk's); None resolves by strategy
+    strategy_key: str = PRINCIPAL
 
 
 @dataclass(slots=True)
@@ -386,6 +394,8 @@ class _Ctx:
     enabled: bool                              # ... and its switch is on
     limits: dict
     assets: list
+    state: str = "ok"                          # the resolution of the account (ok, analysis_only, needs_account)
+    accounts: tuple = ()                       # the ids of the accounts of the desk
 
 
 def _now() -> dt.datetime:
@@ -396,19 +406,25 @@ def _day_start() -> str:
     return _now().strftime("%Y-%m-%d 00:00:00")
 
 
-def _load(u, desk_id: Any) -> _Ctx:
+def _load(u, desk_id: Any, account_id: int | None = None, strategy_key: str = PRINCIPAL) -> _Ctx:
+    """The facts of a desk and of the account an order of `strategy_key` goes out by (SPEC-027 section 5): `account_id` when the caller
+    named one of the desk's accounts, else the account of the strategy. Without one `account` is None and `state` says why."""
     desk = u.desks.find(desk_id) if isinstance(desk_id, int) and not isinstance(desk_id, bool) else None
     if desk is None:
         raise BrokerError("desk_not_found", 404)
-    account = u.broker.account_of_desk(desk.id)
+    found = resolve_account(u, desk.id, strategy_key, account_id)
+    account = found.account
     broker = _broker(u, account.broker_id) if account is not None else None
     trading = bool(account is not None and account.status == "active" and broker is not None and broker.capabilities.orders)
     enabled = bool(trading and broker is not None and orders_enabled(broker.row))
     return _Ctx(desk, account, broker, trading, enabled, u.broker.get_limits(desk.id),
-                [a.symbol for a in u.desks.list_assets(desk.id)])
+                [a.symbol for a in u.desks.list_assets(desk.id)], found.state, found.accounts)
 
 
 def _need_trading(ctx: _Ctx) -> tuple[Broker, BrokerAccount]:
+    """The account that was resolved in `_load` (the caller named it or its strategy owns it). Without one the order has no account."""
+    if ctx.state == "needs_account":
+        raise BrokerError("needs_account", 409)
     if not ctx.trading or ctx.broker is None or ctx.account is None:
         raise BrokerError("no_trading_account", 409)
     return ctx.broker, ctx.account
@@ -463,78 +479,82 @@ def _run(db: Database, out: _Out) -> _Out:
         except SchwabError as error:
             invalid = error
     with db.read() as u:
-        ctx = _load(u, out.desk_id)
+        ctx = _load(u, out.desk_id, out.want_account, out.strategy_key)
         out.desk_name, out.project_id = ctx.desk.name, ctx.desk.project_id
         out.account_id = ctx.account.id if ctx.account is not None else None
         out.broker_kind = ctx.broker.kind if ctx.broker is not None else "none"
-        refusal = rules.gate(ctx.enabled, ctx.desk.status, ctx.trading)
+        refusal = rules.gate(ctx.enabled, ctx.desk.status, ctx.trading, ctx.state)
         if refusal is not None and (out.action != "preview" or not ctx.trading):
             return _refuse(out, refusal)
         if invalid is not None:
             return _fail(out, invalid)
         broker, account = _need_trading(ctx)
-        try:
-            if out.action in ("replace", "cancel"):
-                try:
-                    current = broker.get_order(account.id, out.order_id)
-                except SchwabError as error:
-                    if error.code != NOT_FOUND:
-                        raise
-                    current = None                                  # Schwab answered 404: there is no such order
-                if current is None:
-                    return _refuse(out, {"result": "refused", "code": "order_not_found", "flags": [], "numbers": {},
-                                         "why": t("broker.err.order_not_found")})
-                flag = current.editable if out.action == "replace" else current.cancelable
-                if flag is not True:
-                    return _refuse(out, {"result": "refused", "code": "not_editable", "flags": [], "numbers": {},
-                                         "why": t("broker.err.not_editable")})
-            if out.action == "cancel":
-                out.rule = rules.evaluate(action="cancel", orders_enabled=True, desk_status=ctx.desk.status, account_ok=True)
-            else:
-                out.preview = schwab_accounts.public(broker.preview_order(account.id, out.order))
-                positions = broker.positions(account.id)
-                open_orders = broker.orders(account.id)
-                today = u.broker.count_sent_orders(ctx.desk.id, _day_start()) if "max_orders_per_day" in ctx.limits else 0
-                out.rule = rules.evaluate(
-                    action=out.action, orders_enabled=ctx.enabled, desk_status=ctx.desk.status, account_ok=ctx.trading,
-                    order=out.order, preview=out.preview, capital=float(ctx.desk.capital), positions=positions,
-                    open_orders=open_orders, limits=ctx.limits, assets=ctx.assets, orders_today=today,
-                    replaces_order_id=out.order_id if out.action == "replace" else None)
-        except SchwabError as error:
-            return _fail(out, error)
-        if out.action == "preview":
-            out.status = "previewed"
-            return out
-        if out.action in ("place", "replace") and out.rule["result"] != "refused":
-            filtered = exec_native.check(ctx.desk.id, out.order, preview=out.preview, who=out.who, db=db)       # the same guards as any proposal
-            if filtered is not None:
-                out.rule = filtered
-        rule = out.rule
-        if rule["result"] == "refused":
-            return _refuse(out, rule)
-        out.approved_by = "owner" if out.who.owner else "auto"        # the owner placing it in the app is its own approval
-        if out.approval is not None:                                # a decision the owner approved, checked again
-            if rule["result"] == "needs_owner" and not set(rule["flags"]) <= out.approval:
-                out.status, out.why = "not_sent", rule["why"]
-                out.approved_by = None
+        with account_lock(account.id):                                # the check and the send of one account go together (desk lock, then account lock)
+            try:
+                if out.action in ("replace", "cancel"):
+                    try:
+                        current = broker.get_order(account.id, out.order_id)
+                    except SchwabError as error:
+                        if error.code != NOT_FOUND:
+                            raise
+                        current = None                                  # Schwab answered 404: there is no such order
+                    if current is None:
+                        return _refuse(out, {"result": "refused", "code": "order_not_found", "flags": [], "numbers": {},
+                                             "why": t("broker.err.order_not_found")})
+                    flag = current.editable if out.action == "replace" else current.cancelable
+                    if flag is not True:
+                        return _refuse(out, {"result": "refused", "code": "not_editable", "flags": [], "numbers": {},
+                                             "why": t("broker.err.not_editable")})
+                if out.action == "cancel":
+                    out.rule = rules.evaluate(action="cancel", orders_enabled=True, desk_status=ctx.desk.status, account_ok=True)
+                else:
+                    out.preview = schwab_accounts.public(broker.preview_order(account.id, out.order))
+                    equity = broker.balance(account.id).equity if ctx.desk.capital is None else None        # the base of the percent limits of a desk without capital
+                    positions = broker.positions(account.id)
+                    open_orders = broker.orders(account.id)
+                    today = u.broker.count_sent_orders(ctx.desk.id, _day_start()) if "max_orders_per_day" in ctx.limits else 0
+                    out.rule = rules.evaluate(
+                        action=out.action, orders_enabled=ctx.enabled, desk_status=ctx.desk.status, account_ok=ctx.trading,
+                        order=out.order, preview=out.preview, capital=None if ctx.desk.capital is None else float(ctx.desk.capital),
+                        equity=None if equity is None else float(equity), positions=positions,
+                        open_orders=open_orders, limits=ctx.limits, assets=ctx.assets, orders_today=today,
+                        replaces_order_id=out.order_id if out.action == "replace" else None)
+            except SchwabError as error:
+                return _fail(out, error)
+            if out.action == "preview":
+                out.status = "previewed"
                 return out
-            rose = _value_rose(out.approved_value, rule)
-            if rose:                                                # worth more than 5% above what the owner saw: ask again
-                out.rule = {**rule, "result": "needs_owner", "code": rule["code"] if rule["flags"] else "value_rose",
-                            "flags": [*rule["flags"], "value_rose"], "why": "; ".join(x for x in (rule["why"], rose) if x)}
-                out.status, out.approved_by = "needs_owner", None
-                return out
-            out.approved_by = "owner"
-        elif rule["result"] == "needs_owner":
-            if not out.who.owner:
-                out.status, out.approved_by = "needs_owner", None
-                return out
-            out.approved_by = "owner"                                # the owner placed it in the app: nothing to ask
-        try:
-            out.sent, out.http_status, out.status = exec_dispatch(broker, account.id, out.action, out.order, out.order_id)
-            out.correl_id = (out.sent or {}).get("correl_id")
-        except SchwabError as error:
-            return _fail(out, error, sending=True)
+            if out.action in ("place", "replace") and out.rule["result"] != "refused":
+                filtered = exec_native.check(ctx.desk.id, out.order, preview=out.preview, who=out.who, db=db, account_id=account.id)       # the same guards as any proposal
+                if filtered is not None:
+                    out.rule = filtered
+            rule = out.rule
+            if rule["result"] == "refused":
+                return _refuse(out, rule)
+            out.approved_by = "owner" if out.who.owner else "auto"        # the owner placing it in the app is its own approval
+            if out.approval is not None:                                # a decision the owner approved, checked again
+                if rule["result"] == "needs_owner" and not set(rule["flags"]) <= out.approval:
+                    out.status, out.why = "not_sent", rule["why"]
+                    out.approved_by = None
+                    return out
+                rose = _value_rose(out.approved_value, rule)
+                if rose:                                                # worth more than 5% above what the owner saw: ask again
+                    out.rule = {**rule, "result": "needs_owner", "code": rule["code"] if rule["flags"] else "value_rose",
+                                "flags": [*rule["flags"], "value_rose"], "why": "; ".join(x for x in (rule["why"], rose) if x)}
+                    out.status, out.approved_by = "needs_owner", None
+                    return out
+                out.approved_by = "owner"
+            elif rule["result"] == "needs_owner":
+                if not out.who.owner:
+                    out.status, out.approved_by = "needs_owner", None
+                    return out
+                out.approved_by = "owner"                                # the owner placed it in the app: nothing to ask
+            try:
+                out.sent, out.http_status, out.status = exec_dispatch(broker, account.id, out.action, out.order, out.order_id,
+                                                                      owner=(out.desk_id, out.strategy_key))
+                out.correl_id = (out.sent or {}).get("correl_id")
+            except SchwabError as error:
+                return _fail(out, error, sending=True)
     return out
 
 
@@ -640,7 +660,7 @@ def _record(db: Database, out: _Out, *, approval_run: bool = False) -> dict[str,
             sent = out.sent or {}
             row = u.broker.record_order(
                 broker_kind=out.broker_kind, action=out.action, desk_id=out.desk_id, account_id=out.account_id,
-                agent_slug=out.who.agent, conversation_id=out.who.conversation_id, task_id=out.who.task_id,
+                strategy_key=out.strategy_key if out.account_id is not None else None, agent_slug=out.who.agent, conversation_id=out.who.conversation_id, task_id=out.who.task_id,
                 reason=out.reason, request=out.request, rule_result=rule_result, rule_why=rule_why,
                 decision_id=None if out.twin is not None else decision_id,      # the pending list shows one row per decision
                 approved_by=out.approved_by if sent_out or out.status == "failed" else None,
@@ -712,35 +732,37 @@ def _answer(out: _Out, record_id: int | None, decision_id: int | None, approval_
 
 
 def _attempt(desk_id: Any, action: str, who: Who, *, order: Any = None, order_id: Any = None, reason: Any = None,
-             db: Database | None = None) -> dict[str, Any]:
+             db: Database | None = None, account_id: int | None = None) -> dict[str, Any]:
     database = _db(db)
     out = _Out(action=action, desk_id=desk_id, who=who, order=order,
                order_id=None if order_id is None else _order_id(order_id),
-               reason=_reason(reason) if action != "preview" or reason is not None else None)
+               reason=_reason(reason) if action != "preview" or reason is not None else None, want_account=account_id)
     return _record(database, _run(database, out))
 
 
-def preview(desk_id: int, order: Any, who: Who = Who(), db: Database | None = None) -> dict[str, Any]:
+def preview(desk_id: int, order: Any, who: Who = Who(), db: Database | None = None, account_id: int | None = None) -> dict[str, Any]:
     """`previewOrder` with the whole request, and what the rules of 18.3 would say. Nothing is sent. Raises 409
     `no_trading_account` while the desk has no account that trades."""
-    return _attempt(desk_id, "preview", who, order=order, db=db)
+    return _attempt(desk_id, "preview", who, order=order, db=db, account_id=account_id)
 
 
-def place(desk_id: int, order: Any, reason: Any, who: Who = Who(), db: Database | None = None) -> dict[str, Any]:
+def place(desk_id: int, order: Any, reason: Any, who: Who = Who(), db: Database | None = None,
+          account_id: int | None = None) -> dict[str, Any]:
     """Preview, rules and send (18.2 points 9 and 11). Answers `sent` with the order id, `needs_owner` with the pending
     decision, or raises the refusal (`orders_off`, `desk_inactive`, `no_trading_account`, `rejected`, the Schwab error)."""
-    return _attempt(desk_id, "place", who, order=order, reason=reason, db=db)
+    return _attempt(desk_id, "place", who, order=order, reason=reason, db=db, account_id=account_id)
 
 
 def replace(desk_id: int, order_id: Any, order: Any, reason: Any, who: Who = Who(),
-            db: Database | None = None) -> dict[str, Any]:
+            db: Database | None = None, account_id: int | None = None) -> dict[str, Any]:
     """Reads the order, requires `editable`, previews the new one, applies the rules and replaces it (18.2 point 10)."""
-    return _attempt(desk_id, "replace", who, order=order, order_id=order_id, reason=reason, db=db)
+    return _attempt(desk_id, "replace", who, order=order, order_id=order_id, reason=reason, db=db, account_id=account_id)
 
 
-def cancel(desk_id: int, order_id: Any, reason: Any, who: Who = Who(), db: Database | None = None) -> dict[str, Any]:
+def cancel(desk_id: int, order_id: Any, reason: Any, who: Who = Who(), db: Database | None = None,
+           account_id: int | None = None) -> dict[str, Any]:
     """Reads the order, requires `cancelable` and cancels it. A cancellation needs no preview and goes out on its own."""
-    return _attempt(desk_id, "cancel", who, order_id=order_id, reason=reason, db=db)
+    return _attempt(desk_id, "cancel", who, order_id=order_id, reason=reason, db=db, account_id=account_id)
 
 
 # ---------------------------------------------------------------------------------------------------- pending decisions
@@ -819,7 +841,7 @@ def _need_owner(who: Who | None) -> None:
 
 
 def approve_pending(decision_id: int, decided_by: str = "owner", db: Database | None = None,
-                    desk_id: int | None = None, who: Who | None = None) -> dict[str, Any]:
+                    desk_id: int | None = None, who: Who | None = None, scope: str | None = None) -> dict[str, Any]:
     """The owner approved an order decision in the app (`who` must be `owner_who()`: an agent cannot approve its own order).
     Past 30 minutes it expires instead (nothing is sent). Otherwise the order is previewed again and the rules are applied
     again with the prices of this moment: it is sent when it passes (with `approved_by = 'owner'`); when it does not, the
@@ -828,7 +850,7 @@ def approve_pending(decision_id: int, decided_by: str = "owner", db: Database | 
     _need_owner(who)
     database = _db(db)
     if (proposal := _exec_proposal(database, decision_id, desk_id)) is not None:        # a proposal of a desk: hokma.exec sends it
-        return _exec_answer(exec_approvals.approve(proposal["id"], who=who, db=database), decision_id)
+        return _exec_answer(exec_approvals.approve(proposal["id"], who=who, db=database, scope=scope), decision_id)
     decision, row = _pending_of(database, decision_id, desk_id)
     if _expired(decision):
         _expire(database, decision, row)
@@ -914,30 +936,30 @@ def _read(fn, *args, **kwargs):
 
 
 def order_list(desk_id: int, status: Any = None, fromEnteredTime: Any = None, toEnteredTime: Any = None,  # noqa: N803
-               maxResults: Any = None, db: Database | None = None) -> dict[str, Any]:  # noqa: N803
+               maxResults: Any = None, db: Database | None = None, account_id: int | None = None) -> dict[str, Any]:  # noqa: N803
     """The orders of the account of the desk with the filters of REF 3.2, every field, the account as account_ref and mask."""
     with _db(db).read() as u:
-        broker, account = _need_trading(_load(u, desk_id))
+        broker, account = _need_trading(_load(u, desk_id, account_id))
         found = _read(broker.orders, account.id, status, fromEnteredTime, toEnteredTime, maxResults)
         return {"desk_id": desk_id, **_read(_identity, u, broker, account), "orders": [o.data for o in found]}
 
 
-def order_status(desk_id: int, order_id: Any, db: Database | None = None) -> dict[str, Any]:
+def order_status(desk_id: int, order_id: Any, db: Database | None = None, account_id: int | None = None) -> dict[str, Any]:
     """One order of the account of the desk with its executions."""
     number = _order_id(order_id)
     with _db(db).read() as u:
-        broker, account = _need_trading(_load(u, desk_id))
+        broker, account = _need_trading(_load(u, desk_id, account_id))
         found = _read(broker.get_order, account.id, number)
         if found is None:
             raise BrokerError("order_not_found", 404)
         return {"desk_id": desk_id, **_read(_identity, u, broker, account), "order": found.data}
 
 
-def position_list(desk_id: int, db: Database | None = None) -> dict[str, Any]:
+def position_list(desk_id: int, db: Database | None = None, account_id: int | None = None) -> dict[str, Any]:
     """The positions of the account of the desk: value, day result, open result, and the greeks of 16.16 (None, with the
     reason, when they cannot be read). Hokma keeps no copy: Schwab answers each time."""
     with _db(db).read() as u:
-        broker, account = _need_trading(_load(u, desk_id))
+        broker, account = _need_trading(_load(u, desk_id, account_id))
         who = _read(_identity, u, broker, account)
         found = _read(broker.positions, account.id)
         rows = [{"symbol": p.symbol, "asset_type": p.asset_type, "quantity": p.qty, "long_quantity": p.long_qty,
@@ -971,10 +993,16 @@ def set_limits(desk_id: int, changes: Any, db: Database | None = None, *, tighte
     the limits saved INSIDE this transaction, raises `owner_only` and saves nothing. The app of the owner does not set it."""
     with _db(db).write() as u:
         ctx = _load(u, desk_id)
+        if tighten_only and isinstance(changes, dict) and (notes := [k for k in changes if k in rules.META_KEYS]):
+            raise owner_only("writing the rules of the desk (" + ", ".join(notes) + ")")        # the chief proposes; the owner writes
         try:
             merged = rules.validate_limits(changes, ctx.limits)
         except ValueError as exc:
             raise BrokerError("bad_limits", 400, text=t("broker.err.bad_limits", detail=str(exc))) from exc
+        from hokma.broker import desk_rules
+
+        if not (isinstance(changes, dict) and "guards" in changes):         # a change that names the list is the owner's own choice
+            merged = desk_rules.with_guards(merged)         # otherwise a control only runs if its guard type is in the list of the desk
         if tighten_only and (loosened := rules.loosened_limits(ctx.limits, merged)):
             raise owner_only("loosening or turning off the limit " + ", ".join(loosened))
         return u.broker.set_limits(desk_id, merged)

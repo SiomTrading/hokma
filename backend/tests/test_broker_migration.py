@@ -7,7 +7,7 @@ from dbsupport import env  # noqa: F401  (fixture)
 from test_db_migrate import _desk, _desk_project, raw
 
 from hokma.db import migrate
-from hokma.db.migrate import MIGRATIONS_DIR
+from hokma.db.migrate import MIGRATIONS_DIR, discover
 from hokma.db.transfer import BROKER_TABLES
 
 
@@ -28,9 +28,10 @@ def test_it_runs_on_a_1_0_4_base_without_losing_rows_and_seeds_the_broker(env):
     con.commit()
     before = [con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in ("projects", "desks")]
     con.close()
-    assert migrate().applied == [17, 18, 19, 20, 21, 22, 23]
+    assert migrate().applied == [v for v, _name, _path in discover() if v > 16]
     con = raw()
-    assert [con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in ("projects", "desks")] == before
+    after = [con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in ("projects", "desks")]
+    assert [[row[: len(old_row)] for row, old_row in zip(rows, was)] for rows, was in zip(after, before)] == before        # later migrations may add columns, never change the old ones
     assert con.execute("SELECT kind, name FROM brokers").fetchall() == [("sim", "Hokma")]
     assert con.execute("SELECT count(*) FROM broker_accounts").fetchone()[0] == 0
     assert migrate().applied == [] and con.execute("SELECT count(*) FROM brokers").fetchone()[0] == 1
@@ -53,18 +54,18 @@ def test_the_tables_exist_and_the_limits_hold(env):
         con.execute("INSERT INTO account_ledger (account_id, kind, amount) VALUES (?, 'fill', 1)", (first,))
 
 
-def test_a_desk_has_one_account_and_an_account_serves_one_desk_and_deleting_the_desk_frees_it(env):
+def test_a_desk_can_have_many_accounts_and_an_account_many_desks_and_deleting_the_desk_frees_its_links(env):
     migrate()
     con = raw()
     con.execute("PRAGMA foreign_keys = ON")
     d1, d2 = _desk(con, _desk_project(con, "a")), _desk(con, _desk_project(con, "b"))
     a1, a2 = _account(con, name="A"), _account(con, name="B")
-    con.execute("INSERT INTO desk_accounts VALUES (?, ?)", (d1, a1))
-    with pytest.raises(sqlite3.IntegrityError):                        # one account per desk
-        con.execute("INSERT INTO desk_accounts VALUES (?, ?)", (d1, a2))
-    with pytest.raises(sqlite3.IntegrityError):                        # one desk per account
-        con.execute("INSERT INTO desk_accounts VALUES (?, ?)", (d2, a1))
+    link = "INSERT INTO desk_account_links (desk_id, account_id) VALUES (?, ?)"
+    con.execute(link, (d1, a1))
+    con.execute(link, (d1, a2))                                        # many accounts per desk
+    con.execute(link, (d2, a1))                                        # many desks per account
+    with pytest.raises(sqlite3.IntegrityError):                        # the pair is the key
+        con.execute(link, (d1, a1))
     con.execute("DELETE FROM desks WHERE id = ?", (d1,))
-    assert con.execute("SELECT count(*) FROM desk_accounts").fetchone()[0] == 0
-    assert con.execute("SELECT count(*) FROM broker_accounts").fetchone()[0] == 2      # the account stays
-    con.execute("INSERT INTO desk_accounts VALUES (?, ?)", (d2, a1))
+    assert con.execute("SELECT desk_id, account_id FROM desk_account_links").fetchall() == [(d2, a1)]
+    assert con.execute("SELECT count(*) FROM broker_accounts").fetchone()[0] == 2      # the accounts stay

@@ -90,6 +90,12 @@ def test_the_service_previews_then_posts_the_same_body_reads_the_id_and_records(
     assert (entry.kind, entry.outcome, entry.agent_slug) == ("action", "success", "desk-chief")
 
 
+@pytest.fixture(autouse=True)
+def _no_stop_check(monkeypatch):
+    """These tests are about the preview, the post and the record of Schwab orders (futures and spreads without a stop among them); the stop of an entry has its own tests (SPEC-026, 3390e3)."""
+    monkeypatch.setattr("hokma.exec.guards.stop.check_stop", lambda *a, **k: None)
+
+
 def test_the_preview_that_comes_back_never_carries_the_account_number(ready):
     answer = service.place(ready.desk_id, RECIPES["limit_gtc"], "test", AGENT, db=ready.db)
     text = json.dumps(answer)

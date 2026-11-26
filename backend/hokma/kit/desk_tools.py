@@ -123,13 +123,13 @@ def _plain_error(exc: Exception) -> ToolError:
 
 
 @TOOLSET.tool("desk_create_swo", "Create a stock options swing (SWO) desk with its whole team and its mandate. It is the owner's call: an agent of a desk is refused and the owner creates the desk in the app or asks in the chat. The desk starts at autonomy level 1 (it only analyzes). Premium selling is built but stays closed until a calibrated threshold exists. variant is traditional or pead. Without a mandate the example of the variant is used. Set owner_approved only when the owner asked for this exact mandate.", {
-    "name": _s("Desk name, 1 to 80 characters, unique."), "capital": _i("Capital in USD, a whole number."),
+    "name": _s("Desk name, 1 to 80 characters, unique."), "capital": _i("Optional capital of the desk in USD, a whole number. Leave it out unless the owner gave a figure. The desk never gets an account from this tool."),
     "variant": _s("traditional (default) or pead.", enum=["traditional", "pead"]),
     "mandate": _o("Typed mandate: {name, line: SWO, variant?, strategies, analysts, ...}. Leave it out to use the example of the variant."),
     "assets": {"type": "array", "items": {"type": "string"}, "description": "Symbols of the shares, at most 50."},
     "objective_pct": {"type": "number", "description": "Objective in percent, 0 to 100."}, "token_budget": _i("Weekly token budget."),
     "owner_approved": {"type": "boolean", "description": "True only when the owner asked for this mandate in the chat."}},
-    ["name", "capital"], writes=True)
+    ["name"], writes=True)
 def desk_create_swo(u, c, a: dict) -> str:
     from hokma.desks.errors import DeskError
     from hokma.desks.swo.create import create_swo_desk
@@ -152,7 +152,7 @@ def desk_create_swo(u, c, a: dict) -> str:
     except (LookupError, ValueError) as exc:
         raise ToolError("bad_input", str(exc)) from None
     try:
-        desk = create_swo_desk(name, a["capital"], variant=a.get("variant", "traditional"), mandate=mandate, assets=assets,
+        desk = create_swo_desk(name, a.get("capital"), variant=a.get("variant", "traditional"), mandate=mandate, assets=assets,
                                objective_pct=a.get("objective_pct"), token_budget=a.get("token_budget"), owner_approved=approved is True)
     except (DeskError, ValueError) as exc:
         raise _plain_error(exc) from None
@@ -177,12 +177,13 @@ def desk_mandate_save(u, c, a: dict) -> str:
     return _dump({"desk_id": desk_id, "mandate": saved.name, "approved_by_owner": False})
 
 
-@TOOLSET.tool("desk_cycle_run", "Run one cycle of your SWO desk for one share: plan, analysts, company filter, debate, judge, trader, risk committee and sub-manager. It ends with a report and maybe one proposal. The level of the desk decides the rest: 1 only analyzes, 2 asks the owner, 3 sends under the rules the owner approved. The cycle never sends an order by itself and the proposal goes through the filter of the desk.", {
+@TOOLSET.tool("desk_cycle_run", "Queue one cycle of your SWO desk for one share: plan, analysts, company filter, debate, judge, trader, risk committee and sub-manager. It is the same door as desk_analysis_start (same limits: one live run per desk and share, two per desk, four in all, and the weekly budget of the desk). It answers at once with status queued and the run_id and does NOT wait: the app runs the cycle in its own process; read it later with desk_cycle_status. The cycle ends with a report and maybe one proposal. The level of the desk decides the rest: 1 only analyzes, 2 asks the owner, 3 sends under the rules the owner approved. The cycle never sends an order by itself and the proposal goes through the filter of the desk.", {
     "desk_id": _i("Desk id."), "symbol": _s("The share, for example AAPL."), "as_of": _s("Cut-off, ISO date or time, never in the future. Default now."),
     "strategy": _s("Name of one strategy of the mandate, to run only that one.")}, ["desk_id", "symbol"], writes=True)
 def desk_cycle_run(u, c, a: dict) -> str:
     from hokma.broker.service import BrokerError
-    from hokma.desks.swo import graph
+    from hokma.desks.errors import DeskError
+    from hokma.desks.swo import analysis
 
     desk_id = _swo_desk(c, a["desk_id"])
     symbol = _symbol(a["symbol"])
@@ -190,21 +191,17 @@ def desk_cycle_run(u, c, a: dict) -> str:
     strategy = a.get("strategy")
     if strategy is not None and (not isinstance(strategy, str) or not 1 <= len(strategy.strip()) <= 80):
         raise ToolError("bad_input", "strategy must be the name of a strategy of the mandate")
-    ensure_runtime()
     try:
-        result = graph.run_cycle(desk_id, symbol=symbol, as_of=cut, strategy=strategy.strip() if strategy else None)
-    except graph.CycleError as exc:
-        raise ToolError("unavailable" if exc.code == "no_runtime" else "bad_input", f"{exc.code}: {exc}") from None
+        out = analysis.request(desk_id, symbol, strategy.strip() if strategy else None, as_of=cut)      # the cycle never runs in this process
+    except DeskError as exc:
+        raise _analysis_error(exc) from None
     except BrokerError as exc:
         raise _plain_error(exc) from None
-    return _dump({"desk_id": desk_id, "symbol": symbol, "run_id": result.run_id, "rating": result.rating, "proposal_id": result.proposal_id,
-                  "exec_status": result.exec_status, "absent": list(result.absent), "stopped_at": result.stopped_at, "reason": result.reason,
-                  "detail": result.detail, "analyst_status": dict(result.analyst_status), "analyst_causes": dict(result.analyst_causes),
-                  "learning": result.learning})
+    return _dump({**out, "read_with": "desk_cycle_status"})
 
 
 @TOOLSET.tool("desk_cycle_status", "The record of a cycle of your SWO desk: how far it went, why it stopped, the rating, the proposal and what the filter answered. Without run_id it gives the latest cycles of the desk.", {
-    "desk_id": _i("Desk id."), "run_id": _i("A run id from desk_cycle_run."), "limit": _i("How many recent cycles, 1 to 20 (default 5).")}, ["desk_id"])
+    "desk_id": _i("Desk id."), "run_id": _i("A run id from desk_cycle_run or desk_analysis_start."), "limit": _i("How many recent cycles, 1 to 20 (default 5).")}, ["desk_id"])
 def desk_cycle_status(u, c, a: dict) -> str:
     from hokma.backoffice import runs
     from hokma.desks.swo.graph import KIND
@@ -231,11 +228,78 @@ def _cycle_row(record: dict, *, full: bool) -> dict[str, Any]:
            "as_of": (body.get("entries") or {}).get("as_of"), "stopped_at": out.get("stopped_at"), "reason": out.get("reason"),
            "rating": (out.get("final") or {}).get("rating"), "absent": out.get("absent") or [],
            "detail": out.get("detail"), "analyst_status": out.get("analyst_status") or {}, "analyst_causes": out.get("analyst_causes") or {},
-           "proposal_ids": [o.get("proposal_id") for o in out.get("orders") or []], "delivery": out.get("delivery"), "learning": out.get("learning")}
+           "proposal_ids": [o.get("proposal_id") for o in out.get("orders") or []], "delivery": out.get("delivery"), "learning": out.get("learning"), "in_progress": record["status"] == "running"}
     if full:
         row.update({"trail": out.get("trail"), "regime": out.get("regime"), "filter": out.get("filter"), "judge": out.get("judge"),
                     "committee": out.get("committee"), "final": out.get("final"), "error": out.get("error")})
     return row
+
+
+def _analysis_error(exc: Any) -> ToolError:
+    """The refusal of the analysis door in the words the chief reads: the reason and the way on."""
+    kind = "blocked" if exc.code in ("analysis_unavailable", "analysis_running", "analysis_busy", "desk_budget_exhausted") else "no_data" if exc.code == "analysis_not_found" else "bad_input"
+    hints = ["desk_analysis_get", "desk_analysis_list"] if exc.code in ("analysis_running", "analysis_busy") else []
+    return ToolError(kind, f"{exc.code}: {exc.message}" + (f" (run {exc.extra['run_id']})" if exc.extra.get("run_id") else ""), hints)
+
+
+@TOOLSET.tool("desk_analysis_start", "Analyze one share on your options desk with the whole team (plan, analysts, company filter, debate, judge, trader, risk committee and manager) and save the report of each agent. It is the same cycle as desk_cycle_run, opened from the Analysis panel's door: one live analysis per desk and share (two per desk and four in all), and the report stays in the list of analyses. It answers at once with the run_id and does NOT wait: the app runs the cycle and the owner sees every step arrive in the Analysis panel; read the result later with desk_analysis_get. The cycle sends no order; the level of the desk and the rules decide what follows. A desk that is not a stock options desk has no analysis.", {
+    "desk_id": _i("Desk id."), "symbol": _s("The share, for example AAPL."), "strategy": _s("Name of one strategy of the mandate, to analyze only with that one.")},
+    ["desk_id", "symbol"], writes=True)
+def desk_analysis_start(u, c, a: dict) -> str:
+    from hokma.broker.service import BrokerError
+    from hokma.desks.errors import DeskError
+    from hokma.desks.swo import analysis
+
+    desk_id = _desk(c, a["desk_id"])
+    try:
+        out = analysis.request(desk_id, _symbol(a["symbol"]), a.get("strategy"))
+    except DeskError as exc:
+        raise _analysis_error(exc) from None
+    except BrokerError as exc:
+        raise _plain_error(exc) from None
+    return _dump({**out, "panel": "analysis"})
+
+
+# Agents' texts are long: the chief gets them cut unless it asks for one seat.
+BRIEF_REPORT = 1200
+
+
+@TOOLSET.tool("desk_analysis_get", "The report of one analysis of your options desk: the steps and how each ended, the grade and the reasons of the manager, the proposal and what became of it, and what each agent wrote (report, why, tools it used). An agent that did not deliver is marked absent or failed with its cause. The agents' texts come cut; pass seat (a name such as Simon or a code such as A09) to read one agent's whole text.", {
+    "desk_id": _i("Desk id."), "run_id": _i("The run id from desk_analysis_start or desk_analysis_list."), "seat": _s("Name or code of one agent, to read its text whole.")},
+    ["desk_id", "run_id"])
+def desk_analysis_get(u, c, a: dict) -> str:
+    from hokma.desks.errors import DeskError
+    from hokma.desks.swo import analysis
+
+    desk_id = _desk(c, a["desk_id"])
+    try:
+        out = analysis.get(desk_id, _int_id(a["run_id"], "run_id"))
+    except DeskError as exc:
+        raise _analysis_error(exc) from None
+    seat = a.get("seat")
+    if seat is not None:
+        if not isinstance(seat, str) or not 1 <= len(seat.strip()) <= 40:
+            raise ToolError("bad_input", "seat is the name or the code of an agent")
+        wanted = seat.strip().lower()
+        out["agents"] = [s for s in out["agents"] if s["name"].lower() == wanted or s["seat"].lower() == wanted]
+        if not out["agents"]:
+            raise ToolError("no_data", f"no agent {seat!r} took part in this analysis")
+    else:
+        out["agents"] = [{**s, "report": s["report"][:BRIEF_REPORT]} for s in out["agents"]]
+    return _dump(out)
+
+
+@TOOLSET.tool("desk_analysis_list", "The latest analyses of your options desk, newest first: asset, when, how it ended, the rating and whether it produced a proposal.", {
+    "desk_id": _i("Desk id."), "limit": _i("How many, 1 to 50 (default 20).")}, ["desk_id"])
+def desk_analysis_list(u, c, a: dict) -> str:
+    from hokma.desks.errors import DeskError
+    from hokma.desks.swo import analysis
+
+    desk_id = _desk(c, a["desk_id"])
+    try:
+        return _dump(analysis.list_runs(desk_id, a.get("limit", analysis.DEFAULT_LIMIT)))
+    except DeskError as exc:
+        raise _analysis_error(exc) from None
 
 
 @TOOLSET.tool("desk_cycle_learn", "Step 9 of a cycle whose order left after the cycle ended (level 2, once the owner approved it): measure the lesson from the real entry fill and let the sub-manager reflect. It learns only from an order that executed; otherwise it says so.", {
@@ -243,8 +307,15 @@ def _cycle_row(record: dict, *, full: bool) -> dict[str, Any]:
 def desk_cycle_learn(u, c, a: dict) -> str:
     from hokma.desks.swo import graph
 
+    from hokma.desks.errors import DeskError
+    from hokma.desks.swo import analysis
+
     desk_id = _swo_desk(c, a["desk_id"])
     run_id = _int_id(a["run_id"], "run_id")
+    try:
+        analysis.assert_budget(desk_id)                          # the model calls of this step count against the weekly budget like any other turn
+    except DeskError as exc:
+        raise _analysis_error(exc) from None
     ensure_runtime()
     try:
         learning = graph.learn_after_fill(desk_id, run_id, runtime=graph.current_runtime(desk_id))

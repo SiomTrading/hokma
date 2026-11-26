@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { deskAgentsApi } from "./agentsApi";
 import { desksApi } from "./api";
 import { deskChatApi } from "./deskChatApi";
+import { accountsOf } from "./types";
 
 const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
 
@@ -37,13 +38,14 @@ describe("the shapes the desks server really sends", () => {
     expect(team[0]!.cannot).toEqual([]);
   });
 
-  it("desks: the optional account arrives with its balance, and an old answer without it still reads", async () => {
+  it("desks: the accounts arrive with their balance and what they share, and an old answer without them still reads", async () => {
     const base = { id: 7, project_id: 3, name: "Futuros", capital: 10000, currency: "USD", status: "active", template: "minimal" };
-    const account = { id: 2, name: "Swing", broker: "Hokma Simulated", balance: { cash: 25000, equity: 25000, currency: "USD" }, as_of: "2026-11-18T12:00:00Z" };
-    answer({ desks: [{ ...base, account }, { ...base, id: 8, account: null }, { ...base, id: 9 }] });
+    const account = { id: 2, name: "Swing", broker: "Hokma Simulated", balance: { cash: 25000, equity: 25000, currency: "USD" }, as_of: "2026-11-18T12:00:00Z", shared_with: [8], strategies: ["principal"] };
+    answer({ desks: [{ ...base, accounts: [account], strategies: { principal: 2 } }, { ...base, id: 8, capital: null, accounts: [] }, { ...base, id: 9 }] });
     const desks = await desksApi.list();
-    expect(desks.map((d) => d.account ?? null)).toEqual([account, null, null]);
-    expect(desks[0]!.account!.balance.cash).toBe(25000);
+    expect(desks.map((d) => accountsOf(d))).toEqual([[account], [], []]);
+    expect(desks[0]!.accounts![0]!.balance.cash).toBe(25000);
+    expect(desks[1]!.capital).toBeNull();
   });
 
   it("conversation: the numeric id of the database is sent to the chat socket as text", async () => {

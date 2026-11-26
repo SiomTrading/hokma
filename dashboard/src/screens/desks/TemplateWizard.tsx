@@ -24,7 +24,6 @@ export function TemplateWizard({ onClose, onCreated }: Props) {
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [focus, setFocus] = useState("");
-  const [capital, setCapital] = useState("10000");
   const [objective, setObjective] = useState("");
   const [mandate, setMandate] = useState("");
   const [template, setTemplate] = useState<WizardTemplate>("standard");
@@ -50,20 +49,18 @@ export function TemplateWizard({ onClose, onCreated }: Props) {
 
   const def = templates?.find((item) => item.id === template);
   const suggested = def?.token_budget ?? null;
-  const capitalValue = parseWhole(capital);
   const objectiveValue = parseDecimal(objective);
   const budgetValue = budgetText === null ? suggested : parseWhole(budgetText);
 
   const gaps = useMemo(
     () => ({
       name: name.trim().length < 1 || name.trim().length > DESK_LIMITS.nameMax,
-      capital: capitalValue === null || capitalValue < DESK_LIMITS.capitalMin || capitalValue > DESK_LIMITS.capitalMax,
       objective: objective.trim() !== "" && (objectiveValue === null || objectiveValue < 0 || objectiveValue > 100),
       budget: !noCap && budgetValue !== null && budgetValue < 1,
     }),
-    [name, capitalValue, objective, objectiveValue, noCap, budgetValue],
+    [name, objective, objectiveValue, noCap, budgetValue],
   );
-  const firstStepOk = !gaps.name && !gaps.capital && !gaps.objective;
+  const firstStepOk = !gaps.name && !gaps.objective;
   const canCreate = firstStepOk && !gaps.budget && def !== undefined && !busy;
 
   const addSymbol = () => {
@@ -87,11 +84,10 @@ export function TemplateWizard({ onClose, onCreated }: Props) {
       setStep(0);
       return;
     }
-    if (!canCreate || capitalValue === null) return;
+    if (!canCreate) return;
     const payload: CreateDeskPayload = {
       name: name.trim(),
       focus: focus.trim() || null,
-      capital: capitalValue,
       template,
       assets,
     };
@@ -142,14 +138,9 @@ export function TemplateWizard({ onClose, onCreated }: Props) {
             <Field label={t("desks.field.focus")} hint={t("desks.field.focus.hint")}>
               {(control) => <Input {...control} value={focus} maxLength={DESK_LIMITS.focusMax} onChange={(e) => setFocus(e.target.value)} />}
             </Field>
-            <div className="desk-wizard-two">
-              <Field label={t("desks.field.capital")} hint={t("desks.field.capital.hint")} error={showGaps && gaps.capital ? t("desks.wizard.capitalRange", { min: formatTokens(DESK_LIMITS.capitalMin, locale) }) : undefined}>
-                {(control) => <Input {...control} className="mono" inputMode="numeric" value={capital} onChange={(e) => setCapital(e.target.value)} />}
-              </Field>
-              <Field label={t("desks.field.objective")} hint={t("desks.field.objective.hint")} error={showGaps && gaps.objective ? t("desks.wizard.objectiveRange") : undefined}>
+            <Field label={t("desks.field.objective")} hint={t("desks.field.objective.hint")} error={showGaps && gaps.objective ? t("desks.wizard.objectiveRange") : undefined}>
                 {(control) => <Input {...control} className="mono" inputMode="decimal" value={objective} onChange={(e) => setObjective(e.target.value)} />}
               </Field>
-            </div>
             <Field label={t("desks.field.mandate")} hint={t("desks.field.mandate.hint")}>
               {(control) => <Textarea {...control} rows={4} value={mandate} maxLength={DESK_LIMITS.mandateMax} onChange={(e) => setMandate(e.target.value)} />}
             </Field>

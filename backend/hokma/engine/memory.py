@@ -51,6 +51,11 @@ class MemoryStore:
     def list_messages(self, conversation_id):
         return list(self.messages.get(conversation_id, []))
 
+    def update_message_meta(self, conversation_id, message_id, **meta):
+        for rec in self.messages.get(conversation_id, []):
+            if rec.id == message_id:
+                rec.meta.update(meta)
+
     def add_attachment(self, sha256, name, mime, size):
         rec = AttachmentRecord(self._id("a"), sha256, name, mime, size)
         self.attachments[rec.id] = rec

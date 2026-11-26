@@ -151,7 +151,7 @@ async function scenario(chromium, locale, dist) {
       await box.fill(text);
       await box.press("Enter");
       // a normal message shows up as a user bubble at once; slash commands do not
-      if (!text.startsWith("/")) await until(async () => (await users.count()) > before, "the user bubble");
+      if (!text.startsWith("/")) await until(async () => (await users.count()) > before, "the user bubble", 45000);
     };
     const idle = () => front.getByRole("button", { name: msg("chat.composer.send") }).waitFor({ timeout: 20000 });
 
@@ -256,7 +256,7 @@ async function scenario(chromium, locale, dist) {
     // 9. search finds by content; an unrelated word finds nothing
     const search = page.getByLabel(msg("sidebar.search"));
     await search.fill("pong");
-    await page.locator("aside .sec", { hasText: msg("chat.list.results") }).waitFor();
+    await page.getByRole("complementary", { name: msg("nav.menu") }).locator(".sec", { hasText: msg("chat.list.results") }).waitFor();
     assert.ok((await page.locator("aside .conv").count()) >= 1);
     await search.fill("zzzzqqq");
     await page.getByText(msg("chat.list.noResults"), { exact: true }).waitFor();

@@ -48,14 +48,31 @@ def _desk(c: Any, desk_id: Any) -> int:
     return exec_tools._desk(c, desk_id)
 
 
-def _account(desk_id: int):
+def _account(desk_id: int, account_id: Any = None):
+    """The account a tool works on: the desk's only account, or the one named by `account_id` (which must be one of the desk's). A desk with
+    several accounts must say which: no tool picks "the first". A desk with none answers `no_data`, not an exception."""
     from hokma.db import get_database
 
     with get_database().read() as u:
-        account = u.broker.account_of_desk(desk_id)
-    if account is None:
-        raise ToolError("no_data", "the desk has no account", ["desk_assign_account"])
-    return account
+        linked = u.broker.accounts_of_desk(desk_id)
+    if not linked:
+        raise ToolError("no_data", "the desk has no account", ["desk_add_demo_account", "desk_add_account"])
+    if account_id is None:
+        if len(linked) > 1:
+            raise ToolError("bad_input", f"the desk has {len(linked)} accounts: say account_id ({', '.join(str(a.id) for a in linked)})")
+        return linked[0]
+    chosen = next((a for a in linked if a.id == account_id), None)
+    if chosen is None:
+        raise ToolError("bad_input", f"account {account_id} is not an account of the desk")
+    return chosen
+
+
+def _shared_with(desk_id: int, account_id: int) -> list[int]:
+    """The other desks that hold the account: what the figures of the whole account are shared with."""
+    from hokma.db import get_database
+
+    with get_database().read() as u:
+        return [d for d in u.broker.desks_of_account(account_id) if d != desk_id]
 
 
 def _day(value: Any, name: str) -> date:
@@ -78,45 +95,53 @@ def _prices(ids: list[str]) -> dict[str, Decimal]:
     return dict(sim_engine.mark_source(ids))
 
 
-@TOOLSET.tool("book_positions", "The open positions of the book of the desk account: quantity, average price, multiplier, mark and value. A position with no price has no value and says unpriced.", {
-    "desk_id": _i("Desk id.")}, ["desk_id"])
+@TOOLSET.tool("book_positions", "The open positions of the book of the desk account: quantity, average price, multiplier, mark and value. A position with no price has no value and says unpriced. The positions are those of the whole account; shared_with lists the other desks that hold it.", {
+    "desk_id": _i("Desk id."), "account_id": _i("Account of the desk; needed only when the desk has more than one.")}, ["desk_id"])
 def book_positions(u, c, a: dict) -> str:
     from hokma.backoffice import views
     from hokma.backoffice.book import Book
 
-    account = _account(_desk(c, a["desk_id"]))
+    account = _account(_desk(c, a["desk_id"]), a.get("account_id"))
     book = Book.load(account.id)
-    return _dump({"desk_id": a["desk_id"], "positions": views.to_text(views.positions_overview(book, _prices(list(book.cost_positions()))))})
+    return _dump({"desk_id": a["desk_id"], "account_id": account.id, "shared_with": _shared_with(a["desk_id"], account.id), "positions_scope": "account", "positions": views.to_text(views.positions_overview(book, _prices(list(book.cost_positions()))))})
 
 
-@TOOLSET.tool("book_snapshot", "The snapshot of the desk account: cash, positions value, equity, day result and peak. A figure that is not known is null with its reason in missing; never zero.", {
-    "desk_id": _i("Desk id.")}, ["desk_id"])
+@TOOLSET.tool("book_snapshot", "The snapshot of the desk account: cash, positions value, equity, day result and peak, all of the whole account (shared_with lists the other desks that hold it). A figure that is not known is null with its reason in missing; never zero.", {
+    "desk_id": _i("Desk id."), "account_id": _i("Account of the desk; needed only when the desk has more than one.")}, ["desk_id"])
 def book_snapshot(u, c, a: dict) -> str:
     from hokma.backoffice import book as book_module
     from hokma.backoffice import snapshot
 
-    account = _account(_desk(c, a["desk_id"]))
+    desk_id = _desk(c, a["desk_id"])
+    account = _account(desk_id, a.get("account_id"))
     ids = list(book_module.Book.load(account.id).cost_positions())
     snap = snapshot.snapshot(account.id, prices=_prices(ids))
-    return _dump({k: getattr(snap, k) for k in ("account_id", "as_of", "cash", "positions_value", "equity", "day_pnl", "peak_equity", "realized_pnl",
-                                                 "total_profit", "open_contracts", "positions", "missing")})
+    out = {k: getattr(snap, k) for k in ("account_id", "as_of", "cash", "positions_value", "equity", "day_pnl", "peak_equity", "realized_pnl",
+                                         "total_profit", "open_contracts", "positions", "missing")}
+    return _dump({**out, "shared_with": _shared_with(desk_id, account.id), "positions_scope": "account"})
 
 
-@TOOLSET.tool("book_pnl", "Profit and loss of the desk between two dates, realized, with commissions taken out, by symbol.", {
-    "desk_id": _i("Desk id."), "start": _s("Date."), "end": _s("Date.")}, ["desk_id", "start", "end"])
+@TOOLSET.tool("book_pnl", "Profit and loss that the desk generated between two dates, realized, with commissions taken out, by symbol and by account; only the fills of the orders of this desk (and of one strategy when strategy_key is given), never those of another desk that shares the account. Open lots are valued at the current marks in unrealized (null when a lot has no price).", {
+    "desk_id": _i("Desk id."), "start": _s("Date."), "end": _s("Date."), "account_id": _i("Narrow to one account of the desk."),
+    "strategy_key": _s("Narrow to one strategy of the desk.")}, ["desk_id", "start", "end"])
 def book_pnl(u, c, a: dict) -> str:
     from hokma.backoffice import pnl
 
     start, end = _period(a)
-    return _dump(pnl.pnl(_desk(c, a["desk_id"]), start=f"{start} 00:00:00", end=f"{end} 23:59:59").to_dict())
+    try:
+        report = pnl.pnl(_desk(c, a["desk_id"]), start=f"{start} 00:00:00", end=f"{end} 23:59:59", account_id=a.get("account_id"),
+                         strategy_key=a.get("strategy_key"), marks=_prices)
+    except ValueError as exc:
+        raise ToolError("bad_input", str(exc)) from None
+    return _dump(report.to_dict())
 
 
 @TOOLSET.tool("recon_run", "Reconcile the book of the desk account against a broker statement you were given as rows {ref, kind, contract_id, qty, amount, date, price?}. Amounts carry the sign of the book (a buy is negative); quantities are signed. Returns the breaks, largest first, each with its probable cause.", {
-    "desk_id": _i("Desk id."), "statement": _o("{as_of, lines:[...], account_value?} at most 5000 lines.")}, ["desk_id", "statement"], writes=True)
+    "desk_id": _i("Desk id."), "statement": _o("{as_of, lines:[...], account_value?} at most 5000 lines."), "account_id": _i("Account of the desk; needed only when the desk has more than one.")}, ["desk_id", "statement"], writes=True)
 def recon_run(u, c, a: dict) -> str:
     from hokma.backoffice import recon
 
-    account = _account(_desk(c, a["desk_id"]))
+    account = _account(_desk(c, a["desk_id"]), a.get("account_id"))
     body = a["statement"]
     lines = body.get("lines")
     if not isinstance(lines, list) or not lines or len(lines) > MAX_STATEMENT_LINES:
@@ -130,12 +155,12 @@ def recon_run(u, c, a: dict) -> str:
                   "breaks": [{"id": b.id, "bucket": b.bucket, "key": b.key, "cause": b.cause, "diff": b.diff, "impact": b.impact} for b in result.breaks[:200]]})
 
 
-@TOOLSET.tool("recon_breaks", "The breaks of the last reconciliation of the desk account, largest first.", {"desk_id": _i("Desk id.")}, ["desk_id"])
+@TOOLSET.tool("recon_breaks", "The breaks of the last reconciliation of the desk account, largest first.", {"desk_id": _i("Desk id."), "account_id": _i("Account of the desk; needed only when the desk has more than one.")}, ["desk_id"])
 def recon_breaks(u, c, a: dict) -> str:
     from hokma.backoffice import recon
     from hokma.db import get_database
 
-    account = _account(_desk(c, a["desk_id"]))
+    account = _account(_desk(c, a["desk_id"]), a.get("account_id"))
     with get_database().read() as unit:
         row = unit.session.one("SELECT id, status, as_of FROM reconciliations WHERE account_id = :a ORDER BY id DESC LIMIT 1", {"a": account.id})
     if row is None:
@@ -146,14 +171,14 @@ def recon_breaks(u, c, a: dict) -> str:
 
 
 @TOOLSET.tool("report_account", "The performance report of the desk account for a period: return for the period, the year and since the start against the benchmark the desk declared, net of commissions, with allocation, positions and activity. Numbers are computed, never written.", {
-    "desk_id": _i("Desk id."), "start": _s("Date."), "end": _s("Date.")}, ["desk_id", "start", "end"])
+    "desk_id": _i("Desk id."), "start": _s("Date."), "end": _s("Date."), "account_id": _i("Account of the desk; needed only when the desk has more than one.")}, ["desk_id", "start", "end"])
 def report_account(u, c, a: dict) -> str:
     from hokma.backoffice import benchmarks
     from hokma.backoffice import book as book_module
     from hokma.backoffice.reports import account_report
 
     desk_id = _desk(c, a["desk_id"])
-    account = _account(desk_id)
+    account = _account(desk_id, a.get("account_id"))
     start, end = _period(a)
     ids = list(book_module.Book.load(account.id).cost_positions())
     report = account_report.build_report(account.id, start=start, end=end, benchmark=benchmarks.declared(desk_id), desk_id=desk_id, marks=_prices(ids))
@@ -178,13 +203,13 @@ def report_weekly(u, c, a: dict) -> str:
 
 
 @TOOLSET.tool("export_book", "Export the book of the desk account to a csv or xlsx file in the exports folder of Hokma (the folder and the name are chosen by Hokma). Returns the file names.", {
-    "desk_id": _i("Desk id."), "format": _s("csv, xlsx or both.", enum=["csv", "xlsx", "both"])}, ["desk_id"], writes=True)
+    "desk_id": _i("Desk id."), "format": _s("csv, xlsx or both.", enum=["csv", "xlsx", "both"]), "account_id": _i("Account of the desk; needed only when the desk has more than one.")}, ["desk_id"], writes=True)
 def export_book(u, c, a: dict) -> str:
     from hokma.backoffice import exports
     from hokma.core.config import hokma_data_dir
 
     desk_id = _desk(c, a["desk_id"])
-    account = _account(desk_id)
+    account = _account(desk_id, a.get("account_id"))
     chosen = a.get("format") or "csv"
     formats = exports.FORMATS if chosen == "both" else (chosen,)
     folder = hokma_data_dir() / "exports" / f"desk-{desk_id}"

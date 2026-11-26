@@ -7,7 +7,7 @@ import { MAIL_ID, whatText } from "./AddConnectionDialog";
 import { codeText, connectionErrorText, connectionsApi, isStoreUnavailable } from "./api";
 import type { MailState } from "./api";
 import { daysLeft } from "./session";
-import type { AssetClass, ConnectionCard, DataState, TestResult } from "./types";
+import type { AssetClass, ConnectionCard, DataState, SampleProvider, TestResult } from "./types";
 
 /** Yahoo Finance is the fixed fallback: it is not in the catalog of cards, it has no menu and it cannot be turned off. */
 export const FALLBACK_ID = "yahoo";
@@ -26,10 +26,11 @@ interface Props {
   onOpen: (view: DialogView) => void;
   onViewAccount: () => void;
   onDiagnostic: () => void;
+  onSample: (provider: SampleProvider) => void;
 }
 
 /** "Connected": one row per connected source, its menu, and Yahoo Finance fixed at the end. */
-export function ConnectedList({ cards, mail, focusClass, focusProvider, onCard, onReload, onStoreMissing, onOpen, onViewAccount, onDiagnostic }: Props) {
+export function ConnectedList({ cards, mail, focusClass, focusProvider, onCard, onReload, onStoreMissing, onOpen, onViewAccount, onDiagnostic, onSample }: Props) {
   const { t } = useI18n();
   const [removing, setRemoving] = useState<ConnectionCard | null>(null);
   const connected = cards.filter((card) => card.added && card.id !== FALLBACK_ID);
@@ -43,6 +44,7 @@ export function ConnectedList({ cards, mail, focusClass, focusProvider, onCard, 
       onOpen={onOpen}
       onViewAccount={onViewAccount}
       onDiagnostic={onDiagnostic}
+      onSample={onSample}
       onRemove={() => setRemoving(card)}
     />
   ));
@@ -90,6 +92,7 @@ interface RowProps {
   onOpen: (view: DialogView) => void;
   onViewAccount: () => void;
   onDiagnostic: () => void;
+  onSample: (provider: SampleProvider) => void;
   onRemove: () => void;
 }
 
@@ -110,7 +113,7 @@ function RowMenu({ name, children }: { name: string; children: (close: () => voi
   );
 }
 
-function ProviderRow({ card, focused, onCard, onStoreMissing, onOpen, onViewAccount, onDiagnostic, onRemove }: RowProps) {
+function ProviderRow({ card, focused, onCard, onStoreMissing, onOpen, onViewAccount, onDiagnostic, onSample, onRemove }: RowProps) {
   const { t } = useI18n();
   const [busy, setBusy] = useState<"test" | "toggle" | null>(null);
   const [test, setTest] = useState<TestResult | null>(null);
@@ -214,7 +217,11 @@ function ProviderRow({ card, focused, onCard, onStoreMissing, onOpen, onViewAcco
                 <MenuItem onClick={() => { close(); onOpen({ view: "form", id: card.id, mode: "change", step: 2 }); }}>{t("connections.schwab.login")}</MenuItem>
                 <MenuItem onClick={() => { close(); onViewAccount(); }}>{t("connections.schwab.viewAccount")}</MenuItem>
                 <MenuItem onClick={() => { close(); onDiagnostic(); }}>{t("connections.schwab.diagnostic")}</MenuItem>
+                <MenuItem onClick={() => { close(); onSample("schwab"); }}>{t("connections.schwab.sample")}</MenuItem>
               </>
+            ) : null}
+            {card.id === "alpaca" ? (
+              <MenuItem onClick={() => { close(); onSample("alpaca"); }}>{t("connections.alpaca.sample")}</MenuItem>
             ) : null}
             <MenuItem onClick={() => { close(); onOpen({ view: "guide", id: card.id }); }}>{t("connections.row.guide")}</MenuItem>
             <MenuItem onClick={() => { close(); onRemove(); }}>{t("connections.row.remove")}</MenuItem>

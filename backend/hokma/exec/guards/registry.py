@@ -14,9 +14,11 @@ from hokma.exec.guards.broker_rules import BrokerRulesGuard
 from hokma.exec.guards.cooldown import CooldownGuard
 from hokma.exec.guards.event_window import EventWindowGuard
 from hokma.exec.guards.limits_guard import LimitsGuard
+from hokma.exec.guards.live_loss import LiveLossGuard
 from hokma.exec.guards.max_position import MaxPositionSizeGuard
 from hokma.exec.guards.monitor_guard import MonitorGuard
 from hokma.exec.guards.premium_selling import PremiumSellingGuard
+from hokma.exec.guards.stop import StopGuard
 from hokma.exec.guards.whitelist import SymbolWhitelistGuard
 
 
@@ -34,7 +36,7 @@ class ContractDisciplineGuard:
         return passed(self.name)
 
 
-# The fixed order of the pipeline. The premium-selling switch (SPEC-019, spec 4.5) sits between "limits" and "broker_rules".
+# The fixed order of the pipeline. The premium-selling switch (SPEC-019, spec 4.5) sits between "limits" and "stop" (its refusal is the more specific one); the stop of an entry (SPEC-026, 3390e3) sits before "broker_rules".
 ORDER: tuple[tuple[str, Callable[[], Guard]], ...] = (
     ("contract", ContractDisciplineGuard),
     ("whitelist", SymbolWhitelistGuard),
@@ -42,12 +44,14 @@ ORDER: tuple[tuple[str, Callable[[], Guard]], ...] = (
     ("cooldown", CooldownGuard),
     ("max_position", MaxPositionSizeGuard),
     ("monitor", MonitorGuard),
+    ("live_loss", LiveLossGuard),
     ("account", AccountGuard),
     ("limits", LimitsGuard),
     ("premium_selling", PremiumSellingGuard),
+    ("stop", StopGuard),
     ("broker_rules", BrokerRulesGuard),
 )
-ALWAYS = ("contract", "monitor", "premium_selling", "broker_rules")
+ALWAYS = ("contract", "monitor", "live_loss", "premium_selling", "stop", "broker_rules")
 
 
 def known_types() -> tuple[str, ...]:

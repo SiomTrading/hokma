@@ -99,5 +99,5 @@
 /* Layout state tokens, driven by classes on the root. */
 .hk.sbc { --sbw: 60px; }
 .hk.sbx { --sbw: 0px; }
-.hk.rpoff { --rpw: 0px; }
+.hk.rpoff { --rpw: 36px; }
 .hk.focus { --sbw: 0px; --rpw: 0px; }

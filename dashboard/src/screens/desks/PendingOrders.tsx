@@ -3,6 +3,7 @@ import { ApiError } from "@/api";
 import { Button } from "@/design";
 import { useI18n } from "@/i18n";
 import type { Account } from "./accountsApi";
+import { NoticeActions } from "../chat/OrderNoticeCards";
 import { minutesLeft, pendingApi, summarizeOrder } from "./pendingApi";
 import type { PendingOrder } from "./pendingApi";
 
@@ -100,10 +101,14 @@ export function PendingOrders({ desks }: { desks: Array<{ id: number; name: stri
               </div>
               {row.reason ? <p className="p"><span className="lbl">{t("desks.pending.reason")}</span> {row.reason}</p> : null}
               {row.why ? <p className="p"><span className="lbl">{t("desks.pending.why")}</span> {row.why}</p> : null}
-              <div className="desk-hdr-actions">
-                <Button variant="ghost" size="sm" disabled={busy !== null} aria-label={t("desks.pending.rejectAria", { desk: who, order: summary })} onClick={() => void decide(row, false)}>{t("desks.pending.reject")}</Button>
-                <Button variant="primary" size="sm" disabled={busy !== null} aria-label={t("desks.pending.approveAria", { desk: who, order: summary })} onClick={() => void decide(row, true)}>{t("desks.pending.approve")}</Button>
-              </div>
+              {row.notice && row.proposal_id !== undefined ? (
+                <NoticeActions proposalId={row.proposal_id} label={`${who} ${summary}`} onDone={() => void load()} />
+              ) : (
+                <div className="desk-hdr-actions">
+                  <Button variant="ghost" size="sm" disabled={busy !== null} aria-label={t("desks.pending.rejectAria", { desk: who, order: summary })} onClick={() => void decide(row, false)}>{t("desks.pending.reject")}</Button>
+                  <Button variant="primary" size="sm" disabled={busy !== null} aria-label={t("desks.pending.approveAria", { desk: who, order: summary })} onClick={() => void decide(row, true)}>{t("desks.pending.approve")}</Button>
+                </div>
+              )}
             </li>
           );
         })}

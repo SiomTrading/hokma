@@ -447,7 +447,7 @@ def test_the_migration_keeps_the_saved_default_as_the_last_choice_and_is_applied
         u.session.execute("INSERT INTO engine_connections (engine, label, auth_kind, status, is_default) "
                           "VALUES ('codex', 'ChatGPT', 'subscription', 'connected', 0)")
     result = migrate()
-    assert result.applied == list(range(9, LATEST + 1)) and result.version == LATEST
+    assert result.applied == [v for v, _, _ in discover() if v >= 9] and result.version == LATEST
     with get_database().read() as u:
         rows = {c.label: c for c in u.engine_connections.list()}
         assert rows["Gemini"].chosen_at == rows["Gemini"].updated_at   # nothing lost: the default is their last choice

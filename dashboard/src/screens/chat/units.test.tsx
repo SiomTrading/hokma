@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { t } from "@/i18n";
 import { parseCommand, suggestionsFor } from "./commands";
 import { Markdown, safeHref } from "./markdown";
-import { initialState, reducer } from "./state";
+import { initialState, joinAroundTools, reducer } from "./state";
 import type { Action, ChatState } from "./state";
 import type { ServerEvent } from "./types";
 
@@ -13,7 +13,7 @@ const run = (state: ChatState, ...actions: Action[]) => actions.reduce(reducer, 
 describe("reducer", () => {
   const base = { conversation_id: "7", turn_id: "t1" };
 
-  it("streams deltas into one bubble, closes it on a tool call and starts another after", () => {
+  it("streams deltas into one bubble; tool calls do not enter the chat, they go to the side panel", () => {
     const state = run(
       initialState(null),
       { type: "local_send", text: "hi", attachments: [] },
@@ -30,28 +30,50 @@ describe("reducer", () => {
     expect(state.model).toBe("opus");
     expect(state.project?.name).toBe("Main");
     expect(state.running).toBe(false);
-    expect(state.items.map((i) => i.kind)).toEqual(["user", "assistant", "tool", "assistant"]);
-    const [user, first, tool, last] = state.items;
+    expect(state.items.map((i) => i.kind)).toEqual(["user", "assistant"]);
+    const [user, answer] = state.items;
     expect(user).toMatchObject({ messageId: "11" });
-    expect(first).toMatchObject({ text: "Hello", streaming: false });
-    expect(tool).toMatchObject({ result: { text: "content", isError: false } });
-    expect(last).toMatchObject({ text: "Done", streaming: false, messageId: "12" });
+    expect(answer).toMatchObject({ text: "Hello\n\nDone", streaming: false, messageId: "12" });
   });
 
-  it("shows a running command's output as it arrives and drops it when the result comes (task 3175)", () => {
-    const started = run(
+  it("keeps tool lines, command output and agent events out of the chat, and puts a protection block in it (SPEC-013, panel C)", () => {
+    const state = run(
       initialState("7"),
       ev({ type: "tool_use", ...base, tool_use_id: "c", name: "run_command", input: {}, summary: { kind: "run_command", target: "git clone x" } }),
       ev({ type: "tool_output", ...base, tool_use_id: "c", text: "Cloning into 'x'...\n" }),
-      ev({ type: "tool_output", ...base, tool_use_id: "c", text: "Receiving objects: 50%\n" }),
+      ev({ type: "tool_result", ...base, tool_use_id: "c", is_error: false, text: "ok" }),
+      ev({ type: "guard_block", ...base, id: 1, rule: "real_money", tool: "Bash", target: "x", at: "2026-01-01 00:00:00" }),
+      ev({ type: "agent_start", ...base, agent_id: "g", slug: "iris", description: "d", parent: "", started_at: 1 }),
+      ev({ type: "agent_step", ...base, agent_id: "g", step: { id: "s", name: "Read", kind: "read_file", target: "a", is_error: null } }),
+      ev({ type: "agent_end", ...base, agent_id: "g", status: "done", ended_at: 2, result: "x" }),
+      ev({ type: "shell_start", ...base, shell_id: "h", command: "sleep 1", started_at: 1 }),
     );
-    expect(started.items[0]).toMatchObject({ kind: "tool", output: "Cloning into 'x'...\nReceiving objects: 50%\n" });
-    const long = run(started, ev({ type: "tool_output", ...base, tool_use_id: "c", text: "y".repeat(5000) }));
-    expect((long.items[0] as { output: string }).output.length).toBe(4000);
-    const done = run(started, ev({ type: "tool_result", ...base, tool_use_id: "c", is_error: true, text: "stopped" }),
-      ev({ type: "tool_output", ...base, tool_use_id: "c", text: "late" }));
-    expect(done.items[0]).toMatchObject({ result: { isError: true, text: "stopped" } });
-    expect((done.items[0] as { output?: string }).output).not.toContain("late");
+    expect(state.items.map((i) => i.kind)).toEqual(["block"]);
+    expect(state.items[0]).toMatchObject({ block: { id: 1, rule: "real_money", target: "x" } });
+  });
+
+  it("starts a new paragraph where a tool was called when the server left no separator, and leaves one that exists", () => {
+    const answer = (...events: Action[]) => run(initialState("7"), ...events).items[0] as { text: string };
+    const tool = (id: string) => ev({ type: "tool_use", ...base, tool_use_id: id, name: "Read", input: {}, summary: { kind: "read_file", target: "a" } });
+    const delta = (text: string) => ev({ type: "delta", ...base, text });
+    expect(answer(delta("Voy a leer."), tool("a"), delta("Listo."), tool("b"), delta("Fin.")).text).toBe("Voy a leer.\n\nListo.\n\nFin.");
+    expect(answer(delta("Uno.\n\n"), tool("a"), delta("Dos.")).text).toBe("Uno.\n\nDos.");
+    expect(answer(delta("Uno. "), tool("a"), delta("Dos.")).text).toBe("Uno. Dos.");
+    expect(answer(delta("Uno"), delta("dos")).text).toBe("Unodos");
+    expect(answer(delta("Uno."), tool("a"), tool("b"), delta("Dos.")).text).toBe("Uno.\n\nDos.");
+  });
+
+  it("the saved answer and the reconnected one join the text around each tool like the live one", () => {
+    const tools = (...at: number[]) => at.map((n, i) => ({ id: `t${i}`, name: "Read", kind: "read_file" as const, target: "a", at: n, is_error: false, result: "" }));
+    expect(joinAroundTools("Voy a leer.Listo.Fin.", tools(11, 17))).toBe("Voy a leer.\n\nListo.\n\nFin.");
+    expect(joinAroundTools("Uno.\n\nDos.", tools(6))).toBe("Uno.\n\nDos.");
+    expect(joinAroundTools("Uno.", tools(0, 4))).toBe("Uno.");
+    const rebuilt = run(
+      initialState("7"),
+      ev({ type: "state", conversation_id: "7", state: "running", pending_permissions: [], partial: { turn_id: "t1", text: "Leo.", tools: tools(4) } }),
+      ev({ type: "delta", ...base, text: "Listo." }),
+    );
+    expect((rebuilt.items[0] as { text: string }).text).toBe("Leo.\n\nListo.");
   });
 
   it("marks a stopped turn and keeps the partial text", () => {

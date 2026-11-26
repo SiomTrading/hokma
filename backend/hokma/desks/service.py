@@ -9,15 +9,18 @@ from __future__ import annotations
 import logging
 import os
 import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from hokma.broker import desk_accounts as broker_desk_accounts
 from hokma.broker import service as broker_service
 from hokma.db import Database, DbError, IntegrityViolation, NotFound, ValidationError, get_database
 from hokma.db.repos import desks as repo
 from hokma.db.repos.base import UNSET
 from hokma.db.repos.projects import slugify
-from hokma.desks import budget
+from hokma.db.timeutil import from_db_time
+from hokma.desks import budget, panels
 from hokma.desks import roles as role_data
 from hokma.desks import templates as template_data
 from hokma.desks.errors import DeskError
@@ -171,7 +174,9 @@ def _view(u, desk: repo.Desk, *, detail: bool) -> dict[str, Any]:
     out["agents_working"] = sum(1 for a in agents if a.active and a.agent_slug in working)
     out["today"] = 0                    # orders sent today are read from the broker log, not counted here
     out["drawdown"] = None
-    out["account"] = broker_service.desk_account(u, desk.id)
+    out.update(broker_desk_accounts.of_desk(u, desk.id))               # `accounts` and `strategies` (SPEC-027)
+    out["panels"] = panels.resolve(desk.layout)                          # the panels of the screen, in order (SPEC-025, delivery 3)
+    out["layout"] = None if desk.layout is None else {"panels": out["panels"]}
     out["tokens_week"] = week["used"]
     out["budget_state"] = week["state"]
     if detail:
@@ -202,6 +207,32 @@ def list_desks(*, include_archived: bool = False, db: Database | None = None) ->
         return [_view(u, d, detail=False) for d in u.desks.list(include_archived=include_archived)]
 
 
+RUNS_WINDOW_HOURS = 24
+RUNS_FINISHED = ("done", "failed")
+
+
+def active_runs(db: Database | None = None, now: datetime | None = None) -> dict[str, Any]:
+    """The cycles the server runs for the desks (`run_records`): the ones running now and the ones that finished in the
+    last 24 hours. What the right panel shows under "In the background" (SPEC-013 13.5)."""
+    from hokma.backoffice import runs
+
+    database = _db(db)
+    with database.read() as u:
+        names = {d.id: d.name for d in u.desks.list(include_archived=True)}
+    since = (now or datetime.now(UTC)) - timedelta(hours=RUNS_WINDOW_HOURS)
+
+    def row(r: dict[str, Any]) -> dict[str, Any]:
+        return {"run_id": r["id"], "desk_id": r["desk_id"], "desk_name": names.get(r["desk_id"], ""), "kind": r["kind"],
+                "started_at": r["started_at"]}
+
+    finished = [r for status in RUNS_FINISHED for r in runs.list_runs(status=status, limit=200, db=database)
+                if r["ended_at"] and from_db_time(r["ended_at"]) >= since]
+    finished.sort(key=lambda r: (r["ended_at"], r["id"]), reverse=True)
+    return {"running": [row(r) for r in runs.list_runs(status="running", limit=200, db=database)],
+            "finished_24h": [{**{k: v for k, v in row(r).items() if k != "started_at"}, "status": r["status"],
+                              "ended_at": r["ended_at"]} for r in finished]}
+
+
 def get_desk(desk_id: int, db: Database | None = None) -> dict[str, Any]:
     with _db(db).read() as u:
         return _view(u, _desk(u, desk_id), detail=True)
@@ -229,13 +260,13 @@ def list_agents(desk_id: int, db: Database | None = None) -> list[dict[str, Any]
 
 # ---- create ----------------------------------------------------------------------------------
 
-def _claude_text(owner: str, name: str, mandate: str | None, capital: int, currency: str) -> str:
+def _claude_text(owner: str, name: str, mandate: str | None, capital: int | None, currency: str) -> str:
     path = app_root().joinpath(*CLAUDE_TEMPLATE)
     try:
         body = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         body = FALLBACK_CLAUDE
-    values = {"desk_name": name, "owner_name": owner or "", "capital": f"{capital:,} {currency}",
+    values = {"desk_name": name, "owner_name": owner or "", "capital": f"{capital:,} {currency}" if capital is not None else t("desks.claude.no_capital"),
               "mandate": mandate or t("desks.claude.no_mandate")}
     return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), body)     # one pass: no re-substitution
 
@@ -257,7 +288,72 @@ def _undo(folder: Path, written: list[str]) -> None:
         pass
 
 
-def create_desk(name: str, capital: Any, *, focus: str | None = None, template: str = "standard",
+ACCOUNT_SUFFIX = " demo"                       # the demo account of a desk is called "{desk} demo"
+ACCOUNT_NAME_MAX = 60                          # `broker_accounts.name`
+
+
+def account_request(account: Any, capital: Any) -> tuple[str, int | None]:
+    """What the caller asked for the money of a new desk (SPEC-025 delivery 2), checked before anything is written.
+
+    `account` is `{"mode": "new", "initial_capital": n}` or `{"mode": "existing", "account_id": n}`. Without it the desk has no
+    account (SPEC-027: a desk is born with its agents and no money), and `capital`, if given, is the optional capital of the desk;
+    nobody writes a default. Returns `("new", capital)`, `("existing", id)` or `("none", capital or None)`."""
+    if account is None:
+        return "none", None if capital is None else _capital(capital)
+    if not isinstance(account, dict):
+        raise DeskError("bad_account", 400)
+    mode = account.get("mode")
+    if mode == "new":
+        return "new", _capital(account.get("initial_capital"))
+    if mode == "existing":
+        found = account.get("account_id")
+        if not isinstance(found, int) or isinstance(found, bool):
+            raise DeskError("bad_account", 400)
+        return "existing", found
+    raise DeskError("bad_account", 400)
+
+
+def _demo_account(u, desk_name: str, capital: int):
+    """The demo account of a new desk, in the internal broker (the one of kind `sim`). A name that is taken gets a number."""
+    sim = next((b for b in u.broker.list_brokers() if b.kind == "sim"), None)
+    if sim is None:
+        raise DeskError("no_demo_broker", 409)
+    base = f"{desk_name[:ACCOUNT_NAME_MAX - len(ACCOUNT_SUFFIX) - 4].strip()}{ACCOUNT_SUFFIX}"
+    name, n = base, 1
+    while u.broker.find_account_by_name(sim.id, name) is not None:
+        n += 1
+        name = f"{base} {n}"
+    return u.broker.create_account(sim.id, name, capital)
+
+
+def money_of_new_desk(u, plan: tuple[str, int | None], desk_name: str) -> tuple[int | None, Any]:
+    """Inside the transaction of the desk: the capital of the desk and its account (None when no account was asked).
+    The capital of the desk is the `initial_capital` of the account. A failure raises and the caller's transaction undoes
+    everything: there is no desk without its account and no account without its desk."""
+    kind, value = plan
+    if kind == "none":
+        return value, None
+    if kind == "new":
+        try:
+            return value, _demo_account(u, desk_name, value)
+        except ValidationError as exc:
+            raise DeskError("bad_capital", 400) from exc
+    try:
+        account = u.broker.get_account(value)
+    except NotFound as exc:
+        raise DeskError("account_not_found", 404) from exc
+    if account.status != "active":
+        raise DeskError("account_not_found", 404)
+    return _capital(int(account.initial_capital)), account
+
+
+def link_new_desk_account(u, desk_id: int, account: Any) -> None:
+    if account is None:
+        return
+    broker_desk_accounts.link_account(u, desk_id, account)       # an account may serve other desks too (SPEC-027); the first one is the principal strategy's
+
+
+def create_desk(name: str, capital: Any = None, *, account: Any = None, focus: str | None = None, template: str = "standard",
                 objective_pct: Any = None, mandate: str | None = None, assets: Any = None,
                 token_budget: Any = None, db: Database | None = None) -> dict[str, Any]:
     """Create a desk with the agents of `template`. Each agent keeps its default model for its role.
@@ -267,7 +363,7 @@ def create_desk(name: str, capital: Any, *, focus: str | None = None, template: 
     """
     database = _db(db)
     clean_name = _name(name)
-    clean_capital = _capital(capital)
+    plan = account_request(account, capital)
     clean_focus = _text(focus, 120, "bad_focus")
     clean_mandate = _text(mandate, 4000, "bad_mandate")
     clean_objective = _objective(objective_pct)
@@ -294,9 +390,12 @@ def create_desk(name: str, capital: Any, *, focus: str | None = None, template: 
             with database.write() as u:
                 project = u.projects.create(clean_name, str(folder), slug=slug, kind="strategy",
                                             description=clean_focus)
+                clean_capital, desk_account = money_of_new_desk(u, plan, clean_name)      # the capital comes from the account
                 desk = u.desks.create(project.id, clean_name, capital=clean_capital, focus=clean_focus,
                                       template=chosen.key, objective_pct=clean_objective, mandate=clean_mandate,
                                       token_budget=clean_budget)
+                link_new_desk_account(u, desk.id, desk_account)
+                u.broker.set_limits(desk.id, assets_limits(bool(clean_assets)))        # no rules: only the fixed guards, and the list of assets as a NOTICE if it has one
                 for member in chosen.members:
                     u.desks.add_agent(desk.id, member.agent_slug, member.role, member.model)
                 u.desks.replace_assets(desk.id, clean_assets)
@@ -458,7 +557,7 @@ def update_desk(desk_id: int, changes: dict[str, Any], db: Database | None = Non
     if "focus" in changes:
         values["focus"] = _text(changes["focus"], 120, "bad_focus")
     if "capital" in changes:
-        values["capital"] = _capital(changes["capital"])
+        values["capital"] = None if changes["capital"] is None else _capital(changes["capital"])       # None: the desk has no capital of its own
     if "objective_pct" in changes:
         values["objective_pct"] = _objective(changes["objective_pct"])
     if "mandate" in changes:
@@ -472,7 +571,7 @@ def update_desk(desk_id: int, changes: dict[str, Any], db: Database | None = Non
     try:
         with database.write() as u:
             current = _desk(u, desk_id)
-            if lower_only and (values.get("capital", current.capital) > current.capital
+            if lower_only and (_raises_capital(current.capital, values.get("capital", current.capital))
                                or (values.get("status", current.status) == "active" and current.status != "active")):
                 raise broker_service.owner_only("raising the capital or reactivating a desk")
             u.desks.update(desk_id, **{k: values.get(k, UNSET) for k in (
@@ -482,8 +581,115 @@ def update_desk(desk_id: int, changes: dict[str, Any], db: Database | None = Non
         raise DeskError("db_failed", 400) from exc
 
 
+# ---- panels of the screen (SPEC-025, delivery 3) ---------------------------------------------------------------------------------
+
+def _save_panels(desk_id: int, change, db: Database | None) -> dict[str, Any]:
+    """Read the order, change it and save it in one transaction, so two quick changes (the owner's and the chief's) never lose each other."""
+    try:
+        with _db(db).write() as u:
+            raw = _desk(u, desk_id).layout
+            u.desks.set_layout(desk_id, panels.dump(change(panels.resolve(raw)), panels.saved(raw)))     # the saved strategies travel with the order
+            return _view(u, u.desks.get(desk_id), detail=True)
+    except (IntegrityViolation, ValidationError) as exc:
+        raise DeskError("db_failed", 400) from exc
+
+
+def _check_analysis(desk_id: int, db: Database | None) -> None:
+    """The Analysis panel is only for a desk that has the cycle of agents (SPEC-028, delivery 4): a desk without it is refused with the reason."""
+    from hokma.desks.swo import analysis
+
+    analysis.require_available(desk_id, _db(db))
+
+
+def saved_strategies(desk_id: int, db: Database | None = None) -> dict[str, dict[str, Any]]:
+    """The strategies saved from the Option detail panel, by strategy_key (SPEC-028, 3339-B). They live in the layout of the desk: no table."""
+    with _db(db).read() as u:
+        return panels.saved(_desk(u, desk_id).layout)
+
+
+def save_strategy(desk_id: int, key: str, record: dict[str, Any], limit: int, db: Database | None = None) -> None:
+    """Keep `record` under `key` (a key that exists is replaced). A desk holds at most `limit` strategies: 409 saved_strategies_full."""
+    try:
+        with _db(db).write() as u:
+            raw = _desk(u, desk_id).layout
+            items = panels.saved(raw)
+            if key not in items and len(items) >= limit:
+                raise DeskError("saved_strategies_full", 409)
+            items[key] = record
+            u.desks.set_layout(desk_id, panels.dump(panels.resolve(raw), items))
+    except (IntegrityViolation, ValidationError) as exc:
+        raise DeskError("db_failed", 400) from exc
+
+
+def delete_saved_strategy(desk_id: int, key: str, db: Database | None = None) -> None:
+    try:
+        with _db(db).write() as u:
+            raw = _desk(u, desk_id).layout
+            items = panels.saved(raw)
+            if key not in items:
+                raise DeskError("saved_strategy_not_found", 404)
+            del items[key]
+            u.desks.set_layout(desk_id, panels.dump(panels.resolve(raw), items))
+    except (IntegrityViolation, ValidationError) as exc:
+        raise DeskError("db_failed", 400) from exc
+
+
+def set_panels(desk_id: int, order: Any, db: Database | None = None) -> dict[str, Any]:
+    """The whole order of the panels, as the owner left it after dragging or moving with the keyboard. The three fixed ones must be in it."""
+    wanted = panels.check_order(order)
+    if "analysis" in wanted:
+        _check_analysis(desk_id, db)
+    return _save_panels(desk_id, lambda _current: wanted, db)
+
+
+def add_panel(desk_id: int, panel: Any, db: Database | None = None) -> dict[str, Any]:
+    """Add a panel before the fixed ones. The chief calls this too: a panel moves no money and no rule, so it is not asked."""
+    if str(panel) == "analysis":
+        _check_analysis(desk_id, db)
+    return _save_panels(desk_id, lambda current: panels.with_added(current, str(panel)), db)
+
+
+def remove_panel(desk_id: int, panel: Any, db: Database | None = None) -> dict[str, Any]:
+    """Take a panel off the screen. rules, agents and config cannot be taken off. Nothing but the screen changes."""
+    return _save_panels(desk_id, lambda current: panels.with_removed(current, str(panel)), db)
+
+
+def _raises_capital(current: int | None, wanted: int | None) -> bool:
+    """Whether a change loosens the money of the desk: a bigger number, or taking the number away from a desk that has one.
+    Giving a number to a desk without one is a limit, so it is not."""
+    if current is None:
+        return False
+    return wanted is None or wanted > current
+
+
 def archive_desk(desk_id: int, db: Database | None = None) -> dict[str, Any]:
     return update_desk(desk_id, {"status": "archived"}, db)
+
+
+ASSETS_NOTICE = {"mode": "notice", "timeout_min": 30}
+
+
+def assets_limits(has_assets: bool) -> dict[str, Any]:
+    """The limits a new desk is born with (SPEC-026, section 8). No rule is imposed: the list of assets, when the desk has one, is a NOTICE, so a
+    candidate outside the list waits for the owner and is never refused. The guard runs because it is in `guards`; the mode decides what it does."""
+    if not has_assets:
+        return {"guards": []}
+    return {"guards": ["whitelist"], "rule_modes": {"assets_only": dict(ASSETS_NOTICE)}}
+
+
+def keep_assets_rule(u, desk_id: int, has_assets: bool) -> None:
+    """A desk with a `guards` list and a list of assets applies the list: `whitelist` is added to `guards` so the guard can run, and the rule of the
+    assets is a NOTICE unless the owner already chose a mode for it. A desk without the list (guards None) already runs every guard and is
+    left alone. The system never makes the list a restriction by itself."""
+    config = dict(u.broker.get_limits(desk_id))
+    guards = config.get("guards")
+    if not has_assets or guards is None:
+        return
+    modes = dict(config.get("rule_modes") or {})
+    if "whitelist" in guards and "assets_only" in modes:
+        return
+    modes.setdefault("assets_only", dict(ASSETS_NOTICE))
+    u.broker.set_limits(desk_id, {**config, "guards": list(dict.fromkeys([*guards, "whitelist"])), "rule_modes": modes})
 
 
 def set_assets(desk_id: int, symbols: Any, db: Database | None = None, *, keep_assets_only: bool = False) -> list[dict[str, Any]]:
@@ -499,6 +705,7 @@ def set_assets(desk_id: int, symbols: Any, db: Database | None = None, *, keep_a
             if any(symbol.upper() not in have for symbol, _note in clean):
                 raise broker_service.owner_only("adding an asset while the assets_only limit is on")
         rows = u.desks.replace_assets(desk_id, clean)
+        keep_assets_rule(u, desk_id, bool(rows))
     return [{"symbol": a.symbol, "note": a.note} for a in rows]
 
 

@@ -16,7 +16,7 @@ const BROKERS = [
   { id: 1, kind: "sim", name: "Hokma", commission: { type: "bps", value: 1, min: 0 }, slippage_bps: 2 },
   { id: 2, kind: "schwab", name: "Schwab", commission: { type: "bps", value: 0, min: 0 }, slippage_bps: 0, orders_enabled: true },
 ];
-const SCHWAB_ACCOUNT = { id: 7, broker_id: 2, broker: "Schwab", name: "Schwab ••••1234", initial_capital: 5000, currency: "USD", status: "active", desk_id: 1, cash: 100, equity: 5000, as_of: "2026-11-18T00:00:00Z", can_reset: false, mask: "••••1234" };
+const SCHWAB_ACCOUNT = { id: 7, broker_id: 2, broker: "Schwab", name: "Schwab ••••1234", initial_capital: 5000, currency: "USD", status: "active", desk_ids: [1], cash: 100, equity: 5000, as_of: "2026-11-18T00:00:00Z", can_reset: false, mask: "••••1234" };
 
 const future = (min: number) => new Date(Date.now() + min * 60000).toISOString().replace("T", " ").slice(0, 19);
 const pending = (id: number, patch: Record<string, unknown> = {}) => ({

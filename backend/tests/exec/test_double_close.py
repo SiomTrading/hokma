@@ -59,6 +59,12 @@ def working(cid, side, qty="1", status="WORKING", **kw):
     return SimpleNamespace(contract_id=cid, side=side, qty=float(qty), status=status, filled_qty=0.0, remaining_qty=None, legs=(), **kw)
 
 
+@pytest.fixture(autouse=True)
+def _no_stop_check(monkeypatch):
+    """These tests are about the warning of the owner and the netting of closes; the stop of an entry (SPEC-026, 3390e3) has its own tests."""
+    monkeypatch.setattr("hokma.exec.guards.stop.check_stop", lambda *a, **k: None)
+
+
 def test_a_working_close_is_taken_out_of_the_position_before_the_next_order_is_read():
     positions, orders = (held(C600, "1"),), (working(C600, "sell"),)
     p = prop(leg(C600, "sell", "close"))

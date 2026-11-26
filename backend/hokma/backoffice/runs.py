@@ -15,7 +15,7 @@ import re
 import secrets as _random
 import tempfile
 import threading
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -33,6 +33,7 @@ FINAL_STATUSES = ("done", "failed")
 KIND_RE = re.compile(r"^[a-z][a-z0-9_\-]{0,39}$")
 MAX_RECORD_CHARS = 2_000_000
 MAX_LIST = 1000
+BEGIN_LOCK = 3337_0001                  # the Postgres advisory lock that makes the limits of `begin` atomic between processes
 RECEIPTS_DIR = "receipts"
 STATE_DIR = "state"
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -170,11 +171,22 @@ def record(desk_id: int | None, kind: str, *, signature: str, entries: Any = Non
                                                 "started_at": to_db_time(started_at) or now, "ended_at": to_db_time(ended_at) or now})
 
 
-def begin(desk_id: int | None, kind: str, *, signature: str, started_at: Any = None, db: Database | None = None) -> int:
-    """Open the row of a long run. It is `running` until `finish`; its checkpoints hang from it."""
+def begin(desk_id: int | None, kind: str, *, signature: str, started_at: Any = None, entries: Any = None,
+          guard: Callable[[Any], None] | None = None, db: Database | None = None) -> int:
+    """Open the row of a long run. It is `running` until `finish`; its checkpoints hang from it.
+
+    `entries` is what the run is about (the asset), saved at once so a reader sees it before the first checkpoint exists. `guard(unit)` runs in the
+    same write transaction as the insert: it may read the other runs and raise to refuse this one, so two openers never both pass the same limit."""
     _check_identity(kind, signature)
+    body = dumps(_content(entries, None, (), (), None, None)) if entries is not None else "{}"
     with (db or get_database()).write() as u:
-        return u.session.insert("run_records", {"desk_id": desk_id, "kind": kind, "signature": signature, "status": "running", "record_json": "{}",
+        if guard is not None:
+            if u.session.engine == "postgres":
+                # SQLite's write unit is BEGIN IMMEDIATE: one writer at a time. Postgres has no such lock, so two processes could both count
+                # the same open runs and both pass. A transaction lock, released at commit, makes the count and the insert one step.
+                u.session.execute("SELECT pg_advisory_xact_lock(:k)", {"k": BEGIN_LOCK})
+            guard(u)
+        return u.session.insert("run_records", {"desk_id": desk_id, "kind": kind, "signature": signature, "status": "running", "record_json": body,
                                                 "started_at": to_db_time(started_at) or utcnow()})
 
 

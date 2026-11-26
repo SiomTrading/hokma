@@ -11,12 +11,13 @@ import { requestFocus, takeLogin, useFocus } from "./focus";
 import { DataSourcePicker } from "./DataSourcePicker";
 import { SchwabAccountDialog } from "./SchwabAccount";
 import { SchwabDiagnosticDialog } from "./SchwabDiagnostic";
+import { SchwabSampleDialog } from "./SchwabSample";
 import { SchwabBand } from "./SchwabBand";
-import type { UseKey } from "./types";
+import type { SampleProvider, UseKey } from "./types";
 import { UseOrder } from "./UseOrder";
 import { useConnections } from "./useConnections";
 
-type Dialog = { kind: "add"; start: DialogView; nonce: number } | { kind: "account" } | { kind: "diagnostic" } | null;
+type Dialog = { kind: "add"; start: DialogView; nonce: number } | { kind: "account" } | { kind: "diagnostic" } | { kind: "sample"; provider: SampleProvider } | null;
 
 /** Connections: the "Add" button, what is connected, and the order of use of each kind of data. */
 export function ConnectionsScreen() {
@@ -115,6 +116,7 @@ export function ConnectionsScreen() {
               onOpen={open}
               onViewAccount={() => setDialog({ kind: "account" })}
               onDiagnostic={() => setDialog({ kind: "diagnostic" })}
+              onSample={(provider) => setDialog({ kind: "sample", provider })}
             />
             {priorityError ? (
               <p className="conn-error" role="alert" data-testid="priority-error">
@@ -142,6 +144,7 @@ export function ConnectionsScreen() {
       ) : null}
       {dialog?.kind === "account" ? <SchwabAccountDialog onClose={close} /> : null}
       {dialog?.kind === "diagnostic" ? <SchwabDiagnosticDialog onClose={close} /> : null}
+      {dialog?.kind === "sample" ? <SchwabSampleDialog onClose={close} provider={dialog.provider} /> : null}
     </Pane>
   );
 }

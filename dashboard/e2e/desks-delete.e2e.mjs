@@ -34,7 +34,7 @@ await runSuite("desks-delete", { script: "desks-serve.py", signedIn: true }, asy
   await dialog.waitFor({ state: "detached" });
 
   // 2. back on the Fund: the first desk is gone from the cards and the menu, the second stays
-  await page.getByRole("heading", { name: msg("desks.fund.title") }).waitFor();
+  await page.getByRole("heading", { name: msg("desks.fund.tab"), level: 1 }).waitFor();
   await page.getByRole("button", { name: msg("desks.card.open", { name: "Mesa Dos" }) }).waitFor();
   assert.equal(await page.getByRole("button", { name: msg("desks.card.open", { name: "Mesa Uno" }) }).count(), 0);
   assert.equal(await page.getByRole("button", { name: new RegExp("^Mesa Uno, ") }).count(), 0, "gone from the menu");

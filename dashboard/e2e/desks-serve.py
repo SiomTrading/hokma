@@ -17,6 +17,8 @@ dist, port = Path(sys.argv[1]), int(sys.argv[2])
 HERE = Path(__file__).resolve().parent
 os.environ["HOKMA_MARKET_REPLAY_DIR"] = str(HERE / "market-replay")
 
+from hokma.core import processguard  # noqa: E402
+processguard._role = processguard.SERVER                # e2e only: this script plays the server (the hokma.db package refuses any other process)
 import hokma.core.app as app_module  # noqa: E402
 from hokma.core.config import hokma_home  # noqa: E402
 from hokma.core import session  # noqa: E402

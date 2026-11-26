@@ -21,10 +21,10 @@ export function NewAccountModal({ brokers, onClose, onDone }: Props) {
   const { t } = useI18n();
   const [broker, setBroker] = useState(String(brokers[0]?.id ?? ""));
   const [name, setName] = useState("");
-  const [capital, setCapital] = useState("10000");
+  const [capital, setCapital] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const amount = Number(capital);
+  const amount = capital.trim() === "" ? Number.NaN : Number(capital);
   const valid =
     name.trim().length > 0 && Number.isInteger(amount) && amount >= DESK_LIMITS.capitalMin && amount <= DESK_LIMITS.capitalMax;
 

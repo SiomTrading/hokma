@@ -24,13 +24,14 @@ TABLES = {
     "scheduled_jobs", "onboarding_progress", "trash_items", "checkpoint_points", "engine_connections",
     "libraries", "documents", "doc_chunks", "doc_chunks_fts", "project_folders", "library_folders", "doc_chunk_vectors", "cloud_backup_state", "telegram_link", "telegram_outbox", "telegram_session",
     "desks", "desk_agents", "desk_assets", "desk_connections", "today_config",
-    "brokers", "broker_accounts", "account_ledger", "desk_accounts",
+    "brokers", "broker_accounts", "account_ledger", "desk_account_links", "desk_strategy_accounts",
     "broker_orders", "broker_external_accounts", "desk_limits",
     "lessons", "thesis_events",
     "desk_profile", "desk_autonomy", "exec_proposals", "exec_guard_state", "exec_alerts", "sim_orders", "sim_fills",
     "book_entries", "contracts", "contract_aliases", "econ_events", "run_records", "run_checkpoints", "reconciliations",
     "recon_breaks",
     "desk_seats", "desk_signals", "desk_mandates", "premium_thresholds",
+    "account_rules", "account_day_state", "account_day_events", "rule_mode_migrations", "account_live_session", "desk_day_stops", "account_start_declarations", "notice_grants", "cap_notices",
 }
 
 
@@ -43,10 +44,10 @@ def raw(path=None):
 
 def test_fresh_database_has_the_22_tables_plus_onboarding_and_is_healthy(env):
     result = migrate()
-    assert result.created and result.applied == list(range(1, LATEST + 1)) and result.version == LATEST and result.backup is None
+    assert result.created and result.applied == [v for v, _, _ in discover() if v >= 1] and result.version == LATEST and result.backup is None
     con = raw()
     names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
-    assert names - FTS_SHADOW == TABLES and len(TABLES) == 70
+    assert names - FTS_SHADOW == TABLES and len(TABLES) == 80
     assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
     assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -190,7 +191,7 @@ def test_two_processes_migrating_at_once_apply_it_once(env):
     [th.start() for th in threads]
     [th.join() for th in threads]
     assert not errors
-    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == LATEST
+    assert raw().execute("SELECT count(*) FROM schema_version").fetchone()[0] == len(discover())
 
 
 # ------------------------------------------------------------------------------------------------ seeds
@@ -327,7 +328,7 @@ def test_the_desk_migration_leaves_every_existing_row_untouched(env):
     before = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in watched}
     con.close()
     result = migrate()
-    assert result.applied == list(range(15, LATEST + 1)) and result.version == LATEST
+    assert result.applied == [v for v, _, _ in discover() if v >= 15] and result.version == LATEST
     con = raw()
     after = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in watched}
     after["projects"] = [row[:-1] for row in after["projects"]]       # 0016 adds archived_at at the end, empty

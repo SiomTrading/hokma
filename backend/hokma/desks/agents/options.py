@@ -21,7 +21,7 @@ CODE = "A07"
 KEY = "options"
 DEBIT_STRUCTURES = ("long_call", "long_put", "debit_call_spread", "debit_put_spread")
 SELLING_STRUCTURES = ("short_put", "short_call", "credit_call_spread", "credit_put_spread", "iron_condor", "short_straddle",
-                      "short_strangle", "covered_call", "cash_secured_put")
+                      "short_strangle", "covered_call", "cash_secured_put", "iron_butterfly")
 STRUCTURES = (*DEBIT_STRUCTURES, *SELLING_STRUCTURES)
 CLASSIFICATIONS = ("uncalibrated", "unavailable", "rich", "cheap", "fair")
 DIRECTIONS = ("bullish", "bearish", "neutral")

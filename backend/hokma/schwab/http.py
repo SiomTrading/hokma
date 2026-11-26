@@ -10,6 +10,8 @@ it once and retries. Logs carry the method, the path with markers, the HTTP stat
 
 Blocking: call it from a thread (`asyncio.to_thread`). `set_base` and `set_token_provider` exist for tests only.
 """
+import contextlib
+import contextvars
 import json
 import logging
 import threading
@@ -23,6 +25,7 @@ from typing import Any
 
 from hokma.core import tls
 from hokma.kit.hardblock import exception_match, unsafe_segment
+from hokma.kit.read_budget import ReadBudget, ReadYielded
 
 log = logging.getLogger("hokma.schwab")
 
@@ -75,8 +78,29 @@ _provider: Callable[[], str] | None = None
 _refresher: Callable[[], str | None] | None = None
 _limiter: Any = None                      # a market.cache.RateLimiter, built on first use (see `_allowed`)
 _paused_until = 0.0
+_limit = CALLS_PER_MINUTE
+_reads: ReadBudget | None = None          # the budget of the reads of an account (see `background`), apart from the orders
+_background: contextvars.ContextVar[bool] = contextvars.ContextVar("schwab_background_read", default=False)
 _lock = threading.Lock()
 _clock: Callable[[], float] = time.monotonic
+
+
+@contextlib.contextmanager
+def background():
+    """The calls made inside are READS of an account (the P&L of the broker): lower priority than any order. They have their own cap per minute and
+    yield (`ReadYielded`, no call) when the door is paused, when little of its count is left for the orders, or after a 429 answered to a read, which
+    pauses only the reads. Orders and the market data never run inside it."""
+    token = _background.set(True)
+    try:
+        yield
+    finally:
+        _background.reset(token)
+
+
+def reads_paused() -> bool:
+    """True while the door is paused by a 429 (of an order or of the market data) or the reads rest after a 429 of a read. The reader of the P&L asks it to tell a pause
+    (normal, it ends alone) from reads that keep giving way after it ended."""
+    return _clock() < _paused_until or (_reads is not None and _reads.paused())
 
 
 def set_base(url: str | None) -> None:
@@ -94,9 +118,11 @@ def set_token_provider(provider: Callable[[], str] | None, refresher: Callable[[
 
 def reset_limits(clock: Callable[[], float] | None = None, limit: int = CALLS_PER_MINUTE) -> None:
     """Tests only: forget the pause and the call count, optionally with a fake clock."""
-    global _limiter, _paused_until, _clock
+    global _limiter, _paused_until, _clock, _limit, _reads
     _clock = clock or time.monotonic
     _limiter = _new_limiter(limit)
+    _limit = limit
+    _reads = ReadBudget(lambda: _clock())
     _paused_until = 0.0
 
 
@@ -111,6 +137,18 @@ def _allowed() -> bool:
     global _limiter
     if _limiter is None:
         _limiter = _new_limiter(CALLS_PER_MINUTE)
+    return _limiter.allow()
+
+
+def _read_allowed() -> bool:
+    """A read of an account: it takes from its own budget and from the count of the door, and only when the orders keep their reserve."""
+    global _limiter, _reads
+    if _limiter is None:
+        _limiter = _new_limiter(CALLS_PER_MINUTE)
+    if _reads is None:
+        _reads = ReadBudget(lambda: _clock())
+    if not _reads.admit(_limiter.used(), _limit, _clock() < _paused_until):
+        return False
     return _limiter.allow()
 
 
@@ -156,7 +194,11 @@ def request(method: str, path: str, query: dict | None = None, *, body: bytes | 
         log.warning("schwab call refused before the network: %s", method)
         raise SchwabError(FORBIDDEN_ROUTE, 403)
     logged = str(rule.get("path"))                        # the template: no account hash, no id, no symbol
-    if _clock() < _paused_until or not _allowed():
+    background_read = _background.get()
+    if background_read:
+        if not _read_allowed():
+            raise ReadYielded()                           # no call: an order has priority, and this is not a failure of Schwab
+    elif _clock() < _paused_until or not _allowed():
         raise SchwabError(RATE_LIMITED, 429)
     attempts = 2 if authed else 1
     for attempt in range(attempts):
@@ -188,7 +230,10 @@ def request(method: str, path: str, query: dict | None = None, *, body: bytes | 
     if status == 403:
         raise SchwabError(DENIED, 403, correl_id=correl, errors=errors)
     if status == 429:
-        _paused_until = _clock() + RATE_PAUSE_SECONDS
+        if background_read and _reads is not None:
+            _reads.pause(RATE_PAUSE_SECONDS)              # a read never pauses an order
+        else:
+            _paused_until = _clock() + RATE_PAUSE_SECONDS
         raise SchwabError(RATE_LIMITED, 429, correl_id=correl, errors=errors)
     if status == 404:
         raise SchwabError(NOT_FOUND, 404, correl_id=correl, errors=errors)

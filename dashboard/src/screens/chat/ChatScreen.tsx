@@ -3,6 +3,7 @@ import type { DragEvent } from "react";
 import { Button, EmptyState, ErrorState, Isotype, Loading, Modal, Pill } from "@/design";
 import { useI18n } from "@/i18n";
 import { IntroNotice } from "@/screens/permissions/IntroNotice";
+import { followConversation } from "@/shell/panelState";
 import { useShell, useShellEvent } from "@/shell/useShell";
 import { openDialog, getSnapshot as projectsSnapshot, subscribe as subscribeProjects } from "@/screens/projects/store";
 import type { ScreenProps } from "@/shell/registry";
@@ -11,12 +12,16 @@ import { USAGE_WARN_PCT, chatOptions, errorText, saveToProject, weeklyUsagePct }
 import { isPanelCommand, parseCommand } from "./commands";
 import { Composer } from "./Composer";
 import type { ComposerHandle } from "./Composer";
+import { liveCounts } from "./activity";
 import { getHub } from "./hub";
+import { useActivity } from "./useActivity";
 import { takeChatStart } from "./start";
 import type { HubClient } from "./hub";
 import { McpPanel } from "./McpPanel";
 import { MessageItem } from "./Messages";
 import { ProjectScope } from "./ProjectScope";
+import { WorkingLine } from "./WorkingLine";
+import { OrderNoticeCards } from "./OrderNoticeCards";
 import { initialState, reducer } from "./state";
 import type { AttachmentChip } from "./state";
 import type { ChatOptions, ModelId, ServerEvent } from "./types";
@@ -47,6 +52,7 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
   const fixedConversation = params.conversation ?? null;
   const draft = params.draft ?? null;
   const [state, dispatch] = useReducer(reducer, fixedConversation, initialState);
+  const agentsBusy = liveCounts(useActivity(state.id)).agents > 0;
   const [options, setOptions] = useState<ChatOptions | null>(null);
   const [optionsTick, setOptionsTick] = useState(0);
   const [usagePct, setUsagePct] = useState<number | null>(null);
@@ -150,6 +156,11 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
       usageWarning.given = false;
     }
   }, [usagePct, active]);
+
+  // The side panel follows the chat that has the focus (SPEC-013 13.2).
+  useEffect(() => {
+    if (active && state.id) followConversation({ conversationId: state.id, source: "chat", label: state.title });
+  }, [active, state.id, state.title]);
 
   const { setTabTitle } = shell;
   useEffect(() => {
@@ -332,12 +343,15 @@ export function ChatScreen({ tabKey, params, active }: ScreenProps) {
             }}
           />
         ))}
+        <OrderNoticeCards />
+        <WorkingLine conversationId={state.id} running={state.running} />
       </div>
 
       <Composer
         ref={composer}
         model={state.model}
         running={state.running}
+        agentsBusy={agentsBusy}
         stopping={state.stopping}
         options={options}
         modelMenuRequest={modelMenuRequest}

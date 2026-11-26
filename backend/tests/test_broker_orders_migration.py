@@ -1,5 +1,6 @@
 """0020_broker_orders.sql (task 3299, SPEC-015 18.6): additive, a 1.0.8 base migrates without losing a row, the three tables
 and their limits, and the repos that sit on them (an order record never holds an account identifier)."""
+import re
 import shutil
 import sqlite3
 
@@ -9,7 +10,7 @@ from test_db_migrate import _desk, _desk_project, raw
 
 from hokma.db import migrate
 from hokma.db.errors import NotFound, ValidationError
-from hokma.db.migrate import MIGRATIONS_DIR
+from hokma.db.migrate import MIGRATIONS_DIR, discover
 from hokma.db.transfer import BROKER_TABLES, EXEC_TABLES, LESSON_TABLES, PLANTEL_TABLES
 
 NEW_TABLES = ("broker_orders", "broker_external_accounts", "desk_limits")
@@ -45,13 +46,18 @@ def test_a_1_0_8_base_migrates_by_adding_three_tables_and_loses_nothing(env):
     before_sql = _tables_sql(con)
     before_rows = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in before_sql}
     con.close()
-    assert migrate().applied == [20, 21, 22, 23]
+    assert [v for v in migrate().applied if v <= 26] == [v for v, _n, _p in discover() if 19 < v <= 26]
     con = raw()
     after_sql = _tables_sql(con)
-    assert {n: s for n, s in after_sql.items() if n in before_sql} == before_sql        # no table was altered
-    assert set(after_sql) - set(before_sql) - {n for n in after_sql if n.startswith("doc_chunks_fts_")} - set(LESSON_TABLES) - set(EXEC_TABLES) - set(PLANTEL_TABLES) == set(NEW_TABLES)
-    kept = ("projects", "desks", "broker_accounts", "account_ledger", "desk_accounts")      # what the test filled
-    assert {t: con.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in kept} == {t: before_rows[t] for t in kept}
+    changed_by_0024 = {"desk_accounts"}                                                 # 0024 replaces it with the links
+    assert {n: s for n, s in after_sql.items() if n in before_sql and n != "desks"} == {n: s for n, s in before_sql.items() if n not in changed_by_0024 | {"desks"}}        # no other table was altered
+    squash = lambda sql: re.sub(r"\s+", "", sql)                                        # ADD COLUMN writes its text at the end of the table
+    assert squash(after_sql["desks"]) == squash(re.sub(r"(capital\s+INTEGER)\s+NOT NULL", r"\1", before_sql["desks"])).removesuffix(")") + ",layoutTEXT)"          # 0025 takes the NOT NULL off desks.capital, 0026 adds layout
+    assert set(after_sql) - set(before_sql) - {n for n in after_sql if n.startswith("doc_chunks_fts_")} - set(LESSON_TABLES) - set(EXEC_TABLES) - set(PLANTEL_TABLES) - {"desk_account_links", "desk_strategy_accounts"} - {"account_rules", "account_day_state", "account_day_events", "rule_mode_migrations", "account_live_session", "desk_day_stops", "account_start_declarations", "notice_grants", "cap_notices"} == set(NEW_TABLES)
+    kept = ("projects", "desks", "broker_accounts", "account_ledger")      # what the test filled
+    assert {t: [r[:len(before_rows[t][0])] for r in con.execute(f"SELECT * FROM {t} ORDER BY 1")] for t in kept} == {t: before_rows[t] for t in kept}      # desks has one column more (layout, NULL)
+    assert con.execute("SELECT layout FROM desks").fetchone() == (None,)
+    assert [r[:2] for r in con.execute("SELECT desk_id, account_id FROM desk_account_links")] == before_rows["desk_accounts"]
     assert con.execute("SELECT count(*) FROM desks").fetchone()[0] == 1
     assert con.execute("SELECT kind, name FROM brokers").fetchall() == [("sim", "Hokma")]       # only the seed of the broker is new
     assert all(con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] == 0 for t in NEW_TABLES)

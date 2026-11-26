@@ -11,6 +11,7 @@ import dataclasses
 import json
 import logging
 import sys
+import threading
 import types
 from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
@@ -22,6 +23,7 @@ from typing import Any, Literal
 from hokma.contracts import discipline, symbols
 from hokma.contracts.identity import ContractSheet
 from hokma.db import Database, get_database
+from hokma.db.repos.broker import PRINCIPAL
 from hokma.db.timeutil import utcnow
 from hokma.exec import levels, prefilter, ticket
 from hokma.exec.money import ZERO, dec_or_none, text as dtext
@@ -59,24 +61,43 @@ class Refusal(Exception):
 
 # --------------------------------------------------------------------------------------------------------- the one door
 
-def dispatch(broker: Any, account_id: int, action: str, order: Any = None, order_id: Any = None) -> tuple[dict | None, int, str]:
-    """The only call to the order methods of a broker. Returns (what the broker answered, HTTP status, outcome word)."""
-    if action == "place":
-        return broker.place_order(account_id, order), 201, "sent"
-    if action == "replace":
-        return broker.replace_order(account_id, order_id, order), 201, "replaced"
-    if action == "cancel":
-        return broker.cancel_order(account_id, order_id), 200, "canceled"
+_account_locks: dict[int, threading.RLock] = {}
+_account_locks_guard = threading.Lock()
+
+
+def account_lock(account_id: int) -> threading.RLock:
+    """One lock per ACCOUNT, never per desk (SPEC-027 section 5): two desks that share an account send one after the other, so what the
+    second reads of the account already counts what the first sent. SPEC-026 builds the shared risk budget on it. It is re-entrant: a
+    caller that holds it around its own check and send calls `dispatch`, which takes it again, without waiting for itself. The app is one
+    process; the broker keeps its own rules besides."""
+    with _account_locks_guard:
+        return _account_locks.setdefault(account_id, threading.RLock())
+
+
+def dispatch(broker: Any, account_id: int, action: str, order: Any = None, order_id: Any = None, *,
+             owner: tuple[int | None, str | None] | None = None) -> tuple[dict | None, int, str]:
+    """The only call to the order methods of a broker, under the lock of the account. Returns (what the broker answered, HTTP status,
+    outcome word). `owner` is the (desk, strategy) the order belongs to: a simulated broker books its fills with it."""
+    from hokma.backoffice import desk_owner
+
+    with account_lock(account_id), desk_owner.placing(*(owner or (None, None))):
+        if action == "place":
+            return broker.place_order(account_id, order), 201, "sent"
+        if action == "replace":
+            return broker.replace_order(account_id, order_id, order), 201, "replaced"
+        if action == "cancel":
+            return broker.cancel_order(account_id, order_id), 200, "canceled"
     raise ValueError(f"action must be place, replace or cancel; got {action!r}")
 
 
 @contextmanager
-def open_broker(database: Database, desk_id: int):
-    """The broker and the account of a desk, valid inside the block: the broker holds the session of an open unit."""
+def open_broker(database: Database, desk_id: int, account_id: int):
+    """The broker and the account of an order, valid inside the block: the broker holds the session of an open unit. The account must be
+    one of the desk's (`account_not_in_desk` otherwise)."""
     from hokma.broker import service
 
     with database.read() as u:
-        yield service.broker_of_desk(u, desk_id)
+        yield service.broker_of(u, desk_id, account_id)
 
 
 # ------------------------------------------------------------------------------------------------------------ contracts
@@ -185,9 +206,10 @@ def _json(value: Any) -> str:
 
 
 def _insert(u: Any, p: OrderProposal, *, level: int, status: str, code: str, who: Any, prefilter_json: Any = None, clamps: Any = None,
-            decision_id: int | None = None, record_id: int | None = None, approved_by: str | None = None, approved: bool = False) -> int:
+            decision_id: int | None = None, record_id: int | None = None, approved_by: str | None = None, approved: bool = False,
+            account_id: int | None = None) -> int:
     fp = p.fingerprint()
-    values = {"desk_id": p.desk_id, "line": p.line, "origin": p.origin, "level": level, "proposal_json": _json(p.to_json()), "fingerprint": fp,
+    values = {"desk_id": p.desk_id, "account_id": account_id, "strategy_key": p.strategy_key, "line": p.line, "origin": p.origin, "level": level, "proposal_json": _json(p.to_json()), "fingerprint": fp,
               "status": status, "code": code[:64], "prefilter_json": None if prefilter_json is None else _json(prefilter_json),
               "clamps_json": None if not clamps else _json(list(clamps)), "decision_id": decision_id, "broker_order_record_id": record_id,
               "approved_fingerprint": fp if approved else None, "approved_by": approved_by, "created_by": (p.created_by or _who_name(who))[:80],
@@ -203,7 +225,7 @@ def _record_attempt(u: Any, p: OrderProposal, *, who: Any, account: Any, kind: s
         agent_slug=who.agent if getattr(who, "agent", None) and u.agents.find(who.agent) is not None else None,
         conversation_id=getattr(who, "conversation_id", None), task_id=getattr(who, "task_id", None), reason=(p.thesis or None) and p.thesis[:2000],
         request=request, rule_result=rule_result, rule_why=why[:4000] or None, approved_by=approved_by, http_status=http_status,
-        broker_order_id=broker_order_id, response=response)
+        broker_order_id=broker_order_id, response=response, strategy_key=None if account is None else p.strategy_key)
     return row.id
 
 
@@ -230,8 +252,13 @@ def _notify(u: Any, text: str) -> None:
 
 # ------------------------------------------------------------------------------------------------------------------ submit
 
-def submit(p: OrderProposal, *, who: Any, db: Database | None = None) -> ExecResult:
-    """The door. Records the proposal in `exec_proposals` and every attempt to send in `broker_orders`."""
+def submit(p: OrderProposal, *, who: Any, db: Database | None = None, account_id: int | None = None) -> ExecResult:
+    """The door. Records the proposal in `exec_proposals` and every attempt to send in `broker_orders`.
+
+    The account of the order is resolved here (SPEC-027 section 5) and no caller or agent writes it: a desk with no account records the
+    proposal as `analysis_only` and sends nothing; a strategy with no account waits for the owner (`awaiting_owner`, code
+    `needs_account`); otherwise the order goes out by the account of its strategy. `account_id` is only for code that has the owner's
+    answer (`approvals.choose_account`) or a flatten of one account: it must be an account of the desk."""
     from hokma.broker import service
 
     database = db or get_database()
@@ -245,7 +272,8 @@ def submit(p: OrderProposal, *, who: Any, db: Database | None = None) -> ExecRes
         desk = u.desks.find(p.desk_id)
         if desk is None:
             raise service.BrokerError("desk_not_found", 404)
-        pair = service.broker_of_desk(u, p.desk_id)
+        resolved = service.resolve_account(u, p.desk_id, p.strategy_key, account_id)
+        pair = None if resolved.account is None else (service._broker(u, resolved.account.broker_id), resolved.account)
         desk_name = desk.name
     account = None if pair is None else pair[1]
     kind = "none" if pair is None else pair[0].kind
@@ -259,7 +287,7 @@ def submit(p: OrderProposal, *, who: Any, db: Database | None = None) -> ExecRes
             if record and status == "refused":
                 rid = _record_attempt(u, final, who=who, account=account, kind=kind, request=final.to_json(), rule_result="refused", why=why)
             pid = _insert(u, final, level=level, status=status, code=code, who=who, prefilter_json=prefilter_json, clamps=clamps,
-                          decision_id=decision_id, record_id=rid)
+                          decision_id=decision_id, record_id=rid, account_id=None if account is None else account.id)
         return ExecResult(pid, status, code, why, final.fingerprint(), rid, decision_id, ticket_text)
 
     if real_line is None:
@@ -273,13 +301,16 @@ def submit(p: OrderProposal, *, who: Any, db: Database | None = None) -> ExecRes
         exits_apart(p, sheets)
     except Refusal as refusal:
         return finish("refused", refusal.code, refusal.why)
-    if pair is None:
-        return finish("refused", "no_account", ticket.why("no_account"))
+    if resolved.state == "analysis_only":               # a desk without accounts runs its cycle and keeps what it proposes: no order, no error
+        return finish("analysis_only", "no_account", ticket.why("analysis_only_no_account"), record=False)
+    if resolved.state == "needs_account":                # the desk has accounts but this strategy has none: the owner says which one
+        return _ask_account(database, p, who=who, level=level, desk_name=desk_name, sheets=sheets)
+    assert pair is not None and account is not None
     preview = None
     if kind == "schwab":
-        with open_broker(database, p.desk_id) as live:
+        with open_broker(database, p.desk_id, account.id) as live:
             preview = _schwab_preview(live[0], live[1], to_native(p, sheets, kind))
-    result = prefilter.run(p.desk_id, p, db=database, preview=preview, sheets=sheets)
+    result = prefilter.run(p.desk_id, p, db=database, preview=preview, sheets=sheets, account_id=account.id)
     detail = result.to_json()
     if result.verdict == "BLOCK":
         block = result.blocked_by
@@ -291,7 +322,7 @@ def submit(p: OrderProposal, *, who: Any, db: Database | None = None) -> ExecRes
         return finish("analysis_only", "level_1", ticket.why("level_1"), prefilter_json=detail, clamps=result.clamps, record=False,
                       proposal=final, ticket_text=text)
 
-    risk = _owner_risk(database, final, sheets, preview) if p.origin == "chat" and getattr(who, "owner", False) else None
+    risk = _owner_risk(database, final, sheets, preview, account_id=account.id) if p.origin == "chat" and getattr(who, "owner", False) else None
     risk_why = None if risk is None else owner_risk_why(risk)
     if risk is not None:
         detail = {**detail, "owner_risk_ack": str(risk[2])}      # what the owner was warned of: a bigger exposure at the approval warns again
@@ -315,25 +346,46 @@ def submit(p: OrderProposal, *, who: Any, db: Database | None = None) -> ExecRes
     if auto:
         with database.write() as u:
             pid = _insert(u, final, level=level, status="awaiting_owner", code="approved", who=who, prefilter_json=detail, clamps=result.clamps,
-                          approved=True, approved_by=approver if approver == "owner" or (approver or "").startswith("rule:") else None)
+                          account_id=account.id, approved=True, approved_by=approver if approver == "owner" or (approver or "").startswith("rule:") else None)
         from hokma.exec import approvals
 
         out = approvals.send_approved(pid, db=database, auto_by=approver or "auto")
         return ExecResult(out.proposal_id, out.status, out.code, out.why, out.fingerprint, out.broker_order_record_id, None, text)
 
+    from hokma.exec import notices, telegram_approval
+
+    notice_rules = notices.rules_of(result)[0] if result.needs_owner else []         # a notice a grant of the day already covers does not ask again
+    notice: dict[str, Any] | None = None
     with database.write() as u:
         decision_id = _decision(u, final, desk_name=desk_name, ticket_text=text, who=who)
         rid = _record_attempt(u, final, who=who, account=account, kind=kind, request=final.to_json(), rule_result="needs_owner",
                               why=risk_why or next((r.why for r in result.results if r.code == "needs_owner"), ticket.why("awaiting")))
         pid = _insert(u, final, level=level, status="awaiting_owner", code="owner_risk_confirm" if risk_why else "awaiting_owner", who=who, prefilter_json=detail, clamps=result.clamps,
-                      decision_id=decision_id, record_id=rid)
-        _notify(u, (risk_why or ticket.why("awaiting", desk=desk_name)) + "\n" + text)
-    from hokma.exec import telegram_approval
-
-    telegram_approval.request_buttons(pid, final.fingerprint(), (risk_why + "\n" + text) if risk_why else text)
+                      decision_id=decision_id, record_id=rid, account_id=account.id)
+        if notice_rules:                                  # a rule in notice mode tripped: the order waits with its own deadline and its three answers (SPEC-026, 3390b)
+            notice = notices.attach(u, pid, desk_id=p.desk_id, account_id=account.id, rules=notice_rules, result=result)
+            _notify(u, notices.message(notice, text, account.name))
+        else:
+            _notify(u, (risk_why or ticket.why("awaiting", desk=desk_name)) + "\n" + text)
+    if notice is not None:
+        notices.announce(database, pid, notice, desk_name=desk_name, account_label=account.name, ticket_text=text)
+    else:
+        telegram_approval.request_buttons(pid, final.fingerprint(), (risk_why + "\n" + text) if risk_why else text)
     if risk_why:
         return ExecResult(pid, "awaiting_owner", "owner_risk_confirm", risk_why, final.fingerprint(), rid, decision_id, text)
     return ExecResult(pid, "awaiting_owner", "awaiting_owner", ticket.why("awaiting", desk=desk_name), final.fingerprint(), rid, decision_id, text)
+
+
+def _ask_account(database: Database, p: OrderProposal, *, who: Any, level: int, desk_name: str, sheets: dict[str, ContractSheet]) -> ExecResult:
+    """The strategy of the proposal has no account and the desk has several to offer: the proposal waits for the owner with code
+    `needs_account` and the chief asks in the chat which account it goes out by. Nothing is sent and no account is guessed."""
+    text = ticket.ticket(p, desk_name=desk_name, level=level, contracts=sheets, clamps=())
+    why = ticket.why("needs_account", desk=desk_name)
+    with database.write() as u:
+        decision_id = _decision(u, p, desk_name=desk_name, ticket_text=why + "\n" + text, who=who)
+        pid = _insert(u, p, level=level, status="awaiting_owner", code="needs_account", who=who, decision_id=decision_id)
+        _notify(u, why)
+    return ExecResult(pid, "awaiting_owner", "needs_account", why, p.fingerprint(), None, decision_id, text)
 
 
 def _pending_owner_orders(database: Database, desk_id: int, exclude_id: int | None = None) -> list[OrderProposal]:
@@ -406,7 +458,7 @@ def _sent_unfilled_orders(database: Database, desk_id: int, open_orders: Sequenc
 
 
 def _owner_risk(database: Database, final: OrderProposal, sheets: dict[str, ContractSheet], preview: Any, *, exclude_id: int | None = None,
-                with_pending: bool = True) -> tuple[str, str, Decimal] | None:
+                with_pending: bool = True, account_id: int | None = None) -> tuple[str, str, Decimal] | None:
     """What an order of the owner leaves open once the closes are netted against the account, the live orders, the orders of the owner already
     sent and not yet filled (bug 1243, always counted) and, with `with_pending`, the other orders of the owner that wait for his answer (H3,
     decisions 1265 and bug 1242). A reduce-only order cannot open."""
@@ -414,7 +466,7 @@ def _owner_risk(database: Database, final: OrderProposal, sheets: dict[str, Cont
 
     if final.reduce_only:
         return None
-    ctx = prefilter.load_context(final.desk_id, final, db=database, preview=preview, sheets=sheets)
+    ctx = prefilter.load_context(final.desk_id, final, db=database, preview=preview, sheets=sheets, account_id=account_id)
     sent, matched = _sent_unfilled_orders(database, final.desk_id, ctx.open_orders, exclude_id)
     live = [o for o in ctx.open_orders or () if str(_field(o, "order_id")) not in matched]       # a sent order counts once: as pending, not as a live order too
     pending = [*(_pending_owner_orders(database, final.desk_id, exclude_id) if with_pending else ()), *sent]
@@ -454,9 +506,13 @@ def status(proposal_id: int, *, db: Database | None = None) -> ExecResult:
     return ExecResult(row["id"], row["status"], row["code"] or "", "", row["fingerprint"], row["broker_order_record_id"], row["decision_id"], "")
 
 
-def flatten(desk_id: int, *, reason: str, who: Any, db: Database | None = None) -> list[ExecResult]:
-    """Close every position of the desk: one reduce-only market order per position, sent as a close. The owner, or a rule the owner
-    approved with `flatten: true` at level 3, can ask for it."""
+def flatten(desk_id: int, *, reason: str, who: Any, db: Database | None = None, account_id: int | None = None,
+            only: Mapping[str, Decimal] | None = None) -> list[ExecResult]:
+    """Close every position of ONE account of the desk: one reduce-only market order per position, sent as a close. The account is
+    `account_id` or the one of the principal strategy; a desk whose principal has no account needs it named. The owner, or a rule the
+    owner approved with `flatten: true` at level 3, can ask for it. The positions are the account's: with an account shared by two desks
+    this closes both desks' lots, unless `only` is given: then it closes just those contracts and never more than the signed quantity named for each
+    (what a list the owner confirmed says, `hokma.exec.close_plan`), and cancels only the live orders that touch them."""
     from hokma.broker import service
 
     database = db or get_database()
@@ -464,14 +520,15 @@ def flatten(desk_id: int, *, reason: str, who: Any, db: Database | None = None) 
     if not getattr(who, "owner", False) and not (level == 3 and rules and rules.get("flatten") is True):
         raise service.owner_only("flattening a desk")
     with database.read() as u:
-        pair = service.broker_of_desk(u, desk_id)
         desk = u.desks.find(desk_id)
         if desk is None:
             raise service.BrokerError("desk_not_found", 404)
+        pair = service.broker_of_resolved(u, desk_id, account_id=account_id)
     if pair is None or not pair[0].capabilities.positions:
         raise service.BrokerError("no_trading_account", 409)
+    account_id = pair[1].id
     with database.read() as u:                                    # refuse BEFORE canceling anything: a refused close must not leave the book without its orders
-        facts = service._load(u, desk_id)
+        facts = service._load(u, desk_id, account_id)
         status, enabled = facts.desk.status, facts.enabled
     owner = getattr(who, "owner", False) is True
     if status == "archived" or (not owner and status != "active"):
@@ -479,20 +536,35 @@ def flatten(desk_id: int, *, reason: str, who: Any, db: Database | None = None) 
     if not owner and not enabled:
         raise service.BrokerError("orders_off", 409)
     line = _line_of(database, desk_id)
-    cancel_live_orders(database, desk_id, reason=reason, who=who)          # nothing live can stand between the position and its close
+    cancel_live_orders(database, desk_id, reason=reason, who=who, account_id=account_id, contracts=None if only is None else set(only))          # nothing live can stand between the position and its close
     with database.read() as u:
-        pair = service.broker_of_desk(u, desk_id)
-        broker, account = pair
+        broker, account = service.broker_of(u, desk_id, account_id)
         positions = prefilter._normalize_positions(broker.positions(account.id))       # read AFTER the cancels: a fill while they went out changes the quantity
+    if only is not None:
+        positions = _within(positions, only)
     out: list[ExecResult] = []
     marker = prefilter.EMERGENCY_CLOSE.set((desk_id, "owner") if getattr(who, "owner", False) is True else None)   # only the owner's closes get past a pause
     try:
-        return _flatten_positions(database, desk_id, positions, line, reason, who, out)
+        return _flatten_positions(database, desk_id, positions, line, reason, who, out, account_id)
     finally:
         prefilter.EMERGENCY_CLOSE.reset(marker)
 
 
-def _flatten_positions(database: Database, desk_id: int, positions: Any, line: str, reason: str, who: Any, out: list[ExecResult]) -> list[ExecResult]:
+def _within(positions: Any, only: Mapping[str, Decimal]) -> list[Any]:
+    """The positions a confirmed list allows to close: the contracts it names, on the side it names, never more than it says and never more than is held now."""
+    from types import SimpleNamespace
+
+    out = []
+    for pos in positions:
+        want, have = only.get(getattr(pos, "contract_id", None), Decimal(0)), Decimal(str(pos.qty))
+        if want == 0 or have == 0 or (want > 0) != (have > 0):
+            continue
+        out.append(SimpleNamespace(contract_id=pos.contract_id, qty=min(abs(want), abs(have)) * (1 if have > 0 else -1)))
+    return out
+
+
+def _flatten_positions(database: Database, desk_id: int, positions: Any, line: str, reason: str, who: Any, out: list[ExecResult],
+                       account_id: int | None = None) -> list[ExecResult]:
     for pos in positions:
         qty = Decimal(str(pos.qty))
         if qty == 0 or not getattr(pos, "contract_id", None):
@@ -500,7 +572,7 @@ def _flatten_positions(database: Database, desk_id: int, positions: Any, line: s
         leg = Leg(pos.contract_id, "sell" if qty > 0 else "buy", "close", abs(qty))
         proposal = OrderProposal(desk_id, line, "chat" if getattr(who, "owner", False) else "rule", (leg,), "market", reduce_only=True,
                                  thesis=(reason or "flatten")[:4000], created_by=_who_name(who))
-        out.append(submit(proposal, who=who, db=database))
+        out.append(submit(proposal, who=who, db=database, account_id=account_id))
     return out
 
 
@@ -515,20 +587,32 @@ def _live_orders(broker: Any, account_id: int) -> list[Any]:
     return [o for o in (broker.orders(account_id) or ()) if str(getattr(o, "status", "") or "").upper() not in _DONE]
 
 
-def cancel_live_orders(database: Database, desk_id: int, *, reason: str, who: Any, wait: float = CANCEL_WAIT_SECONDS) -> list[str]:
+def cancel_live_orders(database: Database, desk_id: int, *, reason: str, who: Any, wait: float = CANCEL_WAIT_SECONDS,
+                       account_id: int | None = None, contracts: set[str] | None = None) -> list[str]:
     """First step of a flatten: cancel every live order that touches a contract the desk holds, or every live order of the account when one of
     them cannot be read whole, and wait until the broker confirms that none is live. Raises BrokerError cancel_unconfirmed when it cannot
-    be confirmed: the close is then NOT sent, because a live order of the other side could still cross the position through zero."""
+    be confirmed: the close is then NOT sent, because a live order of the other side could still cross the position through zero.
+    With `contracts` only the live orders on those contracts are canceled (the orders of the rest of the account are not touched), and a live order that
+    cannot be read whole stops the close instead of being canceled with the rest."""
     import time
 
     from hokma.broker import service
     from hokma.exec.guards import scan_orders
 
-    with open_broker(database, desk_id) as live:
+    if account_id is None:                                      # the account of the principal strategy, as flatten does
+        with database.read() as u:
+            pair = service.broker_of_resolved(u, desk_id)
+        if pair is None:
+            raise service.BrokerError("no_trading_account", 409)
+        account_id = pair[1].id
+    with open_broker(database, desk_id, account_id) as live:
         broker, account = live
-        held = {getattr(p, "contract_id", None) for p in prefilter._normalize_positions(broker.positions(account.id)) if Decimal(str(p.qty)) != 0}
+        held = set(contracts) if contracts is not None else {getattr(p, "contract_id", None) for p in prefilter._normalize_positions(broker.positions(account.id))
+                                                             if Decimal(str(p.qty)) != 0}
         orders = _live_orders(broker, account.id)
         everything = not scan_orders(orders)[1]
+        if everything and contracts is not None:
+            raise service.BrokerError("cancel_unconfirmed", 409)               # it cannot be told which orders are the desk's: nothing is canceled or sent
         targets = [o for o in orders if everything or not scan_orders([o])[1] or {c for c, _s, _q in scan_orders([o])[0]} & held]
         ids = [str(o.order_id) for o in targets if getattr(o, "order_id", None) is not None]
         if len(ids) != len(targets):
@@ -549,7 +633,7 @@ def cancel_live_orders(database: Database, desk_id: int, *, reason: str, who: An
     if ids:
         with database.write() as u:
             u.broker.record_order(broker_kind=broker.kind, action="cancel", desk_id=desk_id, account_id=account.id, request={"order_ids": ids, "why": "flatten"},
-                                  rule_result="auto", reason=(reason or "flatten")[:2000])
+                                  rule_result="auto", reason=(reason or "flatten")[:2000], strategy_key=PRINCIPAL)
     return ids
 
 

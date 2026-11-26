@@ -86,28 +86,30 @@ describe("the Fund", () => {
     expect(second).toHaveTextContent("Presupuesto al 80%");
   });
 
-  it("adds up the capital, the day and the equity of the accounts assigned to desks, and drops the empty curve and activity", async () => {
+  it("adds up the capital, the day and the equity of the DIFFERENT accounts of the desks (a shared one counts once)", async () => {
     const account = (id: number, initial: number, equity: number | null) => ({
       id, name: "Cuenta " + id, broker: "Hokma Simulated", initial_capital: initial, balance: { cash: equity, equity, currency: "USD" }, as_of: "2026-11-19T12:00:00Z",
     });
     stubApi([
-      desk({ id: 1, today: 150, account: account(1, 10000, 10150) }),
-      desk({ id: 2, name: "B", today: -50, account: account(2, 25000, 24950) }),
+      desk({ id: 1, today: 150, accounts: [account(1, 10000, 10150), account(3, 5000, 5000)] }),
+      desk({ id: 2, name: "B", today: -50, accounts: [account(2, 25000, 24950), { ...account(3, 5000, 5000), shared_with: [1] }] }),
       desk({ id: 3, name: "C", capital: 99999 }),
     ]);
     renderShell();
     await openFund();
     await screen.findByRole("button", { name: "Abrir la mesa Mesa A" });
-    expect(screen.getByText("35.000")).toBeInTheDocument();
+    expect(screen.getByText("40.000")).toBeInTheDocument();
     expect(screen.getByText("+100,00")).toBeInTheDocument();
-    expect(screen.getByText("35.100,00")).toBeInTheDocument();
+    expect(screen.getByText("40.100,00")).toBeInTheDocument();
+    expect(screen.getByText(t("desks.kpi.capitalOf", { n: "3" }))).toBeInTheDocument();
+    expect(screen.getAllByText(t("desks.accounts.shared.one")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("region", { name: "Curva del fondo" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Actividad de las mesas" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Abrir la mesa Mesa A" })).toHaveTextContent("Hokma Simulated");
   });
 
   it("says the equity is not available instead of inventing it", async () => {
-    stubApi([desk({ id: 1, account: { id: 1, name: "X", broker: "Hokma Simulated", initial_capital: 1000, balance: { cash: null, equity: null, currency: "USD" }, as_of: "" } })]);
+    stubApi([desk({ id: 1, accounts: [{ id: 1, name: "X", broker: "Hokma Simulated", initial_capital: 1000, balance: { cash: null, equity: null, currency: "USD" }, as_of: "" }] })]);
     renderShell();
     await openFund();
     await screen.findByRole("button", { name: "Abrir la mesa Mesa A" });
@@ -157,6 +159,8 @@ describe("creating a desk", () => {
     await click(await screen.findByRole("button", { name: new RegExp(`^${t("desks.start.template.name")}`) }));
     await userEvent.type(await screen.findByLabelText("Nombre de la mesa"), "Futuros NQ");
     await userEvent.type(screen.getByLabelText("Enfoque"), "Intraday futures");
+    expect(screen.queryByLabelText(/Capital/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Cuenta de la mesa")).not.toBeInTheDocument();
     await click(screen.getByRole("button", { name: "Siguiente: equipo" }));
     expect(await screen.findByText("Jefe de mesa · Sonnet")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: new RegExp(t("desks.tpl.standard.name")) })).toHaveAttribute("aria-checked", "true");
@@ -164,7 +168,9 @@ describe("creating a desk", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
     const post = calls.find((c) => c.method === "POST")!;
     expect(post.url).toBe("/api/desks");
-    expect(post.body).toEqual({ name: "Futuros NQ", focus: "Intraday futures", capital: 10000, template: "standard", assets: [], token_budget: 300000 });
+    expect(post.body).toEqual({ name: "Futuros NQ", focus: "Intraday futures", template: "standard", assets: [], token_budget: 300000 });
+    expect(post.body).not.toHaveProperty("account");
+    expect(post.body).not.toHaveProperty("capital");
     expect(clicks).toBeLessThan(6);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(calls.filter((c) => c.url === "/api/desks" && c.method === "GET").length).toBeGreaterThan(1);
@@ -178,8 +184,6 @@ describe("creating a desk", () => {
     await userEvent.click(await screen.findByRole("button", { name: "+ Crear mesa" }));
     await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${t("desks.start.template.name")}`) }));
     await userEvent.type(await screen.findByLabelText("Nombre de la mesa"), "Swing");
-    await userEvent.clear(screen.getByLabelText("Capital"));
-    await userEvent.type(screen.getByLabelText("Capital"), "25.000");
     await userEvent.type(screen.getByLabelText("Objetivo mensual (%)"), "2,5");
     await userEvent.type(screen.getByLabelText("Mandato"), "Sin operar en resultados");
     await userEvent.click(screen.getByRole("button", { name: "Siguiente: equipo" }));
@@ -195,8 +199,26 @@ describe("creating a desk", () => {
     await userEvent.click(screen.getByRole("button", { name: "Crear mesa" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
     expect(calls.find((c) => c.method === "POST")!.body).toEqual({
-      name: "Swing", focus: null, capital: 25000, objective_pct: 2.5, mandate: "Sin operar en resultados", template: "debate", assets: ["NVDA"],
+      name: "Swing", focus: null, objective_pct: 2.5, mandate: "Sin operar en resultados", template: "debate", assets: ["NVDA"],
     });
+  });
+
+  it("the assistant has no account step: a desk is born without money and the first step moves on with only a name", async () => {
+    const calls = stubApi([]);
+    renderShell();
+    await openFund();
+    await userEvent.click(await screen.findByRole("button", { name: "+ Crear mesa" }));
+    await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${t("desks.start.template.name")}`) }));
+    await userEvent.type(await screen.findByLabelText("Nombre de la mesa"), "Sin cuenta");
+    expect(screen.queryByRole("radiogroup", { name: "Cuenta de la mesa" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Capital inicial (USD)")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Siguiente: equipo" }));
+    await screen.findByText("Jefe de mesa · Sonnet");
+    await userEvent.click(screen.getByRole("button", { name: "Crear mesa" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    const body = calls.find((c) => c.method === "POST")!.body as Record<string, unknown>;
+    expect(body.account).toBeUndefined();
+    expect(body.capital).toBeUndefined();
   });
 
   it("does not move on without a name and does not create anything", async () => {
@@ -257,7 +279,7 @@ describe("creating a desk", () => {
     expect(within(dialog).getByText("Create it with Hokma")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: new RegExp(`^${t("desks.start.template.name")}`) }));
     expect(await screen.findByLabelText("Desk name")).toBeInTheDocument();
-    expect(screen.getByText("If you assign it an account of a broker with orders turned on, the desk trades with real money following its rules.")).toBeInTheDocument();
+    expect(screen.getByText("If you add an account of a broker with orders turned on to it, the desk trades with real money following its rules.")).toBeInTheDocument();
   });
 });
 

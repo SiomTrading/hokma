@@ -76,13 +76,13 @@ def _service_error(exc: Exception) -> ToolError:
 
     if isinstance(exc, BrokerError):
         code = {"owner_only": "blocked", "owner_required": "blocked", "no_trading_account": "blocked", "orders_off": "blocked",
-                "desk_inactive": "blocked", "decision_not_found": "no_data", "desk_not_found": "no_data"}.get(exc.code, "bad_input")
+                "needs_account": "blocked", "account_not_in_desk": "blocked", "desk_inactive": "blocked", "decision_not_found": "no_data", "desk_not_found": "no_data"}.get(exc.code, "bad_input")
         return ToolError(code, exc.message)
     return ToolError("bad_input", str(exc)[:300])
 
 
 @TOOLSET.tool("exec_propose", "Propose an order for your desk. You only propose: the code applies the limits of the committee, and what happens next depends on the autonomy level of the desk (1 only analyzes, 2 asks the owner, 3 sends alone under rules the owner approved). Legs use canonical contract ids (see contract_get). Amounts are numbers or text of numbers. The thesis is required: it travels as the message the owner reads. On a SWO desk an entry may add structure, expiration, net_premium, max_loss_usd and underlying, which are checked against the legs. Never put a size or a stop you did not compute.", {
-    "desk_id": _i("Desk id."), "proposal": _o("{line, order_type, limit_price?, stop_price?, tif?, stop_loss?, take_profit?, reduce_only?, thesis, legs:[{contract_id, side, effect, qty}], SWO only: structure?, expiration?, net_premium?, max_loss_usd?, underlying?}")},
+    "desk_id": _i("Desk id."), "proposal": _o("{line, order_type, limit_price?, stop_price?, tif?, stop_loss?, take_profit?, reduce_only?, strategy_key? (default principal; the account is never yours to name), thesis, legs:[{contract_id, side, effect, qty}], SWO only: structure?, expiration?, net_premium?, max_loss_usd?, underlying?}")},
     ["desk_id", "proposal"], writes=True)
 def exec_propose(u, c, a: dict) -> str:
     from hokma import exec as hexec

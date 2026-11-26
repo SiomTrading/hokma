@@ -47,7 +47,7 @@ def pending(r):
 
 # ======================================================================================================= A1: the envelope
 
-MONEY_TOOLS = ("desk_money_set", "desk_assign_account", "desk_unassign_account")
+MONEY_TOOLS = ("desk_money_set", "desk_add_demo_account", "desk_add_account", "desk_remove_account", "desk_bind_strategy")
 
 
 @pytest.mark.parametrize("name", MONEY_TOOLS)
@@ -83,7 +83,7 @@ def test_a_raise_mixed_with_other_fields_changes_nothing(ready):
                                        "limits": {"max_orders_per_day": 3}})
     assert err
     shown = desks.get_desk(d, ready.db)
-    assert shown["name"] == "Futuros NQ" and shown["mandate"] != "otro" and shown["limits"] == {} and shown["capital"] == 10000
+    assert shown["name"] == "Futuros NQ" and shown["mandate"] != "otro" and shown["limits"] == {"guards": []} and shown["capital"] == 10000
 
 
 def test_the_service_checks_against_the_saved_value_inside_the_transaction(ready):

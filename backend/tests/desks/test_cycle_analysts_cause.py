@@ -16,7 +16,7 @@ from b12_support import runtime
 from trader_support import C200, C210, sheet
 
 from hokma.backoffice import runs
-from hokma.broker import service
+from hokma.broker import pnl, service
 from hokma.contracts import sheet as sheet_store
 from hokma.desks.core.graph import ModelReply  # noqa: F401
 from hokma.desks.plantel import SEATS
@@ -29,17 +29,20 @@ from hokma.desks.swo import app_runtime
 from hokma.desks.swo.graph import CycleError, explain
 from hokma.kit import desk_tools
 from hokma.i18n import t as msg
+from account_links_support import link_principal
 
 @pytest.fixture
-def swo(ready):
+def swo(ready, monkeypatch):
     """A real SWO desk on its own account of the simulated broker, with the two option sheets and the quotes of the chain (as in test_b12_cycle)."""
     desk = create_swo_desk("Options swing", 1_000_000, db=ready.db)
     ready.swo_id = desk["id"]
     ready.agent = desk_agent_slug(SEATS["A11"], ready.swo_id)
     with ready.db.write() as u:
         account = u.broker.create_account(ready.broker_id, "Sim B", 1_000_000)
-        u.broker.link_desk(ready.swo_id, account.id)
+        link_principal(u, ready.swo_id, account.id)
     service.set_limits(ready.swo_id, {"max_premium_usd": 5000, "max_drawdown_pct": 10}, db=ready.db)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")                           # the broker answers: the drawdown rule of the desk can be checked
+    monkeypatch.setattr(pnl, "latest_pnl", lambda account_id: pnl.BrokerPnl(account_id, 1_000_000.0, 1_000_000.0, 0.0, (), stamp, "sim"))
     killswitch.beat(ready.swo_id, db=ready.db)
     for cid in (C200, C210):
         sheet_store.save(sheet(cid), db=ready.db)

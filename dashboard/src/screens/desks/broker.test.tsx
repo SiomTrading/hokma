@@ -6,8 +6,10 @@ import { ACCOUNT_PANEL } from "@/test/connectionsBackend";
 import { renderShell, renderWithApp } from "@/test/utils";
 import { SchwabAccount } from "@/screens/connections/SchwabAccount";
 import type { Account } from "./accountsApi";
+import { DeskBar } from "./DeskBar";
 import { resetDesksStore } from "./store";
 import { TODAY_EMPTY } from "./todayFixture";
+import { DESK_TABS } from "./types";
 import type { DeskSummary } from "./types";
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -23,7 +25,7 @@ function desk(patch: Partial<DeskSummary>): DeskSummary {
 function account(patch: Partial<Account>): Account {
   return {
     id: 1, broker_id: 1, broker: "Hokma Simulated", name: "Cuenta A", initial_capital: 25000, currency: "USD", status: "active",
-    desk_id: null, cash: 25000, equity: 25000, as_of: "2026-11-18T00:00:00Z", ...patch,
+    desk_ids: [], cash: 25000, equity: 25000, as_of: "2026-11-18T00:00:00Z", ...patch,
   };
 }
 
@@ -59,18 +61,23 @@ function stubApi(state: { desks: DeskSummary[]; accounts: Account[]; brokers?: u
         return json(made, 201);
       }
       if (url === "/api/brokers/1/costs" && method === "PUT") return json({ id: 1 });
-      if (/^\/api\/desks\/\d+\/account$/.test(url) && method === "DELETE") {
-        const id = Number(url.split("/")[3]);
-        state.accounts.forEach((x) => { if (x.desk_id === id) x.desk_id = null; });
-        return json({ desk_id: id, account: null });
+      const removed = /^\/api\/desks\/(\d+)\/accounts\/(\d+)$/.exec(url);
+      if (removed && method === "DELETE") {
+        const [id, accountId] = [Number(removed[1]), Number(removed[2])];
+        state.accounts.forEach((x) => { if (x.id === accountId) x.desk_ids = x.desk_ids.filter((d) => d !== id); });
+        return json({ desk_id: id, account_id: accountId, accounts: [] });
       }
       if (/\/reset$/.test(url)) return failReset ? json({ detail: { code: "x", message: "No se pudo reiniciar." } }, 500) : json(state.accounts[0]);
-      if (/^\/api\/desks\/\d+\/account$/.test(url) && method === "PUT") {
-        const id = Number(url.split("/")[3]);
-        const a = state.accounts.find((x) => x.id === (body as { account_id: number }).account_id)!;
-        a.desk_id = id;
-        state.desks.find((d) => d.id === id)!.account = { id: a.id, name: a.name, broker: a.broker, initial_capital: a.initial_capital, balance: { cash: a.cash, equity: a.equity, currency: "USD" }, as_of: a.as_of };
-        return json({ id: a.id });
+      const added = /^\/api\/desks\/(\d+)\/accounts$/.exec(url);
+      if (added && method === "POST") {
+        const id = Number(added[1]);
+        const sent = body as { account_id?: number; demo?: { name: string; initial_capital: number } };
+        const a = sent.demo ? account({ id: 60 + state.accounts.length, name: sent.demo.name, initial_capital: sent.demo.initial_capital }) : state.accounts.find((x) => x.id === sent.account_id)!;
+        if (sent.demo) state.accounts.push(a);
+        a.desk_ids = [...a.desk_ids, id];
+        const mine = state.desks.find((d) => d.id === id)!;
+        mine.accounts = [...(mine.accounts ?? []), { id: a.id, name: a.name, broker: a.broker, initial_capital: a.initial_capital, balance: { cash: a.cash, equity: a.equity, currency: "USD" }, as_of: a.as_of, shared_with: a.desk_ids.filter((d) => d !== id), strategies: [] }];
+        return json({ id: a.id }, 201);
       }
       return json({});
     }),
@@ -141,7 +148,7 @@ describe("Broker tab", () => {
   });
 
   it("lists accounts with capital, balance and desk, and says 'No disponible' for a null balance", async () => {
-    stubApi({ desks: [desk({ id: 1 })], accounts: [account({ id: 1, desk_id: 1 }), account({ id: 2, name: "Cuenta B", equity: null, cash: null })] });
+    stubApi({ desks: [desk({ id: 1 })], accounts: [account({ id: 1, desk_ids: [1] }), account({ id: 2, name: "Cuenta B", equity: null, cash: null })] });
     renderShell();
     await openBroker();
     const row = (await screen.findByRole("row", { name: /Cuenta A/ }));
@@ -164,6 +171,17 @@ describe("Broker tab", () => {
     await userEvent.type(within(dialog).getByLabelText(t("desks.accounts.capital")), "5000");
     await userEvent.click(save);
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.url === "/api/brokers/1/accounts")?.body).toEqual({ name: "Cuenta C", capital: 5000 }));
+  });
+
+  it("starts with the capital empty and the save button off until it has a valid value", async () => {
+    stubApi({ desks: [], accounts: [account({})] });
+    renderShell();
+    await openBroker();
+    await userEvent.click(await screen.findByRole("button", { name: t("desks.accounts.newAccount") }));
+    const dialog = await screen.findByRole("dialog", { name: t("desks.accounts.newAccount.title") });
+    expect(within(dialog).getByLabelText(t("desks.accounts.capital"))).toHaveValue("");
+    await userEvent.type(within(dialog).getByLabelText(t("desks.accounts.name")), "Cuenta D");
+    expect(within(dialog).getByRole("button", { name: t("desks.accounts.newAccount.save") })).toBeDisabled();
   });
 
   it("refuses a capital outside the limits", async () => {
@@ -191,18 +209,18 @@ describe("Broker tab", () => {
   });
 
   it("takes an assigned account off its desk after a confirmation, and an unassigned one has no such button", async () => {
-    const calls = stubApi({ desks: [desk({})], accounts: [account({ desk_id: 1 }), account({ id: 2, name: "Cuenta B" })] });
+    const calls = stubApi({ desks: [desk({})], accounts: [account({ desk_ids: [1] }), account({ id: 2, name: "Cuenta B" })] });
     renderShell();
     await openBroker();
-    const buttons = await screen.findAllByRole("button", { name: t("desks.accounts.unassign") });
+    const buttons = await screen.findAllByRole("button", { name: t("desks.accounts.unassign", { desk: "Swing" }) });
     expect(buttons).toHaveLength(1);
     await userEvent.click(buttons[0]!);
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent("Swing");
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.unassign.confirm") }));
-    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/desks/1/account")).toBe(true));
-    await waitFor(() => expect(screen.queryByRole("button", { name: t("desks.accounts.unassign") })).toBeNull());
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/desks/1/accounts/1")).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("button", { name: t("desks.accounts.unassign", { desk: "Swing" }) })).toBeNull());
   });
 
   it("shows the currency next to the balance", async () => {
@@ -228,8 +246,8 @@ describe("Broker tab", () => {
     await openBroker();
     await userEvent.click(await screen.findByRole("button", { name: t("desks.accounts.assign") }));
     const dialog = await screen.findByRole("dialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.assign.save") }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT")).toMatchObject({ url: "/api/desks/7/account", body: { account_id: 1 } }));
+    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.add.save") }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")).toMatchObject({ url: "/api/desks/7/accounts", body: { account_id: 1 } }));
   });
 });
 
@@ -304,8 +322,8 @@ describe("Schwab in the Broker tab (SPEC-015 18.2)", () => {
     const row = await screen.findByRole("row", { name: /Schwab ••••1234/ });
     await userEvent.click(within(row).getByRole("button", { name: t("desks.accounts.assign") }));
     const dialog = await screen.findByRole("dialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.assign.save") }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT" && c.url === "/api/desks/7/account")?.body).toEqual({ account_id: 9 }));
+    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.add.save") }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.url === "/api/desks/7/accounts")?.body).toEqual({ account_id: 9 }));
   });
 
   it("new accounts are offered only for the internal broker", async () => {
@@ -334,25 +352,116 @@ describe("Schwab in the Broker tab (SPEC-015 18.2)", () => {
   });
 });
 
-describe("account in the desk card", () => {
-  it("shows 'Sin cuenta' with a button that assigns a free account, then the balance", async () => {
-    const calls = stubApi({ desks: [desk({ id: 3 })], accounts: [account({ id: 4 })] });
-    renderShell();
+describe("texts of the accounts of a desk (SPEC-027)", () => {
+  it("name no provider outside Connections and carry no long dash, in es and en", () => {
+    for (const locale of ["es", "en"] as const) {
+      const catalog = getCatalog(locale);
+      const keys = Object.keys(catalog).filter((k) => /^desks\.(accounts|card|broker|stat|kpi|fund|side|wizard|hokma|field)\./.test(k) && k !== "desks.fund.broker");
+      for (const key of keys) {
+        expect(catalog[key], `${locale} ${key}`).not.toMatch(/schwab|alpaca|ibkr|interactive brokers|tradovate|yahoo/i);
+        expect(catalog[key], `${locale} ${key}`).not.toContain(String.fromCharCode(0x2014));
+      }
+      for (const key of ["desks.card.analysisOnly", "desks.card.add", "desks.accounts.shared.one", "desks.accounts.shared.many", "desks.accounts.add.firstNote"]) expect(catalog[key], `${locale} ${key}`).toBeTruthy();
+    }
+  });
+});
+
+describe("accounts in the desk bar (SPEC-027)", () => {
+  it("lists every account with its balance, marks the shared one, and always offers 'Agregar cuenta'", async () => {
+    stubApi({ desks: [], accounts: [] });
+    const mine = desk({
+      id: 3, capital: null,
+      accounts: [
+        { id: 4, name: "Cuenta A", broker: "Hokma Simulated", initial_capital: 25000, balance: { cash: 1, equity: 25000, currency: "USD" }, as_of: "", shared_with: [8, 9], strategies: ["principal"] },
+        { id: 5, name: "Cuenta B", broker: "Hokma Simulated", initial_capital: 1000, balance: { cash: null, equity: null, currency: "USD" }, as_of: "", shared_with: [], strategies: [] },
+      ],
+    });
+    renderWithApp(<DeskBar desk={mine} desks={[mine]} order={[...DESK_TABS]} tab="terminal" tabKey="k" onTab={() => undefined} onOrder={() => undefined} onAddPanel={() => undefined} onRemovePanel={() => undefined} onPickDesk={() => undefined} />);
+    const bar = await screen.findByRole("banner");
+    expect(bar).toHaveTextContent("Cuenta A");
+    expect(bar).toHaveTextContent(t("desks.accounts.shared.many", { n: "2" }));
+    expect(bar).toHaveTextContent("Cuenta B");
+    expect(bar).toHaveTextContent(t("desks.accounts.unavailable"));
+    expect(within(bar).getByRole("button", { name: t("desks.card.add") })).toBeInTheDocument();
+    cleanup();
+    const empty = desk({ id: 3, capital: null, accounts: [] });
+    renderWithApp(<DeskBar desk={empty} desks={[empty]} order={[...DESK_TABS]} tab="terminal" tabKey="k" onTab={() => undefined} onOrder={() => undefined} onAddPanel={() => undefined} onRemovePanel={() => undefined} onPickDesk={() => undefined} />);
+    expect(await screen.findByText(t("desks.card.analysisOnly"))).toBeInTheDocument();
+  });
+});
+
+describe("accounts in the desk card (SPEC-027)", () => {
+  const openFundCards = async () => {
     await userEvent.click(within(screen.getByRole("complementary", { name: t("nav.menu") })).getByRole("button", { name: /Mesas de dinero/ }));
-    const card = await screen.findByRole("button", { name: "Abrir la mesa Swing" });
-    expect(card).toHaveTextContent("Sin cuenta");
-    await userEvent.click(screen.getByRole("button", { name: t("desks.card.assign") }));
-    const dialog = await screen.findByRole("dialog");
-    await userEvent.click(await within(dialog).findByRole("button", { name: t("desks.accounts.assign.save") }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ account_id: 4 }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Abrir la mesa Swing" })).toHaveTextContent(/Cuenta A\s*Hokma Simulated/));
+    return screen.findByRole("button", { name: "Abrir la mesa Swing" });
+  };
+  const deskAccount = (patch: Record<string, unknown> = {}) => ({
+    id: 4, name: "Cuenta A", broker: "Hokma Simulated", initial_capital: 25000, balance: { cash: 25000, equity: 25000, currency: "USD" }, as_of: "2026-11-18T00:00:00Z",
+    shared_with: [], strategies: [], ...patch,
   });
 
-  it("says there are no free accounts instead of an empty selector", async () => {
-    stubApi({ desks: [desk({ id: 3 })], accounts: [] });
+  it("a desk without accounts says analysis only, never an empty or zero balance", async () => {
+    stubApi({ desks: [desk({ id: 3, capital: null })], accounts: [] });
     renderShell();
-    await userEvent.click(within(screen.getByRole("complementary", { name: t("nav.menu") })).getByRole("button", { name: /Mesas de dinero/ }));
-    await userEvent.click(await screen.findByRole("button", { name: t("desks.card.assign") }));
-    expect(await screen.findByText(t("desks.accounts.assign.noAccounts"))).toBeInTheDocument();
+    const card = await openFundCards();
+    expect(card).toHaveTextContent(t("desks.card.analysisOnly"));
+    expect(card).toHaveTextContent(t("desks.card.noAccount"));
+    expect(card).not.toHaveTextContent(t("desks.accounts.balance"));
+  });
+
+  it("adds a NEW demo account with the typed name and capital, and the first one says the main strategy will use it", async () => {
+    const calls = stubApi({ desks: [desk({ id: 3, capital: null })], accounts: [] });
+    renderShell();
+    await openFundCards();
+    await userEvent.click(screen.getByRole("button", { name: t("desks.card.add") }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(t("desks.accounts.add.firstNote"))).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByLabelText(t("desks.accounts.name")), "Demo NQ");
+    await userEvent.type(within(dialog).getByLabelText(t("desks.accounts.capital")), "5000");
+    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.add.save") }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.url === "/api/desks/3/accounts")?.body).toEqual({ demo: { name: "Demo NQ", initial_capital: 5000 } }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Abrir la mesa Swing" })).toHaveTextContent(/Demo NQ\s*Hokma Simulated/));
+  });
+
+  it("refuses an empty name or a capital out of limits without calling the server", async () => {
+    const calls = stubApi({ desks: [desk({ id: 3 })], accounts: [] });
+    renderShell();
+    await openFundCards();
+    await userEvent.click(screen.getByRole("button", { name: t("desks.card.add") }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(await within(dialog).findByRole("button", { name: t("desks.accounts.add.save") }));
+    expect(await within(dialog).findByText(t("desks.wizard.required"))).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("adds an existing account that other desks already use and says which ones", async () => {
+    const calls = stubApi({ desks: [desk({ id: 3 }), desk({ id: 8, name: "Opciones" })], accounts: [account({ id: 4, desk_ids: [8] })] });
+    renderShell();
+    await openFundCards();
+    await userEvent.click(screen.getAllByRole("button", { name: t("desks.card.add") })[0]!);
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(await within(dialog).findByRole("radio", { name: new RegExp(t("desks.accounts.add.existing")) }));
+    expect(within(dialog).getByRole("option", { name: new RegExp(`Cuenta A.*${t("desks.accounts.add.alsoIn", { desks: "Opciones" })}`) })).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: t("desks.accounts.add.save") }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.url === "/api/desks/3/accounts")?.body).toEqual({ account_id: 4 }));
+  });
+
+  it("marks an account shared with other desks and shows the balance of each account", async () => {
+    stubApi({ desks: [desk({ id: 3, accounts: [deskAccount({ shared_with: [8] }), deskAccount({ id: 5, name: "Cuenta B", balance: { cash: null, equity: null, currency: "USD" } })] })], accounts: [] });
+    renderShell();
+    const card = await openFundCards();
+    expect(card).toHaveTextContent(t("desks.accounts.shared.one"));
+    expect(card).toHaveTextContent("Cuenta B");
+    expect(card).toHaveTextContent(t("desks.accounts.unavailable"));
+  });
+
+  it("an account already in every desk offers no desk, and says so", async () => {
+    stubApi({ desks: [desk({ id: 3, accounts: [deskAccount()] })], accounts: [account({ id: 4, desk_ids: [3] })] });
+    renderShell();
+    await openFundCards();
+    await userEvent.click(screen.getByRole("button", { name: t("desks.card.add") }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(await within(dialog).findByRole("radio", { name: new RegExp(t("desks.accounts.add.existing")) }));
+    expect(await within(dialog).findByText(t("desks.accounts.add.noAccounts"))).toBeInTheDocument();
   });
 });

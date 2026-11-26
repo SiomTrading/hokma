@@ -48,9 +48,9 @@ def test_every_tool_a_routine_prompt_asks_for_is_in_the_tools_of_its_agent(routi
 
 
 def test_hokma_can_call_the_calendar_the_news_and_the_watchlist_and_names_them():
-    assert {"economic_calendar", "market_news", "watchlist_all", "desk_unassign_account"} <= agent_tools("hokma")
+    assert {"economic_calendar", "market_news", "watchlist_all", "desk_remove_account"} <= agent_tools("hokma")
     body = (TEMPLATE / "agents" / "hokma.md").read_text(encoding="utf-8")
-    assert "`economic_calendar`, `market_news` and `watchlist_all`" in body and "`desk_unassign_account`" in body
+    assert "`economic_calendar`, `market_news` and `watchlist_all`" in body and "`desk_remove_account`" in body
 
 
 def test_an_unattended_routine_can_call_the_read_only_tools_it_asks_for():
@@ -164,18 +164,21 @@ def test_the_refresh_route_does_not_call_the_full_reset(db, net, monkeypatch):  
 # ------------------------------------------------------------------------------------------ B4, C5, C6, C7, C8
 
 def test_the_chat_can_take_an_account_off_a_desk_and_asks_first(db):
-    assert hokma_tools.TOOLS["desk_unassign_account"][4] is True and "desk_unassign_account" in hokma_tools.NO_UNIT
+    assert hokma_tools.TOOLS["desk_remove_account"][4] is True and "desk_remove_account" in hokma_tools.NO_UNIT
     from hokma.engine.stream import summarize_tool
 
-    assert summarize_tool("mcp__hokma__desk_unassign_account", {"desk_id": 3})["target"] == "desk_id=3"
+    assert summarize_tool("mcp__hokma__desk_remove_account", {"desk_id": 3})["target"] == "desk_id=3"
     desk = desks.create_desk("Swing", 10000, template="minimal")
-    made = json.loads(call("account_create", {"name": "A", "capital": 5000})[0])
-    call("desk_assign_account", {"desk_id": desk["id"], "account_id": made["id"]})
-    text, error = call("desk_unassign_account", {"desk_id": desk["id"]})
-    assert not error and json.loads(text) == {"desk_id": desk["id"], "account": None}
-    assert desks.get_desk(desk["id"])["account"] is None
-    assert call("desk_assign_account", {"desk_id": desk["id"], "account_id": made["id"]})[1] is False   # free again
-    assert call("desk_unassign_account", {"desk_id": desk["id"]}, agent="desk-chief")[1] is True
+    first = json.loads(call("account_create", {"name": "A", "capital": 5000})[0])
+    second = json.loads(call("account_create", {"name": "B", "capital": 5000})[0])
+    for made in (first, second):
+        assert call("desk_add_account", {"desk_id": desk["id"], "account_id": made["id"]})[1] is False
+    refused, error = call("desk_remove_account", {"desk_id": desk["id"], "account_id": first["id"]})      # the principal strategy trades through the first one
+    assert error
+    text, error = call("desk_remove_account", {"desk_id": desk["id"], "account_id": second["id"]})
+    assert not error and json.loads(text)["accounts"] == [first["id"]]
+    assert call("desk_add_account", {"desk_id": desk["id"], "account_id": second["id"]})[1] is False        # free again, and it may be in other desks too
+    assert call("desk_remove_account", {"desk_id": desk["id"], "account_id": second["id"]}, agent="desk-chief")[1] is True   # a desk chief cannot
 
 
 def test_creating_an_account_without_any_broker_says_so_instead_of_an_index_error(db, monkeypatch):
@@ -184,20 +187,23 @@ def test_creating_an_account_without_any_broker_says_so_instead_of_an_index_erro
     assert error and "index" not in text and t("broker.err.broker_not_found") in text
 
 
-def test_two_assignments_at_once_lose_with_account_in_use_not_a_generic_error(db, monkeypatch):
+def test_two_additions_at_once_lose_with_a_409_not_a_generic_error(db, monkeypatch):
+    from hokma.broker import desk_accounts
     from hokma.db import IntegrityViolation
 
     desk = desks.create_desk("Swing", 10000, template="minimal")
     broker.create_broker("B")
     made = broker.create_account(broker.list_brokers()[0]["id"], "A", 5000)
 
-    def clash(self, desk_id, account_id):
+    def clash(self, desk_id, account_id, *args, **kwargs):
         raise IntegrityViolation("unique")
 
-    monkeypatch.setattr("hokma.db.repos.broker.BrokerRepo.link_desk", clash, raising=False)
+    monkeypatch.setattr("hokma.db.repos.broker.BrokerRepo.link", clash)
     with pytest.raises(broker.BrokerError) as info:
-        broker.assign_account(desk["id"], made["id"])
-    assert info.value.code == "account_in_use" and info.value.status == 409
+        desk_accounts.add_account(desk["id"], made["id"])
+    assert info.value.status == 409 and info.value.code == "invalid"
+    with db.read() as u:
+        assert u.broker.accounts_of_desk(desk["id"]) == []                       # the loser leaves nothing behind
 
 
 def test_a_repeated_account_name_is_name_taken_by_type_not_by_the_words_of_the_message(db):

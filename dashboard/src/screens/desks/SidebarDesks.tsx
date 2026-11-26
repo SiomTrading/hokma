@@ -17,14 +17,14 @@ export function SidebarDesks() {
   return (
     <div className="desk-list" role="group" aria-label={t("desks.side.list")}>
       {desks.map((desk) => {
-        const capital = formatCapital(desk.capital, locale);
+        const capital = desk.capital === null ? null : formatCapital(desk.capital, locale);
         const today = formatResult(desk.today, locale);
         return (
           <button
             key={desk.id}
             type="button"
             className={cx("nav", "desk-link", activeDesk === String(desk.id) && "on")}
-            aria-label={t("desks.side.row", { name: desk.name, capital, today })}
+            aria-label={capital === null ? t("desks.side.rowNoCapital", { name: desk.name, today }) : t("desks.side.row", { name: desk.name, capital, today })}
             title={desk.name}
             aria-current={activeDesk === String(desk.id) ? "page" : undefined}
             onClick={() => shell.openScreen("desks", { desk: String(desk.id) })}

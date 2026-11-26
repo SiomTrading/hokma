@@ -9,6 +9,8 @@ export interface LiveQuote {
   last: number | null;
   previousClose: number | null;
   changePct: number | null;
+  /** Volume of the day when the message carries it (the quote block of the level 1); null when it does not. */
+  volume?: number | null;
   /** The provider that sent it, by name (Schwab, SiomTrading Futures, Yahoo Finance...). Null when the message does not say. */
   source: string | null;
   /** The provider says the data is delayed. */
@@ -23,6 +25,12 @@ export interface LiveQuotesOptions {
   onFailed: (symbol: string) => void;
   createSocket?: (url: string) => SocketLike;
 }
+
+/** The volume of the day, from the quote block of a message of the stream; null when it is not there. */
+const volumeOf = (message: Record<string, unknown>): number | null => {
+  const block = message.quote;
+  return block !== null && typeof block === "object" ? num((block as Record<string, unknown>).volume) : null;
+};
 
 const origin = (message: Record<string, unknown>): { source: string | null; delayed: boolean } => ({
   source: typeof message.source === "string" && message.source !== "" && message.source !== "none" ? message.source : null,
@@ -139,9 +147,9 @@ export class LiveQuotesClient {
       this.options.onFailed(symbol);
     } else if (message.type === "snapshot") {
       this.attempt = 0;
-      this.options.onQuote(symbol, { last: num(message.last), previousClose: num(message.previous_close), changePct: num(message.change_pct), ...origin(message) });
+      this.options.onQuote(symbol, { last: num(message.last), previousClose: num(message.previous_close), changePct: num(message.change_pct), volume: volumeOf(message), ...origin(message) });
     } else if (message.type === "last" || message.type === "bar") {
-      this.options.onQuote(symbol, { last: num(message.price), previousClose: null, changePct: num(message.change_pct), ...origin(message) });
+      this.options.onQuote(symbol, { last: num(message.price), previousClose: null, changePct: num(message.change_pct), volume: volumeOf(message), ...origin(message) });
     }
   }
 }

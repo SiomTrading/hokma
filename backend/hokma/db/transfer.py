@@ -31,7 +31,7 @@ REFERENCE_TABLES = ("schema_version", "status_transitions")   # created and fill
 BATCH = 500
 APP_ROLE, AGENT_ROLE = "hokma_app", "hokma_agent"
 DESK_TABLES = ("desks", "desk_agents", "desk_assets", "desk_connections", "today_config")
-BROKER_TABLES = ("brokers", "broker_accounts", "account_ledger", "desk_accounts", "broker_orders",
+BROKER_TABLES = ("brokers", "broker_accounts", "account_ledger", "desk_account_links", "desk_strategy_accounts", "broker_orders",
                  "broker_external_accounts", "desk_limits")
 LESSON_TABLES = ("lessons", "thesis_events")      # 0021: written by Hokma code from executed decisions, never by an agent
 EXEC_TABLES = ("desk_profile", "desk_autonomy", "exec_proposals", "exec_guard_state", "exec_alerts", "sim_orders",
@@ -42,8 +42,11 @@ _CREATE_TABLE = re.compile(r"^CREATE TABLE (\w+)\s*\(", re.IGNORECASE)
 _REFERENCE = re.compile(r"^\s*(\w+)\s+.*?REFERENCES\s+(\w+)\s*\(", re.IGNORECASE)
 _ALTER_REFERENCE = re.compile(r"^ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)\b.*?REFERENCES\s+(\w+)\s*\(",
                               re.IGNORECASE | re.DOTALL)
+_DROP_TABLE = re.compile(r"^DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)", re.IGNORECASE)
 _IDENTITY = re.compile(r"^\s*id\s+\{PK\}", re.IGNORECASE)
 _DEFERRED = re.compile(r"^(CREATE\s+(OR\s+REPLACE\s+)?(TRIGGER|FUNCTION)|DROP\s+(TRIGGER|FUNCTION))\b", re.IGNORECASE)
+_CREATE_TRIGGER = re.compile(r"^CREATE\s+TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)", re.IGNORECASE)
+_DROP_TRIGGER = re.compile(r"^DROP\s+TRIGGER\s+(?:IF\s+EXISTS\s+)?(\w+)", re.IGNORECASE)
 _FUNCTION = re.compile(r"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(\w+)\s*\(", re.IGNORECASE)
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 
@@ -87,6 +90,10 @@ def table_plan(script: str) -> list[TableInfo]:
                 tables[added.group(1)].self_refs.append(added.group(2))
             else:
                 tables[added.group(1)].parents.add(added.group(3))
+            continue
+        dropped = _DROP_TABLE.match(statement)
+        if dropped:                                                # a table a later migration removed (desk_accounts, 0024) has nothing to copy
+            tables.pop(dropped.group(1), None)
             continue
         head = _CREATE_TABLE.match(statement)
         if not head:
@@ -167,12 +174,27 @@ def _drop_hokma_objects(session: Session, tables: list[TableInfo], full_script: 
             session.execute(f"DROP FUNCTION IF EXISTS {name}() CASCADE")
 
 
+def _forget_trigger(deferred: list[str], name: str) -> None:
+    """Remove the pending CREATE of trigger `name` when nothing dropped it since (the table it hung on was replaced)."""
+    for index in range(len(deferred) - 1, -1, -1):
+        dropped = _DROP_TRIGGER.match(deferred[index])
+        if dropped and dropped.group(1) == name:
+            return
+        made = _CREATE_TRIGGER.match(deferred[index])
+        if made and made.group(1) == name:
+            del deferred[index]
+            return
+
+
 def _apply_schema(session: Session, backend: Backend, files) -> list[str]:
     """Run every migration except triggers and functions; return those, in order, to run after the copy."""
     deferred: list[str] = []
     for version, script in _script(backend, files):
         for statement in backend.split_statements(script):
             if _DEFERRED.match(statement):
+                made = _CREATE_TRIGGER.match(statement)
+                if made:                                           # a migration that rebuilds a table (0003, 0004) recreates its triggers: the old table took the earlier ones with it
+                    _forget_trigger(deferred, made.group(1))
                 deferred.append(statement)
             else:
                 session.execute(statement)

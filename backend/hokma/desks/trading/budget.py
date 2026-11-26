@@ -21,6 +21,7 @@ from decimal import Decimal
 from fractions import Fraction
 from typing import Any
 
+from hokma.exec import thresholds
 from hokma.exec.money import dec_or_none
 
 ZERO = Decimal(0)
@@ -46,6 +47,8 @@ class BudgetInputs:
     max_drawdown_pct: Decimal | None = None
     capital_floor_usd: Decimal | None = None
     funding: Mapping[str, Any] = field(default_factory=dict)
+    daily_loss_steps: tuple[Mapping[str, Any], ...] | None = None        # SPEC-026 (A8): a USD that scales with the equity
+    drawdown_steps: tuple[Mapping[str, Any], ...] | None = None
     desk_status: str = "active"
     orders_enabled: bool = True
     account_ok: bool = True
@@ -64,6 +67,8 @@ class BudgetInputs:
                    risk_pct=dec_or_none(risk_pct) or Decimal(1), max_premium_usd=d("max_premium_usd"),
                    committee_max_contracts=committee_max_contracts, max_position_pct=d("max_position_pct"), max_order_pct=d("max_order_pct"),
                    max_drawdown_pct=d("max_drawdown_pct"), capital_floor_usd=d("capital_floor_usd"), funding=funding,
+                   daily_loss_steps=tuple(limits.get("daily_loss_steps") or ()) or None,
+                   drawdown_steps=tuple(limits.get("drawdown_steps") or ()) or None,
                    desk_status=desk_status, orders_enabled=orders_enabled, account_ok=account_ok)
 
     @classmethod
@@ -106,6 +111,17 @@ def _floor(numerator: Decimal, denominator: Decimal) -> int:
     return (Fraction(numerator) / Fraction(denominator)).__floor__()
 
 
+def _loss_cap(inp: BudgetInputs) -> Decimal | None:
+    """The USD the account may lose in a day: the fixed one and the step of the base (as the account guard), the smaller holds."""
+    return thresholds.effective_usd(dec_or_none(inp.funding.get("daily_loss_usd")), inp.daily_loss_steps, inp.base)
+
+
+def _trailing_cap(inp: BudgetInputs) -> Decimal | None:
+    """The USD the account may fall from its peak: the fixed one and the step of the equity (as the account guard), the smaller holds."""
+    return thresholds.effective_usd(dec_or_none(inp.funding.get("trailing_drawdown_usd")), inp.drawdown_steps,
+                                    inp.equity if inp.equity is not None and inp.equity > 0 else None)
+
+
 def _drawdown_room(inp: BudgetInputs) -> tuple[Decimal | None, str]:
     if inp.max_drawdown_pct is None:
         return None, ""
@@ -122,7 +138,7 @@ def pretrade_check(inp: BudgetInputs) -> tuple[Blocker, ...]:
     if not inp.orders_enabled:
         out.append(Blocker("orders_off", "orders are switched off for this desk"))
     if not inp.account_ok:
-        out.append(Blocker("no_account", "the desk has no trading account"))
+        out.append(Blocker("no_account", "the order has no trading account"))      # the account the order resolved to; a desk with none never gets here (SPEC-027 4.3)
     room, unknown = _drawdown_room(inp)
     if unknown:
         out.append(Blocker("drawdown_unknown", unknown))
@@ -133,13 +149,13 @@ def pretrade_check(inp: BudgetInputs) -> tuple[Blocker, ...]:
             out.append(Blocker("capital_floor_unknown", "capital_floor_usd is set and the equity is unknown"))
         elif inp.equity <= inp.capital_floor_usd:
             out.append(Blocker("capital_floor", f"the equity {inp.equity} is at or under the floor of {inp.capital_floor_usd}"))
-    loss = dec_or_none(inp.funding.get("daily_loss_usd"))
+    loss = _loss_cap(inp)
     if loss is not None:
         if inp.day_pnl is None:
             out.append(Blocker("daily_loss_unknown", "the funded daily loss is set and the result of the day is unknown"))
         elif inp.day_pnl + loss <= 0:
             out.append(Blocker("daily_loss", "the funded account already lost its daily allowance"))
-    trailing = dec_or_none(inp.funding.get("trailing_drawdown_usd"))
+    trailing = _trailing_cap(inp)
     if trailing is not None:
         if inp.equity is None or inp.peak_equity is None:
             out.append(Blocker("trailing_drawdown_unknown", "the trailing drawdown is set and the equity or its peak is unknown"))
@@ -185,10 +201,10 @@ def size_by_plan(inp: BudgetInputs, *, risk_per_contract_usd: Decimal, premium_p
     if inp.capital_floor_usd is not None:
         limits["capital_floor"] = 0 if inp.equity is None else _floor(inp.equity - inp.capital_floor_usd, risk_per_contract_usd)
     funding = inp.funding
-    loss = dec_or_none(funding.get("daily_loss_usd"))
+    loss = _loss_cap(inp)
     if loss is not None:
         limits["funding_daily_loss"] = 0 if inp.day_pnl is None else _floor(loss + inp.day_pnl, risk_per_contract_usd)
-    trailing = dec_or_none(funding.get("trailing_drawdown_usd"))
+    trailing = _trailing_cap(inp)
     if trailing is not None:
         limits["funding_trailing"] = (0 if inp.equity is None or inp.peak_equity is None
                                       else _floor(trailing - (inp.peak_equity - inp.equity), risk_per_contract_usd))

@@ -52,6 +52,10 @@ NAN_CALLS = {
     "options.structure_matrix": {"direction": "sideways", "vol_view": "flat"}, "options.classify_structure": {"legs": []},
     "options.structure_profile": {"structure": "long_call", "strikes": [NAN], "premiums": [1.0], "quantity": 1, "multiplier": 100},
     "options.management_plan": {"structure": "long_call", "net_premium_usd": NAN, "max_profit_usd": 1.0, "max_loss_usd": 1.0, "days_to_expiration": 5.0, "equity_usd": 1000.0},
+    "options.profit_probability": {"structure": "long_call", "strikes": [100.0], "premiums": [NAN], "quantity": 1, "multiplier": 100, "spot": 100.0, "volatility": 0.3,
+                                   "time_to_expiration": 0.25},
+    "options.strategy_cards": {"rows": [], "spot": NAN, "view": "bullish", "expiration": "2026-12-25", "years": 0.1, "multiplier": 100},
+    "options.pnl_grid": {"legs": [LEG], "spot": NAN, "years": 0.1, "multiplier": 100, "iv_by_leg": [0.3]},
 }
 NETWORK = {"options.expiry_dates", "options.option_chain"}        # covered in test_chain.py with a fake market module
 

@@ -53,6 +53,7 @@ def _oco(*symbols):
 def test_an_oco_with_a_second_child_outside_the_list_is_refused_and_so_is_a_symbol_outside_the_list_by_the_native_road(ready):
     from hokma.desks import service as desks
 
+    service.set_limits(ready.desk_id, {"guards": None}, db=ready.db)         # a desk that already existed runs every guard, the list of symbols included
     desks.set_assets(ready.desk_id, ["MSFT"], db=ready.db)
     with pytest.raises(BrokerError) as e:
         service.place(ready.desk_id, _oco("MSFT", "AAPL"), "attack", AGENT, db=ready.db)
@@ -91,6 +92,7 @@ def test_all_shares_legs_are_read_with_an_exact_list_and_never_skip_the_node():
 def test_an_all_shares_sell_of_a_symbol_outside_the_list_with_nothing_held_is_refused(ready):
     from hokma.desks import service as desks
 
+    service.set_limits(ready.desk_id, {"guards": None}, db=ready.db)         # a desk that already existed runs every guard, the list of symbols included
     desks.set_assets(ready.desk_id, ["MSFT"], db=ready.db)
     order = {"orderStrategyType": "SINGLE", "orderType": "MARKET", "session": "NORMAL", "duration": "DAY", "orderLegCollection": [
         {"instruction": "SELL", "quantityType": "ALL_SHARES", "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}}]}
@@ -138,6 +140,7 @@ ATTACKS = {
 def test_every_nested_structure_ends_in_a_refusal_or_in_the_filter_and_nothing_reaches_schwab(ready, name):
     from hokma.desks import service as desks
 
+    service.set_limits(ready.desk_id, {"guards": None}, db=ready.db)         # a desk that already existed runs every guard, the list of symbols included
     desks.set_assets(ready.desk_id, ["MSFT"], db=ready.db)                     # anything with AAPL in it must not go
     with pytest.raises(BrokerError) as e:
         service.place(ready.desk_id, ATTACKS[name], "attack", AGENT, db=ready.db)
@@ -269,3 +272,27 @@ def test_an_all_shares_exit_takes_everything_and_nothing_else_of_its_contract_ma
             service.place(ready.desk_id, order, "attack", AGENT, db=ready.db)
         assert e.value.code == "cannot_check" and sent(ready.fake) == []
     assert _codes(ready, _node("TRIGGER", [_leg("BUY", "MSFT", 5)], [_node(legs=[everything])])) is None
+
+
+def _stop_node(qty, price="9.00"):
+    node = _node(legs=[_leg("SELL", "MSFT", qty)], order_type="STOP")
+    node["stopPrice"] = price
+    return node
+
+
+def test_the_stop_of_a_trigger_entry_has_to_cover_the_whole_quantity_of_the_entry(ready):
+    """Vera (3390d): BUY 10 with a child SELL 1 STOP was accepted and reserved for 10 with a stop of 1."""
+    from hokma.exec import native
+    from hokma.i18n import catalog
+
+    _desk_msft(ready)
+    short = _node("TRIGGER", [_leg("BUY", "MSFT", 10)], [_stop_node(1)])
+    result = native.check(ready.desk_id, short, preview=None, who=AGENT, db=ready.db)
+    assert result["code"] == "stop_invalid" and "1" in result["why"] and "10" in result["why"]
+    assert _codes(ready, _node("TRIGGER", [_leg("BUY", "MSFT", 10)], [_stop_node(10)])) != "stop_invalid"
+    assert _codes(ready, _node("TRIGGER", [_leg("BUY", "MSFT", 10)], [_stop_node(6), _stop_node(4)])) != "stop_invalid"        # two stops that add up to 10 cover it
+    assert _codes(ready, _node("TRIGGER", [_leg("BUY", "MSFT", 10)], [_stop_node(6), _stop_node(3)])) == "stop_invalid"
+    oco = _node("TRIGGER", [_leg("BUY", "MSFT", 10)], [_node("OCO", children=[_stop_node(3), _node(legs=[_leg("SELL", "MSFT", 10)])])])
+    assert _codes(ready, oco) == "stop_invalid"                                                    # the target of an OCO is not a stop
+    for lang in ("es", "en"):
+        assert "{stop_qty}" in catalog(lang)["risk.stop_qty"]

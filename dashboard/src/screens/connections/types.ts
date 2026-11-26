@@ -156,6 +156,18 @@ export interface DiagnosticAnswer {
   };
 }
 
+/** The answer of the anonymous sample of the account (SPEC-026 3390e1): where the file went. Account numbers and ids are XXXX in it. */
+export type SampleProvider = "schwab" | "alpaca";
+
+export interface SampleAnswer {
+  ok: boolean;
+  file: string;
+  folder_is_downloads: boolean;
+  accounts: number;
+  positions: number;
+  activity: boolean;
+}
+
 export interface SchwabAccountPanel {
   accounts: SchwabAccountEntry[];
   /** Orders switch of the Schwab broker (Broker tab). False when it does not exist. */

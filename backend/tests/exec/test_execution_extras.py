@@ -8,10 +8,16 @@ import pytest
 from exec_support import AGENT, NQ, db, desks_db, env, proposal, ready  # noqa: F401
 
 from hokma import exec as hexec
-from hokma.broker import service
+from hokma.broker import pnl, service
 from hokma.exec import alerts, killswitch, levels, monitor, tca, telegram_approval
 
 D = Decimal
+
+
+def broker_loss(monkeypatch, account_id, loss, start=100_000):
+    """The broker reports this account with an equity `loss` under its start (the loss of the day and, from the start, the drawdown); the other accounts give no data."""
+    reading = pnl.BrokerPnl(account_id, float(start - loss), float(start), float(-loss), (), datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "sim")
+    monkeypatch.setattr(pnl, "latest_pnl", lambda a: reading if a == account_id else None)
 
 
 def test_alerts_ring_once_per_crossing_survive_a_restart_and_rearm_when_the_condition_ends(ready):
@@ -72,18 +78,19 @@ def test_cusum_has_the_right_sign_the_sharpe_warns_and_the_levels_come_from_fact
     assert monitor.kill_level(drawdown_pct=1, day_loss_usd=1500, thresholds=th).name == "halt"
 
 
-def test_the_emergency_switch_pauses_a_desk_over_its_usd_cap_and_the_desk_then_refuses_orders(ready):
+def test_the_emergency_switch_pauses_a_desk_over_its_usd_cap_and_the_desk_then_refuses_orders(ready, monkeypatch):
     service.set_limits(ready.desk_id, {"funding": {"daily_loss_usd": 1000, "trailing_drawdown_usd": 5000}}, db=ready.db)
+    broker_loss(monkeypatch, ready.account_id, 0)
     assert killswitch.run_once(ready.db) == {}                                              # nothing lost yet
-    with ready.db.write() as u:
-        u.session.insert_row("book_entries", {"account_id": ready.account_id, "kind": "fee", "amount": "-6000", "currency": "USD", "source": "owner",
-                                              "source_ref": "loss1", "occurred_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")})
+    broker_loss(monkeypatch, ready.account_id, 6000)                                        # the broker says the day lost 6000
     assert killswitch.run_once(ready.db) == {ready.desk_id: "halt"}
     with ready.db.read() as u:
-        assert u.desks.find(ready.desk_id).status == "paused"
+        from hokma.broker import day_close
+
+        assert u.desks.find(ready.desk_id).status == "active" and day_close.is_closed(u, ready.account_id)      # SPEC-026, 3390c: the ACCOUNT stops, not the desk
     out = hexec.submit(proposal(ready, origin="chat", created_by="owner"), who=ready.owner, db=ready.db)
     assert out.status == "refused"
-    assert killswitch.run_once(ready.db) == {}                                              # a paused desk is left alone
+    assert killswitch.run_once(ready.db) == {ready.desk_id: "halt"}                         # it is still over the cap; the account stays closed and the owner is told once
 
 
 def test_the_ticket_buttons_approve_the_exact_fingerprint_and_an_unauthorized_or_stale_tap_does_nothing(ready):
@@ -136,14 +143,12 @@ def test_a_failed_notice_does_not_hold_back_the_next_ones(env):
         assert [r["text"] for r in u.session.query("SELECT text FROM telegram_outbox ORDER BY id")] == ["notice 0", "notice 1", "notice 2"]
 
 
-def test_a_usd_trailing_drawdown_alone_halts_the_desk_with_no_percent_threshold(ready):
+def test_a_usd_trailing_drawdown_alone_halts_the_desk_with_no_percent_threshold(ready, monkeypatch):
     assert killswitch.thresholds_of({"funding": {"trailing_drawdown_usd": 2000}}) == {"halt_drawdown_usd": 2000.0}
     assert monitor.kill_level(drawdown_pct=None, day_loss_usd=None, drawdown_usd=2500, thresholds={"halt_drawdown_usd": 2000}).name == "halt"
     assert monitor.kill_level(drawdown_pct=None, day_loss_usd=None, drawdown_usd=100, thresholds={"halt_drawdown_usd": 2000}).name == "ok"
     service.set_limits(ready.desk_id, {"funding": {"trailing_drawdown_usd": 5000}}, db=ready.db)          # nothing else configured
-    with ready.db.write() as u:
-        u.session.insert_row("book_entries", {"account_id": ready.account_id, "kind": "fee", "amount": "-6000", "currency": "USD", "source": "owner",
-                                              "source_ref": "dd1", "occurred_at": "2026-01-01 00:00:00"})
+    broker_loss(monkeypatch, ready.account_id, 6000)                                                       # 6000 under the highest equity the broker reported
     assert killswitch.run_once(ready.db) == {ready.desk_id: "halt"}
 
 
@@ -152,6 +157,7 @@ class _Dies(BaseException):
 
 
 def test_one_failing_desk_does_not_stop_the_pass_and_a_dead_task_is_restarted_and_a_stale_monitor_blocks_openings(ready, monkeypatch):
+    broker_loss(monkeypatch, ready.account_id, 0)                              # the broker answers: the drawdown rule of the desk can be checked
     calls = []
 
     def flaky(db=None):
@@ -183,19 +189,13 @@ def test_one_failing_desk_does_not_stop_the_pass_and_a_dead_task_is_restarted_an
     out = hexec.submit(proposal(ready, origin="chat", created_by="owner"), who=ready.owner, db=ready.db)
     assert (out.status, out.code) == ("refused", "monitor_stale")
     killswitch.beat(ready.desk_id, db=ready.db)                              # the monitor reads again
-    assert hexec.submit(proposal(ready, origin="chat", created_by="owner"), who=ready.owner, db=ready.db).status == "filled"
+    again = hexec.submit(proposal(ready, origin="chat", created_by="owner"), who=ready.owner, db=ready.db)
+    assert again.status == "filled", (again.code, again.why)
 
 
 def test_a_pass_that_measured_nothing_is_not_a_heartbeat_and_new_openings_stay_blocked(ready):
-    from hokma.backoffice import book as book_module
-    from hokma.broker.types import Fill
-
     service.set_limits(ready.desk_id, {"funding": {"trailing_drawdown_usd": 5000}}, db=ready.db)
-    book_module.record_fill(Fill(ready.account_id, NQ, "buy", 1.0, 21000.0, 0.0, "2026-11-20 15:00:00", multiplier=D(20), contract_id=NQ),
-                            desk_id=ready.desk_id, source="sim", source_ref="open1")        # an open position with no price: the equity is unknown
-    from hokma.exec import prefilter
-
-    prefilter.set_mark_source(lambda ids: {})                                                  # no price for the open position
+    assert pnl.latest_pnl(ready.account_id) is None                                            # the broker gives no data: the equity is unknown
     assert killswitch.check_desk(ready.desk_id, db=ready.db).measured is False
     killswitch.run_once(ready.db)
     assert killswitch.load_heartbeat(ready.desk_id, db=ready.db) is None
@@ -203,22 +203,16 @@ def test_a_pass_that_measured_nothing_is_not_a_heartbeat_and_new_openings_stay_b
     assert (out.status, out.code) == ("refused", "monitor_never_measured")
 
 
-@pytest.mark.parametrize("limits, priced, expected", [
+@pytest.mark.parametrize("limits, with_data, expected", [
     ({"funding": {"trailing_drawdown_usd": 5000}}, True, True),
     ({"funding": {"trailing_drawdown_usd": 5000}}, False, False),
     ({"funding": {"daily_loss_usd": 1000}}, True, True),
-    ({"funding": {"daily_loss_usd": 1000}}, False, False),          # an open position with no price: its loss is not in the day result
+    ({"funding": {"daily_loss_usd": 1000}}, False, False),          # the broker gives no data: the loss of the day is unknown, not zero
     ({"funding": {"trailing_drawdown_usd": 5000, "daily_loss_usd": 1000}}, True, True),
     ({"funding": {"trailing_drawdown_usd": 5000, "daily_loss_usd": 1000}}, False, False),
 ])
-def test_measured_needs_every_armed_threshold_compared_with_a_real_value(ready, limits, priced, expected):
-    from hokma.backoffice import book as book_module
-    from hokma.broker.types import Fill
-    from hokma.exec import prefilter
-
+def test_measured_needs_every_armed_threshold_compared_with_a_real_value(ready, monkeypatch, limits, with_data, expected):
     service.set_limits(ready.desk_id, limits, db=ready.db)
-    book_module.record_fill(Fill(ready.account_id, NQ, "buy", 1.0, 21000.0, 0.0, "2026-11-20 15:00:00", multiplier=D(20), contract_id=NQ),
-                            desk_id=ready.desk_id, source="sim", source_ref="p1")
-    if not priced:
-        prefilter.set_mark_source(lambda ids: {})
+    if with_data:
+        broker_loss(monkeypatch, ready.account_id, 10)
     assert killswitch.check_desk(ready.desk_id, db=ready.db).measured is expected

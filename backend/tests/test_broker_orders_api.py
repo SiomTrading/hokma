@@ -126,12 +126,13 @@ def test_a_decision_of_another_desk_is_not_found_from_this_desk(client, ready):
 
 def test_the_limits_are_read_and_changed_with_the_rule_of_merge_and_null(client, ready):
     d = ready.desk_id
-    assert client.get(f"/api/desks/{d}/limits").json() == {"limits": {}}
+    assert client.get(f"/api/desks/{d}/limits").json() == {"limits": {"guards": []}}
     assert client.put(f"/api/desks/{d}/limits", json={"limits": {"max_order_pct": 10, "assets_only": True}}).json() == {
-        "limits": {"max_order_pct": 10.0, "assets_only": True}}
-    assert client.put(f"/api/desks/{d}/limits", json={"limits": {"max_order_pct": None}}).json() == {"limits": {"assets_only": True}}
+        "limits": {"max_order_pct": 10.0, "assets_only": True, "guards": ["whitelist"]}}
+    assert client.put(f"/api/desks/{d}/limits", json={"limits": {"max_order_pct": None}}).json() == {
+        "limits": {"assets_only": True, "guards": ["whitelist"]}}
     bad = client.put(f"/api/desks/{d}/limits", json={"limits": {"max_order_pct": -1}})
     assert bad.status_code == 400 and code(bad) == "bad_limits"
     assert client.put(f"/api/desks/{d}/limits", json={"limits": "x"}).status_code == 400
-    assert client.get(f"/api/desks/{d}/limits").json() == {"limits": {"assets_only": True}}
+    assert client.get(f"/api/desks/{d}/limits").json() == {"limits": {"assets_only": True, "guards": ["whitelist"]}}
     assert client.get("/api/desks/999/limits").status_code == 404

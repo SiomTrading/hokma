@@ -20,7 +20,7 @@ def call(name, args, agent="hugo"):
 
 
 def body(**extra):
-    return {"line": "DT", "order_type": "market", "thesis": "test", "legs": [{"contract_id": NQ, "side": "buy", "effect": "open", "qty": 1}], **extra}
+    return {"line": "DT", "order_type": "market", "thesis": "test", "legs": [{"contract_id": NQ, "side": "buy", "effect": "open", "qty": 1}], "stop_loss": "20990", **extra}
 
 
 def test_an_agent_proposes_and_at_level_1_nothing_goes_out(ready):

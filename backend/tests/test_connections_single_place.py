@@ -47,6 +47,10 @@ def test_no_route_outside_connections_takes_a_key_or_a_provider():
         for route, line in routes_in(path):
             if route.startswith("/api/desks/{desk_id}/connections"):   # which already configured connections one desk
                 continue                                              # uses (SPEC-014); it takes no key, no provider setup
+            if route.startswith("/api/desks/{desk_id}/strategies/"):      # the account a strategy of a desk trades through (SPEC-027): a strategy_key is not an API key
+                continue
+            if route.startswith("/api/desks/{desk_id}/option-detail/"):   # the strategies saved from the Option detail panel (SPEC-028, 3339-B): a strategy key is not an API key
+                continue
             if CONFIG_WORDS.search(route) and not route.startswith("/api/backup/key"):   # the recovery key, not a provider's
                 offenders.append(f"{path.relative_to(ROOT)}:{line}: {route}")
     assert offenders == [], "keys and providers are configured only under /api/connections"

@@ -43,7 +43,7 @@ def test_the_tools_are_declared_with_strict_schemas_and_only_the_cycle_tools_tha
         assert hokma_tools.TOOLS[name][4] is writes and name in hokma_tools.NO_UNIT, name
         assert listed[name]["inputSchema"]["additionalProperties"] is False and listed[name]["description"]
     assert set(desk_tools.TOOLS) == {"desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_status", "desk_cycle_learn", "desk_signals",
-                                    "lessons_propose"}
+                                    "lessons_propose", "desk_analysis_start", "desk_analysis_get", "desk_analysis_list"}
     for name in desk_tools.TOOLS:                                       # no tool takes a path or a pattern, and none lets the agent declare a control
         props = set(hokma_tools.TOOLS[name][1])
         assert not props & {"path", "file", "regex", "pattern", "origin", "line", "effect", "price", "risk", "owner_order", "level"}, name
@@ -87,7 +87,7 @@ def test_the_mandate_edit_goes_through_save_mandate_as_the_agent_and_never_chang
     assert err and out["error_code"] == "bad_input"
 
 
-def test_the_cycle_tool_checks_its_arguments_before_it_asks_for_a_runtime(desk, monkeypatch):
+def test_the_cycle_tool_checks_its_arguments_and_only_queues_the_run(desk, monkeypatch):
     graph.register_runtime_factory(None)
     monkeypatch.setattr(app_runtime, "build_runtime", lambda desk_id: (_ for _ in ()).throw(graph.CycleError("no_data", "the chain is down")))
     for bad in ({"desk_id": desk.swo_id, "symbol": ""}, {"desk_id": desk.swo_id, "symbol": "A" * 41}, {"desk_id": desk.swo_id, "symbol": "AAPL", "as_of": "not a date"},
@@ -96,9 +96,12 @@ def test_the_cycle_tool_checks_its_arguments_before_it_asks_for_a_runtime(desk, 
         out, err = call("desk_cycle_run", bad)
         assert err and out["error_code"] in ("bad_input", "blocked"), bad
         assert graph._FACTORY is None                                  # nothing was registered by a call that failed its arguments
+    assert graph._FACTORY is None                                      # the tool server never builds a runtime for a cycle: it only queues it
     out, err = call("desk_cycle_run", {"desk_id": desk.swo_id, "symbol": "AAPL", "as_of": "2026-11-20T15:00:00Z"})
-    assert err and out["error_code"] == "bad_input" and "no_data" in out["message"] and "the chain is down" in out["message"]
-    assert graph._FACTORY is app_runtime.build_runtime                 # the runtime of the app is registered once, on the first run
+    assert not err and out["status"] == "queued" and out["run_id"] and graph._FACTORY is None
+    from hokma.backoffice import runs
+
+    assert runs.get(out["run_id"])["status"] == "running"            # opened, waiting for the app
     other = lambda desk_id: None                                      # noqa: E731
     graph.register_runtime_factory(other)
     desk_tools.ensure_runtime()

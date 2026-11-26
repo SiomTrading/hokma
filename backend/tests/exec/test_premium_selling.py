@@ -225,7 +225,7 @@ def test_an_agent_cannot_pose_as_the_chat_to_dodge_the_guard_ECT_042(swo):
 
 def test_the_guard_sits_between_the_limits_and_the_rules_of_the_broker_and_no_configuration_turns_it_off_ECT_042():
     names = registry.known_types()
-    assert names.index("limits") + 1 == names.index("premium_selling") == names.index("broker_rules") - 1
+    assert names.index("limits") + 1 == names.index("premium_selling") == names.index("stop") - 1 == names.index("broker_rules") - 2          # the stop of an entry (3390e3) sits between it and the rules
     assert "premium_selling" in registry.ALWAYS
     assert [g.name for g in registry.build({"guards": ["whitelist"]})].count("premium_selling") == 1
     assert [g.name for g in registry.build(None)] == list(names)

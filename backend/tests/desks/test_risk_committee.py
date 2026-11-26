@@ -245,7 +245,7 @@ def test_reed_tightens_the_limits_of_the_desk_inside_the_frame_of_the_owner_and_
     models = voices(verdict=verdict_reply(limits={"max_premium_usd": 3000, "max_drawdown_pct": 8}))
     result = run_committee(case(book), models, kit_root=KIT, db=book.db)
     assert result.limits.status == "applied"
-    assert service.get_limits(book.desk_id, db=book.db) == {"max_premium_usd": 3000.0, "max_drawdown_pct": 8.0}
+    assert service.get_limits(book.desk_id, db=book.db) == {"max_premium_usd": 3000.0, "max_drawdown_pct": 8.0, "guards": ["limits", "account"]}
 
 
 def test_reed_cannot_loosen_a_limit_and_the_attempt_asks_the_owner_AH_19(book):
@@ -253,7 +253,7 @@ def test_reed_cannot_loosen_a_limit_and_the_attempt_asks_the_owner_AH_19(book):
     models = voices(verdict=verdict_reply(limits={"max_premium_usd": 9000}))
     result = run_committee(case(book), models, kit_root=KIT, db=book.db)
     assert result.limits.status == "asks_owner" and result.limits.loosened == ("max_premium_usd",) and "owner" in result.limits.message
-    assert service.get_limits(book.desk_id, db=book.db) == {"max_premium_usd": 5000.0}
+    assert service.get_limits(book.desk_id, db=book.db) == {"max_premium_usd": 5000.0, "guards": ["limits"]}
     box = risk.risk_toolbox(ARBITER, book.desk_id, db=book.db)                                   # the same through his tool
     outcome = box.call("desk_configure", {"limits": {"max_premium_usd": 9000}})
     assert outcome.ok and outcome.data["status"] == "asks_owner" and outcome.data["loosened"] == ["max_premium_usd"]
@@ -330,7 +330,7 @@ def test_apply_limit_changes_tightens_and_a_loosening_saves_nothing_and_asks_the
 def test_reed_fills_the_contract_of_limits_and_cannot_raise_the_base_the_owner_set_TA_51(book):
     service.set_limits(book.desk_id, {"max_premium_usd": 5000}, db=book.db)                     # what the owner agreed when the desk was created
     contract = risk.limits_contract(book.desk_id, db=book.db)
-    assert contract.line == "SWO" and contract.base == {"max_premium_usd": 5000.0} and not contract.complete
+    assert contract.line == "SWO" and contract.base == {"max_premium_usd": 5000.0, "guards": ["limits"]} and not contract.complete
     assert contract.missing == ("max_position_pct", "max_daily_loss_pct", "max_drawdown_pct") and contract.filled == ("max_premium_usd",)
     assert risk.fill_contract(book.desk_id, {"max_position_pct": 10, "max_daily_loss_pct": 2, "max_drawdown_pct": 8}, db=book.db).status == "applied"
     full = risk.limits_contract(book.desk_id, db=book.db)

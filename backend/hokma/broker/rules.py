@@ -22,8 +22,10 @@ from being reduced); only what Schwab itself raises (reviews, warns, alerts) sti
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from decimal import Decimal
 from typing import Any
 
+from hokma.exec import thresholds
 from hokma.i18n import t
 from hokma.schwab.accounts import OPEN_ORDER_STATUSES
 
@@ -32,7 +34,16 @@ LIMIT_KEYS = ("max_order_pct", "max_daily_loss_pct", "assets_only", "options_all
               "extended_hours_allowed", "max_orders_per_day",
               # SPEC-018 (H2): the limits that the filter of hokma.exec applies by code
               "max_position_pct", "cooldown_seconds", "max_drawdown_pct", "capital_floor_usd", "funding", "max_premium_usd",
-              "max_margin_pct", "max_weight_pct", "event_windows", "guards")
+              "max_margin_pct", "max_weight_pct", "event_windows", "guards",
+              # SPEC-026 (A8): a loss or a drawdown in USD that scales with the equity (see hokma.exec.thresholds)
+              "daily_loss_steps", "drawdown_steps",
+              # SPEC-025: what the rules tab keeps next to the limits; no guard reads them (see hokma.broker.desk_rules)
+              "instructions", "proposed", "dismissed", "rule_sources",
+              # SPEC-026: restriction or notice of each control (see hokma.broker.rule_modes); read by the pipeline of the guards
+              "rule_modes")
+META_KEYS = ("instructions", "proposed", "dismissed", "rule_sources", "rule_modes")
+RULE_TEXT_MAX = 500
+RULE_SOURCES = ("chat", "hand", "suggested")
 FUNDING_KEYS = ("daily_loss_usd", "trailing_drawdown_usd", "max_contracts", "consistency_pct")
 MAX_EVENT_WINDOWS = 20
 MAX_ORDER_PCT = 1000.0
@@ -93,12 +104,16 @@ def validate_limits(changes: Any, current: Mapping[str, Any] | None = None) -> d
             merged[key] = value
         elif key == "funding":
             merged[key] = _validate_funding(value)
+        elif key in ("daily_loss_steps", "drawdown_steps"):
+            merged[key] = thresholds.clean_steps(value)
         elif key == "event_windows":
             merged[key] = _validate_windows(value)
         elif key == "guards":
             from hokma.exec.guards import registry
 
             merged[key] = registry.validate_types(value)
+        elif key in META_KEYS:
+            merged[key] = _validate_meta(key, value)
         else:                                                  # assets_only and the three *_allowed
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be true or false")
@@ -145,11 +160,59 @@ def _validate_windows(value: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _validate_meta(key: str, value: Any) -> Any:
+    """The notes of the rules tab: instructions, proposals of the chief, dismissed suggestions and where each rule came from."""
+    if key == "dismissed":
+        if not isinstance(value, list) or len(value) > 60 or not all(isinstance(x, str) and 0 < len(x) <= 40 for x in value):
+            raise ValueError("dismissed must be a list of up to 60 ids")
+        return list(dict.fromkeys(value))
+    if key == "rule_modes":
+        from hokma.broker import rule_modes
+
+        return rule_modes.clean_modes(value)
+    if key == "rule_sources":
+        if not isinstance(value, Mapping) or len(value) > 80 or not all(
+                isinstance(k, str) and 0 < len(k) <= 60 and v in RULE_SOURCES for k, v in value.items()):
+            raise ValueError("rule_sources must map a rule id to chat, hand or suggested")
+        return dict(value)
+    top = 40 if key == "instructions" else 20
+    if not isinstance(value, list) or len(value) > top:
+        raise ValueError(f"{key} must be a list of at most {top} items")
+    out = []
+    for item in value:
+        if not isinstance(item, Mapping) or not isinstance(item.get("id"), str) or not isinstance(item.get("text"), str) \
+                or len(item["text"]) > RULE_TEXT_MAX:
+            raise ValueError(f"every item of {key} needs an id and a text of up to {RULE_TEXT_MAX} characters")
+        out.append(dict(item))
+    return out
+
+
 NUMERIC_LIMITS = ("max_order_pct", "max_daily_loss_pct", "max_orders_per_day")      # smaller is stricter; absent is off
 SMALLER_IS_STRICTER = ("max_position_pct", "max_drawdown_pct", "max_premium_usd", "max_margin_pct", "max_weight_pct")
 LARGER_IS_STRICTER = ("cooldown_seconds", "capital_floor_usd")      # a longer pause and a higher floor are stricter; absent is off
 FLAG_LIMITS = {"assets_only": True, "options_allowed": False, "short_allowed": False, "extended_hours_allowed": False}
 # for a flag limit the value that turns it ON (assets_only is on when True; the three *_allowed are on when False)
+
+
+def _loss_loosened(old: Mapping[str, Any], new: Mapping[str, Any], fixed: str, steps_key: str) -> bool:
+    """A USD loss or drawdown (fixed, or a scale of steps, or both) is loosened when, at any point of the equity (the breaks of both scales,
+    and the equity now), the cap of `new` is above the cap of `old`, or when it was set and now it is not. The cap at a point is the smaller of
+    the fixed USD and the step, as the account guard applies it."""
+    was_fixed, now_fixed = (old.get("funding") or {}).get(fixed), (new.get("funding") or {}).get(fixed)
+    was_steps, now_steps = old.get(steps_key), new.get(steps_key)
+    if was_fixed is None and not was_steps:
+        return False
+    if now_fixed is None and not now_steps:
+        return True
+    points = {Decimal(str(s["up_to_equity"])) for s in (was_steps or []) + (now_steps or [])}
+    points |= {p + Decimal("0.01") for p in points}                     # the first value past each break, where the next step starts
+    points.add(Decimal(1))
+    for base in points:
+        was = thresholds.effective_usd(was_fixed, was_steps, base)
+        now = thresholds.effective_usd(now_fixed, now_steps, base)
+        if was is not None and (now is None or now > was):
+            return True
+    return False
 
 
 def loosened_limits(before: Mapping[str, Any] | None, after: Mapping[str, Any] | None) -> list[str]:
@@ -173,8 +236,13 @@ def loosened_limits(before: Mapping[str, Any] | None, after: Mapping[str, Any] |
         was, now = old.get(key), new.get(key)
         if was is not None and (now is None or now < was):
             out.append(key)
+    for fixed, steps_key, key in (("daily_loss_usd", "daily_loss_steps", "daily_loss"), ("trailing_drawdown_usd", "drawdown_steps", "drawdown")):
+        if _loss_loosened(old, new, fixed, steps_key):
+            out.append(steps_key if old.get(steps_key) or new.get(steps_key) else f"funding.{fixed}")
     was_f, now_f = old.get("funding") or {}, new.get("funding") or {}
     for key in FUNDING_KEYS:
+        if key in ("daily_loss_usd", "trailing_drawdown_usd"):
+            continue            # a USD loss or drawdown is compared with its steps above
         if was_f.get(key) is not None and (now_f.get(key) is None or now_f[key] > was_f[key]):
             out.append(f"funding.{key}")
     for window in old.get("event_windows") or []:
@@ -189,6 +257,9 @@ def loosened_limits(before: Mapping[str, Any] | None, after: Mapping[str, Any] |
         listed = limits.get("guards")
         return set(registry.known_types()) if listed is None else set(listed) | set(registry.ALWAYS)
 
+    from hokma.broker import rule_modes
+
+    out.extend(rule_modes.loosened_modes(old, new))
     if not effective(old) <= effective(new):          # absent means every known type: dropping any of them loosens
         out.append("guards")
     return out
@@ -365,9 +436,13 @@ def _money(value: float) -> str:
 
 # --------------------------------------------------------------------------------------------------------- evaluate
 
-def gate(orders_enabled: bool, desk_status: str, account_ok: bool) -> dict[str, Any] | None:
+def gate(orders_enabled: bool, desk_status: str, account_ok: bool, account_state: str = "ok") -> dict[str, Any] | None:
     """The first three rows of 18.3: no account of a broker that trades, the switch of the broker off, the desk paused or
-    archived. They need no preview, so the service can refuse before it calls the broker. None when none of them applies."""
+    archived. They need no preview, so the service can refuse before it calls the broker. None when none of them applies.
+    `account_ok` is about the account the order resolved to (SPEC-027 section 5), not about the desk; `account_state` is
+    `needs_account` when the desk has accounts and the strategy of the order has none."""
+    if account_state == "needs_account":
+        return _result("refused", "needs_account", t("broker.err.needs_account"))
     if not account_ok:
         return _result("refused", "no_trading_account", t("broker.err.no_trading_account"))
     if not orders_enabled:
@@ -378,7 +453,7 @@ def gate(orders_enabled: bool, desk_status: str, account_ok: bool) -> dict[str, 
 
 
 def evaluate(*, action: str, orders_enabled: bool, desk_status: str, account_ok: bool, order: Any = None,
-             preview: Mapping[str, Any] | None = None, capital: float = 0.0, positions: Sequence[Any] = (),
+             preview: Mapping[str, Any] | None = None, capital: float | None = 0.0, equity: float | None = None, positions: Sequence[Any] = (),
              open_orders: Sequence[Any] = (), limits: Mapping[str, Any] | None = None, assets: Iterable[str] = (),
              orders_today: int = 0, marks: Mapping[str, float] | None = None,
              replaces_order_id: Any = None) -> dict[str, Any]:
@@ -386,7 +461,8 @@ def evaluate(*, action: str, orders_enabled: bool, desk_status: str, account_ok:
 
     action: "preview", "place", "replace" or "cancel". orders_enabled: the switch of the broker of the account. desk_status:
     "active", "paused" or "archived". account_ok: the desk has an active account of a broker that takes orders. order: the
-    request (REF B.1). preview: the `PreviewOrder` as JSON (REF B.2). capital: `desks.capital`. positions: `Position` objects
+    request (REF B.1). preview: the `PreviewOrder` as JSON (REF B.2). capital: `desks.capital` (None: the desk has none). equity: the equity of the account that runs the order, the base of the
+    percent limits when the desk has no capital. positions: `Position` objects
     of the account. open_orders: `Order` objects of the account (those that are not open are ignored). limits: the desk's
     optional limits (empty means none). assets: the symbols of `desk_assets`. orders_today: orders sent today by the desk.
     marks: symbol -> price for orders without a price, over the ones derived from the positions and the preview.
@@ -426,7 +502,7 @@ def evaluate(*, action: str, orders_enabled: bool, desk_status: str, account_ok:
             order_value, unpriced = _nodes_value(order, held, marks)
             numbers["unpriced"] = unpriced
         numbers["order_value"] = order_value
-        flags += _soft_flags(facts, limits, assets, capital, positions, open_orders, held, marks, order_value,
+        flags += _soft_flags(facts, limits, assets, capital, equity, positions, open_orders, held, marks, order_value,
                              orders_today, replaces_order_id, numbers)
         if numbers.get("unpriced"):                            # a value that cannot be worked out cannot be held to the capital
             symbols = ", ".join(sorted({_sym(s) for s in numbers["unpriced"] if s}) or ["?"])
@@ -438,8 +514,8 @@ def evaluate(*, action: str, orders_enabled: bool, desk_status: str, account_ok:
     return _result("auto", "ok", "", **numbers)
 
 
-def _soft_flags(facts: Mapping[str, Any], limits: Mapping[str, Any], assets: Iterable[str], capital: float,
-                positions: Sequence[Any], open_orders: Sequence[Any], held: Mapping[str, tuple[float, float]],
+def _soft_flags(facts: Mapping[str, Any], limits: Mapping[str, Any], assets: Iterable[str], capital: float | None,
+                equity: float | None, positions: Sequence[Any], open_orders: Sequence[Any], held: Mapping[str, tuple[float, float]],
                 marks: Mapping[str, float], order_value: float, orders_today: int, replaces_order_id: Any,
                 numbers: dict[str, Any]) -> list[tuple[str, str]]:
     flags: list[tuple[str, str]] = []
@@ -454,8 +530,15 @@ def _soft_flags(facts: Mapping[str, Any], limits: Mapping[str, Any], assets: Ite
         in_orders += value
     committed = in_positions + in_orders + order_value
     numbers.update(committed=committed, capital=capital, in_positions=in_positions, in_open_orders=in_orders)
-    if committed > capital:
+    if capital is not None and committed > capital:             # a desk without capital (SPEC-027) has no ceiling of its own
         flags.append(("capital", t("broker.why.capital", committed=_money(committed), capital=_money(capital))))
+    # what a percent limit is a percent of: the capital of the desk, else the equity of the account. With neither it cannot be
+    # measured, and a limit that cannot be measured is not skipped: the order waits for the owner.
+    base = capital if capital is not None and capital > 0 else (equity if equity is not None and equity > 0 else None)
+    numbers["pct_base"] = base
+    if base is None and (limits.get("max_order_pct") is not None or limits.get("max_daily_loss_pct") is not None):
+        flags.append(("pct_base", t("broker.why.pct_base")))
+    capital = base or 0.0
 
     pct = limits.get("max_order_pct")
     if pct is not None and capital > 0 and order_value > capital * pct / 100.0:

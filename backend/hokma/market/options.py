@@ -127,6 +127,8 @@ def _text(code: str, symbol: str = "") -> str:
         return t("options.err.auth_failed")
     if code == "rate_limited":
         return t("options.err.rate_limited")
+    if code == "no_ex_dividend":
+        return t("options.err.no_ex_dividend", symbol=symbol)
     if code == "schwab.auth":
         return t("options.err.schwab.auth")
     if code == "schwab.rate_limited":
@@ -1179,6 +1181,29 @@ def chain(symbol: Any, dates: Any, strikes: Any = None, desk_id: int | None = No
 
 
 # ---------------------------------------------------------------------------------------------- dashboard: underlying
+
+def ex_dividend(symbol: Any, desk_id: int | None = None) -> dict:
+    """The ex-dividend dates of one US stock or ETF (SPEC-028, 3339-A): the next one (`nextDivExDate` of the fundamental block of the quote), the last
+    one (`divExDate`), the amount per share and the yearly frequency. Only Schwab carries them: with another source, or with a symbol the block does not
+    cover, it raises `no_ex_dividend` (the panel says "no data", it never shows a date it does not have). `next_ex_date` None with the rest present
+    means that the source knows of no coming ex-dividend date. Cached 15 minutes: the date changes a few times a year and the panel asks on every slider."""
+    symbol = _check_equity(symbol)
+    providers = _providers(desk_id)
+    if SCHWAB not in providers:
+        raise _fail("no_ex_dividend", 409, symbol)
+
+    def build() -> dict:
+        answer = _schwab_call(lambda: schwab_endpoints.quotes([symbol], "fundamental"))
+        node = answer.get(symbol) if answer is not None else None
+        data = schwab_models.dump(node) if node is not None else {}
+        block = data.get("fundamental") if isinstance(data, dict) else None
+        if not isinstance(block, dict):
+            raise _fail("no_ex_dividend", 404, symbol)
+        return {"symbol": symbol, "source": "Schwab", "as_of": _iso(_now()), "next_ex_date": _day_of(block.get("nextDivExDate")),
+                "last_ex_date": _day_of(block.get("divExDate")), "amount": _clean(block.get("divAmount")), "frequency": _whole_of(block.get("divFreq"))}
+
+    return _cached(("ex_dividend", symbol), CONTRACT_SECONDS, build)
+
 
 def _is_iex(source: Any) -> bool:
     """True when the chart's own source is Alpaca (IEX feed): its volume is one exchange's, not the consolidated one."""

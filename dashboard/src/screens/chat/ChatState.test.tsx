@@ -8,7 +8,7 @@ import { renderWithApp, TEST_TOKEN } from "@/test/utils";
 import { ChatScreen, resetUsageWarning } from "./ChatScreen";
 import { ConversationList } from "./ConversationList";
 import { FakeServer } from "./testkit";
-import { setHub } from "./hub";
+import { getHub, setHub } from "./hub";
 
 const OPTIONS = {
   agents: [{ slug: "risk", name: "Risk desk", description: "Watches limits" }],
@@ -71,8 +71,8 @@ function open(conversation = "9") {
   return view;
 }
 
-describe("history restores attachments and tool lines", () => {
-  it("paints the chips with the image thumbnail and the tool lines where they were called", async () => {
+describe("history restores attachments, and the tool lines go to the side panel", () => {
+  it("paints the chips with the image thumbnail, the whole answer without tool lines, and keeps the steps for the panel", async () => {
     open("9");
     server.emit({
       type: "history",
@@ -97,13 +97,11 @@ describe("history restores attachments and tool lines", () => {
     expect(within(user).getByText("ES-5m.png")).toBeInTheDocument();
     expect(within(user).getByText("plan.pdf")).toBeInTheDocument();
     expect(user.querySelectorAll("img").length).toBe(1);
-    // text, tool line, text: the line sits where the tool was called
-    const order = Array.from(document.querySelectorAll('[data-testid="assistant-message"], [data-testid="tool-use"]')).map((n) => n.getAttribute("data-testid"));
-    expect(order).toEqual(["assistant-message", "tool-use", "assistant-message"]);
-    const tool = screen.getByTestId("tool-use");
-    expect(within(tool).getByText("notes.md")).toBeInTheDocument();
-    expect(within(tool).getByText(t("chat.tool.done"))).toBeInTheDocument();
-    expect(within(tool).getByText("file text")).toBeInTheDocument();
+    // the answer is its whole text; the tool is not in the chat (A2c), it is the first step of the turn in the panel
+    expect(screen.getAllByTestId("assistant-message").map((n) => n.textContent)).toEqual([expect.stringContaining("I will look. Done.")]);
+    expect(screen.queryByTestId("tool-use")).toBeNull();
+    const [turn] = getHub().activity.get("9").turns;
+    expect(turn?.steps).toMatchObject([{ id: "tu1", kind: "read_file", target: "notes.md", isError: false, result: "file text" }]);
   });
 });
 
@@ -123,8 +121,9 @@ describe("a turn in progress survives a reconnect", () => {
       partial: { turn_id: "t1", text: "Part one and two ", tools: [{ id: "tu1", name: "Bash", kind: "run_command", target: "ls", at: 4, is_error: null, result: null }] },
     });
     const bubbles = await screen.findAllByTestId("assistant-message");
-    expect(bubbles.map((b) => b.textContent)).toEqual(["Part", "one and two"].map((s) => expect.stringContaining(s)));
-    expect(within(screen.getByTestId("tool-use")).getByText(t("chat.tool.running"))).toBeInTheDocument();
+    expect(bubbles.map((b) => b.textContent)).toEqual([expect.stringContaining("Part one and two")]);
+    expect(screen.queryByTestId("tool-use")).toBeNull();
+    expect(getHub().activity.get("9").turns[0]?.steps).toMatchObject([{ id: "tu1", isError: null }]);
     server.emit({ type: "delta", conversation_id: "9", turn_id: "t1", text: "three" });
     await waitFor(() => expect(screen.getAllByTestId("assistant-message").pop()?.textContent).toContain("one and two three"));
     expect(screen.getByRole("button", { name: t("chat.composer.stop") })).toBeInTheDocument();

@@ -39,7 +39,7 @@ describe("the prices of a list by stream", () => {
     socket.serverSend({ type: "snapshot", sub: nq, seq: 1, epoch: "e1", last: 100, previous_close: 90, change_pct: 11.1 });
     socket.serverSend({ type: "last", sub: nq, seq: 2, epoch: "e1", price: 101, change_pct: 12.2 });
     socket.serverSend({ type: "error", sub: es, seq: 1, epoch: "e1", code: "market.down" });
-    expect(quotes).toEqual([["NQ=F", { last: 100, previousClose: 90, changePct: 11.1, source: null, delayed: false }], ["NQ=F", { last: 101, previousClose: null, changePct: 12.2, source: null, delayed: false }]]);
+    expect(quotes).toEqual([["NQ=F", { last: 100, previousClose: 90, changePct: 11.1, volume: null, source: null, delayed: false }], ["NQ=F", { last: 101, previousClose: null, changePct: 12.2, volume: null, source: null, delayed: false }]]);
     socket.serverSend({ type: "last", sub: nq, seq: 3, epoch: "e1", price: 102, change_pct: 13, source: "Schwab", data_state: "live" });
     socket.serverSend({ type: "last", sub: nq, seq: 4, epoch: "e1", price: 103, change_pct: 14, source: "Yahoo Finance", data_state: "delayed" });
     expect((quotes.slice(2) as Array<[string, LiveQuote]>).map(([, q]) => [q.source, q.delayed])).toEqual([["Schwab", false], ["Yahoo Finance", true]]);

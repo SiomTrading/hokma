@@ -17,7 +17,7 @@ SCAN_LIMIT = 500
 
 def _derive(unit) -> set[str]:
     found: set[str] = set()
-    if any(c.message_count > 0 for c in unit.conversations.list(limit=SCAN_LIMIT)):
+    if any(c.message_count > 0 for c in unit.conversations.list(limit=SCAN_LIMIT, include_ledger=False)):
         found.add(FIRST_CONVERSATION)
     if len(unit.projects.list()) >= 2:
         found.add(FIRST_PROJECT)

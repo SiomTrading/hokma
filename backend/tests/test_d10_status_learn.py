@@ -303,6 +303,15 @@ def test_first_day_progress_goes_from_zero_to_three(client, db):  # noqa: F811
         assert set(u.onboarding.done()) == {"first_conversation", "first_project", "first_image"}
 
 
+def test_the_token_ledger_of_the_strategies_panel_does_not_count_as_the_first_conversation(client, db):  # noqa: F811
+    from hokma.db.repos.conversations import LEDGER_TITLE
+    with db.write() as u:
+        ledger = u.conversations.create(engine="claude_code", title=LEDGER_TITLE)
+        u.conversations.archive(ledger.id, True)
+        u.messages.add(ledger.id, "assistant", LEDGER_TITLE, tokens_in=10, tokens_out=5)
+    assert client.get("/api/learn/progress").json()["steps"]["first_conversation"] is False
+
+
 def test_first_day_before_the_database_exists(env):  # noqa: F811
     body = TestClient(create_app(), headers=HEADERS).get("/api/learn/progress").json()
     assert body["ready"] is False and body["done"] == 0

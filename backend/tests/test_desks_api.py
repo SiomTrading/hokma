@@ -35,6 +35,21 @@ def client(desks_db):
         yield c
 
 
+def test_post_with_a_new_demo_account_creates_it_and_the_capital_comes_from_it(client, desks_db):
+    res = client.post("/api/desks", json={"name": "Con cuenta", "template": "minimal", "account": {"mode": "new", "initial_capital": 25000}})
+    assert res.status_code == 201
+    body = res.json()
+    assert body["capital"] == 25000 and body["accounts"][0]["name"] == "Con cuenta demo" and body["accounts"][0]["initial_capital"] == 25000
+
+
+def test_post_without_money_and_with_a_bad_account_are_refused(client):
+    free = client.post("/api/desks", json={"name": "Sin plata", "template": "minimal"})                          # SPEC-027: no money is asked to create
+    assert free.status_code == 201 and free.json()["capital"] is None and free.json()["accounts"] == []
+    bad = client.post("/api/desks", json={"name": "Mala", "template": "minimal", "account": {"mode": "existing", "account_id": 999}})
+    assert bad.status_code == 404 and bad.json()["detail"]["code"] == "account_not_found"
+    assert [d["name"] for d in client.get("/api/desks").json()["desks"]] == ["Sin plata"]               # the bad one left nothing
+
+
 def new_desk(client, name="Futuros NQ", **kw):
     body = {"name": name, "capital": 10000, "template": "minimal", **kw}
     res = client.post("/api/desks", json=body)

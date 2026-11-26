@@ -9,8 +9,9 @@ export interface TelegramState {
   user_name: string;
   group_linked?: boolean;
   avisos?: "ok" | "no_permission" | "unreachable" | "failed" | null;
-  /** Bug 1170: what Telegram answered when the Avisos topic failed (code, error class and a translated message). */
+  /** The permission mode Telegram turns run with ("ask" or "auto"); it follows the engine's mode (telegram/glue.py permission_mode). */
   permission_mode?: "ask" | "auto";
+  /** Bug 1170: what Telegram answered when the Avisos topic failed (code, error class and a translated message). */
   avisos_detail?: { code: number | null; error: string; message: string } | null;
   outbox?: { pending: number; last_error: string | null };
   connect_error?: string | null;

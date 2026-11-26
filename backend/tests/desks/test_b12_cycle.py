@@ -9,7 +9,7 @@ from trader_support import C200, C210, answer_json, sheet
 
 from hokma import exec as hexec
 from hokma.backoffice import runs
-from hokma.broker import service
+from hokma.broker import pnl, service
 from hokma.contracts import sheet as sheet_store
 import pandas as pd
 from b7_support import ScriptedChat
@@ -22,19 +22,22 @@ from hokma.desks.swo.graph import NODES, CycleError, CycleResult, Mark, learn_af
 from hokma.desks.plantel import SEATS
 from hokma.desks.core.graph import ModelReply
 from hokma.exec import killswitch, levels
+from account_links_support import link_principal
 
 
 @pytest.fixture
-def swo(ready):
+def swo(ready, monkeypatch):
     """A real SWO desk (the real kit) on its own account of the simulated broker, with the two option sheets and the quotes of the chain."""
     desk = create_swo_desk("Options swing", 1_000_000, db=ready.db)
     ready.swo_id = desk["id"]
     ready.agent = desk_agent_slug(SEATS["A11"], ready.swo_id)
     with ready.db.write() as u:
         account = u.broker.create_account(ready.broker_id, "Sim B", 1_000_000)
-        u.broker.link_desk(ready.swo_id, account.id)
+        link_principal(u, ready.swo_id, account.id)
         ready.swo_account = account.id
     service.set_limits(ready.swo_id, {"max_premium_usd": 5000, "max_drawdown_pct": 10}, db=ready.db)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")                           # the broker answers: the drawdown rule of the desk can be checked
+    monkeypatch.setattr(pnl, "latest_pnl", lambda account_id: pnl.BrokerPnl(account_id, 1_000_000.0, 1_000_000.0, 0.0, (), stamp, "sim"))
     killswitch.beat(ready.swo_id, db=ready.db)                      # the emergency switch has measured the desk
     for cid in (C200, C210):
         sheet_store.save(sheet(cid), db=ready.db)

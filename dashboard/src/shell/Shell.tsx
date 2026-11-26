@@ -6,6 +6,7 @@ import { ShutdownDialog } from "@/screens/system/ShutdownDialog";
 import { getScreen } from "./registry";
 import { SettingsModal } from "./SettingsModal";
 import { Sidebar } from "./Sidebar";
+import { RightPanel } from "./RightPanel";
 import { Boundary, Slot, hasSlot } from "./Slot";
 import { TopBar } from "./TopBar";
 import { matchShortcut } from "./shortcuts";
@@ -51,31 +52,6 @@ function ScreenHost() {
         );
       })}
     </>
-  );
-}
-
-function RightPanel() {
-  const { t } = useI18n();
-  const shell = useShell();
-  return (
-    <aside className="right" aria-label={t("rightPanel.title")}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 10px 6px 14px" }}>
-        <span className="sec" style={{ padding: 0 }}>
-          {t("rightPanel.title")}
-        </span>
-        <div style={{ display: "flex", gap: 2 }}>
-          <Slot name="rightPanel.actions" />
-          <IconButton icon="chevronRight" size={15} label={t("rightPanel.collapse")} onClick={shell.toggleRightPanel} />
-        </div>
-      </div>
-      {hasSlot("rightPanel") ? (
-        <Slot name="rightPanel" />
-      ) : (
-        <p className="p" style={{ padding: "0 14px" }}>
-          {t("rightPanel.unavailable")}
-        </p>
-      )}
-    </aside>
   );
 }
 
@@ -172,7 +148,7 @@ export function Shell() {
         <main className="center">
           <ScreenHost />
         </main>
-        {layout.rightPanel && !layout.focus ? <RightPanel /> : null}
+        {!layout.focus ? <RightPanel /> : null}
         {layout.terminal && !layout.focus ? <TerminalDock /> : null}
         <div className="status" role="contentinfo" aria-label={t("settings.status")}>
           <Slot name="statusBar" />

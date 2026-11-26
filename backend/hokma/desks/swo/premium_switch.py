@@ -17,9 +17,9 @@ from hokma.db import Database
 from hokma.exec.guards.premium_selling import SwitchState, switch_state
 from hokma.i18n import t
 
-PURCHASE_STRUCTURES: tuple[str, ...] = ("long_call", "long_put", "debit_call_spread", "debit_put_spread")
+PURCHASE_STRUCTURES: tuple[str, ...] = ("long_call", "long_put", "debit_call_spread", "debit_put_spread", "protective_put")
 SELLING_STRUCTURES: tuple[str, ...] = ("short_put", "short_call", "credit_call_spread", "credit_put_spread", "iron_condor",
-                                       "short_straddle", "short_strangle", "covered_call", "cash_secured_put")
+                                       "short_straddle", "short_strangle", "covered_call", "cash_secured_put", "iron_butterfly")
 ALL_STRUCTURES: tuple[str, ...] = PURCHASE_STRUCTURES + SELLING_STRUCTURES
 
 

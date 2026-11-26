@@ -59,7 +59,7 @@ def test_hokma_db_migrate_command(env, capsys):
     assert main(["db", "migrate"]) == 0
     assert t("db.migrate.done", version=__import__("hokma.db.migrate", fromlist=["discover"]).discover()[-1][0]) in capsys.readouterr().out
     assert main(["db", "migrate"]) == 0
-    assert sqlite3.connect(str(db_path())).execute("SELECT count(*) FROM schema_version").fetchone()[0] == __import__("hokma.db.migrate", fromlist=["discover"]).discover()[-1][0]
+    assert sqlite3.connect(str(db_path())).execute("SELECT count(*) FROM schema_version").fetchone()[0] == len(__import__("hokma.db.migrate", fromlist=["discover"]).discover())       # one row per migration: the versions are not contiguous (0028 and 0030 come later)
 
 
 def test_hokma_db_migrate_exits_with_4_and_the_catalog_message(env, capsys):

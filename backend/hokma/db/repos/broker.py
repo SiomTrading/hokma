@@ -1,4 +1,4 @@
-"""brokers, broker_accounts, account_ledger, desk_accounts (task 3294, C7-5a). Rows and their limits only: the
+"""brokers, broker_accounts, account_ledger, desk_account_links and desk_strategy_accounts (task 3294, C7-5a; 0024, SPEC-027). Rows and their limits only: the
 contract that brokers obey lives in hokma.broker."""
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from hokma.db.errors import ValidationError
+from hokma.db.errors import IntegrityViolation, ValidationError
 from hokma.db.models import Record, loads_json
 from hokma.db.repos.base import Repo, require_in
 from hokma.db.repos.desks import MAX_CAPITAL, MIN_CAPITAL
@@ -16,7 +16,23 @@ from hokma.db.timeutil import utcnow
 class NameTaken(ValidationError):
     """An account name already used in that broker."""
 
+
+class AlreadyLinked(ValidationError):
+    """The account is already in that desk."""
+
+
+class NotLinked(ValidationError):
+    """The account is not in that desk, so a strategy cannot trade through it."""
+
+
+class AccountInUseByStrategy(IntegrityViolation):
+    """A strategy of the desk trades through the account: it cannot be taken out (409 account_in_use_by_strategy)."""
+    code = "account_in_use_by_strategy"
+
 CURRENCIES = ("USD",)
+PRINCIPAL = "principal"                    # the strategy every desk has (SPEC-027 3.2)
+MAX_STRATEGY_KEY = 80
+LINK_ORIGINS = ("owner", "chat")
 MAX_NAME = 60
 ACCOUNT_STATUSES = ("active", "archived")
 ORDER_ACTIONS = ("preview", "place", "replace", "cancel")
@@ -89,6 +105,7 @@ class BrokerOrderRow(Record):
     response_json: Any
     correl_id: str | None
     created_at: str
+    strategy_key: str | None = None
 
 
 def _carries_identifier(value: Any) -> bool:
@@ -200,20 +217,71 @@ class BrokerRepo(Repo):
         self.s.insert("account_ledger", {"account_id": account_id, "kind": kind, "amount": amount,
                                          "created_at": utcnow()})
 
-    def link_desk(self, desk_id: int, account_id: int) -> None:
-        self.get_account(account_id)
-        self.s.insert_row("desk_accounts", {"desk_id": desk_id, "account_id": account_id})
+    # ---- accounts of a desk (0024, SPEC-027): many to many; each strategy of a desk trades through one of them ----
 
-    def account_of_desk(self, desk_id: int) -> BrokerAccount | None:
-        row = self.s.one("SELECT a.* FROM broker_accounts a JOIN desk_accounts d ON d.account_id = a.id "
-                         "WHERE d.desk_id = :d", {"d": desk_id})
+    def link(self, desk_id: int, account_id: int, added_by: str = "owner") -> None:
+        """Put an account in a desk. The same account may be in other desks. Raises AlreadyLinked when the pair exists."""
+        require_in("added_by", added_by, LINK_ORIGINS)
+        self.get_account(account_id)
+        if self.s.scalar("SELECT 1 FROM desk_account_links WHERE desk_id = :d AND account_id = :a",
+                         {"d": desk_id, "a": account_id}) is not None:
+            raise AlreadyLinked(f"account {account_id} is already in desk {desk_id}")
+        self.s.insert_row("desk_account_links", {"desk_id": desk_id, "account_id": account_id,
+                                                 "added_at": utcnow(), "added_by": added_by})
+
+    def accounts_of_desk(self, desk_id: int) -> list[BrokerAccount]:
+        """The accounts of a desk, the oldest link first."""
+        rows = self.s.query("SELECT a.* FROM broker_accounts a JOIN desk_account_links l ON l.account_id = a.id "
+                            "WHERE l.desk_id = :d ORDER BY l.added_at, a.id", {"d": desk_id})
+        return [BrokerAccount.from_row(r) for r in rows]
+
+    def desks_of_account(self, account_id: int) -> list[int]:
+        """The ids of the desks that hold an account, in id order."""
+        rows = self.s.query("SELECT desk_id FROM desk_account_links WHERE account_id = :a ORDER BY desk_id", {"a": account_id})
+        return [r["desk_id"] for r in rows]
+
+    def unlink(self, desk_id: int, account_id: int) -> bool:
+        """Take an account out of a desk. Refused (AccountInUseByStrategy) while a strategy of the desk trades through it.
+        Returns False when the pair did not exist."""
+        users = self.strategies_of_account(desk_id, account_id)
+        if users:
+            raise AccountInUseByStrategy(f"account {account_id} is used by the strategies {', '.join(users)} of desk {desk_id}")
+        return self.s.execute("DELETE FROM desk_account_links WHERE desk_id = :d AND account_id = :a",
+                              {"d": desk_id, "a": account_id}) > 0
+
+    def bind_strategy(self, desk_id: int, strategy_key: str, account_id: int) -> None:
+        """Say that a strategy of a desk trades through an account of that desk (an upsert: it moves the strategy)."""
+        if not isinstance(strategy_key, str) or not 1 <= len(strategy_key) <= MAX_STRATEGY_KEY:
+            raise ValidationError(f"strategy_key must have 1 to {MAX_STRATEGY_KEY} characters")
+        if self.s.scalar("SELECT 1 FROM desk_account_links WHERE desk_id = :d AND account_id = :a",
+                         {"d": desk_id, "a": account_id}) is None:
+            raise NotLinked(f"account {account_id} is not in desk {desk_id}")
+        if self.s.scalar("SELECT 1 FROM desk_strategy_accounts WHERE desk_id = :d AND strategy_key = :k",
+                         {"d": desk_id, "k": strategy_key}) is None:
+            self.s.insert_row("desk_strategy_accounts", {"desk_id": desk_id, "strategy_key": strategy_key, "account_id": account_id})
+        else:
+            self.s.update("desk_strategy_accounts", {"desk_id": desk_id, "strategy_key": strategy_key}, {"account_id": account_id})
+
+    def unbind_strategy(self, desk_id: int, strategy_key: str) -> bool:
+        return self.s.execute("DELETE FROM desk_strategy_accounts WHERE desk_id = :d AND strategy_key = :k",
+                              {"d": desk_id, "k": strategy_key}) > 0
+
+    def account_of_strategy(self, desk_id: int, strategy_key: str = PRINCIPAL) -> BrokerAccount | None:
+        """The account a strategy of a desk trades through; None when it has none yet."""
+        row = self.s.one("SELECT a.* FROM broker_accounts a JOIN desk_strategy_accounts s ON s.account_id = a.id "
+                         "WHERE s.desk_id = :d AND s.strategy_key = :k", {"d": desk_id, "k": strategy_key})
         return BrokerAccount.from_row(row) if row else None
 
-    def desk_of_account(self, account_id: int) -> int | None:
-        return self.s.scalar("SELECT desk_id FROM desk_accounts WHERE account_id = :a", {"a": account_id})
+    def strategy_bindings(self, desk_id: int) -> dict[str, int]:
+        """strategy_key -> account id for every strategy of the desk that has an account."""
+        rows = self.s.query("SELECT strategy_key, account_id FROM desk_strategy_accounts WHERE desk_id = :d ORDER BY strategy_key",
+                            {"d": desk_id})
+        return {r["strategy_key"]: r["account_id"] for r in rows}
 
-    def unlink_desk(self, desk_id: int) -> None:
-        self.s.execute("DELETE FROM desk_accounts WHERE desk_id = :d", {"d": desk_id})
+    def strategies_of_account(self, desk_id: int, account_id: int) -> list[str]:
+        rows = self.s.query("SELECT strategy_key FROM desk_strategy_accounts WHERE desk_id = :d AND account_id = :a ORDER BY strategy_key",
+                            {"d": desk_id, "a": account_id})
+        return [r["strategy_key"] for r in rows]
 
     # ---- accounts of an outside broker (0020): the fingerprint is all that is kept of the identifier ----
 
@@ -253,7 +321,7 @@ class BrokerRepo(Repo):
                      rule_why: str | None = None, decision_id: int | None = None, approved_by: str | None = None,
                      http_status: int | None = None, broker_order_id: str | None = None,
                      replaces_order_id: str | None = None, response: Any = None,
-                     correl_id: str | None = None) -> BrokerOrderRow:
+                     correl_id: str | None = None, strategy_key: str | None = None) -> BrokerOrderRow:
         """One row per attempt. `request` and `response` must already be masked (account_ref and mask): a value that still
         carries 'accountNumber' or 'hashValue' is refused."""
         require_in("action", action, ORDER_ACTIONS)
@@ -265,6 +333,8 @@ class BrokerRepo(Repo):
             raise ValidationError("broker_kind must have 1 to 40 characters")
         if reason is not None and len(reason) > MAX_REASON:
             raise ValidationError(f"reason must have at most {MAX_REASON} characters")
+        if strategy_key is not None and not 1 <= len(strategy_key) <= MAX_STRATEGY_KEY:
+            raise ValidationError(f"strategy_key must have 1 to {MAX_STRATEGY_KEY} characters")
         if rule_why is not None and len(rule_why) > MAX_WHY:
             rule_why = rule_why[:MAX_WHY]
         new_id = self.s.insert("broker_orders", {
@@ -274,7 +344,8 @@ class BrokerRepo(Repo):
             "decision_id": decision_id, "approved_by": approved_by, "http_status": http_status,
             "broker_order_id": None if broker_order_id is None else str(broker_order_id),
             "replaces_order_id": None if replaces_order_id is None else str(replaces_order_id),
-            "response_json": _masked_json("response", response), "correl_id": correl_id, "created_at": utcnow()})
+            "response_json": _masked_json("response", response), "correl_id": correl_id, "created_at": utcnow(),
+            "strategy_key": strategy_key})
         return self.get_order_record(new_id)
 
     def get_order_record(self, id: int) -> BrokerOrderRow:
@@ -301,6 +372,13 @@ class BrokerRepo(Repo):
         order limit of 18.5 counts with it; an attempt that was refused or is waiting for the owner does not count)."""
         return int(self.s.scalar("SELECT count(*) FROM broker_orders WHERE desk_id = :d AND action IN ('place', 'replace') "
                                  "AND http_status BETWEEN 200 AND 299 AND created_at >= :s", {"d": desk_id, "s": since}) or 0)
+
+    def placed_order_refs(self, desk_id: int, account_id: int) -> list[str]:
+        """The ids the broker gave to the orders a desk sent through an account (place and replace answered 2xx)."""
+        rows = self.s.query("SELECT DISTINCT broker_order_id FROM broker_orders WHERE desk_id = :d AND account_id = :a "
+                            "AND action IN ('place', 'replace') AND http_status BETWEEN 200 AND 299 AND broker_order_id IS NOT NULL",
+                            {"d": desk_id, "a": account_id})
+        return [r["broker_order_id"] for r in rows]
 
     def pending_order_records(self, desk_id: int | None = None) -> list[BrokerOrderRow]:
         """The attempts that wait for the owner: a 'needs_owner' row whose decision is still 'proposed', oldest first."""

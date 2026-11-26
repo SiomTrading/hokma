@@ -8,6 +8,8 @@ from hokma.db.models import Attachment, Conversation, Message, dumps_json
 from hokma.db.repos.base import UNSET, Repo, flag, given, require_in
 from hokma.db.timeutil import utcnow
 
+LEDGER_TITLE = "strategies panel usage"          # the token ledger of the Strategies panel: an archived conversation nobody lists, restores or deletes
+
 _CONV = ("SELECT c.*, (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count "
          "FROM conversations c")
 
@@ -38,9 +40,13 @@ class ConversationsRepo(Repo):
             return None
 
     def list(self, *, project_id: int | None = None, pinned: bool | None = None, search: str | None = None,
-             archived: bool | None = None, limit: int = 100, offset: int = 0) -> list[Conversation]:
-        """`archived`: None = every conversation, False = the visible ones, True = only the archived ones."""
+             archived: bool | None = None, limit: int = 100, offset: int = 0, include_ledger: bool = False) -> list[Conversation]:
+        """`archived`: None = every conversation, False = the visible ones, True = only the archived ones. The token ledger of the Strategies
+        panel (LEDGER_TITLE) is left out unless `include_ledger`: it is bookkeeping, not a conversation of the owner."""
         sql, params = _CONV + " WHERE 1 = 1", {"limit": limit, "offset": offset}
+        if not include_ledger:
+            sql += " AND NOT (c.archived = 1 AND c.title = :ledger_title)"
+            params["ledger_title"] = LEDGER_TITLE
         if project_id is not None:
             sql += " AND c.project_id = :project_id"
             params["project_id"] = project_id
@@ -57,18 +63,29 @@ class ConversationsRepo(Repo):
         sql += " ORDER BY c.pinned DESC, COALESCE(c.last_message_at, c.started_at) DESC, c.id DESC LIMIT :limit OFFSET :offset"
         return [Conversation.from_row(r) for r in self.s.query(sql, params)]
 
+    def _guard_ledger(self, id: int) -> Conversation:
+        """The ledger of tokens cannot be renamed, pinned, restored or deleted: it looks like it does not exist (NotFound)."""
+        current = self.get(id)
+        if current.archived and current.title == LEDGER_TITLE:
+            raise NotFound(f"conversations {id!r} not found")
+        return current
+
     def _set(self, id: int, **values: Any) -> Conversation:
         self.get(id)
         self.s.update("conversations", {"id": id}, values)
         return self.get(id)
 
     def rename(self, id: int, title: str | None) -> Conversation:
+        self._guard_ledger(id)
         return self._set(id, title=(title or "").strip() or None)
 
     def pin(self, id: int, pinned: bool) -> Conversation:
+        self._guard_ledger(id)
         return self._set(id, pinned=flag(pinned))
 
     def archive(self, id: int, archived: bool) -> Conversation:
+        if not archived:
+            self._guard_ledger(id)
         return self._set(id, archived=flag(archived))
 
     def set_project(self, id: int, project_id: int | None) -> Conversation:
@@ -88,7 +105,7 @@ class ConversationsRepo(Repo):
         return self._set(id, engine_session=session)
 
     def delete(self, id: int) -> None:
-        self.get(id)
+        self._guard_ledger(id)
         self.s.execute("DELETE FROM conversations WHERE id = :id", {"id": id})
 
 
@@ -146,6 +163,10 @@ class MessagesRepo(Repo):
             raise ValidationError("content is required")
         self.s.update("messages", {"id": id}, values)
         return self.get(id)
+
+    def set_meta(self, id: int, meta: Any) -> None:
+        self.get(id)
+        self.s.update("messages", {"id": id}, {"meta": dumps_json(meta) if meta else None})
 
     def search(self, text: str, *, limit: int = 50) -> list[Message]:
         rows = self.s.query("SELECT * FROM messages WHERE content LIKE :q ESCAPE '\\' ORDER BY id DESC LIMIT :n",

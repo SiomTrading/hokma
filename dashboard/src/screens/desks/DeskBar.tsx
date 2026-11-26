@@ -3,23 +3,34 @@ import { useI18n } from "@/i18n";
 import { useState } from "react";
 import { AssignAccount } from "./AssignAccount";
 import { formatBalance, formatCapital, formatPercent, formatResult, resultTone } from "./format";
-import { DESK_TABS } from "./types";
-import type { DeskSummary, DeskTab } from "./types";
+import { PanelTabs } from "./PanelTabs";
+import { accountsOf } from "./types";
+import type { DeskTab } from "./panels";
+import type { DeskSummary } from "./types";
 
 interface Props {
   desk: DeskSummary;
   desks: DeskSummary[];
+  /** The panels of the screen, in the order they are shown. */
+  order: DeskTab[];
   tab: DeskTab;
   tabKey: string;
   onTab: (tab: DeskTab) => void;
+  onOrder: (order: DeskTab[]) => void;
+  onAddPanel: (panel: DeskTab) => void;
+  onRemovePanel: (panel: DeskTab) => void;
+  /** Panels the "+ Add" menu shows disabled, each with its reason. */
+  blocked?: Partial<Record<DeskTab, string>>;
   onPickDesk: (id: number) => void;
 }
 
-/** Top bar of a desk: desk selector, the five tabs, capital, result of the day and drawdown. */
-export function DeskBar({ desk, desks, tab, tabKey, onTab, onPickDesk }: Props) {
+/** Top bar of a desk: desk selector, its tabs, capital, result of the day and drawdown. */
+export function DeskBar({ desk, desks, order, tab, tabKey, onTab, onOrder, onAddPanel, onRemovePanel, blocked, onPickDesk }: Props) {
   const { t, locale } = useI18n();
   const paused = desk.status === "paused";
   const [assigning, setAssigning] = useState(false);
+  const accounts = accountsOf(desk);
+  const money = desk.capital ?? (accounts.length > 0 ? accounts.reduce((sum, a) => sum + a.initial_capital, 0) : null);
   return (
     <header className="pane desks-hdr desk-bar">
       <h1 className="sr-only">{desk.name}</h1>
@@ -33,29 +44,14 @@ export function DeskBar({ desk, desks, tab, tabKey, onTab, onPickDesk }: Props) 
           ))}
         </Select>
       </span>
-      <div className="ext-tabs" role="tablist" aria-label={t("desks.tabs.label")}>
-        {DESK_TABS.map((id) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            id={`${tabKey}-tab-${id}`}
-            aria-selected={id === tab}
-            aria-controls={`${tabKey}-panel`}
-            className="ext-tab"
-            onClick={() => onTab(id)}
-          >
-            {t(`desks.tab.${id}`)}
-          </button>
-        ))}
-      </div>
+      <PanelTabs order={order} tab={tab} tabKey={tabKey} onTab={onTab} onOrder={onOrder} onAdd={onAddPanel} onRemove={onRemovePanel} blocked={blocked} />
       <div className="desk-bar-stats">
         <div className="desk-stat">
           <span className="lbl">{t("desks.stat.capital")}</span>
-          <b className="mono">{formatCapital(desk.capital, locale)}</b>
+          <b className="mono">{money === null ? t("desks.card.noAccount") : formatCapital(money, locale)}</b>
         </div>
         <div className="desk-stat">
-          <span className="lbl">{t("desks.stat.today")}</span>
+          <span className="lbl">{t("desks.stat.deskResult")}</span>
           <b className={cx("mono", resultTone(desk.today))}>{formatResult(desk.today, locale)}</b>
         </div>
         <div className="desk-stat">
@@ -64,11 +60,21 @@ export function DeskBar({ desk, desks, tab, tabKey, onTab, onPickDesk }: Props) 
         </div>
         <div className="desk-stat">
           <span className="lbl">{t("desks.stat.account")}</span>
-          {desk.account ? (
-            <b className="mono">{desk.account.name} · {desk.account.broker} · {formatBalance(desk.account.balance.equity, locale, t("desks.accounts.unavailable"), desk.account.balance.currency)}</b>
-          ) : (
-            <button type="button" className="desk-card-assign" onClick={() => setAssigning(true)}>{t("desks.card.assign")}</button>
-          )}
+          <div className="desk-bar-accounts">
+            {accounts.length === 0 ? (
+              <b className="mono">{t("desks.card.analysisOnly")}</b>
+            ) : (
+              accounts.map((account) => (
+                <b key={account.id} className="mono">
+                  {account.name} · {account.broker} · {formatBalance(account.balance.equity, locale, t("desks.accounts.unavailable"), account.balance.currency)}
+                  {account.shared_with && account.shared_with.length > 0 ? (
+                    <small>{t(account.shared_with.length === 1 ? "desks.accounts.shared.one" : "desks.accounts.shared.many", { n: String(account.shared_with.length) })}</small>
+                  ) : null}
+                </b>
+              ))
+            )}
+            <button type="button" className="desk-card-assign" onClick={() => setAssigning(true)}>{t("desks.card.add")}</button>
+          </div>
         </div>
         <button type="button" className="pill mono desk-palette" disabled title={t("desks.bar.paletteSoon")} aria-label={t("desks.bar.palette")}>
           ⌕ Ctrl K

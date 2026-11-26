@@ -16,6 +16,7 @@ from hokma.broker.types import Order, Position
 from hokma.i18n import t
 from hokma.kit import hokma_tools
 from hokma.permissions import modes
+from hokma.broker import desk_accounts
 
 AGENT = Who(agent="desk-chief", conversation_id=3, task_id=None)
 OWNER = service.owner_who()
@@ -89,6 +90,29 @@ def test_reviews_warns_and_alerts_ask_the_owner_with_the_messages(key):
 def test_a_closing_order_still_asks_when_schwab_asks_for_a_review():
     answer = good(order=limit("SELL", 10), positions=[position(long=10, value=100)], preview=preview_body(warns=["Penny stock"]))
     assert answer["result"] == "needs_owner" and answer["flags"] == ["review"]
+
+
+def test_a_desk_without_capital_has_no_ceiling_but_still_has_the_other_rules():
+    huge = preview_body(value=1e9)
+    assert good(capital=None, preview=huge)["result"] == "auto"                       # SPEC-027: the capital is optional
+    assert good(capital=100.0, preview=huge)["flags"] == ["capital"]
+    assert good(capital=None, preview=huge, desk_status="paused")["code"] == "desk_inactive"
+
+
+def test_percent_limits_of_a_desk_without_capital_are_measured_on_the_equity_of_the_account_and_never_skipped():
+    limits = {"max_order_pct": 5}
+    over = good(capital=None, equity=10000.0, preview=preview_body(value=600.0), limits=limits)               # 6% of the equity
+    assert over["result"] == "needs_owner" and over["flags"] == ["max_order_pct"]
+    assert good(capital=None, equity=10000.0, preview=preview_body(value=400.0), limits=limits)["result"] == "auto"
+    loss = good(capital=None, equity=10000.0, positions=[position(day=-600.0)], limits={"max_daily_loss_pct": 5})
+    assert loss["flags"] == ["max_daily_loss_pct"]
+    for equity in (None, 0.0):                                                                                   # nothing to measure against: it fails closed
+        blind = good(capital=None, equity=equity, limits=limits)
+        assert blind["result"] == "needs_owner" and blind["flags"] == ["pct_base"] and blind["why"]
+    assert good(capital=None, equity=None)["result"] == "auto"                                                  # no percent limit, nothing to measure
+    old = good(capital=10000.0, equity=1.0, preview=preview_body(value=600.0), limits=limits)                  # an old desk keeps its capital as base
+    assert old["flags"] == ["max_order_pct"] and old["numbers"]["pct_base"] == 10000.0
+    assert good(capital=10000.0, preview=preview_body(value=400.0), limits=limits)["result"] == "auto"
 
 
 def test_the_capital_adds_positions_open_orders_that_open_and_the_new_order():
@@ -302,7 +326,7 @@ def test_a_desk_without_an_account_or_with_an_account_that_does_not_trade_or_is_
     assert refused.value.code == "no_trading_account"
     internal = service.create_account(1, "Interna", 5000, db=ready.db)                            # the simulated broker takes orders, with its switch off
     other = make_desk(ready.db, name="Interna")
-    service.assign_account(other["id"], internal["id"], db=ready.db)
+    desk_accounts.add_account(other["id"], internal["id"], db=ready.db)
     with pytest.raises(BrokerError) as refused:
         service.place(other["id"], limit(), "t", AGENT, db=ready.db)
     assert refused.value.code == "orders_off"
@@ -485,11 +509,11 @@ def test_a_refusal_is_not_softened_when_the_owner_places_it_in_the_app(ready):
 
 
 def test_a_limit_that_is_on_asks_the_owner_and_off_does_not(ready):
-    assert service.set_limits(ready.desk_id, {"max_order_pct": 5}, db=ready.db) == {"max_order_pct": 5.0}
+    assert service.set_limits(ready.desk_id, {"max_order_pct": 5}, db=ready.db) == {"max_order_pct": 5.0, "guards": []}
     ready.fake.on("POST", PREVIEW_PATH, preview_body(value=800.0))                                    # 8% of 10,000
     assert service.place(ready.desk_id, limit(), "t", AGENT, db=ready.db)["status"] == "needs_owner"
     service.set_limits(ready.desk_id, {"max_order_pct": None}, db=ready.db)
-    assert service.get_limits(ready.desk_id, db=ready.db) == {}
+    assert service.get_limits(ready.desk_id, db=ready.db) == {"guards": []}
     assert service.place(ready.desk_id, limit(), "t", AGENT, db=ready.db)["status"] == "sent"
 
 
@@ -497,7 +521,7 @@ def test_assets_only_uses_the_symbols_of_the_desk(ready):
     from hokma.desks import service as desks
 
     desks.set_assets(ready.desk_id, ["MSFT"], db=ready.db)
-    service.set_limits(ready.desk_id, {"assets_only": True}, db=ready.db)
+    service.set_limits(ready.desk_id, {"assets_only": True, "rule_modes": {"assets_only": {"mode": "restriction"}}}, db=ready.db)    # SPEC-026: the list blocks only as a restriction
     with pytest.raises(BrokerError) as outside:                     # SPEC-018: the symbol list of the desk is a guard that blocks, also for native orders
         service.place(ready.desk_id, limit(symbol="AAPL"), "t", AGENT, db=ready.db)
     assert outside.value.code == "symbol_not_allowed"
@@ -523,13 +547,13 @@ def test_the_limits_are_saved_per_desk_merge_validate_and_show_in_the_desk(ready
 
     service.set_limits(ready.desk_id, {"short_allowed": False, "max_orders_per_day": 4}, db=ready.db)
     assert service.set_limits(ready.desk_id, {"max_orders_per_day": None, "assets_only": True}, db=ready.db) == {
-        "short_allowed": False, "assets_only": True}
-    assert desks.get_desk(ready.desk_id, ready.db)["limits"] == {"short_allowed": False, "assets_only": True}
+        "short_allowed": False, "assets_only": True, "guards": ["whitelist"]}
+    assert desks.get_desk(ready.desk_id, ready.db)["limits"] == {"short_allowed": False, "assets_only": True, "guards": ["whitelist"]}
     for bad in ({"max_order_pct": -2}, {"foo": 1}, "x"):
         with pytest.raises(Err) as refused:
             service.set_limits(ready.desk_id, bad, db=ready.db)
         assert refused.value.code == "bad_limits" and refused.value.status == 400
-    assert service.get_limits(ready.desk_id, db=ready.db) == {"short_allowed": False, "assets_only": True}
+    assert service.get_limits(ready.desk_id, db=ready.db) == {"short_allowed": False, "assets_only": True, "guards": ["whitelist"]}
     with pytest.raises(Err):
         service.get_limits(999, db=ready.db)
 

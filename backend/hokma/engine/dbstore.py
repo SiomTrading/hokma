@@ -105,11 +105,7 @@ class DbChatStore:
     def add_message(self, conversation_id, role, text, tokens_in=0, tokens_out=0, status="complete", meta=None):
         meta = dict(meta or {})
         ids = [n for n in (_int(i) for i in meta.get("attachments") or []) if n is not None]
-        stored = {k: meta[k] for k in ("tools", "blocks") if meta.get(k)} or None
-        if stored is not None and len(json.dumps(stored)) > META_LIMIT and stored.get("tools"):
-            stored = {**stored, "tools": [{**t, "result": None} for t in stored["tools"]]}
-        if stored is not None and len(json.dumps(stored)) > META_LIMIT:
-            stored = {"blocks": stored["blocks"]} if stored.get("blocks") and len(json.dumps(stored["blocks"])) < META_LIMIT else None
+        stored = self._fit({k: meta[k] for k in ("tools", "agents", "blocks", "origin") if meta.get(k)} or None)
         with self.db.write() as u:
             conv = u.conversations.get(int(conversation_id))
             m = u.messages.add(conv.id, role, text, model=conv.model if role == "assistant" else None,
@@ -121,6 +117,28 @@ class DbChatStore:
             if images:
                 u.onboarding.mark(FIRST_IMAGE)
         return self._message(m, status, meta)
+
+    @staticmethod
+    def _fit(stored: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The meta of a message cut down to what fits the column: the results of the tools, then the steps of the agents."""
+        size = lambda value: len(json.dumps(value))
+        if stored is not None and size(stored) > META_LIMIT and stored.get("tools"):
+            stored = {**stored, "tools": [{**t, "result": None} for t in stored["tools"]]}
+        if stored is not None and size(stored) > META_LIMIT and stored.get("agents"):
+            stored = {**stored, "agents": [{**a, "steps": [], "result": str(a.get("result") or "")[:500]}
+                                           for a in stored["agents"]]}
+        if stored is not None and size(stored) > META_LIMIT:
+            stored = {"blocks": stored["blocks"]} if stored.get("blocks") and size(stored["blocks"]) < META_LIMIT else None
+        return stored
+
+    def update_message_meta(self, conversation_id, message_id, **meta):
+        number = _int(message_id)
+        if number is None:
+            return
+        with self.db.write() as u:
+            current = u.messages.get(number).meta
+            merged = {**(current if isinstance(current, dict) else {}), **{k: v for k, v in meta.items() if v}}
+            u.messages.set_meta(number, self._fit(merged or None))
 
     def _message(self, m, status: str | None = None, meta=None) -> MessageRecord:
         from hokma.db import from_db_time

@@ -12,7 +12,7 @@ patterns:
   - Price the legs from the chain with the side the desk would trade on (buy at the ask, sell at the bid) and run the profile tool for payoff, breakevens and greeks.
   - Size by the maximum loss in dollars against the share of equity the desk allows, using the contract multiplier of the contract sheet.
   - Write the management plan before entry, profit target, stop, time exit, roll rule and size, and mark which thresholds are the desk's and which are uncalibrated defaults.
-  - Show the distance of the short strikes in standard deviations and the expected value when a probability of profit exists.
+  - Show the distance of the short strikes in standard deviations and the expected value when the spot, rate, volatility and time are known.
 avoid:
   - Proposing a credit structure, a covered call or a short leg without a covering long leg while the premium selling switch is closed.
   - Presenting a structure whose expected value is not positive on its own numbers.
@@ -38,7 +38,7 @@ last step and belongs to the trader role.
 1. Read the legs from the chain. Buy at the ask and sell at the bid; show the mid only as a reference.
 2. Call `quant_call options.structure_profile` with the structure, the ordered strikes, the premium per share of each option leg in the order of the `legs` field, the quantity, the multiplier of the sheet, the spot and, when known, the rate, volatility and time to expiration.
 3. Read: net premium (positive is a debit), maximum profit and loss (empty means unbounded), breakevens, signs of the greeks and the distance of each short strike in standard deviations.
-4. When a probability of profit exists, pass it as `p_profit` and report the expected value. Say so when the tool warns that it is not positive.
+4. With the spot, rate, volatility and time to expiration, the tool returns the expected value: the exact mean of the payoff at expiration under a lognormal price, not an average of the best and the worst case. Report it as that. At fair prices it is close to zero, so a negative figure is a cost to the buyer or the seller, not an edge: say so when the tool warns that it is not positive.
 
 ## 3. Classify for the switch
 

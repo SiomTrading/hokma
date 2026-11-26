@@ -34,6 +34,7 @@ BRIEFING_WINDOW = timedelta(hours=3)         # the premarket briefing is worth n
 MAX_PARALLEL = 3
 _INFLIGHT: set[tuple[str, int]] = set()      # (database, job id) of every run that was claimed and has not ended
 _INFLIGHT_LOCK = threading.Lock()
+TICK_HOOKS: list = []             # callables `(db)` run in every tick after the due jobs; work that other processes asked for (analysis requests of the chat tools)
 OUTCOME_LISTENERS: list = []      # callables `(job, outcome)` told after each run; a failing one is logged, never raised
 
 
@@ -122,11 +123,20 @@ class Scheduler:
                 log.exception("scheduler tick failed")
             except Exception:
                 log.exception("scheduler tick crashed")
+            self._run_hooks()
             first, last = False, now
             try:
                 await asyncio.wait_for(self._stop.wait(), self.tick)
             except asyncio.TimeoutError:
                 pass
+
+    def _run_hooks(self) -> None:
+        for hook in list(TICK_HOOKS):
+            try:
+                if self._ready():
+                    hook(self.db)
+            except Exception:
+                log.exception("a hook of the scheduler tick failed")
 
     # ------------------------------------------------------------------ one pass
 

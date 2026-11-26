@@ -89,6 +89,14 @@ def forget_cache() -> None:
     _cache.clear()
 
 
+class NotConnected(LookupError):
+    """No connected provider has this data: the student has to connect one in Connections."""
+
+
+class NoRows(LookupError):
+    """Every provider that was asked answered, with nothing for this symbol or range."""
+
+
 class _Skip(Exception):
     """A provider that cannot answer this call; `reason` is the sentence for the agent."""
 
@@ -378,6 +386,7 @@ def _ask(tool: str, args: dict, desk_id: int | None) -> dict:
     service = _connections()
     allowed = _allowed(desk_id)
     reasons: list[str] = []
+    empties = 0
     secrets: list[str] = []
     for provider in service.order("news"):                   # the order of the use "news" of Connections (SPEC-015 4.4)
         if provider not in PROVIDERS or tool not in PROVIDERS[provider][1]:
@@ -418,6 +427,7 @@ def _ask(tool: str, args: dict, desk_id: int | None) -> dict:
             reasons.append(t("company.err.rate", provider=name, limit=CALLS_PER_MINUTE[provider]))
             continue
         except _Empty:
+            empties += 1
             reasons.append(t("company.err.empty", provider=name, what=what, symbol=args.get("symbol") or "-"))
             continue
         except _Skip as skip:
@@ -429,7 +439,9 @@ def _ask(tool: str, args: dict, desk_id: int | None) -> dict:
         out = _scrub({"source": name, "fetched_at": _iso(now), **body}, secrets)
         _remember(key, out, now, CACHE_SECONDS.get(tool, CACHE_DEFAULT))
         return out
-    raise LookupError(" ".join(reasons) if reasons else _missing(tool))
+    if not reasons:
+        raise NotConnected(_missing(tool))
+    raise (NoRows if empties == len(reasons) else LookupError)(" ".join(reasons))
 
 
 # ---------------------------------------------------------------------------------------------- the tools

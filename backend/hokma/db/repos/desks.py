@@ -27,7 +27,7 @@ class Desk(Record):
     focus: str | None
     template: str
     mode: str
-    capital: int
+    capital: int | None            # optional since 0025 (SPEC-027): a desk is born without capital; its accounts carry the money
     currency: str
     objective_pct: float | None
     mandate: str | None
@@ -38,6 +38,7 @@ class Desk(Record):
     sort_order: int
     created_at: str
     updated_at: str
+    layout: str | None = None      # SPEC-025 delivery 3 (0026): JSON {"panels": [...]}; NULL is the default order
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +71,7 @@ class DeskConnection(Record):
 class DesksRepo(Repo):
     # ---- desks -----------------------------------------------------------------------------
 
-    def create(self, project_id: int, name: str, *, capital: int, focus: str | None = None,
+    def create(self, project_id: int, name: str, *, capital: int | None = None, focus: str | None = None,
                template: str = "standard", objective_pct: float | None = None, mandate: str | None = None,
                token_budget: int | None = None, sort_order: int | None = None) -> Desk:
         """The row only. `mode` is not a parameter: the table fixes it at `simulation`."""
@@ -82,8 +83,8 @@ class DesksRepo(Repo):
         if mandate is not None and len(mandate) > 4000:
             raise ValidationError("mandate must have at most 4000 characters")
         require_in("template", template, TEMPLATES)
-        if not isinstance(capital, int) or isinstance(capital, bool) or not MIN_CAPITAL <= capital <= MAX_CAPITAL:
-            raise ValidationError(f"capital must be a whole number from {MIN_CAPITAL} to {MAX_CAPITAL}")
+        if capital is not None and (not isinstance(capital, int) or isinstance(capital, bool) or not MIN_CAPITAL <= capital <= MAX_CAPITAL):
+            raise ValidationError(f"capital must be a whole number from {MIN_CAPITAL} to {MAX_CAPITAL}, or empty")
         if objective_pct is not None and not 0 <= objective_pct <= 100:
             raise ValidationError("objective_pct must be between 0 and 100")
         if token_budget is not None and token_budget <= 0:
@@ -131,8 +132,8 @@ class DesksRepo(Repo):
             raise ValidationError("mandate must have at most 4000 characters")
         if "capital" in values:
             cap = values["capital"]
-            if not isinstance(cap, int) or isinstance(cap, bool) or not MIN_CAPITAL <= cap <= MAX_CAPITAL:
-                raise ValidationError(f"capital must be a whole number from {MIN_CAPITAL} to {MAX_CAPITAL}")
+            if cap is not None and (not isinstance(cap, int) or isinstance(cap, bool) or not MIN_CAPITAL <= cap <= MAX_CAPITAL):
+                raise ValidationError(f"capital must be a whole number from {MIN_CAPITAL} to {MAX_CAPITAL}, or empty")
         if values.get("objective_pct") is not None and not 0 <= values["objective_pct"] <= 100:
             raise ValidationError("objective_pct must be between 0 and 100")
         if values.get("token_budget") is not None and values["token_budget"] <= 0:
@@ -141,6 +142,12 @@ class DesksRepo(Repo):
             require_in("status", values["status"], STATUSES)
         if values:
             self.s.update("desks", {"id": id}, {**values, "updated_at": utcnow()})
+        return self.get(id)
+
+    def set_layout(self, id: int, layout: str | None) -> Desk:
+        """Save the panels of the screen of the desk (hokma.desks.panels). NULL goes back to the default order."""
+        self.get(id)
+        self.s.update("desks", {"id": id}, {"layout": layout, "updated_at": utcnow()})
         return self.get(id)
 
     def set_alert(self, id: int, week: str | None, level: int | None) -> None:

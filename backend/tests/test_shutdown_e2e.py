@@ -4,11 +4,13 @@ database is intact and the partial text of the turn was saved."""
 import asyncio
 import json
 import os
+import queue
 import signal
 import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -64,11 +66,13 @@ def _post(port: int, token: str | None, force: bool = False) -> int:
 TERMINAL_OUTPUT: list[str] = []
 
 
-async def _open_work(port: int, token: str) -> str:
-    """A terminal with a running command and a chat turn that is still streaming; returns the text received so far."""
+async def _open_work(port: int, token: str, keep: list) -> str:
+    """A terminal with a running command and a chat turn that is still streaming; returns the text received so far.
+    The connections go to `keep`: they must outlive this call, or the server shuts the terminal down on its own."""
     import websockets
 
     terminal = await websockets.connect(f"ws://127.0.0.1:{port}/ws/terminal?token={token}")
+    keep.append(terminal)
     await asyncio.sleep(1.0)                                         # the shell must be reading before it gets the command
     await terminal.send(json.dumps({"type": "input", "data": "exec sleep 600\n"}))
     try:                                                             # what the terminal said, for the failure message
@@ -77,6 +81,7 @@ async def _open_work(port: int, token: str) -> str:
     except (asyncio.TimeoutError, Exception):
         pass
     chat = await websockets.connect(f"ws://127.0.0.1:{port}/ws/chat?token={token}")
+    keep.append(chat)
     await chat.send(json.dumps({"type": "send", "text": "[slow] keep talking"}))
     seen = ""
     while len(seen) < 20:
@@ -87,6 +92,27 @@ async def _open_work(port: int, token: str) -> str:
     return seen
 
 
+def _hold_work(port: int, token: str, release: threading.Event, out: queue.Queue) -> None:
+    """Runs in its own thread with its own loop, which lives until `release`: closing the loop earlier drops both sockets
+    and the server stops the terminal shell, so the test sometimes missed processes it expects (bug 1191)."""
+    async def main() -> None:
+        keep: list = []
+        try:
+            out.put(await _open_work(port, token, keep))
+        except BaseException as exc:                                 # noqa: BLE001  handed to the test thread
+            out.put(exc)
+            return
+        while not release.is_set():
+            await asyncio.sleep(0.1)
+        for connection in keep:
+            try:
+                await connection.close()
+            except Exception:                                        # noqa: BLE001  the shutdown may have closed it already
+                pass
+
+    asyncio.run(main())
+
+
 def test_a11_the_shutdown_leaves_nothing_behind_and_saves_the_turn(tmp_path, monkeypatch):
     monkeypatch.setenv("HOKMA_LANG", "en")
     ins, port = Install(tmp_path), free_port()
@@ -94,6 +120,8 @@ def test_a11_the_shutdown_leaves_nothing_behind_and_saves_the_turn(tmp_path, mon
     shim.mkdir()
     (shim / "claude").write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_CLAUDE}" "$@"\n')
     (shim / "claude").chmod(0o755)
+    release, out = threading.Event(), queue.Queue()
+    worker = None
     proc = subprocess.Popen([str(ins.exe_a), "start", "--port", str(port), "--no-browser"],
                             env=ins.env(PATH=f"{shim}:{os.environ['PATH']}"), stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, text=True, start_new_session=True)
@@ -101,7 +129,11 @@ def test_a11_the_shutdown_leaves_nothing_behind_and_saves_the_turn(tmp_path, mon
         line = proc.stdout.readline().strip()
         token = line.split("#t=")[1].split("&o=")[0]
         assert wait_until(lambda: health(port), 40), "the engine never answered /health"
-        seen = asyncio.run(_open_work(port, token))
+        worker = threading.Thread(target=_hold_work, args=(port, token, release, out), daemon=True)
+        worker.start()
+        seen = out.get(timeout=90)
+        if isinstance(seen, BaseException):
+            raise seen
         assert seen
         below = wait_until(lambda: (lambda d: d if any("fake_claude" in c for c in d.values()) and len(d) >= 3 else None)(
             _descendants(proc.pid)), 20)
@@ -129,6 +161,9 @@ def test_a11_the_shutdown_leaves_nothing_behind_and_saves_the_turn(tmp_path, mon
             conn.close()
         assert saved and saved[0].startswith(seen[:10]), (saved, seen)
     finally:
+        release.set()
+        if worker is not None:
+            worker.join(15)
         for pid in session_pids(proc.pid):
             os.kill(pid, signal.SIGKILL)
         proc.wait()

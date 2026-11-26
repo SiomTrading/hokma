@@ -21,7 +21,7 @@ describe("shell loads", () => {
     expect(root()).not.toHaveClass("light");
     expect(screen.getByRole("complementary", { name: t("nav.menu") })).toBeInTheDocument();
     expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "Proyectos" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Panel lateral" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Terminal" })).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
     expect(screen.getByText("HOKMA")).toBeInTheDocument();
@@ -120,17 +120,22 @@ describe("top bar buttons change the grid like the design", () => {
     expect(screen.queryByRole("region", { name: "Terminal" })).not.toBeInTheDocument();
   });
 
-  it("right panel toggles", async () => {
-    await userEvent.click(screen.getByRole("button", { name: "Panel de proyectos" }));
+  it("right panel minimizes to the 36 px rail and opens again from it, and the choice is remembered (T3)", async () => {
+    await userEvent.click(screen.getByRole("button", { name: "Panel lateral" }));
     expect(root()).toHaveClass("rpoff");
-    expect(screen.queryByRole("complementary", { name: "Proyectos" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Panel lateral" })).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}").rightPanel).toBe(false);
+    await userEvent.click(screen.getByTestId("panel-rail"));
+    expect(root()).not.toHaveClass("rpoff");
+    expect(screen.getByRole("complementary", { name: "Panel lateral" })).toBeInTheDocument();
   });
 
   it("full screen hides menu, right panel and terminal", async () => {
     await userEvent.click(screen.getByRole("button", { name: "Pantalla completa" }));
     expect(root()).toHaveClass("focus");
     expect(screen.queryByRole("region", { name: "Terminal" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("complementary", { name: "Proyectos" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Panel lateral" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("panel-rail")).not.toBeInTheDocument();
   });
 });
 

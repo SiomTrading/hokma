@@ -1,6 +1,7 @@
 """SWO mesa end to end (SPEC-019 section 8, criteria 2 to 7): the owner creates the desk with the tool, a cycle runs on a fake LLM engine and
 recorded data, and each level does what the spec says. Nothing here reaches the network or a real broker."""
 import json
+from datetime import datetime, timezone
 
 import pytest
 from b12_support import AS_OF, Engines, runtime
@@ -9,7 +10,7 @@ from trader_support import C200, C210, P190, answer_json, sheet
 
 from hokma import exec as hexec
 from hokma.backoffice import runs
-from hokma.broker import service
+from hokma.broker import desk_accounts, pnl, service
 from hokma.contracts import sheet as sheet_store
 from hokma.desks.plantel import SEATS
 from hokma.desks.swo import graph, premium_switch
@@ -33,17 +34,21 @@ def rows(world, sql, **p):
 
 
 @pytest.fixture
-def swo(ready):
-    """A SWO desk made by the tool of the owner, on its own account of the simulated broker, with the chain quotes and a runtime on fake engines."""
+def swo(ready, monkeypatch):
+    """A SWO desk made by the tool of the owner (it is born without an account), then its own account of the simulated broker, `Sim B`, made and
+    added on purpose (SPEC-027), with the chain quotes and a runtime on fake engines."""
     out, err = call("desk_create_swo", {"name": "Options swing", "capital": 1_000_000, "owner_approved": True})
     assert not err, out
+    assert rows(ready, "SELECT * FROM desk_account_links WHERE desk_id = :d", d=out["desk_id"]) == []           # the tool never creates an account
     ready.swo_id = out["desk_id"]
     ready.created = out
     ready.agent = desk_agent_slug(SEATS["A11"], ready.swo_id)
     with ready.db.write() as u:
         account = u.broker.create_account(ready.broker_id, "Sim B", 1_000_000)
-        u.broker.link_desk(ready.swo_id, account.id)
+    desk_accounts.add_account(ready.swo_id, account.id, added_by="chat", db=ready.db)             # the first account also ties the principal strategy
     service.set_limits(ready.swo_id, {"max_premium_usd": 5000, "max_drawdown_pct": 10}, db=ready.db)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")                           # the broker answers: the drawdown rule of the desk can be checked
+    monkeypatch.setattr(pnl, "latest_pnl", lambda account_id: pnl.BrokerPnl(account_id, 1_000_000.0, 1_000_000.0, 0.0, (), stamp, "sim"))
     killswitch.beat(ready.swo_id, db=ready.db)
     for cid in (C200, C210, P190):
         sheet_store.save(sheet(cid), db=ready.db)
@@ -57,10 +62,35 @@ def swo(ready):
     graph.register_runtime_factory(None)
 
 
-def cycle(r):
-    out, err = call("desk_cycle_run", {"desk_id": r.swo_id, "symbol": "AAPL", "as_of": AS_OF.isoformat()})
-    assert not err, out
-    return out
+def run_queued(r, as_of=AS_OF):
+    """What the app does with a cycle the chat queued: the tool only answers `queued`, then the app picks the request up in its tick and runs it in
+    its own process. Returns the queued answer and the last event of the run."""
+    import time
+
+    from hokma.desks.swo import analysis
+
+    events = []
+    stop = analysis.subscribe(events.append)
+    try:
+        queued, err = call("desk_cycle_run", {"desk_id": r.swo_id, "symbol": "AAPL", "as_of": as_of.isoformat()})
+        assert not err, queued
+        assert queued["status"] == "queued" and not analysis._live and events == []                  # nothing ran in the tool
+        assert analysis.drain_requests(r.db) == [queued["run_id"]]
+        deadline = time.time() + 120
+        while (analysis._live or not [e for e in events if e["event"] in ("finished", "failed")]) and time.time() < deadline:
+            time.sleep(0.05)
+    finally:
+        stop()
+    last = [e for e in events if e["event"] in ("finished", "failed") and e["run_id"] == queued["run_id"]][-1]
+    return queued, last
+
+
+def cycle(r, as_of=AS_OF):
+    queued, last = run_queued(r, as_of)
+    row = runs.get(queued["run_id"], db=r.db)["record"]["outputs"]
+    learning = (row.get("learning") or {}).get("status")
+    return {"run_id": queued["run_id"], "rating": last.get("rating"), "proposal_id": last.get("proposal_id"), "exec_status": last.get("exec_status"),
+            "stopped_at": last.get("stopped_at"), "reason": last.get("reason"), "learning": learning}
 
 
 def test_criterion_2_the_owner_creates_the_desk_with_the_tool_and_an_agent_cannot(swo):
@@ -116,7 +146,7 @@ def test_criterion_4_N3_a_call_inside_the_rules_goes_alone_and_outside_them_asks
     assert proposal["approved_by"] == "rule:r1" and proposal["origin"] == "desk" and proposal["level"] == 3
     levels.set_level(swo.swo_id, 3, rules={"id": "r2", "max_qty": 50, "symbols": ["OPT:MSFT"]}, who=swo.owner, db=swo.db)
     swo.engines = Engines()
-    outside = call("desk_cycle_run", {"desk_id": swo.swo_id, "symbol": "AAPL", "as_of": AS_OF.replace(hour=16).isoformat()})[0]
+    outside = cycle(swo, AS_OF.replace(hour=16))
     assert outside["exec_status"] == "awaiting_owner"                                         # outside the rules of the owner: it asks him
     assert len(rows(swo, "SELECT * FROM sim_orders")) == 1                                    # only the order inside the rules ever left
 

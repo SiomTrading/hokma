@@ -22,9 +22,9 @@ from hokma.exec.money import MoneyError, dec, dec_or_none, text
 from hokma.exec.proposal import Leg, OrderProposal, ProposalError
 
 Structure = Literal["long_call", "long_put", "debit_call_spread", "debit_put_spread", "short_put", "short_call", "credit_call_spread",
-                    "credit_put_spread", "iron_condor", "short_straddle", "short_strangle", "covered_call", "cash_secured_put"]
+                    "credit_put_spread", "iron_condor", "short_straddle", "short_strangle", "covered_call", "cash_secured_put", "iron_butterfly", "protective_put"]
 STRUCTURES: tuple[str, ...] = get_args(Structure)
-DEBIT_STRUCTURES = frozenset({"long_call", "long_put", "debit_call_spread", "debit_put_spread"})
+DEBIT_STRUCTURES = frozenset({"long_call", "long_put", "debit_call_spread", "debit_put_spread", "protective_put"})
 CREDIT_STRUCTURES = frozenset(STRUCTURES) - DEBIT_STRUCTURES
 UNBOUNDED_LOSS = frozenset({"short_call", "short_straddle", "short_strangle"})
 SHARES_PER_OPTION = 100                  # the shares a standard listed option covers (a covered call holds this many per call)
@@ -46,13 +46,14 @@ BASE_DESCRIPTIONS: Mapping[str, str] = {
     "risk_usd": "The loss in USD if the stop is hit. Never write it: the sizing module computes it.",
     "thesis": "The reason for the trade in the words the owner reads: the view, the evidence and what would prove it wrong. Do not write sizes, stops or objectives in it.",
     "decision_id": "The decision this order follows, when the desk made one. Leave it empty if you have none.",
+    "strategy_key": "The strategy this order belongs to, only when the plan names one; otherwise leave it empty. Never name the account: Hokma resolves the account from the strategy.",
     "created_by": "Who proposed it. Never write it: the tool sets it from the agent that calls.",
 }
 
 
 @dataclass(frozen=True, kw_only=True)
 class SWOProposal(OrderProposal):                 # SPEC-018 4.2
-    structure: Structure = field(metadata={"description": "The name of the option structure the legs make: long_call, long_put, debit_call_spread, debit_put_spread, short_put, short_call, credit_call_spread, credit_put_spread, iron_condor, short_straddle, short_strangle, covered_call or cash_secured_put. It must match the legs: a different name is refused."})
+    structure: Structure = field(metadata={"description": "The name of the option structure the legs make: long_call, long_put, debit_call_spread, debit_put_spread, short_put, short_call, credit_call_spread, credit_put_spread, iron_condor, short_straddle, short_strangle, covered_call, cash_secured_put, iron_butterfly or protective_put. It must match the legs: a different name is refused."})
     expiration: date = field(metadata={"description": "The expiration date of the structure as YYYY-MM-DD: the nearest expiration among its option legs."})
     net_premium: Decimal = field(metadata={"description": "The net premium per share of one structure, from the chain quotes: positive is a debit you pay, negative is a credit you receive. Buy legs count at the ask and sell legs at the bid."})
     max_loss_usd: Decimal | None = field(metadata={"description": "The most the whole order can lose in USD, from the strikes and the premium. Write null only for a structure whose loss has no bound: short_call, short_straddle and short_strangle."})
@@ -185,6 +186,9 @@ def derive_structure(legs: Sequence[Leg]) -> str | None:
         if len(shares) == 1 and len(options) == 1 and shares[0].side == "buy" and options[0].kind == "C" and options[0].side == "sell" \
                 and shares[0].qty == options[0].qty * SHARES_PER_OPTION and shares[0].underlying == options[0].underlying:
             return "covered_call"
+        if len(shares) == 1 and len(options) == 1 and shares[0].side == "buy" and options[0].kind == "P" and options[0].side == "buy" \
+                and shares[0].qty == options[0].qty * SHARES_PER_OPTION and shares[0].underlying == options[0].underlying:
+            return "protective_put"
         return None
     if not options or len({x.underlying for x in options}) != 1 or len({x.qty for x in options}) != 1:
         return None
@@ -215,6 +219,6 @@ def derive_structure(legs: Sequence[Leg]) -> str | None:
         puts = sorted((x for x in options if x.kind == "P"), key=lambda x: x.strike)                   # type: ignore[arg-type,return-value]
         calls = sorted((x for x in options if x.kind == "C"), key=lambda x: x.strike)                  # type: ignore[arg-type,return-value]
         if len(puts) == 2 and len(calls) == 2 and puts[0].side == "buy" and puts[1].side == "sell" and calls[0].side == "sell" \
-                and calls[1].side == "buy" and puts[1].strike < calls[0].strike:                       # type: ignore[operator]
-            return "iron_condor"
+                and calls[1].side == "buy" and puts[0].strike < puts[1].strike <= calls[0].strike < calls[1].strike:   # type: ignore[operator]
+            return "iron_butterfly" if puts[1].strike == calls[0].strike else "iron_condor"
     return None

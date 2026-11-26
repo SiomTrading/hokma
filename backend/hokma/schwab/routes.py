@@ -132,6 +132,29 @@ async def streaming_diagnostic(request: Request) -> dict:
         raise _fail(error) from None
 
 
+@router.post("/diagnostic/account-sample", summary="Save an anonymous sample of the account answers (SPEC-026 3390e1, read only)")
+async def account_sample(request: Request) -> dict:
+    """One read of §/accounts?fields=positions§ and the latest ACCT_ACTIVITY message, anonymized and saved in the downloads folder of the owner.
+    Account numbers, hashes and ids are "XXXX" in the file; the amounts are intact. It never sends an order."""
+    _guard(request)
+    from hokma.connections import runtime
+    from hokma.schwab import sample
+
+    activity = None
+    try:
+        source = await (await runtime.prepare()).provider_source("schwab")
+        streamer = getattr(source, "streamer", None)
+        activity = streamer.last_activity() if streamer is not None else None
+    except Exception:                                                      # noqa: BLE001  (the accounts are the sample; the activity is a bonus)
+        log.info("the last account activity is not available for the sample")
+    try:
+        return await asyncio.to_thread(sample.capture, activity)
+    except SchwabError as error:
+        raise _fail(error) from None
+    except RuntimeError:
+        raise HTTPException(status_code=500, detail={"code": "schwab.err.sample_unsafe", "message": "the sample would have kept a personal value: nothing was written"}) from None
+
+
 @router.get("/analytics/{calc}", summary="A calculation over Schwab data")
 async def analytics_route(calc: str, request: Request) -> dict:
     _guard(request)

@@ -5,6 +5,8 @@ from typing import Any
 MAX_TARGET = 500
 MAX_DESK_TARGET = 6000          # a desk request is shown whole: what the owner approves is what runs (mandate up to 4000)
 MAX_RESULT_TEXT = 4000
+MAX_AGENT_DESCRIPTION = 200
+SUBAGENT_TOOLS = {"Agent", "Task"}      # the tool that starts a subagent (recorded: "Agent" in CLI 2.1.331, `Task` in its tool list)
 
 _KINDS = {"Write": "write_file", "Edit": "edit_file", "MultiEdit": "edit_file", "NotebookEdit": "edit_file",
           "Read": "read_file", "NotebookRead": "read_file", "Bash": "run_command", "PowerShell": "run_command",
@@ -24,7 +26,7 @@ def _desk_target(name: str, tool_input: Any) -> str:
     """What a desk tool is about to create or change, in neutral `key=value` terms, so the owner sees it in the
     permission request (the panel shows it as the target). Empty for any other tool."""
     short = name.rsplit("__", 1)[-1]
-    if short in ("today_configure", "account_create", "account_reset", "desk_assign_account", "desk_unassign_account", "desk_money_set", "gmail_send",
+    if short in ("today_configure", "account_create", "account_reset", "desk_add_demo_account", "desk_add_account", "desk_remove_account", "desk_bind_strategy", "desk_money_set", "gmail_send",
                  "order_place", "order_replace", "order_cancel", "desk_create_swo") and isinstance(tool_input, dict):
         return " | ".join(f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in tool_input.items())
     if short not in ("desk_create", "desk_configure") or not isinstance(tool_input, dict):
@@ -56,6 +58,55 @@ def summarize_tool(name: str, tool_input: Any) -> dict[str, str]:
                 target = value
                 break
     return {"kind": _KINDS.get(name, "other"), "target": target[:MAX_TARGET]}
+
+
+def agent_call(name: str, tool_input: Any) -> dict[str, str] | None:
+    """`{slug, description}` of a subagent launch, None for any other tool. The slug is the `subagent_type` the CLI got."""
+    if name not in SUBAGENT_TOOLS or not isinstance(tool_input, dict):
+        return None
+    slug = tool_input.get("subagent_type")
+    description = tool_input.get("description") or tool_input.get("prompt") or ""
+    return {"slug": slug if isinstance(slug, str) else "",
+            "description": " ".join(str(description).split())[:MAX_AGENT_DESCRIPTION]}
+
+
+def task_event(msg: dict[str, Any]) -> dict[str, Any] | None:
+    """The start or end of a background task (a subagent or a shell command) from a `system` line, or None."""
+    if msg.get("type") != "system" or not isinstance(msg.get("tool_use_id"), str) or not msg["tool_use_id"]:
+        return None
+    if msg.get("subtype") == "task_started":
+        return {"type": "task_start", "id": msg["tool_use_id"], "task_type": str(msg.get("task_type") or ""),
+                "text": str(msg.get("description") or "")}
+    if msg.get("subtype") == "task_notification":
+        return {"type": "task_end", "id": msg["tool_use_id"], "status": str(msg.get("status") or ""),
+                "text": str(msg.get("summary") or "")[:MAX_RESULT_TEXT]}
+    return None
+
+
+def task_track(msg: dict[str, Any]) -> tuple[str, str] | None:
+    """What a `system` line says about the background tasks of the conversation itself (bug 1257), or None.
+
+    `("add", id)`: a task of the main thread was started in the background. `("done", id)`: the CLI reported its end
+    (`task_notification`), which is what makes it open an automatic turn to tell the model. The `task_updated` line
+    that comes just before it is not an end: the turn that tells the model has not begun. A task a subagent owns
+    (`owned_by_subagent`) belongs to that subagent: its end does not wake the main thread, so it is not followed here."""
+    if msg.get("type") != "system" or msg.get("owned_by_subagent"):
+        return None
+    task_id = msg.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        return None
+    subtype = msg.get("subtype")
+    if subtype == "task_started" and msg.get("is_backgrounded") is True:
+        return ("add", task_id)
+    if subtype == "task_notification":
+        return ("done", task_id)
+    return None
+
+
+def launch_receipt(msg: dict[str, Any]) -> bool:
+    """True when a `user` line carries the receipt of a subagent started in the background (its answer comes later)."""
+    result = msg.get("tool_use_result")
+    return isinstance(result, dict) and bool(result.get("isAsync"))
 
 
 def text_delta(msg: dict[str, Any]) -> str | None:

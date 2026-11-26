@@ -49,8 +49,6 @@ export type SlotName =
   | "sidebar.desks"
   | "brand.subtitle"
   | "addMenu.assets"
-  | "rightPanel"
-  | "rightPanel.actions"
   | "terminal"
   | "statusBar"
   | "statusBar.end"
@@ -76,6 +74,32 @@ export function registerSlot<P extends object = Record<string, never>>(
 
 export function getSlot(name: SlotName): readonly SlotEntry[] {
   return slots.get(name) ?? [];
+}
+
+/* ---------- Side panel sections ---------- */
+
+export interface PanelSectionRegistration {
+  id: string;
+  /** Position in the column, top to bottom. */
+  order: number;
+  /** Takes the height that is left (the others take their own, with a shared cap). */
+  fill?: boolean;
+  titleKey: string;
+  component: ComponentType;
+  /** Buttons at the right of the title (the "+" of Projects). */
+  actions?: ComponentType;
+  /** Short text at the right of the title while the section is folded. A hook, so it can read live data. */
+  useSummary?: () => string;
+}
+
+const panelSections = new Map<string, PanelSectionRegistration>();
+
+export function registerPanelSection(registration: PanelSectionRegistration): void {
+  panelSections.set(registration.id, registration);
+}
+
+export function getPanelSections(): readonly PanelSectionRegistration[] {
+  return Array.from(panelSections.values()).sort((a, b) => a.order - b.order);
 }
 
 /* ---------- Settings sections ---------- */
@@ -108,4 +132,5 @@ export function resetRegistry(): void {
   screens.clear();
   slots.clear();
   sections.clear();
+  panelSections.clear();
 }

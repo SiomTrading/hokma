@@ -222,7 +222,7 @@ export function ProjectsPanel() {
   if (snap.listError && !list) return <ErrorState title={t("projects.error.load")} message={snap.listError} onRetry={() => void refresh()} />;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: "1 0 auto" }}>
       <div style={{ padding: "0 14px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
         <span className="lbl">{t("projects.workdir")}</span>
         <span className="mono" title={list?.workdir} style={{ fontSize: 11, color: "var(--t2)", whiteSpace: "nowrap" }}>
@@ -283,7 +283,7 @@ export function ProjectsPanel() {
           {tab === "files" ? (
           <>
           <div
-            style={{ flex: 1, overflow: "auto", padding: "0 6px", outline: dragging ? "1px dashed var(--acc)" : "none", borderRadius: 10 }}
+            style={{ flex: "1 0 96px", overflow: "auto", padding: "0 6px", outline: dragging ? "1px dashed var(--acc)" : "none", borderRadius: 10 }}
             onDragOver={onDragOver}
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
@@ -306,7 +306,7 @@ export function ProjectsPanel() {
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
             style={{
-              margin: 10, padding: 12, border: `1px dashed ${dragging ? "var(--acc)" : "var(--border)"}`, borderRadius: 12,
+              flex: "none", margin: 10, padding: 12, border: `1px dashed ${dragging ? "var(--acc)" : "var(--border)"}`, borderRadius: 12,
               display: "flex", flexDirection: "column", gap: 4, textAlign: "center",
             }}
           >

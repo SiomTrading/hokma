@@ -55,6 +55,10 @@ def set_client_factory(factory: ClientFactory | None) -> None:
     """Tests only: where the client comes from (`factory(broker)` returns a TradingClient). None puts the default back."""
     global _factory
     _factory = factory
+    _pnl_clients.clear()
+
+
+_pnl_clients: dict[Any, TradingClient] = {}      # one client per broker row for the reads of the P&L: the keys are not read from the store every 5 seconds
 
 
 def _default_client(broker: "AlpacaBroker") -> TradingClient:
@@ -320,11 +324,51 @@ class AlpacaBroker(ExternalBroker):
         return {"orderStrategy": {"orderBalance": {"orderValue": float(value) if not missing else 0.0}}, "unpriced": missing}
 
 
+def read_pnl_raw(row: Any) -> tuple[Any, list[Any]]:
+    """The two reads of the P&L of an Alpaca account, and nothing else: `GET /v2/account` and `GET /v2/positions` (SPEC-026 v2, piece 3390e1b).
+    Returns (account, positions) as the SDK models, untouched: `hokma.broker.pnl.alpaca_pnl` maps them. It places, changes and cancels nothing.
+
+    Source of the fields (official Alpaca documentation, read on 2026-11-25; the schemas are the ones of the OpenAPI that the pages publish):
+      account    https://docs.alpaca.markets/reference/getaccount-1
+                 `equity`       "Cash + long_market_value + short_market_value" (`portfolio_value` is deprecated and equal to it)
+                 `last_equity`  "Equity as of previous trading day at 16:00:00 ET"   (`balance_asof` is the date of that snapshot)
+      positions  https://docs.alpaca.markets/reference/getallopenpositions
+                 `unrealized_intraday_pl`  "Unrealized profit/loss in dollars for the day"
+                 `unrealized_pl`           "Unrealized profit/loss in dollars"
+                 `qty` (the number of shares), `side` (long | short), `symbol`
+    The numbers come as strings in the documentation and in the SDK. A field the broker leaves out is None here, never 0."""
+    key = getattr(row, "id", None)
+    client = _pnl_clients.get(key)
+    if client is None:
+        client = (_factory or _default_client)(SimpleNamespace(row=row))
+        _pnl_clients[key] = client
+    try:
+        return _guard(client.get_account), list(_guard(client.get_all_positions))
+    except APIError:
+        raise                                                          # the caller tells a 429 from the rest
+    except Exception:
+        _pnl_clients.pop(key, None)                                    # a client that failed is built again on the next read (keys may have changed)
+        raise
+
+
+def read_wire(row: Any) -> tuple[dict, list]:
+    """The answers of `GET /v2/account` and `GET /v2/positions` exactly as Alpaca sent them (JSON, no model), for the anonymous sample of the owner.
+    Read only, two calls."""
+    key = getattr(row, "id", None)
+    client = _pnl_clients.get(key)
+    if client is None:
+        client = (_factory or _default_client)(SimpleNamespace(row=row))
+        _pnl_clients[key] = client
+    account, positions = _guard(lambda: client.get("/account")), _guard(lambda: client.get("/positions"))
+    return account if isinstance(account, dict) else {}, positions if isinstance(positions, list) else []
+
+
 def sync_accounts(db=None, paper: bool = True) -> list[int]:
     """The keys are saved: make sure the broker row and the local account of this Alpaca account exist (see `external.sync_accounts`).
     `paper` says which endpoint the keys belong to; it defaults to the paper one."""
     from hokma.db import get_database
 
+    _pnl_clients.clear()                                               # new keys: the readers of the P&L take the saved ones
     client = (_factory or _default_client)(SimpleNamespace(row=SimpleNamespace(config={"paper": paper})))
     raw = _guard(client.get_account)
     number = getattr(raw, "account_number", None)

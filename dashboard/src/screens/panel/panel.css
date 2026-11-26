@@ -1,0 +1,58 @@
+/* Side panel (SPEC-013). Colours and sizes come from the design tokens; the only new thing is the pulse of the dot. */
+.right.rail { align-items: center; padding-top: 10px; gap: 8px; }
+.pn-rail { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 36px; padding: 6px 0; background: none; border: 0; color: var(--t2); cursor: pointer; font: 600 11px Montserrat, sans-serif; }
+.pn-rail:hover { color: var(--t1); }
+/* A permission waits or a protection blocked something: the whole strip turns amber, so it is seen with the panel minimized. */
+.right.rail[data-tone="waiting"], .right.rail[data-tone="blocked"] { background: var(--warn-sub); box-shadow: inset 2px 0 0 var(--warn); }
+.right.rail[data-tone="waiting"] .pn-rail, .right.rail[data-tone="blocked"] .pn-rail { color: var(--warn); }
+.pn-rail .pn-dot { margin-top: 0; }
+.pn-count { min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 999px; background: var(--acc-sub); color: var(--acc); font: 600 11px Montserrat, sans-serif; }
+.pn-count.bg { background: var(--glass-strong); color: var(--t2); }
+
+.pn-title { display: flex; align-items: center; justify-content: space-between; padding: 10px 10px 6px 14px; flex: none; }
+.pn-sec { display: flex; flex-direction: column; min-width: 0; border-top: 1px solid var(--border); }
+.pn-sec.fill { flex: 1 1 0; min-height: 0; border-top: 0; overflow: hidden; }
+/* The section takes only the room the others leave and scrolls inside it: what does not fit never paints over the sections below (bug 1261). */
+.pn-sec.fill .pn-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; }
+.pn-sec.fill .pn-body > * { flex-shrink: 0; }
+.pn-body[hidden] { display: none; }
+.pn-rest { flex: 0 1 auto; max-height: 55%; overflow-y: auto; scrollbar-width: thin; }
+.pn-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 8px 0 4px; flex: none; }
+.pn-toggle { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; padding: 4px 6px; background: none; border: 0; color: var(--t3); cursor: pointer; text-align: left; }
+.pn-toggle .sec { padding: 2px 0; }
+.pn-sum { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-actions { display: flex; gap: 2px; }
+
+.pn-list { display: flex; flex-direction: column; gap: 2px; padding: 2px 6px 8px; min-width: 0; }
+.pn-pad { padding: 4px 8px; }
+.pn-conv { padding-top: 0; }
+.pn-row { display: flex; gap: 8px; align-items: flex-start; padding: 4px; border-radius: var(--r-item); min-width: 0; text-align: left; }
+.pn-row.hl { background: var(--acc-sub); }
+.pn-click { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; width: 100%; }
+.pn-click:hover { background: var(--glass); }
+.pn-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.pn-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pn-name { font: 600 12px Montserrat, sans-serif; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-clock { margin-left: auto; flex: none; font: 400 11px "JetBrains Mono", monospace; color: var(--t3); }
+.pn-task, .pn-step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-hint { white-space: pre-line; }
+.pn-fold { display: grid; place-items: center; background: none; border: 0; color: var(--t3); cursor: pointer; padding: 0; }
+.pn-act { align-self: flex-start; }
+.pn-detail { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; min-width: 0; }
+.pn-block { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pn-steps summary { cursor: pointer; font: 500 11px Montserrat, sans-serif; color: var(--t2); }
+.pn-sub { display: flex; align-items: center; gap: 4px; background: none; border: 0; color: var(--t3); cursor: pointer; font: 600 10px Montserrat, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; padding: 6px 4px 2px; }
+
+.pn-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 5px; background: currentColor; color: var(--t3); }
+.pn-dot.working { color: var(--acc); animation: pn-pulse 1.6s ease-in-out infinite; }
+.pn-dot.waiting { color: var(--warn); }
+.pn-dot.done { color: var(--ok); }
+.pn-dot.error { color: var(--bad); }
+.pn-dot.stopped, .pn-dot.idle { color: var(--t3); }
+@keyframes pn-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .pn-dot.working { animation: none; } }
+
+/* The one live line of the chat: replaces every tool line the chat used to show. */
+.chat-working { display: flex; align-items: center; gap: 8px; padding: 4px 6px; color: var(--t2); font: 500 12px Montserrat, sans-serif; }
+.chat-working .pn-dot { margin-top: 0; }
+.chat-working .pn-clock { margin-left: auto; }

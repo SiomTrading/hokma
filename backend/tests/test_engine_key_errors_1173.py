@@ -428,9 +428,12 @@ _ID = r"[a-z][a-z0-9]*(?:[-_/.][a-z0-9.]+)*"
 MODEL_SHAPES = [
     re.compile(rf"""["']({_ID}[-_/.]v?\d[a-z0-9.\-_/]*|[a-z]\d+(?:-[a-z0-9.]+)*)["']""", re.I),
     re.compile(rf"""["']({_ID}-(?:chat|latest|instruct|reasoner|coder|preview|exp))["']""", re.I),
+    # a known family, a separator and a word, with no number (claude-sonnet, gemini-pro, grok-beta, mistral-large)
+    re.compile(r"""["']((?:gpt|chatgpt|claude|gemini|gemma|grok|llama|mistral|mixtral|codestral|deepseek|qwen|command|sonar|kimi|moonshot|glm|phi|yi)[-/.][a-z][a-z0-9.\-_/]*)["']""", re.I),
 ]
-# Literals of the engine code with that shape that are not models (reviewed one by one): text encodings.
-NOT_MODELS = {"utf-8", "latin-1"}
+# Literals of the engine code with that shape that are not models (reviewed one by one): text encodings, the id of an
+# engine ("claude-code") and the name of an ACP sign-in method ("gemini-api-key", acp.py).
+NOT_MODELS = {"utf-8", "latin-1", "claude-code", "gemini-api-key"}
 
 
 def model_literals(text: str) -> list[str]:
@@ -440,10 +443,11 @@ def model_literals(text: str) -> list[str]:
 def test_the_literal_check_catches_any_provider():
     for literal in ('"gpt-6.1-sol"', "'grok-9'", '"chatgpt-4o-latest"', '"claude-sonnet-5-5"', '"o3"', '"o4-mini"',
                     '"deepseek-chat"', '"mistral-large-latest"', '"kimi-k3.1-pro"', '"gemini-3.8-flash"',
-                    '"llama-4-scout"', '"models/gemini-9-flash"'):
+                    '"llama-4-scout"', '"models/gemini-9-flash"', '"claude-sonnet"', '"gemini-pro"', '"grok-beta"',
+                    '"mistral-large"', '"sonar-pro"', '"command-r-plus"'):
         assert model_literals(literal), literal
     for literal in ('"utf-8"', '"haiku"', '"fast"', '"stream-json"', '"anthropic-version"', '"2023-06-01"',
-                    '"x-api-key"', '"flash-lite"'):
+                    '"x-api-key"', '"flash-lite"', '"claude-code"', '"sonnet"', '"opus"'):
         assert not model_literals(literal), literal
 
 

@@ -52,7 +52,8 @@ class BrokerRulesGuard:
     def check(self, ctx: GuardContext) -> GuardResult:
         result = rules.evaluate(
             action="place", orders_enabled=ctx.orders_enabled, desk_status=ctx.desk_status, account_ok=ctx.account_ok,
-            order=rules_order(ctx.proposal, ctx.contracts), preview=ctx.preview, capital=float(ctx.capital),
+            order=rules_order(ctx.proposal, ctx.contracts), preview=ctx.preview,
+            capital=float(ctx.capital) if ctx.capital and ctx.capital > 0 else None, equity=_equity(ctx),
             positions=rules_positions(ctx.positions), open_orders=list(ctx.open_orders), limits=dict(_plain(ctx.limits)),
             assets=list(ctx.assets), orders_today=ctx.orders_today, marks={k: float(v) for k, v in ctx.marks.items()})
         if result["result"] == "refused":
@@ -62,6 +63,12 @@ class BrokerRulesGuard:
                                {k: float(v) for k, v in result["numbers"].items() if isinstance(v, (int, float)) and not isinstance(v, bool)},
                                flags=tuple(result["flags"]))
         return passed(self.name)
+
+
+def _equity(ctx: GuardContext) -> float | None:
+    """The equity of the account that runs the order, the base of the percent limits for a desk without capital."""
+    value = getattr(ctx.book, "equity", None)
+    return None if value is None else float(value)
 
 
 def _plain(value: Any) -> Any:

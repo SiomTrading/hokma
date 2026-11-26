@@ -19,7 +19,7 @@ export function ObjectiveSection({ deskId, detail, onSaved }: Props) {
   const { t, locale } = useI18n();
   const [name, setName] = useState(detail.name);
   const [focus, setFocus] = useState(detail.focus ?? "");
-  const [capital, setCapital] = useState(String(detail.capital));
+  const [capital, setCapital] = useState(detail.capital === null ? "" : String(detail.capital));
   const [objective, setObjective] = useState(detail.objective_pct === null ? "" : String(detail.objective_pct).replace(".", locale === "es" ? "," : "."));
   const [mandate, setMandate] = useState(detail.mandate ?? "");
   const [budget, setBudget] = useState(detail.token_budget === null ? "" : formatTokens(detail.token_budget, locale));
@@ -33,7 +33,7 @@ export function ObjectiveSection({ deskId, detail, onSaved }: Props) {
   const budgetValue = budget.trim() === "" ? null : parseWhole(budget);
   const gaps = {
     name: name.trim().length < 1 || name.trim().length > DESK_LIMITS.nameMax,
-    capital: capitalValue === null || capitalValue < DESK_LIMITS.capitalMin || capitalValue > DESK_LIMITS.capitalMax,
+    capital: capital.trim() !== "" && (capitalValue === null || capitalValue < DESK_LIMITS.capitalMin || capitalValue > DESK_LIMITS.capitalMax),
     objective: objective.trim() !== "" && (objectiveValue === null || objectiveValue < 0 || objectiveValue > 100),
     budget: budget.trim() !== "" && (budgetValue === null || budgetValue < 1),
   };

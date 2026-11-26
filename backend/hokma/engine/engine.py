@@ -9,7 +9,7 @@ from hokma.engine import attachments as att
 from hokma.engine.memory import FileAgents, MemoryStore, WorkdirProjects
 from hokma.engine.protocols import (DEFAULT_MODEL, GENERAL_PROJECT_ID, MODELS, AgentCatalog, ChatStore, ConversationRecord,
                                     ProjectRecord, ProjectResolver)
-from hokma.engine.session import PERMISSION_TIMEOUT, STOP_GRACE, ChatSession, TurnError
+from hokma.engine.session import BG_WAIT, GROUP_WINDOW, INIT_WAIT, PERMISSION_TIMEOUT, STOP_GRACE, ChatSession, TurnError
 from hokma.engines import catalog, effective
 from hokma.engines.base import EngineAdapter
 from hokma.engines.registry import build_adapter, tier_of
@@ -20,6 +20,17 @@ MAX_FRAME_CHARS = 2 * 1024 * 1024
 MAX_TEXT_CHARS = 200_000
 MAX_ATTACHMENTS = 10
 MAX_PROCESSES = 8
+
+
+def _env_seconds(name: str, default: float) -> float:
+    """A number of seconds from the environment; anything that is not a positive number leaves the default."""
+    import os
+
+    try:
+        value = float(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
 TITLE_WORDS, TITLE_CHARS = 8, 60
 COMMANDS = {"modelo": "model", "model": "model", "agente": "agent", "agent": "agent",
             "proyecto": "project", "project": "project"}
@@ -71,6 +82,7 @@ class ChatEngine:
                  agents: AgentCatalog | None = None, launch: Callable[[], LaunchSpec] = prepare_claude_launch,
                  claude_bin: str | None = None, session_token: str = "", permission_timeout: float = PERMISSION_TIMEOUT,
                  stop_grace: float = STOP_GRACE, max_processes: int = MAX_PROCESSES,
+                 bg_wait: float | None = None, group_window: float | None = None, init_wait: float | None = None,
                  permission_mode: Callable[[], str] | None = None,
                  checkpoint: Callable[[str, str], Any] | None = None,
                  blocks: Callable[[], list[dict[str, Any]]] | None = None) -> None:
@@ -79,6 +91,11 @@ class ChatEngine:
         self.agents: AgentCatalog = agents or FileAgents()
         self.launch, self.claude_bin, self.session_token = launch, claude_bin, session_token
         self.permission_timeout, self.stop_grace, self.max_processes = permission_timeout, stop_grace, max_processes
+        # Bug 1257: how long an agent started in the background may work before the chat gives up on it (seconds;
+        # `HOKMA_AGENT_WAIT_SECONDS` sets it for the whole app), and how long the answers of agents that end together are grouped.
+        self.bg_wait = bg_wait if bg_wait is not None else _env_seconds("HOKMA_AGENT_WAIT_SECONDS", BG_WAIT)
+        self.group_window = group_window if group_window is not None else GROUP_WINDOW
+        self.init_wait = init_wait if init_wait is not None else INIT_WAIT      # how long the turn a notice announced may take to open
         self.sessions: dict[str, ChatSession] = {}
         self.subscribers: dict[str, set[Connection]] = {}
         self.permission_mode: Callable[[], str] = permission_mode or modes.current_mode
@@ -87,6 +104,8 @@ class ChatEngine:
         self._background: set[asyncio.Task] = set()
         self.fallbacks: dict[str, dict[str, str]] = {}      # conversation -> {from, to} to announce before the next turn
         self.announced: dict[str, dict[str, str]] = {}      # conversation -> the replacement already announced
+        self._analysis_stop: Callable[[], None] | None = None   # stops the feed of the analysis of the desks (SPEC-028, delivery 4)
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def adapter_for(self, kind: str) -> EngineAdapter:
         adapter = self.adapters.get(kind)
@@ -179,6 +198,16 @@ class ChatEngine:
         for conn in list(self.subscribers.get(conversation_id, ())):
             await conn.send(event)
 
+    async def broadcast_all(self, event: dict[str, Any]) -> None:
+        """An event that is not of one conversation (the card of an order that waits for the owner): every open panel gets it once."""
+        seen: list[Connection] = []
+        for subs in list(self.subscribers.values()):
+            for conn in list(subs):
+                if conn not in seen:
+                    seen.append(conn)
+        for conn in seen:
+            await conn.send(event)
+
     def subscribe(self, conn: Connection, conversation_id: str) -> None:
         self.subscribers.setdefault(conversation_id, set()).add(conn)
 
@@ -192,7 +221,8 @@ class ChatEngine:
         live = [s for s in self.sessions.values() if s.has_process]
         if len(live) < self.max_processes:
             return
-        idle = sorted((s for s in live if s.state == "idle" and s is not asking), key=lambda s: s.last_used)
+        # a conversation that waits for agents working in the background goes last: closing it kills them
+        idle = sorted((s for s in live if s.state == "idle" and s is not asking), key=lambda s: (s.watching, s.last_used))
         if not idle:
             raise TurnError("too_many_sessions", "too many conversations are running at the same time")
         asyncio.get_running_loop().create_task(idle[0]._drop_process())
@@ -203,6 +233,9 @@ class ChatEngine:
         return self.sessions[conversation_id]
 
     async def shutdown(self) -> None:
+        if self._analysis_stop is not None:
+            self._analysis_stop()
+            self._analysis_stop = None
         await asyncio.gather(*(s.close() for s in list(self.sessions.values())), return_exceptions=True)
 
     # ------------------------------------------------------------- dispatch
@@ -217,7 +250,7 @@ class ChatEngine:
         if not isinstance(msg, dict) or not isinstance(msg.get("type"), str):
             return await self._error(conn, "bad_message", "the message needs a string `type`")
         handler = {"send": self._on_send, "stop": self._on_stop, "permission_response": self._on_permission,
-                   "command": self._on_command, "open": self._on_open, "ping": self._on_ping}.get(msg["type"])
+                   "watch_desk": self._on_watch_desk, "command": self._on_command, "open": self._on_open, "ping": self._on_ping}.get(msg["type"])
         if handler is None:
             return await self._error(conn, "bad_message", f"unknown type {msg['type'][:40]!r}")
         try:
@@ -247,6 +280,33 @@ class ChatEngine:
     async def _on_ping(self, conn: Connection, msg: dict) -> None:
         await conn.send({"type": "pong"})
 
+    async def _on_watch_desk(self, conn: Connection, msg: dict) -> None:
+        """`{"type":"watch_desk","desk_id":N}`: this socket receives the progress of the analyses of desk N as `type: analysis` messages
+        (SPEC-028, delivery 4). The panel never asks for it again: every step that enters or leaves and the end of the run arrive here."""
+        from hokma.desks.swo import analysis
+
+        desk_id = msg.get("desk_id")
+        if isinstance(desk_id, bool) or not isinstance(desk_id, int) or desk_id < 1:
+            return await self._error(conn, "bad_message", "desk_id must be a desk id")
+        self._loop = asyncio.get_running_loop()
+        if self._analysis_stop is None:
+            self._analysis_stop = analysis.subscribe(self._forward_analysis)
+        self.subscribe(conn, analysis.watch_key(desk_id))
+        await conn.send({"type": "watching", "desk_id": desk_id})
+
+    def _forward_analysis(self, event: dict[str, Any]) -> None:
+        """Called in the thread of a cycle: hands the event to the loop of the sockets. An event that finds no loop (the engine closed) is lost
+        on purpose: the record of the run has it."""
+        from hokma.desks.swo import analysis
+
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self.broadcast(analysis.watch_key(event["desk_id"]), {"type": "analysis", **event}), loop)
+        except RuntimeError:
+            pass
+
     def _existing(self, msg: dict) -> ConversationRecord | None:
         cid = msg.get("conversation_id")
         return self.store.get_conversation(cid) if isinstance(cid, str) else None
@@ -261,7 +321,7 @@ class ChatEngine:
         # Built without awaiting, then sent as one block: a delta of the live turn cannot land between the saved
         # history and the partial answer, so the panel never shows a piece twice or loses one.
         history = {"type": "history", "conversation_id": conv.id, "messages": [
-            self._history_row(m) for m in self.store.list_messages(conv.id)]}
+            self._history_row(m, session is not None and session.holds_agents) for m in self.store.list_messages(conv.id)]}
         state: dict[str, Any] = {"type": "state", "conversation_id": conv.id,
                                  "state": session.state if session else "idle",
                                  "pending_permissions": [p.event() for p in session.pending.values()] if session else []}
@@ -270,14 +330,23 @@ class ChatEngine:
             state["partial"] = partial
         await conn.send_all([history, state])
 
-    def _history_row(self, m) -> dict[str, Any]:
+    def _history_row(self, m, holds_agents: bool = False) -> dict[str, Any]:
         row: dict[str, Any] = {"id": m.id, "role": m.role, "text": m.text, "status": m.status,
                                "tokens_in": m.tokens_in, "tokens_out": m.tokens_out, "created_at": m.created_at}
         tools = m.meta.get("tools")
         if tools:
             row["tools"] = tools
+        if m.meta.get("agents"):
+            # An agent saved as working with nobody waiting for it (the app restarted, the process went away) is over:
+            # it is shown as stopped, never as a spinner that nothing will stop (bug 1257).
+            row["agents"] = m.meta["agents"] if holds_agents else [
+                {**a, "status": "stopped"} if a.get("status") == "working" else a for a in m.meta["agents"]]
         if m.meta.get("blocks"):
             row["blocks"] = m.meta["blocks"]
+        if m.meta.get("origin"):
+            row["origin"] = m.meta["origin"]
+        if m.meta.get("unsent"):
+            row["unsent"] = True                  # the owner's message that never reached the engine (bug 1257)
         files = []
         for attachment_id in m.meta.get("attachments") or []:
             record = self.store.get_attachment(attachment_id) if isinstance(attachment_id, str) else None
@@ -417,7 +486,8 @@ class ChatEngine:
         if created and self._ref(msg):
             event["client_ref"] = self._ref(msg)
         await conn.send(event)
-        session.start_turn(conv, project, blocks, text, meta)
+        if not session.start_turn(conv, project, blocks, text, meta):    # a turn opened while this one was awaiting
+            await self._error(conn, "busy", "a turn is already running", conv.id)
 
     def _desk_gate(self, conv: ConversationRecord, project: ProjectRecord):
         """(error or None, conversation) for a turn about to start in a money desk (SPEC-014 P5): a desk over its

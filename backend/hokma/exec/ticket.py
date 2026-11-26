@@ -24,6 +24,8 @@ _WHY: dict[str, Callable[..., str]] = {         # one literal t(...) per message
     "not_found": lambda **p: t("exec.why.not_found", **p),
     "closed": lambda **p: t("exec.why.closed", **p),
     "no_account": lambda **p: t("exec.why.no_account", **p),
+    "analysis_only_no_account": lambda **p: t("exec.why.analysis_only_no_account", **p),
+    "needs_account": lambda **p: t("exec.why.needs_account", **p),
     "awaiting": lambda **p: t("exec.why.awaiting", **p),
     "rejected": lambda **p: t("exec.why.rejected", **p),
     "no_line": lambda **p: t("exec.why.no_line", **p),

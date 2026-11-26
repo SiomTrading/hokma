@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { EmptyState, ErrorState, Input, Loading, Pane, Pill } from "@/design";
 import { useI18n } from "@/i18n";
+import { followConversation } from "@/shell/panelState";
 import { useShell } from "@/shell/useShell";
 import { OpusConfirm } from "../agents/OpusConfirm";
 import { errorText } from "../chat/chatApi";
 import { Composer } from "../chat/Composer";
 import type { ComposerHandle } from "../chat/Composer";
+import { liveCounts } from "../chat/activity";
 import { getHub } from "../chat/hub";
+import { useActivity } from "../chat/useActivity";
 import type { HubClient } from "../chat/hub";
 import { MessageItem } from "../chat/Messages";
+import { WorkingLine } from "../chat/WorkingLine";
 import { initialState, reducer } from "../chat/state";
-import type { AttachmentChip } from "../chat/state";
+import type { AttachmentChip, Item } from "../chat/state";
 import type { ModelId, ServerEvent } from "../chat/types";
 import "../chat/chat.css";
 import { deskAgentsApi, errorCode } from "./agentsApi";
@@ -30,6 +34,13 @@ function useHubStatus() {
   );
 }
 
+/** The line that names the report ("About analysis 12 of AAPL:") that the Analysis panel puts before every question; the screen shows only what the owner typed. */
+const ABOUT_LINE = /^(?:Sobre el an\u00e1lisis|About analysis) \S+ (?:de|of) [^\n]*:\n/;
+
+function withoutAbout(item: Item): Item {
+  return item.kind === "user" ? { ...item, text: item.text.replace(ABOUT_LINE, "") } : item;
+}
+
 /** Share of the weekly token budget of the desk already used, 0 to 100; null when the desk has no cap. */
 function budgetPct(desk: DeskSummary): number | null {
   if (!desk.token_budget || desk.token_budget <= 0) return null;
@@ -41,7 +52,7 @@ function budgetPct(desk: DeskSummary): number | null {
  * conversation and from there it is the same chat as the global one: same socket, same messages, same box. The model
  * selector shows and changes the model of the chief in this desk, never the global default.
  */
-export function DeskChat({ desk }: { desk: DeskSummary }) {
+export function DeskChat({ desk, about }: { desk: DeskSummary; about?: string }) {
   const { t } = useI18n();
   const [load, setLoad] = useState<Load>({ state: "loading" });
 
@@ -58,7 +69,7 @@ export function DeskChat({ desk }: { desk: DeskSummary }) {
   return (
     <Pane className="dterm-chat" aria-label={t("desks.terminal.chat")}>
       {load.state === "ready" ? (
-        <DeskChatBody key={load.conversation.id} desk={desk} conversation={load.conversation} />
+        <DeskChatBody key={load.conversation.id} desk={desk} conversation={load.conversation} about={about} />
       ) : (
         <>
           <div className="dterm-ph">
@@ -75,12 +86,13 @@ export function DeskChat({ desk }: { desk: DeskSummary }) {
   );
 }
 
-function DeskChatBody({ desk, conversation }: { desk: DeskSummary; conversation: DeskConversation }) {
+function DeskChatBody({ desk, conversation, about }: { desk: DeskSummary; conversation: DeskConversation; about?: string }) {
   const { t } = useI18n();
   const shell = useShell();
   const hub = getHub();
   const status = useHubStatus();
   const [state, dispatch] = useReducer(reducer, conversation, (conv) => ({ ...initialState(conv.id), model: conv.model }));
+  const agentsBusy = liveCounts(useActivity(state.id)).agents > 0;
   const [confirmOpus, setConfirmOpus] = useState(false);
   const [refused, setRefused] = useState(false);
   const composer = useRef<ComposerHandle>(null);
@@ -118,6 +130,10 @@ function DeskChatBody({ desk, conversation }: { desk: DeskSummary; conversation:
     return hub.register(self);
   }, [hub, handleEvent]);
 
+  // The side panel follows the desk chat while it is the one in use: when it opens and every time it takes the focus.
+  const follow = useCallback(() => followConversation({ conversationId: conversation.id, source: "desk", label: desk.name }), [conversation.id, desk.name]);
+  useEffect(follow, [follow]);
+
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -132,7 +148,8 @@ function DeskChatBody({ desk, conversation }: { desk: DeskSummary; conversation:
   }, [desk.budget_state]);
 
   const send = (text: string, attachments: AttachmentChip[]): boolean => {
-    const message = { type: "send", conversation_id: conversation.id, text, attachments: attachments.map((chip) => chip.id) };
+    // `about` is the line that tells the chief which report the question is about (the Analysis panel): the chief reads it with desk_analysis_get.
+    const message = { type: "send", conversation_id: conversation.id, text: about ? `${about}\n${text}` : text, attachments: attachments.map((chip) => chip.id) };
     if (!hub.send(message)) {
       shell.toast({ tone: "warn", text: t("chat.composer.notConnected") });
       return false;
@@ -168,7 +185,7 @@ function DeskChatBody({ desk, conversation }: { desk: DeskSummary; conversation:
   const pct = budgetPct(desk);
 
   return (
-    <>
+    <div className="dterm-chat-host" onFocusCapture={follow} onPointerDownCapture={follow} style={{ display: "contents" }}>
       <div className="dterm-ph">
         <span className="dterm-tab on">{t("desks.terminal.chat")}</span>
         <span className="dterm-ph-end">
@@ -191,10 +208,11 @@ function DeskChatBody({ desk, conversation }: { desk: DeskSummary; conversation:
         {state.items.map((item) => (
           <MessageItem
             key={item.key}
-            item={item}
+            item={withoutAbout(item)}
             actions={{ projectName: desk.name, canSave: false, onPermission: answerPermission, onSaveMessage: () => undefined, onSaveAttachment: () => undefined }}
           />
         ))}
+        <WorkingLine conversationId={conversation.id} running={state.running} />
       </div>
 
       {desk.budget_state === "warn" && !exhausted ? (
@@ -215,6 +233,7 @@ function DeskChatBody({ desk, conversation }: { desk: DeskSummary; conversation:
           ref={composer}
           model={state.model}
           running={state.running}
+          agentsBusy={agentsBusy}
           stopping={state.stopping}
           options={null}
           modelMenuRequest={0}
@@ -236,7 +255,7 @@ function DeskChatBody({ desk, conversation }: { desk: DeskSummary; conversation:
           }}
         />
       ) : null}
-    </>
+    </div>
   );
 }
 

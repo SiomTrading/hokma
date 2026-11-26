@@ -156,6 +156,8 @@ def _limits_text(limits: Mapping[str, Any]) -> str:
     for key in ("max_premium_usd", "max_position_pct", "max_order_pct", "max_drawdown_pct", "capital_floor_usd", "max_orders_per_day"):
         if limits.get(key) is not None:
             rows.append(f"- {key}: {limits[key]}")
+    for item in limits.get("instructions") or []:              # the rules of the owner that the code does not apply (SPEC-025): read them
+        rows.append(f"- instruction of the owner (nothing blocks it, you follow it): {item.get('text', '')}")
     return "\n".join(rows)
 
 
@@ -576,7 +578,7 @@ def plan_trade(answer: TraderAnswer, ctx: TradeContext) -> TradeResult:
     except BuildError as exc:
         return _no("no_trade", exc.code, str(exc))
     max_loss = None if max_loss_unit is None else max_loss_unit * n
-    covered = answer.structure == "covered_call"                                                         # decision 1264: its exits are orders apart, never native children
+    covered = answer.structure in ("covered_call", "protective_put")                                                       # decision 1264: its exits are orders apart, never native children
     try:
         proposal = SWOProposal(desk_id=ctx.desk_id, line="SWO", origin="desk", legs=built.legs, order_type="limit", limit_price=entry, tif="day",
                                stop_loss=None if covered else plan.stop, take_profit=None if covered else plan.target, risk_usd=risk_unit * n, thesis=answer.thesis, created_by=ctx.agent,
@@ -591,7 +593,7 @@ def plan_trade(answer: TraderAnswer, ctx: TradeContext) -> TradeResult:
         warnings.append("uncalibrated defaults in the exits: " + ", ".join(plan.uncalibrated))
     if covered:
         detail["exits_apart"] = {"stop": str(plan.stop), "target": str(plan.target), "why": "a covered call goes as a plain order without native children; its exits are orders of their own"}
-        warnings.append("covered_call: the stop and the target are not attached to the entry; they go as separate orders")
+        warnings.append(f"{answer.structure}: the stop and the target are not attached to the entry; they go as separate orders")
     detail["cost_usd"] = str(built.cost_usd)
     return TradeResult("proposed", "ok", "", proposal, n, detail, tuple(warnings), (), answer.thesis)
 

@@ -9,8 +9,9 @@ every difference in one bucket:
 * `one_side`: a line that only one side has.
 
 Every break carries one probable cause (timing, currency, mapping, duplicate_or_missing, commission or data_quality). The breaks come ordered by the
-absolute money they put at stake. One more check is made when the statement carries the value of the account: the sum of the capital of the desks
-that use the account against that value. Its difference is a break like any other.
+absolute money they put at stake. One more check is made when the statement carries the value of the account: the capital of the account
+(its opening amount) against that value. Each account is checked once, however many desks share it: the capital belongs to the account, not to a desk.
+Its difference is a break like any other.
 
 `trace` explains one break in one sentence (who did what and why) with an owner, an expected date and an action (watch, adjust, ticket, suppress). It only
 diagnoses: it receives a read-only reader of the book and has no way to write to it. `verify_break` is the critic: it checks again each break
@@ -246,7 +247,7 @@ def _late(line: Line, as_of: str) -> bool:
     return date.fromisoformat(line.date) >= date.fromisoformat(as_of) - timedelta(days=LATE_DAYS)
 
 
-def compare(entries: Sequence[BookEntry], statement: Statement, *, desk_capital_sum: Decimal | None = None) -> tuple[list[Break], dict[str, Any]]:
+def compare(entries: Sequence[BookEntry], statement: Statement, *, account_capital: Decimal | None = None) -> tuple[list[Break], dict[str, Any]]:
     """The full join of the book and the statement. Pure: no database. Returns the breaks (ordered by impact) and a summary."""
     if len(entries) > MAX_LINES or len(statement.lines) > MAX_LINES:
         raise ReconError("too many lines to reconcile")
@@ -307,15 +308,15 @@ def compare(entries: Sequence[BookEntry], statement: Statement, *, desk_capital_
             breaks.append(_mk("one_side", None, b, "duplicate_or_missing", "the book has no such line"))
     nav: dict[str, Any] = {"status": "skipped", "reason": "the statement has no account value"}
     if statement.account_value is not None:
-        if desk_capital_sum is None:
-            nav = {"status": "skipped", "reason": "no desk uses the account"}
+        if account_capital is None:
+            nav = {"status": "skipped", "reason": "the account has no capital recorded"}
         else:
-            gap = statement.account_value - desk_capital_sum
-            nav = {"status": "ok" if abs(gap) <= TOLERANCE_AMOUNT else "break", "desk_capital_sum": text(desk_capital_sum), "account_value": text(statement.account_value),
+            gap = statement.account_value - account_capital
+            nav = {"status": "ok" if abs(gap) <= TOLERANCE_AMOUNT else "break", "account_capital": text(account_capital), "account_value": text(statement.account_value),
                    "difference": text(gap)}
             if abs(gap) > TOLERANCE_AMOUNT:
-                breaks.append(Break("amount", f"{NAV_KEY}", {"desk_capital_sum": text(desk_capital_sum)}, {"account_value": text(statement.account_value)}, gap, abs(gap),
-                                    "data_quality", detail="the sum of the capital of the desks is not the value of the account at the broker"))
+                breaks.append(Break("amount", f"{NAV_KEY}", {"account_capital": text(account_capital)}, {"account_value": text(statement.account_value)}, gap, abs(gap),
+                                    "data_quality", detail="the capital of the account is not the value of the account at the broker"))
     breaks.sort(key=lambda x: (-x.impact, x.key, x.bucket))
     counts = {name: sum(1 for x in breaks if x.bucket == name) for name in BUCKETS}
     summary = {"as_of": as_of, "local_lines": len(local), "statement_lines": len(broker), "matched": matched, "breaks": len(breaks), "by_bucket": counts,
@@ -323,9 +324,11 @@ def compare(entries: Sequence[BookEntry], statement: Statement, *, desk_capital_
     return breaks, summary
 
 
-def _capital_sum(session: Any, account_id: int) -> Decimal | None:
-    rows = session.query("SELECT d.capital AS capital FROM desks d JOIN desk_accounts a ON a.desk_id = d.id WHERE a.account_id = :a", {"a": account_id})
-    return sum((Decimal(str(r["capital"])) for r in rows), ZERO) if rows else None
+def _account_capital(session: Any, account_id: int) -> Decimal | None:
+    """The capital of the account, counted once: its opening amount. It does not depend on how many desks hold the account or on whether a desk
+    has a capital of its own (a desk may have none)."""
+    value = session.scalar("SELECT initial_capital FROM broker_accounts WHERE id = :a", {"a": account_id})
+    return None if value is None else Decimal(str(value))
 
 
 def reconcile(account_id: int, *, statement: Statement, db: Database | None = None, persist: bool = True) -> Reconciliation:
@@ -337,8 +340,8 @@ def reconcile(account_id: int, *, statement: Statement, db: Database | None = No
     stamp = f"{date.fromisoformat(statement.as_of).isoformat()} 00:00:00"
     with database.read() as u:
         entries = book_module.entries_in(u.session, account_id)
-        capital = _capital_sum(u.session, account_id)
-    breaks, summary = compare(entries, statement, desk_capital_sum=capital)
+        capital = _account_capital(u.session, account_id)
+    breaks, summary = compare(entries, statement, account_capital=capital)
     status = "breaks" if breaks else "clean"
     if not persist:
         return Reconciliation(account_id, statement.as_of, status, summary, tuple(breaks))
@@ -463,8 +466,8 @@ def trace(break_row: Break | Mapping[str, Any], book_reader: BookReader, *, toda
     base = today or datetime.now(timezone.utc).date()
     material = row.material if materiality == MATERIAL_AMOUNT else (row.bucket in ("quantity", "one_side", "timing") or row.is_nav or row.impact >= materiality)
     if row.is_nav:
-        sentence = (f"The desks hold {row.local and row.local.get('desk_capital_sum')} of capital while the broker values the account at "
-                    f"{row.broker and row.broker.get('account_value')}, a gap of {text(row.diff)} from trading results or flows that no desk holds yet; only the owner changes capital.")
+        sentence = (f"The account holds {row.local and (row.local.get('account_capital') or row.local.get('desk_capital_sum'))} of capital while the broker values it at "
+                    f"{row.broker and row.broker.get('account_value')}, a gap of {text(row.diff)} from trading results or flows that the capital does not hold yet; only the owner changes capital.")
         return Trace(sentence, "owner", add_business_days(base, 5).isoformat(), "watch", True, row.cause)
     local, broker = row.local, row.broker
     if local is not None:
@@ -499,7 +502,7 @@ def verify_break(break_row: Break | Mapping[str, Any], book_reader: BookReader) 
     _assert_read_only(book_reader)
     row = break_row if isinstance(break_row, Break) else Break.from_row(break_row)
     if row.is_nav:
-        return Verdict(row.key, "unverifiable", "the capital of the desks is not in the entries of the book")
+        return Verdict(row.key, "unverifiable", "the capital of the account is not in the entries of the book")
     if row.local is None and row.broker is not None:
         present = book_reader.find(source_ref=row.broker["ref"], kind=row.broker["kind"], contract_id=row.broker.get("contract_id"))
         if present and not row.broker.get("repeat"):

@@ -1,16 +1,26 @@
+import { DEFAULT_PANELS, isDeskPanel } from "./panels";
+import type { DeskTab } from "./panels";
+
 /** Contract of `GET /api/desks` (SPEC-014, section 3). */
 export type DeskStatus = "active" | "paused" | "archived";
 export type DeskTemplate = "minimal" | "standard" | "debate" | "custom";
 export type BudgetState = "ok" | "warn" | "exhausted";
 
-/** The account of a desk. `cash` and `equity` are null when the broker cannot tell: say so, never show 0. */
+/**
+ * One account of a desk (SPEC-027). `cash` and `equity` are null when the broker cannot tell: say so, never show 0.
+ * `shared_with` lists the OTHER desks that hold the same account; `strategies` the strategies of this desk that trade through it.
+ */
 export interface DeskAccount {
   id: number;
   name: string;
   broker: string;
+  /** Masked number (••••1234) of an account of a real broker, or null. */
+  mask?: string | null;
   initial_capital: number;
   balance: { cash: number | null; equity: number | null; currency: string };
   as_of: string;
+  shared_with?: number[];
+  strategies?: string[];
 }
 
 export interface DeskSummary {
@@ -18,7 +28,8 @@ export interface DeskSummary {
   project_id: number;
   name: string;
   focus: string | null;
-  capital: number;
+  /** Null: a desk is born without money. Its accounts hold the money. */
+  capital: number | null;
   currency: string;
   status: DeskStatus;
   template: DeskTemplate;
@@ -32,20 +43,29 @@ export interface DeskSummary {
   /** Weekly cap of the desk. Null means no cap of its own. */
   token_budget: number | null;
   budget_state: BudgetState;
-  /** Optional for old data: null while the desk has no account. */
-  account?: DeskAccount | null;
+  /** The panels of the screen, in order (SPEC-025, delivery 3). Absent in old data: the five of before. */
+  panels?: string[];
+  /** The saved layout; null until the owner or the chief changes the panels. */
+  layout?: { panels: string[] } | null;
+  /** The accounts of the desk. Empty: the desk only analyzes. Optional for old data. */
+  accounts?: DeskAccount[];
+  /** strategy key -> account id, for the strategies that already trade through an account. */
+  strategies?: Record<string, number>;
 }
+
+/** The accounts of a desk, empty when the server sent none. */
+export const accountsOf = (desk: Pick<DeskSummary, "accounts">): DeskAccount[] => desk.accounts ?? [];
 
 export interface DeskList {
   desks: DeskSummary[];
 }
 
-/** The five tabs of a desk, in the order they are shown. */
-export const DESK_TABS = ["terminal", "agents", "operations", "rules", "config"] as const;
-export type DeskTab = (typeof DESK_TABS)[number];
+/** The five tabs every desk had before the layout (SPEC-025, delivery 3). The panels a desk shows now are `panelsOf(desk)`. */
+export const DESK_TABS = DEFAULT_PANELS;
+export type { DeskTab };
 
 export function isDeskTab(value: string | undefined): value is DeskTab {
-  return DESK_TABS.includes(value as DeskTab);
+  return isDeskPanel(value);
 }
 
 export type DeskModel = "haiku" | "sonnet" | "opus";
@@ -77,7 +97,6 @@ export interface DeskTemplateDef {
 export interface CreateDeskPayload {
   name: string;
   focus: string | null;
-  capital: number;
   objective_pct?: number;
   mandate?: string;
   template: WizardTemplate;

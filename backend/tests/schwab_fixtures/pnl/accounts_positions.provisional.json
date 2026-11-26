@@ -1,0 +1,104 @@
+[
+  {
+    "securitiesAccount": {
+      "type": "MARGIN",
+      "accountNumber": "12345678",
+      "isClosingOnlyRestricted": false,
+      "positions": [
+        {
+          "longQuantity": 10,
+          "shortQuantity": 0,
+          "averagePrice": 512.3,
+          "marketValue": 5089,
+          "currentDayProfitLoss": -34,
+          "currentDayProfitLossPercentage": -0.66,
+          "longOpenProfitLoss": -34,
+          "shortOpenProfitLoss": 0,
+          "previousSessionLongQuantity": 0,
+          "previousSessionShortQuantity": 0,
+          "currentDayCost": 5123,
+          "instrument": {
+            "assetType": "EQUITY",
+            "symbol": "SPY",
+            "cusip": "78462F103"
+          }
+        },
+        {
+          "longQuantity": 0,
+          "shortQuantity": 5,
+          "averagePrice": 190.1,
+          "marketValue": -945,
+          "currentDayProfitLoss": 12.5,
+          "currentDayProfitLossPercentage": 1.3,
+          "longOpenProfitLoss": 0,
+          "shortOpenProfitLoss": 20.25,
+          "previousSessionLongQuantity": 0,
+          "previousSessionShortQuantity": 5,
+          "currentDayCost": 0,
+          "instrument": {
+            "assetType": "EQUITY",
+            "symbol": "QQQ",
+            "cusip": "46090E103"
+          }
+        },
+        {
+          "longQuantity": 3,
+          "shortQuantity": 0,
+          "averagePrice": 50,
+          "marketValue": 151.5,
+          "instrument": {
+            "assetType": "EQUITY",
+            "symbol": "IWM",
+            "cusip": "464287655"
+          }
+        }
+      ],
+      "initialBalances": {
+        "equity": 25000,
+        "liquidationValue": 25000,
+        "accountValue": 25000,
+        "cashBalance": 19877
+      },
+      "currentBalances": {
+        "equity": 24966,
+        "availableFunds": 19877,
+        "buyingPower": 39754
+      }
+    }
+  },
+  {
+    "securitiesAccount": {
+      "type": "CASH",
+      "accountNumber": "87654321",
+      "isClosingOnlyRestricted": false,
+      "positions": [
+        {
+          "longQuantity": 20,
+          "shortQuantity": 0,
+          "averagePrice": 297.5,
+          "marketValue": 5950,
+          "currentDayProfitLoss": -37.5,
+          "currentDayProfitLossPercentage": -0.63,
+          "longOpenProfitLoss": -37.5,
+          "shortOpenProfitLoss": 0,
+          "instrument": {
+            "assetType": "EQUITY",
+            "symbol": "XLK",
+            "cusip": "81369Y803"
+          }
+        }
+      ],
+      "initialBalances": {
+        "liquidationValue": 10000,
+        "accountValue": 10000,
+        "cashBalance": 4012.5
+      },
+      "currentBalances": {
+        "totalCash": 4012.5,
+        "longNonMarginableMarketValue": 5950,
+        "cashAvailableForTrading": 4012.5,
+        "cashAvailableForWithdrawal": 4012.5
+      }
+    }
+  }
+]

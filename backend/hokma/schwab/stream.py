@@ -41,6 +41,11 @@ CHART_FUTURES = "CHART_FUTURES"
 CHANGE_SERVICES = (LEVELONE_EQUITIES, LEVELONE_OPTIONS, LEVELONE_FUTURES)       # tipo Change: the last value of each field is kept
 SEQUENCE_SERVICES = (CHART_EQUITY, CHART_FUTURES)                               # tipo All Sequence: each message is whole
 SERVICES = CHANGE_SERVICES + SEQUENCE_SERVICES
+# The account's own service (guide 7.16): it tells that SOMETHING happened in the account (an order sent, filled, canceled). The guide does not list the types of
+# message nor the schema of the data, so Hokma does not read them: it only counts the message as a signal that the fills of the book must be pulled now.
+ACCT_ACTIVITY = "ACCT_ACTIVITY"
+ACTIVITY_KEY = "Account Activity"                                             # the guide: only the first key is used; it labels the updates
+ACCOUNT_SERVICES = (ACCT_ACTIVITY,)
 
 # The fields asked for (guide 7.8, 7.9, 7.10, 7.14). `0` is the key and arrives as `key`.
 FIELDS = {
@@ -49,6 +54,7 @@ FIELDS = {
     LEVELONE_FUTURES: "0,1,2,3,4,5,8,9,10,11,12,13,14,18,19,22,23,24,29,32,33,34,35,37,38",
     CHART_EQUITY: "0,1,2,3,4,5,6,7,8",
     CHART_FUTURES: "0,1,2,3,4,5,6",
+    ACCT_ACTIVITY: "0,1,2,3",
 }
 
 SUCCESS_CODES = (0, 26, 27, 28, 29)
@@ -155,8 +161,9 @@ class SchwabStreamer:
 
     def __init__(self, config: StreamConfig, on_data: Callable, on_status: Callable,
                  on_limit: Callable | None = None, on_unavailable: Callable | None = None,
-                 backoff: tuple[float, ...] | None = None, tap: Callable | None = None) -> None:
+                 backoff: tuple[float, ...] | None = None, tap: Callable | None = None, on_activity: Callable | None = None) -> None:
         self._cfg = config
+        self._on_activity = on_activity                        # on_activity(message_type): the account did something; the account and the data are NOT passed on
         self._taps: list[Callable] = [tap] if tap is not None else []   # the measuring tool sees every incoming message, without ids (see `sanitize`)
         self._on_data, self._on_status = on_data, on_status
         self._on_limit, self._on_unavailable = on_limit, on_unavailable
@@ -181,9 +188,15 @@ class SchwabStreamer:
         self._was_ready = False
         self.stats = {"heartbeats": 0, "heartbeat_gaps_ms": [], "logins": 0, "sessions": 0}   # for the measuring tool: counts only
         self._last_beat: float | None = None
+        self._last_activity: dict | None = None             # the latest ACCT_ACTIVITY entry, in memory only, for the anonymous sample (hokma.schwab.sample)
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__}>"                    # nothing the session holds is ever shown
+
+    def last_activity(self) -> dict | None:
+        """A copy of the latest ACCT_ACTIVITY entry ({received_at, entry}) or None. It still holds the account and the data: only the anonymous
+        sample reads it, and it anonymizes it before anything is written."""
+        return None if self._last_activity is None else json.loads(json.dumps(self._last_activity))
 
     # ---- what the owner of the session asks ----
 
@@ -197,7 +210,7 @@ class SchwabStreamer:
 
     def want(self, service: str, keys: list[str] | set[str]) -> None:
         """Add keys to the desired set of a service. The session opens (or reopens after an idle LOGOUT) when it is not running."""
-        if service not in SERVICES:
+        if service not in SERVICES and service not in ACCOUNT_SERVICES:
             raise ValueError("unknown streamer service")
         if self._dirty is None:
             self._dirty = asyncio.Event()
@@ -460,6 +473,9 @@ class SchwabStreamer:
         service = block.get("service")
         content = block.get("content")
         ts = block.get("timestamp")
+        if service in ACCOUNT_SERVICES and isinstance(content, list):
+            self._activity(content)
+            return
         if service not in SERVICES or not isinstance(content, list):
             return
         for entry in content:
@@ -481,6 +497,20 @@ class SchwabStreamer:
                 self._on_data(service, key, snapshot, frozenset(fields), delayed, ts if isinstance(ts, int) else None)
             except Exception:
                 log.warning("streamer data callback failed service=%s", service)
+
+    def _activity(self, content: list) -> None:
+        """A message of ACCT_ACTIVITY: only its type (field 2) goes out, never the account (field 1) nor the data (field 3)."""
+        for entry in content:
+            if isinstance(entry, dict):
+                self._last_activity = {"received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "entry": json.loads(json.dumps(entry, default=str))}
+        if self._on_activity is None:
+            return
+        for entry in content:
+            if isinstance(entry, dict):
+                try:
+                    self._on_activity(str(entry.get("2") or ""))
+                except Exception:
+                    log.warning("streamer activity callback failed")
 
     # ---- the subscriptions: one command at a time ----
 
@@ -513,7 +543,30 @@ class SchwabStreamer:
             else:
                 self._empty_since = None
 
+    async def _reconcile_account_service(self, service: str) -> None:
+        """ACCT_ACTIVITY takes SUBS and UNSUBS only (guide 7.16), with ONE key: it is on or off, there is nothing to add or take one by one."""
+        have = self._sent.setdefault(service, set())
+        wanted = bool(self._want.get(service))
+        if wanted and not have:
+            code = await self._command(service, "SUBS", [ACTIVITY_KEY], self._fields[service])
+            if code in SUCCESS_CODES:
+                have.add(ACTIVITY_KEY)
+            elif code == SERVICE_UNAVAILABLE:
+                self._dead.add(service)
+                if self._on_unavailable:
+                    self._on_unavailable(service)
+            elif code == NO_CONNECTION:
+                raise _Reconnect("no_connection")
+            else:
+                log.warning("streamer subscription not applied service=%s code=%s", service, code)
+        elif have and not wanted:
+            if await self._command(service, "UNSUBS", [ACTIVITY_KEY]) in SUCCESS_CODES:
+                have.clear()
+
     async def _reconcile_service(self, service: str) -> None:
+        if service in ACCOUNT_SERVICES:
+            await self._reconcile_account_service(service)
+            return
         chunk = max(1, self._cfg.chunk)
         have = self._sent.setdefault(service, set())
         gone = sorted(have - self._want.get(service, set()))

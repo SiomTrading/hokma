@@ -48,6 +48,7 @@ from hokma.desks.core.signal import Signal
 from hokma.desks.core.state import DeskState, Message, initial_state, make_report
 from hokma.desks.plantel import SEATS
 from hokma.desks.swo import premium_switch, regime
+from hokma.desks.swo import report as seat_report
 from hokma.desks.swo.premium_switch import PremiumSwitchClosed
 from hokma.exec import levels
 from hokma.i18n import t as _t
@@ -225,6 +226,9 @@ class _Run:
     step: int = 0
     closed: bool = False
     log: DecisionLog | None = None
+    listener: Callable[[dict[str, Any]], None] | None = None     # the live feed of the panel (SPEC-028, delivery 4): one call per event
+    seats: list[dict[str, Any]] = field(default_factory=list)    # the report of each seat that took part, kept in the record of the run
+    calls: dict[str, tuple[str, ...]] = field(default_factory=dict)   # tools each analyst called
 
 
 def _chat(run: _Run, key: str) -> ChatModel:
@@ -245,6 +249,20 @@ def _plain(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     return value
+
+
+def _emit(run: _Run, event: Mapping[str, Any]) -> None:
+    """One event to the live feed. A listener that fails never stops the cycle: the record of the run is the truth, the feed is a courtesy."""
+    if run.listener is None:
+        return
+    try:
+        run.listener({**event, "desk_id": run.desk_id, "run_id": run.run_id, "symbol": run.symbol})
+    except Exception:                                                              # noqa: BLE001
+        log.warning("the live feed of run %s failed on %s", run.run_id, event.get("event"))
+
+
+def _note(run: _Run, code: str, step: str, status: str, **fields: Any) -> None:
+    run.seats.append(seat_report.seat_entry(code, step=step, status=status, **fields))
 
 
 # ---- the nodes ------------------------------------------------------------------------------------------------------------------------
@@ -272,6 +290,7 @@ def _run_analyst(run: _Run, key: str) -> tuple[str, str, str, str]:
         log.warning("analyst %s of desk %s failed: %s", key, run.desk_id, explain(exc))
         cause = str(exc) if isinstance(exc, CycleError) else _t("desks.cycle.analyst_failed", key=key, error=explain(exc))
         return key, "", f"error:{type(exc).__name__}", cause
+    run.calls[key] = tuple(result.calls)
     if not result.valid:
         why = "; ".join(result.check.problems[:2])[:200]
         return key, "", "invalid:" + why, _t("desks.cycle.report_invalid", key=key, why=why)
@@ -287,6 +306,8 @@ def _analysts(run: _Run, state: DeskState) -> dict[str, Any]:
     except Exception as exc:                                                   # noqa: BLE001  (no data for anybody: every analyst is absent with the cause)
         log.warning("the data of %s for desk %s did not load: %s", run.symbol, run.desk_id, explain(exc))
         detail = str(exc) if isinstance(exc, CycleError) else _t("desks.cycle.load_failed", symbol=run.symbol, error=explain(exc))
+        for k in keys:
+            _note(run, ANALYST_AGENTS[k].code, "analysts", seat_report.FAILED, why=detail)
         return {"analyst_status": {k: f"error:{type(exc).__name__}" for k in keys}, "analyst_causes": {k: detail for k in keys},
                 "stop": f"error:analysts:{type(exc).__name__}", "error": explain(exc), "detail": detail}
     with ThreadPoolExecutor(max_workers=max(1, len(keys))) as pool:
@@ -298,9 +319,14 @@ def _analysts(run: _Run, state: DeskState) -> dict[str, Any]:
         status[key] = how
         if cause:
             causes[key] = cause
+        _note(run, ANALYST_AGENTS[key].code, "analysts", seat_report.OK if how == "ok" else seat_report.ABSENT if how == "no_data" else seat_report.FAILED,
+              summary=text.split("\n", 1)[0], report=text, why=cause, tools=run.calls.get(key, ()))
         reports[key] = make_report(key, text or None)
         if text:
             run.reports[key] = text
+    for key in state.get("off", ()):                                           # left out by the plan: absent, and it says so
+        if key in ANALYST_AGENTS:
+            _note(run, ANALYST_AGENTS[key].code, "analysts", seat_report.ABSENT, why=_t("desks.analysis.left_out"))
     update: dict[str, Any] = {"reports": reports, "analyst_status": status, "analyst_causes": causes}
     if not run.reports:
         update.update(_stop("no_analyst_report"))
@@ -320,6 +346,15 @@ def _company_filter(run: _Run, state: DeskState) -> dict[str, Any]:
                                         strategy=run.strategy, run_id=run.run_id, kit_root=run.rt.kit_root, language=run.rt.language, db=run.db,
                                         pead_signal=run.data.pead_signal)
     run.filter = result
+    seen = set()
+    for signal in result.signals:
+        seen.add(signal.source)
+        _note(run, signal.source, "company_filter", seat_report.OK, summary=_t("desks.analysis.abstained") if signal.abstained else f"{signal.value:+.2f} / {signal.confidence}",
+              report=signal.reason, why=", ".join(signal.data_missing),
+              signal={"value": signal.value, "confidence": signal.confidence, "abstained": signal.abstained})
+    for code in codes:
+        if code not in seen:
+            _note(run, code, "company_filter", seat_report.FAILED, why=_t("desks.analysis.no_view"))
     summary = {"passes": result.passes, "reason_code": result.reason_code, "blended": result.blended, "confidence": result.confidence,
                "n_used": result.n_used, "abstained": list(result.abstained), "merged": [list(g) for g in result.merged], "vetoed_by": result.vetoed_by}
     update: dict[str, Any] = {"regime": label, "regime_facts": regime_facts, "filter": summary}
@@ -351,6 +386,11 @@ def _debate(run: _Run, state: DeskState) -> dict[str, Any]:
     raw = {"rounds": result.rounds, "stop_reason": result.stop_reason, "summary": result.summary, "error": result.error,
            "bull": None if result.bull is None else _plain(result.bull.to_dict()), "bear": None if result.bear is None else _plain(result.bear.to_dict())}
     run.log.record_raw(symbol=run.symbol, as_of=run.as_of, debate=raw)
+    for code, side in (("A08", result.bull), ("A09", result.bear)):
+        text = side.render() if side else ""
+        _note(run, code, "debate", seat_report.OK if side else seat_report.FAILED, summary=text.split("\n", 1)[0], report=text,
+              why="" if side else (result.error or _t("desks.analysis.no_argument")))
+    _note(run, "A10", "debate", seat_report.OK, summary=result.summary, why=result.note.central_disagreement if result.note else (result.error or ""), role="moderator")
     return {"debate": {"count": result.rounds, "summary": result.summary, "last_speaker": "bear", "last_response": "", "verdict": ""},
             "debate_stop": result.stop_reason}
 
@@ -374,6 +414,9 @@ def _judge(run: _Run, state: DeskState) -> dict[str, Any]:
                      snapshot=run.snapshot, reports=dict(run.reports), summary=run.debate.summary, ledger=run.debate.ledger)
     result = run_judge(_chat(run, "A10"), case, gate=gate, kit_root=run.rt.kit_root, language=run.rt.language)
     run.judge = result
+    verdict = result.to_plantel()
+    _note(run, "A10", "judge", seat_report.OK if result.output is not None else seat_report.FAILED, summary=result.rating, report=verdict.rationale,
+          why="; ".join(result.flags) + (f" ({result.error})" if result.error else ""))
     update: dict[str, Any] = {"judge": {"rating": result.rating, "flags": list(result.flags), "gate": gate.status, "gate_rounds": gate.rounds}}
     assert run.log is not None
     run.log.record_raw(symbol=run.symbol, as_of=run.as_of, debate={"stage": "judge", "case": _case_text(run)[:4000]},
@@ -401,6 +444,12 @@ def _trader(run: _Run, state: DeskState) -> dict[str, Any]:
     run.ctx = ctx
     result = run_trader(run.rt.trader_model, ctx, language=run.rt.language)
     run.trade = result
+    if result.proposal is not None:
+        shown = result.proposal
+        _note(run, "A11", "trader", seat_report.OK, summary=f"{shown.structure} {shown.underlying} x{result.contracts}", report=result.thesis, why=result.why)
+    else:
+        _note(run, "A11", "trader", seat_report.OK if result.status in ("stand_aside", "no_trade") else seat_report.FAILED,
+              summary=f"{result.status}: {result.code}", report=result.thesis, why=result.why)
     if result.proposal is None:
         return _stop(f"trader:{result.status}:{result.code}", trade={"status": result.status, "code": result.code, "why": result.why})
     proposal = result.proposal
@@ -411,7 +460,8 @@ def _trader(run: _Run, state: DeskState) -> dict[str, Any]:
     if run.log.reopen_blocked(proposal.underlying, proposal.expiration, owner_order=run.owner_order):
         return _stop("rejected_before")
     return {"trade": {"status": result.status, "code": result.code, "structure": proposal.structure, "underlying": proposal.underlying,
-                      "expiration": proposal.expiration.isoformat(), "contracts": result.contracts}}
+                      "expiration": proposal.expiration.isoformat(), "contracts": result.contracts,
+                      "net_premium": str(proposal.net_premium), "max_loss_usd": None if proposal.max_loss_usd is None else str(proposal.max_loss_usd)}}
 
 
 def _committee(run: _Run, state: DeskState) -> dict[str, Any]:
@@ -423,6 +473,14 @@ def _committee(run: _Run, state: DeskState) -> dict[str, Any]:
     result = risk.run_committee(context, {code: _chat(run, code) for code in COMMITTEE_CODES}, kit_root=run.rt.kit_root, language=run.rt.language, db=run.db)
     run.committee = result
     verdict = result.verdict
+    last_turn: dict[str, Any] = {}
+    for turn in result.turns:
+        last_turn[turn.seat_code] = turn
+    for code, turn in last_turn.items():
+        _note(run, code, "committee", seat_report.OK if turn.valid else seat_report.FAILED, summary=turn.text.split("\n", 1)[0], report=turn.text,
+              why="; ".join(turn.problems), tools=turn.tools_called)
+    if verdict is not None and "A14" not in last_turn:
+        _note(run, "A14", "committee", seat_report.OK, summary=verdict.risk_level, report=verdict.summary)
     summary = {"risk_level": None if verdict is None else verdict.risk_level, "summary": "" if verdict is None else verdict.summary,
                "limits": None if result.limits is None else {"status": result.limits.status, "limits": _plain(result.limits.limits)},
                "turns": [{"seat": t.seat_code, "valid": t.valid} for t in result.turns]}
@@ -434,6 +492,12 @@ def _committee(run: _Run, state: DeskState) -> dict[str, Any]:
     return update
 
 
+def _absent_facts(run: _Run, state: DeskState) -> dict[str, Any]:
+    """The reports that did not arrive, by name and cause, so the note of the manager mentions them (SPEC-028 A3). Empty when every report came."""
+    gone = {entry["name"]: entry["why"] for entry in run.seats if entry["step"] == "analysts" and entry["status"] != seat_report.OK}
+    return {"reports_not_delivered": gone} if gone else {}
+
+
 def _manager(run: _Run, state: DeskState) -> dict[str, Any]:
     """Step 8, Grant: the final rating, then the delivery of the proposal to `exec_propose`. The level of the desk decides what follows."""
     assert run.judge is not None and run.trade is not None and run.trade.proposal is not None and run.filter is not None
@@ -443,10 +507,16 @@ def _manager(run: _Run, state: DeskState) -> dict[str, Any]:
                         judge_rationale=run.judge.to_plantel().rationale, committee={"risk_level": committee.get("risk_level"), "summary": committee.get("summary")},
                         proposal={"structure": run.trade.proposal.structure, "underlying": run.trade.proposal.underlying,
                                   "expiration": run.trade.proposal.expiration.isoformat(), "net_premium": str(run.trade.proposal.net_premium),
-                                  "contracts": run.trade.contracts})
+                                  "contracts": run.trade.contracts},
+                        extra=_absent_facts(run, state))
     result = final_rating(_chat(run, "A15"), desk_id=run.desk_id, as_of=run.as_of, symbol=run.symbol, facts=_plain(facts), line=LINE,
                           kit_root=run.rt.kit_root, language=run.rt.language, db=run.db)
     run.final = result
+    if result.valid and result.final is not None:
+        notes = "\n".join([result.final.summary, result.thesis, *(f"- {w}" for w in result.would_change)])
+        _note(run, "A15", "manager", seat_report.OK, summary=f"{result.final.rating} {result.final.grade}", report=notes, tools=result.calls)
+    else:
+        _note(run, "A15", "manager", seat_report.FAILED, why="; ".join(result.check.problems[:4]), tools=result.calls)
     if not result.valid or result.final is None:
         return _stop("manager_invalid", final={"valid": False, "problems": list(result.check.problems[:4])})
     report = {"rating": result.final.rating, "grade": result.final.grade, "summary": result.final.summary, "thesis": result.thesis,
@@ -538,7 +608,8 @@ def _close(run: _Run, state: DeskState) -> dict[str, Any]:
                       "committee": state.get("committee"), "final": state.get("final"), "delivery": state.get("delivery"),
                       "learning": state.get("learning"), "orders": run.orders, "absent": absent, "analyst_status": state.get("analyst_status"),
                       "analyst_causes": state.get("analyst_causes"), "error": state.get("error"), "detail": state.get("detail"),
-                      "debate": state.get("debate"), "trail": [*state.get("trail", []), "close"]})
+                      "debate": state.get("debate"), "trail": [*state.get("trail", []), "close"],
+                      "plan": {"order": state.get("plan"), "run": state.get("selected"), "off": state.get("off")}, "agents": run.seats})
     runs.finish(run.run_id, status, entries={"symbol": run.symbol, "as_of": run.as_of.isoformat(), "desk_id": run.desk_id, "mandate": run.mandate.name},
                 outputs=outputs, order_ids=[run.proposal_id] if run.proposal_id is not None else [], db=run.db)
     run.closed = True
@@ -563,6 +634,8 @@ def build_graph(run: _Run) -> CompiledGraph:
                     checkpoint.save(run.run_id, run.signature, run.step, name, dict(_plain(_checkpoint_state(state))), trail, db=run.db)
                 except Exception:                                                   # noqa: BLE001  (a checkpoint that cannot be written is not a reason to trade)
                     log.warning("checkpoint of %s was not written", name)
+            if name != "close":
+                _emit(run, {"event": "step", "node": name, "step": seat_report.step_of(name), "phase": "enter"})
             try:
                 update = bodies[name](run, state) or {}
             except Exception as exc:                                                # noqa: BLE001  (fail closed: no proposal after an error)
@@ -571,6 +644,9 @@ def build_graph(run: _Run) -> CompiledGraph:
                           "detail": str(exc) if isinstance(exc, CycleError) else _t("desks.cycle.step_failed", name=name, error=explain(exc))}
             if update.get("stop"):
                 update["stop_at"] = name
+            if name != "close":
+                _emit(run, {"event": "step", "node": name, "step": seat_report.step_of(name), "phase": "exit", "ok": not update.get("stop"),
+                            "stop": update.get("stop") if isinstance(update.get("stop"), str) else None})
             return {**update, "trail": trail}
         return node
 
@@ -607,11 +683,30 @@ def _profile(db: Database, desk_id: int) -> tuple[str, str | None]:
     return row["line"], row["variant"]
 
 
+def cycle_signature(desk_id: int, symbol: str, as_of: datetime) -> str:
+    return hashlib.sha256(f"{desk_id}|{symbol.strip().upper()}|{as_of.isoformat()}".encode()).hexdigest()
+
+
+def preflight(desk_id: int, db: Database | None = None) -> CycleRuntime:
+    """What a cycle needs before it opens: the desk is a SWO desk, the runtime of the app exists and the mandate can be read. Raises
+    `CycleError` with the stable code; the run is not opened. Returns the runtime to hand to `run_cycle`."""
+    database = db or get_database()
+    _profile(database, desk_id)
+    rt = current_runtime(desk_id)
+    try:
+        load_desk_mandate(desk_id, db=database)
+    except Exception as exc:                                                       # noqa: BLE001
+        raise CycleError("no_mandate", f"desk {desk_id} has no mandate it can run with") from exc
+    return rt
+
+
 def run_cycle(desk_id: int, *, symbol: str, as_of: datetime, runtime: CycleRuntime | None = None, strategy: str | None = None,
-              owner_order: bool = False, db: Database | None = None) -> CycleResult:
+              owner_order: bool = False, db: Database | None = None, listener: Callable[[dict[str, Any]], None] | None = None,
+              run_id: int | None = None) -> CycleResult:
     """One cycle of a SWO desk for one symbol at one cut-off (AH-22). Returns the run id, the final rating of Grant (None when the cycle ended
     before him), the proposal and what the door answered, and the reports that did not arrive. `owner_order` is true only when the owner asked
-    for this operation again after rejecting it."""
+    for this operation again after rejecting it. `listener` (SPEC-028, delivery 4) receives one event when the run opens (`started`), one when each step
+    enters and leaves (`step`) and one at the end (`finished`, or `failed` when the graph itself broke); the record of the run stays the truth."""
     database = db or get_database()
     _profile(database, desk_id)
     rt = runtime or current_runtime(desk_id)
@@ -620,13 +715,17 @@ def run_cycle(desk_id: int, *, symbol: str, as_of: datetime, runtime: CycleRunti
     except Exception as exc:                                                       # noqa: BLE001
         raise CycleError("no_mandate", f"desk {desk_id} has no mandate it can run with") from exc
     sym = symbol.strip().upper()
-    signature = hashlib.sha256(f"{desk_id}|{sym}|{as_of.isoformat()}".encode()).hexdigest()
-    run_id = runs.begin(desk_id, KIND, signature=signature, started_at=as_of, db=database)
-    run = _Run(rt, database, desk_id, sym, as_of, mandate, strategy, owner_order, run_id, signature, log=DecisionLog(desk_id, db=database))
+    signature = cycle_signature(desk_id, sym, as_of)
+    if run_id is None:
+        run_id = runs.begin(desk_id, KIND, signature=signature, started_at=as_of, db=database)
+    # else: the caller opened the row already (the analysis door, which counts it against its limits from that moment)
+    run = _Run(rt, database, desk_id, sym, as_of, mandate, strategy, owner_order, run_id, signature, log=DecisionLog(desk_id, db=database), listener=listener)
+    _emit(run, {"event": "started", "as_of": as_of.isoformat(), "strategy": strategy, "steps": list(seat_report.STEPS)})
     state = initial_state(desk_id=desk_id, symbol=sym, line=LINE, as_of=as_of, horizon=mandate.strategies[0].horizon)
     try:
         final_state = build_graph(run).invoke(state).state
-    except BaseException:
+    except BaseException as exc:
+        _emit(run, {"event": "failed", "error": explain(exc)})
         if not run.closed:
             try:
                 runs.finish(run_id, "failed", entries={"symbol": sym, "as_of": as_of.isoformat()}, outputs={"reason": "graph_error"}, db=database)
@@ -634,6 +733,10 @@ def run_cycle(desk_id: int, *, symbol: str, as_of: datetime, runtime: CycleRunti
                 pass
         raise
     stop = final_state.get("stop")
+    _emit(run, {"event": "finished", "status": "failed" if isinstance(stop, str) and stop.startswith("error:") else "done",
+                "rating": (final_state.get("final") or {}).get("rating"), "stopped_at": final_state.get("stop_at") if stop else None,
+                "reason": stop if isinstance(stop, str) else None, "proposal_id": run.proposal_id, "exec_status": run.exec_status,
+                "absent": list(final_state.get("absent", ())), "detail": final_state.get("detail") if stop else None})
     return CycleResult(run_id, (final_state.get("final") or {}).get("rating"), run.proposal_id, run.exec_status, tuple(final_state.get("absent", ())),
                        final_state.get("stop_at") if stop else None, stop if isinstance(stop, str) else None,
                        None if run.learning is None else run.learning.status, final_state.get("detail") if stop else None,

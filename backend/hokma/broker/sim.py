@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+from hokma.backoffice import desk_owner
 from hokma.backoffice import book as book_module
 from hokma.backoffice import valuation
 from hokma.broker import sim_engine
@@ -165,6 +166,9 @@ class SimBroker(BaseBroker):
 
         self.account(account_id)
         parsed = self._parse(order)
+        owner = desk_owner.current_owner()
+        if owner is not None:
+            parsed["_owner"] = {"desk_id": owner[0], "strategy_key": owner[1]}         # kept with the order: a working order fills later, by another thread
         ref = "S" + secrets.token_hex(7)
         database = get_database()
         with database.write() as u:
@@ -232,7 +236,12 @@ class SimBroker(BaseBroker):
         avg = sum((f.qty * f.price for f in fills), ZERO) / total
         assets = assets or {leg["contract_id"]: leg.get("asset_type") or "equity" for leg in parsed["legs"]}
         try:
-            return self._book_in_one_transaction(account_id, ref, parsed, fills, assets, total, avg)
+            result = self._book_in_one_transaction(account_id, ref, parsed, fills, assets, total, avg)
+            if result.get("status") == "FILLED":
+                from hokma.exec import live
+
+                live.after_fill(account_id)                 # SPEC-026, 3390c: the fill is an event of the live freeze, measured at once
+            return result
         except _NotEnoughCash:
             self._close(ref, "rejected", "the account does not have the cash for this order")
             return {"order_id": ref, "status": "REJECTED", "filled_qty": "0", "reason": "insufficient_cash"}
@@ -251,7 +260,8 @@ class SimBroker(BaseBroker):
             need, cash = sim_engine.cash_needed(fills, assets), book_module.cash_in(u.session, account_id)
             if cash is not None and need is not None and need > cash:
                 raise _NotEnoughCash()                              # rolls the claim back with everything else
-            desk_id = u.broker.desk_of_account(account_id)
+            named = parsed.get("_owner")                                          # the desk of the order, never "the first desk of the account"
+            desk_id = named["desk_id"] if isinstance(named, dict) and named.get("desk_id") is not None else desk_owner.owner_of_fill(u.session, account_id, ref)[0]
             for n, f in enumerate(fills):
                 u.session.insert("sim_fills", {"sim_order_id": row["id"], "contract_id": f.contract_id, "side": f.side, "qty": text(f.qty), "price": text(f.price),
                                                "commission": text(f.commission), "multiplier": text(f.multiplier),
@@ -303,8 +313,10 @@ class SimBroker(BaseBroker):
         with get_database().read() as u:
             rows = u.session.query(
                 "SELECT s.* FROM sim_orders s JOIN broker_accounts a ON a.id = s.account_id "
-                "LEFT JOIN desk_accounts da ON da.account_id = a.id LEFT JOIN desks d ON d.id = da.desk_id "
-                "WHERE s.status = 'working' AND a.broker_id = :b AND a.status = 'active' AND (d.id IS NULL OR d.status = 'active')", {"b": self.id})
+                "WHERE s.status = 'working' AND a.broker_id = :b AND a.status = 'active' "
+                "AND (NOT EXISTS (SELECT 1 FROM desk_account_links l WHERE l.account_id = a.id) "
+                "OR EXISTS (SELECT 1 FROM desk_account_links l JOIN desks d ON d.id = l.desk_id WHERE l.account_id = a.id AND d.status = 'active'))",
+                {"b": self.id})
         for row in rows:
             parsed = json.loads(row["request_json"])
             if contract_id not in {leg["contract_id"] for leg in parsed["legs"]}:

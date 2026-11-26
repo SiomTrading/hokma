@@ -22,6 +22,7 @@ from backoffice_support import AAPL, NQ, OPT, SPY, db, desks_db, env, load_mixed
 from hokma.backoffice import book, pnl, provenance, snapshot, valuation, views
 from hokma.backoffice.cost_basis import reconstruct
 from hokma.backoffice.book import Book
+from account_links_support import unlink_all
 
 MARKS = {AAPL: D("210"), SPY: D("505"), OPT: D("6.5"), NQ: D("20120")}
 
@@ -91,7 +92,7 @@ def test_pnl_of_the_period_by_desk_account_and_symbol_with_commissions_subtracte
 
 def test_a_desk_without_account_has_an_empty_pnl_FT_106(ready):
     with ready.db.write() as u:
-        u.broker.unlink_desk(ready.desk_id)
+        unlink_all(u, ready.desk_id)
     report = pnl.pnl(ready.desk_id, start="2026-03-01 00:00:00", end="2026-03-31 00:00:00", db=ready.db)
     assert report.account_id is None and report.net == 0
 

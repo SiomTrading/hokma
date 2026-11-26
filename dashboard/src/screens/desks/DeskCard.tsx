@@ -4,6 +4,7 @@ import { useI18n } from "@/i18n";
 import { AssignAccount } from "./AssignAccount";
 import { DeleteDeskModal } from "./DeleteDeskModal";
 import { formatBalance, formatCapital, formatPercent, formatResult, resultTone } from "./format";
+import { accountsOf } from "./types";
 import type { DeskSummary } from "./types";
 
 interface Props {
@@ -20,6 +21,8 @@ export function DeskCard({ desk, onOpen }: Props) {
   const trigger = useRef<HTMLButtonElement>(null);
   const paused = desk.status === "paused";
   const today = formatResult(desk.today, locale);
+  const accounts = accountsOf(desk);
+  const money = desk.capital ?? (accounts.length > 0 ? accounts.reduce((sum, a) => sum + a.initial_capital, 0) : null);
   return (
     <div className="desk-card-wrap">
     <button type="button" className="pane desk-card" onClick={onOpen} aria-label={t("desks.card.open", { name: desk.name })}>
@@ -33,10 +36,10 @@ export function DeskCard({ desk, onOpen }: Props) {
       <div className="desk-card-stats">
         <div>
           <div className="lbl">{t("desks.stat.capital")}</div>
-          <div className="mono">{formatCapital(desk.capital, locale)}</div>
+          <div className="mono">{money === null ? t("desks.card.noAccount") : formatCapital(money, locale)}</div>
         </div>
         <div>
-          <div className="lbl">{t("desks.stat.today")}</div>
+          <div className="lbl">{t("desks.stat.deskResult")}</div>
           <div className={cx("mono", resultTone(desk.today))}>{today}</div>
         </div>
         <div>
@@ -44,17 +47,24 @@ export function DeskCard({ desk, onOpen }: Props) {
           <div className="mono">{desk.drawdown === null ? t("desks.stat.none") : formatPercent(desk.drawdown, locale)}</div>
         </div>
       </div>
-      <div className="desk-card-account">
-        {desk.account ? (
-          <>
-            <span className="desk-card-acct-name">{desk.account.name}<small>{desk.account.broker}</small></span>
-            <span className="desk-card-acct-nums">
-              <span><span className="lbl">{t("desks.accounts.balance")}</span><b className="mono">{formatBalance(desk.account.balance.cash, locale, t("desks.accounts.unavailable"))}</b></span>
-              <span><span className="lbl">{t("desks.kpi.equity")}</span><b className="mono">{formatBalance(desk.account.balance.equity, locale, t("desks.accounts.unavailable"))}</b></span>
-            </span>
-          </>
+      <div className="desk-card-accounts">
+        {accounts.length === 0 ? (
+          <span className="desk-card-acct-none">{t("desks.card.analysisOnly")}</span>
         ) : (
-          <span>{t("desks.card.noAccount")}</span>
+          accounts.map((account) => (
+            <div key={account.id} className="desk-card-account">
+              <span className="desk-card-acct-name">
+                {account.name}<small>{account.broker}{account.mask ? ` ${account.mask}` : ""}</small>
+                {account.shared_with && account.shared_with.length > 0 ? (
+                  <small className="desk-card-shared">{t(account.shared_with.length === 1 ? "desks.accounts.shared.one" : "desks.accounts.shared.many", { n: String(account.shared_with.length) })}</small>
+                ) : null}
+              </span>
+              <span className="desk-card-acct-nums">
+                <span><span className="lbl">{t("desks.accounts.balance")}</span><b className="mono">{formatBalance(account.balance.cash, locale, t("desks.accounts.unavailable"))}</b></span>
+                <span><span className="lbl">{t("desks.kpi.equity")}</span><b className="mono">{formatBalance(account.balance.equity, locale, t("desks.accounts.unavailable"))}</b></span>
+              </span>
+            </div>
+          ))
         )}
       </div>
       <div className="desk-card-foot">
@@ -66,11 +76,9 @@ export function DeskCard({ desk, onOpen }: Props) {
         </span>
       </div>
     </button>
-      {desk.account ? null : (
-        <button type="button" className="desk-card-assign" onClick={() => setAssigning(true)}>
-          {t("desks.card.assign")}
-        </button>
-      )}
+      <button type="button" className="desk-card-assign" onClick={() => setAssigning(true)}>
+        {t("desks.card.add")}
+      </button>
       <button ref={trigger} type="button" className="desk-card-more" aria-label={t("desks.card.options", { name: desk.name })} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
         ···
       </button>

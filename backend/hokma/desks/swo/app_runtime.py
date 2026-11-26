@@ -203,30 +203,37 @@ def trade_context(desk_id: int, symbol: str, as_of: datetime) -> TradeContext:
     mandate = load_desk_mandate(desk_id)
     with get_database().read() as u:
         desk = u.desks.get(desk_id)
-        pair = service.broker_of_desk(u, desk_id)
-    if pair is None:
-        raise CycleError("no_data", f"desk {desk_id} has no trading account")
-    broker, account = pair
-    state = account_snapshot.snapshot(account.id)
-    if state.equity is None or state.cash is None:
-        raise CycleError("no_data", f"the account of desk {desk_id} has no equity or no cash in the back office: {sorted(state.missing)}")
-    book: dict[str, Decimal] = {}
-    for position in state.positions:
-        cid, qty = position.get("contract_id") or position.get("symbol"), position.get("qty")
-        if cid and qty is not None:
-            book[str(cid)] = Decimal(str(qty))
+        pair = service.broker_of_resolved(u, desk_id)           # the account of the principal strategy; never "the first account of the desk"
     limits = service.get_limits(desk_id)
+    book: dict[str, Decimal] = {}
+    if pair is None:
+        # No account for this strategy (the desk has none, or the owner has not said which one): the cycle still runs and its proposal is
+        # kept as analysis only or waits for the owner (`exec.submit`). It is sized on an empty book at the capital of the desk: nothing is
+        # read from an account that is not there, and the real checks run again with the real account when the order goes out.
+        broker, state = None, None
+        capital = Decimal(desk.capital or 0)
+        equity, cash, peak, day_pnl, open_contracts = capital, capital, capital, Decimal(0), Decimal(0)
+    else:
+        broker, account = pair
+        state = account_snapshot.snapshot(account.id)
+        if state.equity is None or state.cash is None:
+            raise CycleError("no_data", f"the account of desk {desk_id} has no equity or no cash in the back office: {sorted(state.missing)}")
+        for position in state.positions:
+            cid, qty = position.get("contract_id") or position.get("symbol"), position.get("qty")
+            if cid and qty is not None:
+                book[str(cid)] = Decimal(str(qty))
+        equity, cash, peak, day_pnl, open_contracts = state.equity, state.cash, state.peak_equity, state.day_pnl, state.open_contracts
 
     def money(key: str) -> Decimal | None:
         value = limits.get(key)
         return None if value is None else Decimal(str(value))
 
-    budget = BudgetInputs(equity=state.equity, cash=state.cash, capital=Decimal(desk.capital), peak_equity=state.peak_equity, day_pnl=state.day_pnl,
-                          open_contracts=state.open_contracts, risk_pct=Decimal(str(mandate.risk.max_risk_per_trade_pct)),
+    budget = BudgetInputs(equity=equity, cash=cash, capital=Decimal(desk.capital or 0), peak_equity=peak, day_pnl=day_pnl,
+                          open_contracts=open_contracts, risk_pct=Decimal(str(mandate.risk.max_risk_per_trade_pct)),
                           max_premium_usd=money("max_premium_usd"), max_position_pct=money("max_position_pct"), max_drawdown_pct=money("max_drawdown_pct"),
                           capital_floor_usd=money("capital_floor_usd"))
     return TradeContext(desk_id=desk_id, underlying=symbol, as_of=as_of, sheets=found, quotes=quotes, current_book=book, budget=budget,
-                        costs=BrokerCosts.from_broker(broker))
+                        costs=BrokerCosts.from_broker(broker))      # no broker: the default costs of the simulated one, as the class says
 
 
 def fills_of(order: Mapping[str, Any]) -> list[Fill]:

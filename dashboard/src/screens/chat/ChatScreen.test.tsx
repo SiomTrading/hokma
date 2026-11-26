@@ -87,7 +87,7 @@ afterEach(() => {
 });
 
 describe("chat turn", () => {
-  it("sends, streams markdown, shows tools, offers Stop and ends cleanly", async () => {
+  it("sends, streams markdown, keeps tools out of the chat (one live line), offers Stop and ends cleanly", async () => {
     await mount();
     await userEvent.type(box(), "Plan my week{Enter}");
     expect(server.last("send")).toMatchObject({ conversation_id: null, text: "Plan my week", model: "sonnet", attachments: [] });
@@ -99,9 +99,10 @@ describe("chat turn", () => {
     expect(screen.getByText("the plan").tagName).toBe("STRONG");
     expect(screen.getByRole("button", { name: t("chat.composer.stop") })).toBeInTheDocument();
     server.emit({ type: "tool_use", ...base, tool_use_id: "a", name: "Read", input: {}, summary: { kind: "read_file", target: "ips.md" } });
-    expect(screen.getByTestId("tool-use")).toHaveTextContent("ips.md");
+    expect(screen.queryByTestId("tool-use")).toBeNull();
+    expect(screen.getByTestId("working-line")).toHaveTextContent(`${t("chat.working.main")}, ${t("chat.working.link")}`);
     server.emit({ type: "tool_result", ...base, tool_use_id: "a", is_error: false, text: "file text" });
-    expect(screen.getByTestId("tool-use")).toHaveTextContent(t("chat.tool.done"));
+    expect(screen.queryByTestId("tool-use")).toBeNull();
     server.emit({ type: "delta", ...base, text: "second part" });
 
     await userEvent.click(screen.getByRole("button", { name: t("chat.composer.stop") }));

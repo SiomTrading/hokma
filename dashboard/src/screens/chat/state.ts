@@ -1,6 +1,6 @@
 import { DEFAULT_MODEL, isModel } from "./types";
 import { attachmentUrl } from "./chatApi";
-import type { GuardBlock, ModelId, PermissionBody, ProjectRef, ServerEvent, StoredAttachment, StoredTool, ToolSummary } from "./types";
+import type { GuardBlock, ModelId, PermissionBody, ProjectRef, ServerEvent, StoredAttachment, StoredTool, TurnOrigin } from "./types";
 
 export interface AttachmentChip {
   key: string;
@@ -20,9 +20,8 @@ export interface AttachmentChip {
 }
 
 export type Item =
-  | { kind: "user"; key: string; messageId?: string; text: string; attachments: AttachmentChip[] }
-  | { kind: "assistant"; key: string; text: string; streaming: boolean; status: "complete" | "stopped" | "error"; messageId?: string }
-  | { kind: "tool"; key: string; toolUseId: string; name: string; summary: ToolSummary; result?: { isError: boolean; text: string }; output?: string }
+  | { kind: "user"; key: string; messageId?: string; text: string; attachments: AttachmentChip[]; /** Saved, but waiting for the lead to finish the summary of its agents (bug 1257). */ waiting?: boolean; /** Never sent: Hokma closed while it waited. */ unsent?: boolean }
+  | { kind: "assistant"; key: string; text: string; streaming: boolean; status: "complete" | "stopped" | "error"; messageId?: string; afterTool?: boolean; origin?: TurnOrigin }
   | { kind: "permission"; key: string; body: PermissionBody; sending?: boolean; resolution?: { decision: "allow" | "deny"; by: string } }
   | { kind: "block"; key: string; block: GuardBlock }
   | { kind: "notice"; key: string; tone: "info" | "warn" | "bad"; text: string; action?: "open_engines" };
@@ -39,6 +38,8 @@ export interface ChatState {
   /** True from the moment a stored conversation is opened until its history arrives. */
   loading: boolean;
   loadError: string | null;
+  /** Who opened the turn that runs, when it was not the owner (bug 1257): its text is a new message of the assistant that carries this mark. */
+  origin?: TurnOrigin;
 }
 
 export type Action =
@@ -93,44 +94,38 @@ function chipOf(file: StoredAttachment): AttachmentChip {
   };
 }
 
+/** Text that follows a tool call must not stick to the text before it: "...the file.Done" becomes two paragraphs. */
+function needsBreak(before: string, after: string): boolean {
+  return before.length > 0 && after.length > 0 && !/\s$/.test(before) && !/^\s/.test(after);
+}
+
 /**
- * Items of one answer: the text cut at the points where the tools were called, so a saved answer looks as it did
- * while it ran. `running` is a turn still in progress: its last piece keeps streaming and a tool with no result yet
- * is still running.
+ * The text of an answer with a paragraph break where a tool was called, when the server left none there. `at` is how many
+ * characters of the answer came before the tool call. The tools are not in the chat (they are in the side panel), but the
+ * text on both sides of one must still read as separate paragraphs, as a live answer does.
  */
-function answerItems(base: string, text: string, tools: StoredTool[], status: "complete" | "stopped" | "error", running: boolean, messageId?: string): Item[] {
-  const items: Item[] = [];
+export function joinAroundTools(text: string, tools: StoredTool[]): string {
+  const cuts = [...new Set(tools.map((tool) => Math.min(Math.max(tool.at, 0), text.length)))].sort((a, b) => a - b);
+  let out = "";
   let cursor = 0;
-  const pushText = (end: number, last: boolean) => {
-    const part = text.slice(cursor, end);
-    cursor = end;
-    if (!part.trim()) return;
-    items.push({
-      kind: "assistant",
-      key: last && messageId ? `m-${messageId}` : `${base}-t${items.length}`,
-      text: part,
-      streaming: running && last,
-      status: last ? status : "complete",
-      messageId: last ? messageId : undefined,
-    });
-  };
-  [...tools]
-    .sort((a, b) => a.at - b.at)
-    .forEach((tool, index) => {
-      pushText(Math.min(Math.max(tool.at, cursor), text.length), false);
-      const finished = tool.is_error !== null || !running;
-      items.push({
-        kind: "tool",
-        key: `tool-${tool.id || `${base}-${index}`}`,
-        toolUseId: tool.id,
-        name: tool.name,
-        summary: { kind: tool.kind, target: tool.target },
-        result: finished ? { isError: tool.is_error ?? status !== "complete", text: tool.result ?? "" } : undefined,
-        ...(!finished && tool.output ? { output: tool.output } : {}),
-      });
-    });
-  pushText(text.length, true);
-  return items;
+  for (const cut of cuts) {
+    out += text.slice(cursor, cut);
+    cursor = cut;
+    if (cut < text.length && needsBreak(out, text.slice(cut, cut + 1))) out += "\n\n";
+  }
+  return out + text.slice(cursor);
+}
+
+/**
+ * Items of one answer: its whole text. The tools and the agents the answer used are not in the chat, they are in the side
+ * panel (SPEC-013), so a saved answer and a live one read the same. `running` is a turn still in progress.
+ */
+function answerItems(base: string, text: string, tools: StoredTool[], status: "complete" | "stopped" | "error", running: boolean, messageId?: string, origin?: TurnOrigin): Item[] {
+  const whole = joinAroundTools(text, tools);
+  if (!whole.trim()) return [];
+  // A reconnect right after a tool call: the next piece of text still has to start a new paragraph.
+  const afterTool = running && tools.some((tool) => tool.at >= text.length);
+  return [{ kind: "assistant", key: messageId ? `m-${messageId}` : `${base}-t0`, text: whole, streaming: running, status, messageId, ...(afterTool ? { afterTool } : {}), ...(origin ? { origin } : {}) }];
 }
 
 function blockItem(block: GuardBlock): Item {
@@ -140,9 +135,6 @@ function blockItem(block: GuardBlock): Item {
 function permissionItem(body: PermissionBody): Item {
   return { kind: "permission", key: `perm-${body.request_id}`, body };
 }
-
-/** Characters of a running command's live output kept on its card (the server keeps the same tail). */
-const LIVE_OUTPUT_CHARS = 4000;
 
 function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: string) => string): ChatState {
   switch (event.type) {
@@ -159,45 +151,62 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
     case "engine_notice":
       return { ...state, items: [...state.items, { kind: "notice", key: nextKey("n"), tone: "warn", text: event.message }] };
     case "turn_start": {
+      // A turn nobody asked for (the summary of the background agents) has no message of the owner to mark.
+      if (event.origin) return { ...state, running: true, origin: event.origin };
       const items = [...state.items];
       for (let i = items.length - 1; i >= 0; i -= 1) {
         const item = items[i]!;
         if (item.kind === "user") {
-          if (!item.messageId) items[i] = { ...item, messageId: event.message_id };
+          if (!item.messageId) items[i] = { ...item, messageId: event.message_id ?? undefined };
           break;
         }
       }
+      // His turn starts: the waiting state ends on that same message, which is not added again (bug 1257).
+      return { ...state, items: items.map((item) => (item.kind === "user" && item.waiting && item.messageId === event.message_id ? { ...item, waiting: false } : item)), running: true, origin: undefined };
+    }
+    case "queued": {
+      // The message is already on screen (the local send): it only gets its saved id and the waiting state. One that is
+      // not (another tab, a reload in the middle) appears now, so it never looks lost.
+      const items = [...state.items];
+      let at = items.findIndex((item) => item.kind === "user" && item.messageId === event.message_id);
+      if (at < 0) {
+        for (let i = items.length - 1; i >= 0; i -= 1) {
+          const item = items[i]!;
+          if (item.kind === "user" && !item.messageId && item.text === event.text) {
+            at = i;
+            break;
+          }
+        }
+      }
+      if (at >= 0) {
+        const item = items[at] as Extract<Item, { kind: "user" }>;
+        items[at] = { ...item, messageId: event.message_id, waiting: true };
+      } else {
+        items.push({ kind: "user", key: `m-${event.message_id}`, messageId: event.message_id, text: event.text, attachments: [], waiting: true });
+      }
       return { ...state, items, running: true };
     }
+    case "queued_dropped":
+      return { ...state, items: state.items.map((item) => (item.kind === "user" && item.messageId === event.message_id ? { ...item, waiting: false, unsent: true } : item)) };
     case "delta": {
       const last = state.items[state.items.length - 1];
       if (last && last.kind === "assistant" && last.streaming) {
-        return { ...state, running: true, items: [...state.items.slice(0, -1), { ...last, text: last.text + event.text }] };
+        const gap = last.afterTool && needsBreak(last.text, event.text) ? "\n\n" : "";
+        return { ...state, running: true, items: [...state.items.slice(0, -1), { ...last, text: last.text + gap + event.text, afterTool: false }] };
       }
-      const item: Item = { kind: "assistant", key: nextKey("a"), text: event.text, streaming: true, status: "complete" };
+      const item: Item = { kind: "assistant", key: nextKey("a"), text: event.text, streaming: true, status: "complete", ...(state.origin ? { origin: state.origin } : {}) };
       return { ...state, running: true, items: [...state.items, item] };
     }
     case "tool_use": {
-      if (state.items.some((item) => item.kind === "tool" && item.toolUseId === event.tool_use_id)) return state;
-      const item: Item = { kind: "tool", key: `tool-${event.tool_use_id}`, toolUseId: event.tool_use_id, name: event.name, summary: event.summary };
-      return { ...state, items: [...closeStreaming(state.items), item] };
+      // The tool is in the side panel; here it only marks that the text that follows starts a new paragraph.
+      const last = state.items[state.items.length - 1];
+      if (!last || last.kind !== "assistant" || !last.streaming || last.afterTool) return state;
+      return { ...state, items: [...state.items.slice(0, -1), { ...last, afterTool: true }] };
     }
-    case "tool_result":
-      return {
-        ...state,
-        items: state.items.map((item) =>
-          item.kind === "tool" && item.toolUseId === event.tool_use_id ? { ...item, result: { isError: event.is_error, text: event.text } } : item,
-        ),
-      };
-    case "tool_output":
-      return {
-        ...state,
-        items: state.items.map((item) =>
-          item.kind === "tool" && item.toolUseId === event.tool_use_id && !item.result
-            ? { ...item, output: ((item.output ?? "") + event.text).slice(-LIVE_OUTPUT_CHARS) }
-            : item,
-        ),
-      };
+    case "guard_block": {
+      if (state.items.some((item) => item.kind === "block" && item.block.id === event.id)) return state;
+      return { ...state, items: [...closeStreaming(state.items), blockItem(event)] };
+    }
     case "permission_request": {
       if (state.items.some((item) => item.kind === "permission" && item.body.request_id === event.request_id)) return state;
       return { ...state, items: [...closeStreaming(state.items), permissionItem(event)] };
@@ -211,10 +220,6 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
             : item,
         ),
       };
-    case "guard_block": {
-      if (state.items.some((item) => item.kind === "block" && item.block.id === event.id)) return state;
-      return { ...state, items: [...closeStreaming(state.items), blockItem(event)] };
-    }
     case "done": {
       const status = event.stopped ? "stopped" : "complete";
       const items = closeStreaming(state.items, status);
@@ -228,7 +233,7 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
           if (item.kind === "user") break;
         }
       }
-      return { ...state, items, running: false, stopping: false };
+      return { ...state, items, running: false, stopping: false, origin: undefined };
     }
     case "error": {
       if (event.code === "unknown_conversation" && state.loading) {
@@ -240,15 +245,15 @@ function applyEvent(state: ChatState, event: ServerEvent, errorText?: (code: str
       const text = detail ? `${base}\n${detail}` : base;
       const notice: Item = { kind: "notice", key: nextKey("n"), tone: "bad", text, ...(event.code === "no_engine" || event.code === "auth" || event.code === "model_choice" ? { action: "open_engines" as const } : {}) };
       if (event.code === "busy" || event.code === "unknown_request") return { ...state, items: [...state.items, notice] };
-      return { ...state, items: [...closeStreaming(state.items, "error"), notice], running: false, stopping: false };
+      return { ...state, items: [...closeStreaming(state.items, "error"), notice], running: false, stopping: false, origin: undefined };
     }
     case "history": {
       const items: Item[] = [];
       for (const message of event.messages) {
         if (message.role === "user") {
-          items.push({ kind: "user", key: `m-${message.id}`, messageId: message.id, text: message.text, attachments: (message.attachments ?? []).map(chipOf) });
+          items.push({ kind: "user", key: `m-${message.id}`, messageId: message.id, text: message.text, attachments: (message.attachments ?? []).map(chipOf), ...(message.unsent ? { unsent: true } : {}) });
         } else if (message.role === "assistant") {
-          items.push(...answerItems(`m-${message.id}`, message.text, message.tools ?? [], message.status, false, message.id));
+          items.push(...answerItems(`m-${message.id}`, message.text, message.tools ?? [], message.status, false, message.id, message.origin));
           for (const block of message.blocks ?? []) items.push(blockItem(block));
         }
       }

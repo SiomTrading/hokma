@@ -34,6 +34,17 @@ STRUCTURES: dict[str, dict[str, Any]] = {
     "covered_call": {"legs": [("stock", None, None), ("short", "call", 0)], "strikes": 1, "class": "credit", "greeks": {"delta": "+", "gamma": "-", "vega": "-", "theta": "+"}},
     "cash_secured_put": {"legs": [("short", "put", 0)], "strikes": 1, "class": "credit", "greeks": {"delta": "+", "gamma": "-", "vega": "-", "theta": "+"}},
 }
+# Textbook structures of the Strategies panel (SPEC-028, 3338-A) that the order path does not carry yet: the proposal schema, the sizing and the premium
+# switch list keep the 13 of STRUCTURES until a panel proposes them. They are profiled, priced and shown through CATALOG.
+EXTRA_STRUCTURES: dict[str, dict[str, Any]] = {
+    # strikes low wing, body, high wing: a short call and a short put at the body, a long put below and a long call above
+    "iron_butterfly": {"legs": [("long", "put", 0), ("short", "put", 1), ("short", "call", 1), ("long", "call", 2)], "strikes": 3, "class": "credit",
+                       "greeks": {"delta": "~", "gamma": "-", "vega": "-", "theta": "+"}},
+    # the shares plus a long put: the cost of the structure is the put, the shares are the ones the account holds
+    "protective_put": {"legs": [("stock", None, None), ("long", "put", 0)], "strikes": 1, "class": "debit",
+                       "greeks": {"delta": "+", "gamma": "+", "vega": "+", "theta": "-"}},
+}
+CATALOG: dict[str, dict[str, Any]] = {**STRUCTURES, **EXTRA_STRUCTURES}
 DIRECTIONS = ("bullish", "bearish", "neutral")
 VOL_VIEWS = ("rising", "flat", "falling")
 # (direction, vol view) -> structures in order of preference
@@ -150,7 +161,7 @@ def classify_structure(legs: list) -> QuantResult:
 
 def build_legs(structure: str, strikes: list[float], premiums: list[float], quantity: float, multiplier: float, spot: float | None) -> list[pay.Leg]:
     """The legs of a named structure from its ordered strikes (low to high) and the per-share premium of each option leg."""
-    spec = STRUCTURES[structure]
+    spec = CATALOG[structure]
     options = [x for x in spec["legs"] if x[0] != "stock"]
     if len(strikes) != spec["strikes"] or len(premiums) != len(options):
         raise ValueError(f"{structure} needs {spec['strikes']} strike(s) and {len(options)} premium(s), got {len(strikes)} and {len(premiums)}")
@@ -171,16 +182,37 @@ def build_legs(structure: str, strikes: list[float], premiums: list[float], quan
     return legs
 
 
+EV_WARNING = "expected value is"        # the card of the panel shows the figure itself and drops this sentence: at mid prices the mean is about zero
+
+
+def expected_pnl_usd(legs: list[pay.Leg], spot: float, rate: float, dividend_yield: float, volatility: float, years: float) -> float:
+    """Exact mean of the payoff at expiration in dollars when the price ends lognormal with drift rate - dividend_yield and the given volatility.
+    Each option leg is worth E[(S-K)+] = F N(d1) - K N(d2) (call) or K N(-d2) - F N(-d1) (put) with F the forward; a stock leg is worth F.
+    It is the mean of the whole payoff, not a two-point average of the best and the worst case: the money between the strikes counts."""
+    fwd = spot * math.exp((rate - dividend_yield) * years)
+    sd = volatility * math.sqrt(years)
+    total = 0.0
+    for leg in legs:
+        if leg.instrument == "stock":
+            total += leg.sign * leg.quantity * leg.multiplier * (fwd - leg.premium)
+            continue
+        d1 = (math.log(fwd / leg.strike) + 0.5 * sd * sd) / sd
+        d2 = d1 - sd
+        mean = (leg.strike * c.norm_cdf(-d2) - fwd * c.norm_cdf(-d1)) if leg.put else (fwd * c.norm_cdf(d1) - leg.strike * c.norm_cdf(d2))
+        total += leg.sign * leg.quantity * leg.multiplier * (mean - leg.premium)
+    return total
+
+
 @registry.register("options.structure_profile", module="options",
-                   summary="Payoff profile of a named structure in dollars: net premium (positive = debit), maximum profit and loss (None when unbounded; cash secured put and covered call included), breakevens, premium class and, with volatility, rate and time, its net greeks. strikes go low to high; premiums are per share, one per option leg in the order of the legs field of the answer; quantity is in contracts and the contract multiplier is required. With p_profit it also gives the expected value and warns when it is not positive; with volatility and time it gives the distance of each short strike in standard deviations.",
+                   summary="Payoff profile of a named structure in dollars: net premium (positive = debit), maximum profit and loss (None when unbounded; cash secured put and covered call included), breakevens, premium class and, with volatility, rate and time, its net greeks. strikes go low to high; premiums are per share, one per option leg in the order of the legs field of the answer; quantity is in contracts and the contract multiplier is required. With spot, rate, volatility and time it also gives the expected value in dollars, the exact mean of the payoff at expiration under a lognormal price (the same drift as the probability of profit), and warns when it is not positive; with volatility and time it gives the distance of each short strike in standard deviations.",
                    inputs={"structure": {"type": "str", "required": True}, "strikes": {"type": "list", "required": True}, "premiums": {"type": "list", "required": True},
                            "quantity": {"type": "float", "required": True}, "multiplier": {"type": "float", "required": True},
-                           "spot": {"type": "float", "required": False, "default": None}, "p_profit": {"type": "float", "required": False, "default": None},
+                           "spot": {"type": "float", "required": False, "default": None},
                            "rate": {"type": "float", "required": False, "default": None}, "volatility": {"type": "float", "required": False, "default": None},
                            "time_to_expiration": {"type": "float", "required": False, "default": None}, "dividend_yield": {"type": "float", "required": False, "default": 0.0}},
                    piece_ids=("ECT-098",))
 def structure_profile(structure: str, strikes: list, premiums: list, quantity: float, multiplier: float, spot: float | None = None,
-                      p_profit: float | None = None, rate: float | None = None, volatility: float | None = None,
+                      rate: float | None = None, volatility: float | None = None,
                       time_to_expiration: float | None = None, dividend_yield: float = 0.0) -> QuantResult:
     name, unit, method, pieces = "options.structure_profile", "usd", "structure_payoff_and_greeks", ("ECT-098",)
     if not isinstance(structure, str) or not isinstance(strikes, (list, tuple)) or not isinstance(premiums, (list, tuple)):
@@ -188,36 +220,32 @@ def structure_profile(structure: str, strikes: list, premiums: list, quantity: f
     ks, ps = [c.num("strikes[]", x) for x in strikes], [c.num("premiums[]", x) for x in premiums]
     qty, mult = c.num("quantity", quantity), c.num("multiplier", multiplier)
     s = c.num("spot", spot, allow_none=True)
-    pw, r, v = c.num("p_profit", p_profit, allow_none=True), c.num("rate", rate, allow_none=True), c.num("volatility", volatility, allow_none=True)
+    r, v = c.num("rate", rate, allow_none=True), c.num("volatility", volatility, allow_none=True)
     t, q = c.num("time_to_expiration", time_to_expiration, allow_none=True), c.num("dividend_yield", dividend_yield)
-    params = {"structure": structure, "strikes": ks, "premiums": ps, "quantity": qty, "multiplier": mult, "spot": s, "p_profit": pw, "rate": r,
+    params = {"structure": structure, "strikes": ks, "premiums": ps, "quantity": qty, "multiplier": mult, "spot": s, "rate": r,
               "volatility": v, "time_to_expiration": t, "dividend_yield": q}
-    if structure not in STRUCTURES:
-        return c.empty(name, unit, method, f"structure must be one of {sorted(STRUCTURES)}", params=params, piece_ids=pieces)
+    if structure not in CATALOG:
+        return c.empty(name, unit, method, f"structure must be one of {sorted(CATALOG)}", params=params, piece_ids=pieces)
     if not all(math.isfinite(x) for x in ks + ps + [qty, mult, q]) or qty <= 0 or mult <= 0 or any(k <= 0 for k in ks):
         return c.empty(name, unit, method, "strikes, quantity and multiplier must be positive finite numbers; premiums finite and not negative", params=params, piece_ids=pieces)
-    if pw is not None and not 0.0 <= pw <= 1.0:
-        return c.empty(name, unit, method, "p_profit must be in [0, 1]", params=params, piece_ids=pieces)
     warns: list[str] = []
 
     def compute() -> dict:
         legs = build_legs(structure, ks, ps, qty, mult, s)
         info = pay.profile(legs)
         net = pay.net_premium_usd(legs)
-        spec = STRUCTURES[structure]
+        spec = CATALOG[structure]
         out: dict[str, Any] = {**info, "legs": [{"instrument": leg.instrument, "position": "long" if leg.sign > 0 else "short",
                                                  "kind": None if leg.instrument == "stock" else ("put" if leg.put else "call"), "strike": leg.strike,
                                                  "premium": leg.premium, "quantity": leg.quantity} for leg in legs], "net_premium_usd": net, "premium_type": "debit" if net > 1e-12 else ("credit" if net < -1e-12 else "even"),
                                "expected_class": spec["class"], "greeks_signs": _greek_text(spec["greeks"])}
         if out["premium_type"] != spec["class"]:
             warns.append(f"the premiums given make this {out['premium_type']} while {structure} is normally a {spec['class']}: check the quotes")
-        if pw is not None and info["max_profit_usd"] is not None and info["max_loss_usd"] is not None:
-            ev = pw * info["max_profit_usd"] - (1.0 - pw) * info["max_loss_usd"]
+        if None not in (s, r, v, t) and v > 0 and t > 0 and s > 0:       # type: ignore[comparison-overlap]
+            ev = expected_pnl_usd(legs, s, r, q, v, t)
             out["expected_value_usd"] = ev
             if ev <= 0:
-                warns.append(f"expected value is {ev:.2f} dollars at p_profit={pw:g}: the structure loses money on its own numbers")
-        elif pw is not None:
-            warns.append("expected value needs bounded profit and loss: it was not computed")
+                warns.append(f"{EV_WARNING} {ev:.2f} dollars under the lognormal price at the volatility given: the structure does not pay for its risk on its own numbers")
         if v is not None and t is not None and s is not None and v > 0 and t > 0 and s > 0:
             out["short_strike_distance_sigma"] = [{"strike": leg.strike, "kind": "put" if leg.put else "call",
                                                    "sigma": abs(math.log(leg.strike / s)) / (v * math.sqrt(t))}
@@ -261,8 +289,8 @@ def management_plan(structure: str, net_premium_usd: float, max_profit_usd: floa
                 "debit_stop": DEFAULT_DEBIT_STOP, "close_dte": DEFAULT_CLOSE_DTE, "roll_delta": DEFAULT_ROLL_DELTA}
     used = {k: (given[k] if given[k] is not None else defaults[k]) for k in defaults}
     params = {"structure": structure, "net_premium_usd": net, "max_profit_usd": prof, "max_loss_usd": loss, "days_to_expiration": dte, "equity_usd": eq, **given}
-    if structure not in STRUCTURES:
-        return c.empty(name, unit, method, f"structure must be one of {sorted(STRUCTURES)}", params=params, piece_ids=pieces)
+    if structure not in CATALOG:
+        return c.empty(name, unit, method, f"structure must be one of {sorted(CATALOG)}", params=params, piece_ids=pieces)
     if not all(math.isfinite(x) for x in [net, prof, loss, dte, eq] + list(used.values())) or loss <= 0 or prof <= 0 or eq <= 0 or dte < 0:
         return c.empty(name, unit, method, "max_profit_usd, max_loss_usd and equity_usd must be positive; days not negative; all finite", params=params, piece_ids=pieces)
     if not 0.0 < used["risk_pct"] <= MAX_RISK_PCT:
@@ -272,7 +300,7 @@ def management_plan(structure: str, net_premium_usd: float, max_profit_usd: floa
                        params=params, piece_ids=pieces)
 
     def compute() -> dict:
-        spec = STRUCTURES[structure]
+        spec = CATALOG[structure]
         credit = spec["class"] == "credit"
         premium = abs(net)
         stop_loss = used["stop_multiple"] * premium if credit else used["debit_stop"] * premium

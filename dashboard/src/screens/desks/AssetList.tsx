@@ -10,6 +10,8 @@ export interface Quote {
   last: number | null;
   previousClose: number | null;
   changePct: number | null;
+  /** Volume of the day when the stream carries it; null otherwise. */
+  volume: number | null;
   /** The provider that served this price, by name; null until a message says it. */
   source: string | null;
   delayed: boolean;
@@ -31,7 +33,7 @@ export function useQuotes(symbols: string[]): Record<string, QuoteState | undefi
           const before = prev[symbol];
           const held = before && before !== "failed" ? before : null;
           // A price message carries the price and the change; the previous close stays the one the snapshot gave.
-          return { ...prev, [symbol]: { last: quote.last ?? held?.last ?? null, previousClose: quote.previousClose ?? held?.previousClose ?? null, changePct: quote.changePct ?? held?.changePct ?? null, source: quote.source ?? held?.source ?? null, delayed: quote.source ? quote.delayed : (held?.delayed ?? false) } };
+          return { ...prev, [symbol]: { last: quote.last ?? held?.last ?? null, previousClose: quote.previousClose ?? held?.previousClose ?? null, changePct: quote.changePct ?? held?.changePct ?? null, volume: quote.volume ?? held?.volume ?? null, source: quote.source ?? held?.source ?? null, delayed: quote.source ? quote.delayed : (held?.delayed ?? false) } };
         }),
       onFailed: (symbol) => setQuotes((prev) => ({ ...prev, [symbol]: prev[symbol] && prev[symbol] !== "failed" ? prev[symbol] : "failed" })),
     });

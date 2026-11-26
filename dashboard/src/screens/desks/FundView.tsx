@@ -8,16 +8,22 @@ import { DeskCard } from "./DeskCard";
 import { formatBalance, formatCapital, formatResult, resultTone } from "./format";
 import { refreshDesks, useDesks } from "./store";
 import { TodayCard } from "./TodayCard";
-import type { DeskSummary } from "./types";
+import { accountsOf } from "./types";
+import type { DeskAccount, DeskSummary } from "./types";
 
 interface Props {
   /** Opens the creation flow right away (the "New desk" row of the menu). */
   openCreate?: boolean;
 }
 
-/** The numbers of the header, from the accounts assigned to desks. Equity is null when any broker cannot tell. */
-function fundTotals(desks: DeskSummary[]) {
-  const accounts = desks.flatMap((d) => (d.account ? [d.account] : []));
+/**
+ * The numbers of the header, from the accounts of the desks. An account that serves several desks counts ONCE (by id), and the capital comes
+ * from the accounts, not from the desks. Equity is null when any broker cannot tell.
+ */
+export function fundTotals(desks: DeskSummary[]) {
+  const byId = new Map<number, DeskAccount>();
+  for (const desk of desks) for (const account of accountsOf(desk)) if (!byId.has(account.id)) byId.set(account.id, account);
+  const accounts = [...byId.values()];
   const capital = accounts.reduce((sum, a) => sum + a.initial_capital, 0);
   const equity = accounts.some((a) => a.balance.equity === null) ? null : accounts.reduce((sum, a) => sum + (a.balance.equity ?? 0), 0);
   const today = desks.reduce((sum, d) => sum + d.today, 0);

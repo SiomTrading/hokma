@@ -3,7 +3,8 @@ export interface DeskDetail {
   id: number;
   name: string;
   focus: string | null;
-  capital: number;
+  /** Null: the desk has no capital of its own, its accounts hold the money (SPEC-027). */
+  capital: number | null;
   objective_pct: number | null;
   mandate: string | null;
   token_budget: number | null;

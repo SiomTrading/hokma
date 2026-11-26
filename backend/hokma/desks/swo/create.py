@@ -122,7 +122,7 @@ def _mandate(variant: str, mandate: Mandate | Mapping[str, Any] | None, kit_root
     return chosen
 
 
-def create_swo_desk(name: str, capital: Any, *, variant: str = "traditional", mandate: Mandate | Mapping[str, Any] | None = None,
+def create_swo_desk(name: str, capital: Any = None, *, account: Any = None, variant: str = "traditional", mandate: Mandate | Mapping[str, Any] | None = None,
                     assets: Any = None, objective_pct: Any = None, token_budget: Any = None, owner_approved: bool = False,
                     kit_root: Path | None = None, db: Database | None = None) -> dict[str, Any]:
     """Create a SWO desk with its plantel. `variant` is `traditional` or `pead`. Without a mandate the kit example of the
@@ -133,7 +133,7 @@ def create_swo_desk(name: str, capital: Any, *, variant: str = "traditional", ma
     if variant not in SWO_VARIANTS:
         raise DeskError("bad_template", 400)
     clean_name = service._name(name)
-    clean_capital = service._capital(capital)
+    money = service.account_request(account, capital)
     clean_objective = service._objective(objective_pct)
     clean_budget = service._budget(token_budget)
     service.check_symbols(assets if assets is not None else [])
@@ -162,9 +162,12 @@ def create_swo_desk(name: str, capital: Any, *, variant: str = "traditional", ma
         try:
             with database.write() as u:
                 project = u.projects.create(clean_name, str(folder), slug=slug, kind="strategy", description=None)
+                clean_capital, desk_account = service.money_of_new_desk(u, money, clean_name)      # the capital comes from the account
                 desk = u.desks.create(project.id, clean_name, capital=clean_capital, focus=None, template="custom",
                                       objective_pct=clean_objective, mandate=mandate_text, token_budget=clean_budget)
+                service.link_new_desk_account(u, desk.id, desk_account)
                 now = utcnow()
+                u.broker.set_limits(desk.id, service.assets_limits(bool(clean_assets)))        # no rules: only the fixed guards, and the list of assets as a NOTICE if it has one
                 u.session.insert_row("desk_profile", {"desk_id": desk.id, "line": LINE, "variant": variant,
                                                       "benchmark": None, "updated_at": now})
                 u.session.insert_row("desk_autonomy", {"desk_id": desk.id, "level": 1, "rules_json": None,

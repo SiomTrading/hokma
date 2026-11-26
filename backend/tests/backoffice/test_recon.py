@@ -118,11 +118,11 @@ def test_entries_after_the_statement_date_and_internal_kinds_are_not_compared():
 
 
 def test_the_sum_of_desk_capital_against_the_account_value_is_one_more_check():
-    breaks, summary = run([], [], statement={"account_value": "1010000"}, desk_capital_sum=D("1000000"))
+    breaks, summary = run([], [], statement={"account_value": "1010000"}, account_capital=D("1000000"))
     b = breaks[0]
     assert b.is_nav and b.bucket == "amount" and b.diff == D("10000") and b.impact == D("10000")
     assert summary["nav_tieout"]["status"] == "break" and summary["nav_tieout"]["difference"] == "10000"
-    ok, summary = run([], [], statement={"account_value": "1000000.01"}, desk_capital_sum=D("1000000"))
+    ok, summary = run([], [], statement={"account_value": "1000000.01"}, account_capital=D("1000000"))
     assert ok == [] and summary["nav_tieout"]["status"] == "ok"
 
 
@@ -131,7 +131,7 @@ def test_the_output_is_ordered_by_absolute_money_and_every_break_has_one_cause()
             entry(3, "commission", "F3", "-2.50"), entry(4, "deposit", "DEP9", "1000.00", day="2026-03-01")]
     rows = [row("fill", "F2", "-420000", contract=NQ, qty="2"), row("dividend", "D2", "10.02"), row("commission", "F3", "-2.60"),
             row("fill", "F9", "-6000.20", contract="EQ:SPY", qty="10", day="2026-03-04")]
-    breaks, summary = run(book, rows, desk_capital_sum=D("1000000"), statement={"account_value": "1010000"})
+    breaks, summary = run(book, rows, account_capital=D("1000000"), statement={"account_value": "1010000"})
     assert [b.impact for b in breaks] == [D("420000"), D("10000"), D("6000.20"), D("1000"), D("0.10"), D("0.02")]
     assert all(b.cause in recon.CAUSES for b in breaks) and summary["breaks"] == 6
     assert sum(summary["by_bucket"].values()) == 6
@@ -185,7 +185,7 @@ def traced_breaks():
             entry(2, "commission", "F3", "-2.50"), entry(3, "interest", "I1", "5.00", day="2026-03-04")]
     rows = [row("fill", "F2", "-420000", contract=NQ, qty="2", day="2026-03-03"), row("commission", "F3", "-2.60"), row("interest", "I1", "5.00", day="2026-03-06"),
             row("dividend", "D9", "12.50", contract="EQ:SPY", day="2026-03-05")]
-    breaks, _ = run(book, rows, desk_capital_sum=D("1000000"), statement={"account_value": "1010000"})
+    breaks, _ = run(book, rows, account_capital=D("1000000"), statement={"account_value": "1010000"})
     return ReadOnlyBook(book), {b.key.split("|")[-1]: b for b in breaks}
 
 

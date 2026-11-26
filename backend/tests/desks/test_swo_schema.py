@@ -36,16 +36,35 @@ CASES = {
     "short_straddle": ([L("OPT:AAPL:2026-12-18:P:200", "sell"), L(C200, "sell")], "-9.0", None),
     "short_strangle": ([L(P190, "sell"), L(C200, "sell")], "-7.5", None),
     "covered_call": ([L(STOCK, "buy", 100), L(C210, "sell")], "-1.8", "19820"),
+    # the two structures of the Strategies panel (SPEC-028, 3339-B): the butterfly shares its body, the protective put buys the shares and the put
+    "iron_butterfly": ([L(P190, "buy"), L("OPT:AAPL:2026-12-18:P:200", "sell"), L(C200, "sell"), L(C210, "buy")], "-3.7", "630"),
+    "protective_put": ([L(STOCK, "buy", 100), L(P190, "buy")], "2.5", "1250"),
 }
 
 
-def test_TA_36_all_thirteen_structures_are_derived_from_their_legs():
-    assert set(CASES) == set(schema.STRUCTURES) and len(CASES) == 13
+def test_TA_36_all_fifteen_structures_are_derived_from_their_legs():
+    assert set(CASES) == set(schema.STRUCTURES) and len(CASES) == 15
     for name, (legs, net, loss) in CASES.items():
         if name == "iron_condor":
             legs = [L(P170, "buy"), L(P180, "sell"), L(C210, "sell"), L(C220, "buy")]
         p = make(name, legs, net, loss)
         assert isinstance(p, OrderProposal) and isinstance(p, SWOProposal) and p.structure == name
+
+
+def test_3339B_the_butterfly_and_the_condor_are_told_apart_by_their_body_and_the_protective_put_needs_the_shares_and_a_bought_put():
+    body = "OPT:AAPL:2026-12-18:P:200"
+    butterfly = [L(P190, "buy"), L(body, "sell"), L(C200, "sell"), L(C210, "buy")]
+    condor = [L(P170, "buy"), L(P180, "sell"), L(C200, "sell"), L(C210, "buy")]
+    assert derive_structure(butterfly) == "iron_butterfly" and derive_structure(condor) == "iron_condor"
+    assert derive_structure([L(P190, "buy"), L(body, "sell"), L(C220, "sell"), L(C210, "buy")]) is None         # the puts' body above the calls' body: neither
+    assert derive_structure([L(STOCK, "buy", 100), L(P190, "buy")]) == "protective_put"
+    assert derive_structure([L(STOCK, "buy", 50), L(P190, "buy")]) is None                                        # not the shares of one contract
+    assert derive_structure([L(STOCK, "buy", 100), L(P190, "sell")]) is None
+    assert derive_structure([L(STOCK, "sell", 100), L(P190, "buy")]) is None
+    with pytest.raises(ProposalError, match="they make a protective_put"):
+        make("covered_call", [L(STOCK, "buy", 100), L(P190, "buy")], "-1.0", "100")
+    with pytest.raises(ProposalError, match="above zero"):
+        make("protective_put", [L(STOCK, "buy", 100), L(P190, "buy")], "-2.5", "1250")                      # the put is paid: a debit
 
 
 def test_TA_36_it_is_a_subclass_of_the_order_proposal_and_keeps_its_fingerprint():
@@ -127,7 +146,7 @@ def test_TA_36_every_field_has_a_description_that_instructs_the_model():
 
 
 def test_TA_36_the_structure_names_are_the_ones_of_the_options_module():
-    from hokma.quant.options.structures import STRUCTURES as module_structures
+    from hokma.quant.options.structures import CATALOG as module_structures
 
     assert set(schema.STRUCTURES) == set(module_structures)
     for name, spec in module_structures.items():

@@ -1,4 +1,5 @@
 """The decision of a cycle, the issues, the health of the routines and the benchmark (SPEC-018: TA-48, OA-35, OA-34, TA-46)."""
+from decimal import Decimal
 import json
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal as D
@@ -56,7 +57,7 @@ def test_a_filled_order_resolves_the_decision_with_its_order_id_TA_48(ready):
 
 def test_an_order_that_ends_without_a_fill_resolves_the_decision_as_rejected_TA_48(ready):
     levels.set_level(ready.desk_id, 3, rules={"id": "r", "max_qty": 5, "order_types": ["limit"]}, who=ready.owner, db=ready.db)
-    out = hexec.submit(proposal(ready, order_type="limit", limit="20990"), who=AGENT, db=ready.db)
+    out = hexec.submit(proposal(ready, order_type="limit", limit="20990", stop_loss=Decimal("20980")), who=AGENT, db=ready.db)
     assert out.status == "sent"
     decision_id = decisions.record(ready.desk_id, "Buy on a pullback", proposal_id=out.proposal_id, db=ready.db)
     assert decisions.resolve(out.proposal_id, db=ready.db) is None                          # still working: nothing to close

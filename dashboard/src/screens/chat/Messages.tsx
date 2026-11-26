@@ -3,8 +3,8 @@ import { useI18n } from "@/i18n";
 import { useShell } from "@/shell/useShell";
 import { BlockCard } from "@/screens/permissions/BlockCard";
 import { Markdown } from "./markdown";
+import { useAgentNamer } from "../panel/agentNames";
 import type { AttachmentChip, Item } from "./state";
-import type { SummaryKind } from "./types";
 
 export interface MessageActions {
   /** Project the conversation runs in; empty when it has none (the permission card then says the work folder). */
@@ -50,30 +50,11 @@ export function AttachmentView({ chip, onSave, saveLabel }: { chip: AttachmentCh
   );
 }
 
-function ToolLine({ item }: { item: Extract<Item, { kind: "tool" }> }) {
+/** "Iris pide permiso" when a subagent asks, the plain badge when the main thread does. */
+function AskBadge({ agent }: { agent?: { id: string; slug: string } }) {
   const { t } = useI18n();
-  const kind: SummaryKind = item.summary.kind;
-  const verb = kind === "other" ? t("chat.tool.other", { tool: item.name }) : t(`chat.tool.${kind}`);
-  const state = item.result ? (item.result.isError ? "failed" : "done") : "running";
-  return (
-    <div className="chat-tool fade" data-testid="tool-use">
-      <Chip className="chat-tool-chip">
-        <Icon name="terminal" size={14} strokeWidth={1.8} />
-        <span>{verb}</span>
-        {item.summary.target ? <span className="mono chat-tool-target">{item.summary.target}</span> : null}
-        <Pill tone={state === "done" ? "ok" : state === "failed" ? "bad" : "default"}>{t(`chat.tool.${state}`)}</Pill>
-      </Chip>
-      {!item.result && item.output ? (
-        <pre className="mono chat-tool-live" aria-live="polite" aria-label={t("chat.tool.live")} data-testid="tool-live">{item.output}</pre>
-      ) : null}
-      {item.result?.text ? (
-        <details className="chat-tool-result">
-          <summary>{t("chat.tool.result")}</summary>
-          <pre className="mono">{item.result.text}</pre>
-        </details>
-      ) : null}
-    </div>
-  );
+  const namer = useAgentNamer();
+  return <Pill tone="warn">{agent ? t("chat.perm.agent.badge", { name: namer(agent.slug) }) : t("chat.perm.badge")}</Pill>;
 }
 
 function PermissionCard({ item, actions }: { item: Extract<Item, { kind: "permission" }>; actions: MessageActions }) {
@@ -96,7 +77,7 @@ function PermissionCard({ item, actions }: { item: Extract<Item, { kind: "permis
   return (
     <Bubble from="assistant" className="chat-perm" role="group" aria-label={t("chat.perm.badge")} data-testid="permission-card">
       <div className="chat-perm-head">
-        <Pill tone="warn">{t("chat.perm.badge")}</Pill>
+        <AskBadge agent={item.body.agent} />
         <span className="h2">{t(`chat.perm.title.${kind}`, params)}</span>
       </div>
       <span className="p">{t(`chat.perm.text.${kind}`, params)}</span>
@@ -125,11 +106,22 @@ export function MessageItem({ item, actions }: { item: Item; actions: MessageAct
             </div>
           ))}
           <span className="chat-pre">{item.text}</span>
+          {item.waiting ? (
+            <div className="chat-bubble-foot" data-testid="waiting-lead">
+              <span className="chat-small" role="status">{t("chat.waitingLead")}</span>
+            </div>
+          ) : null}
+          {item.unsent ? (
+            <div className="chat-bubble-foot" data-testid="unsent">
+              <Pill tone="warn">{t("chat.unsent")}</Pill>
+            </div>
+          ) : null}
         </Bubble>
       );
     case "assistant":
       return (
-        <Bubble from="assistant" data-testid="assistant-message">
+        <Bubble from="assistant" data-testid="assistant-message" {...(item.origin ? { "data-origin": item.origin } : {})}>
+          {item.origin ? <div className="chat-bubble-origin" data-testid="origin-mark">{t("chat.origin.agents")}</div> : null}
           <Markdown text={item.text} />
           {item.streaming ? <span className="caret" aria-hidden="true" /> : null}
           {item.status !== "complete" ? (
@@ -146,8 +138,6 @@ export function MessageItem({ item, actions }: { item: Item; actions: MessageAct
           ) : null}
         </Bubble>
       );
-    case "tool":
-      return <ToolLine item={item} />;
     case "permission":
       return <PermissionCard item={item} actions={actions} />;
     case "block":

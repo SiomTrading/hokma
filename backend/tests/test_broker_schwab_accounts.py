@@ -30,6 +30,7 @@ from hokma.desks.api import router as desks_router
 from hokma.market.providers import get_catalog
 from hokma.rpc.ws import SESSION_TOKEN
 from hokma.schwab import accounts, http
+from hokma.broker import desk_accounts
 
 TR = "/trader/v1"
 SECRETS = (FAKE_ACCOUNT_NUMBER, FAKE_ACCOUNT_NUMBER_2, FAKE_HASH, FAKE_HASH_2)
@@ -225,13 +226,14 @@ def test_the_balance_is_none_while_schwab_cannot_be_read(linked, fake):
 def test_a_desk_sees_the_real_balance_of_its_schwab_account(linked):
     desk = make_desk(linked)
     first = ids(linked)[0]
-    service.assign_account(desk["id"] if isinstance(desk, dict) else desk.id, first, db=linked)
+    desk_accounts.add_account(desk["id"] if isinstance(desk, dict) else desk.id, first, db=linked)
     with linked.read() as u:
-        card = service.desk_account(u, desk["id"] if isinstance(desk, dict) else desk.id)
+        card = desk_accounts.of_desk(u, desk["id"] if isinstance(desk, dict) else desk.id)["accounts"][0]
     assert card["balance"] == {"cash": 216.25, "equity": 217.75, "currency": "USD"} and card["initial_capital"] == 218
-    with pytest.raises(service.BrokerError) as raised:                      # one account serves one desk
-        service.assign_account(make_desk(linked, name="Otra")["id"], first, db=linked)
-    assert raised.value.code == "account_in_use"
+    other = make_desk(linked, name="Otra")["id"]
+    desk_accounts.add_account(other, first, db=linked)                          # an account may serve many desks (SPEC-027)
+    with linked.read() as u:
+        assert u.broker.desks_of_account(first) == sorted([desk["id"] if isinstance(desk, dict) else desk.id, other])
 
 
 def test_positions_and_orders_are_typed_and_carry_only_account_ref_and_mask(linked, fake):
@@ -377,7 +379,7 @@ def test_the_connections_panel_carries_the_orders_switch(client, fake):
 def test_no_number_and_no_hash_in_any_table_file_log_or_answer(linked, client, caplog, keys, env):
     caplog.set_level("DEBUG")
     desk = make_desk(linked)
-    service.assign_account(desk["id"] if isinstance(desk, dict) else desk.id, ids(linked)[0], db=linked)
+    desk_accounts.add_account(desk["id"] if isinstance(desk, dict) else desk.id, ids(linked)[0], db=linked)
     answers = [client.get("/api/brokers").text, client.get(f"/api/accounts/{ids(linked)[0]}").text,
                client.get(f"/api/brokers/{listed(client)['schwab']['id']}/accounts").text]
     with linked.read() as u:

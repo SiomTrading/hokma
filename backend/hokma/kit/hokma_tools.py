@@ -497,6 +497,9 @@ def _desk_out(desk: dict) -> dict:
     out = {k: desk[k] for k in DESK_KEYS if k in desk}
     out["assets"] = [x["symbol"] for x in desk["assets"]]
     out["limits"] = desk.get("limits", {})
+    out["accounts"] = [{k: x.get(k) for k in ("id", "name", "broker", "mask", "initial_capital", "balance", "shared_with", "strategies")}
+                       for x in desk.get("accounts", [])]               # empty: the desk only analyzes until the owner says yes to an account
+    out["strategies"] = desk.get("strategies", {})
     if isinstance(desk.get("connections"), dict):                   # a desk just created: what data it was born with
         out["connections"] = desk["connections"]
     out["agents"] = [{k: x[k] for k in ("agent_slug", "name", "role", "model", "active")} for x in desk["agents"]]
@@ -692,20 +695,171 @@ def account_reset(u, c: Caller, a: dict) -> str:
     return _dump(_broker_call(service.reset_account, a["account_id"], True))
 
 
-def desk_assign_account(u, c: Caller, a: dict) -> str:
-    """Assign an account to a desk with the same service as PUT /api/desks/{id}/account."""
-    from hokma.broker import service
+def _own_desk_for_accounts(c: Caller, a: dict) -> int:
+    """The desk an account tool acts on: the chief only its own, the owner's assistant any desk. The owner's yes in the chat comes before
+    (permissions.modes.ALWAYS_ASK); nothing runs without it."""
+    desk_id = a["desk_id"]
+    _own_desk_or_refuse(c, desk_id)
+    return desk_id
 
-    _no_chief(c)
-    return _dump(_broker_call(service.assign_account, a["desk_id"], a["account_id"]))
+
+def desk_add_demo_account(u, c: Caller, a: dict) -> str:
+    """Create a demo account and put it in the desk, in one transaction. The owner said yes in the chat; the first account also becomes the
+    account of the principal strategy."""
+    from hokma.broker import desk_accounts
+
+    return _dump(_broker_call(desk_accounts.add_demo_account, _own_desk_for_accounts(c, a), a["name"], a["initial_capital"], added_by="chat"))
 
 
-def desk_unassign_account(u, c: Caller, a: dict) -> str:
-    """Take the account off a desk with the same service as DELETE /api/desks/{id}/account. The account keeps its money."""
-    from hokma.broker import service
+def desk_add_account(u, c: Caller, a: dict) -> str:
+    """Put an account that exists in a connected broker in the desk, even if other desks use it. Returns the account as the broker reads it."""
+    from hokma.broker import desk_accounts
 
-    _no_chief(c)
-    return _dump(_broker_call(service.unassign_account, a["desk_id"]))
+    return _dump(_broker_call(desk_accounts.add_account, _own_desk_for_accounts(c, a), a["account_id"], added_by="chat"))
+
+
+def desk_remove_account(u, c: Caller, a: dict) -> str:
+    """Take an account out of the desk. Refused while a strategy uses it or the desk has orders alive in it. Positions stay in the account."""
+    from hokma.broker import desk_accounts
+
+    return _dump(_broker_call(desk_accounts.remove_account, _own_desk_for_accounts(c, a), a["account_id"]))
+
+
+def desk_bind_strategy(u, c: Caller, a: dict) -> str:
+    """Say which account a strategy of the desk trades through (an account that is already in the desk)."""
+    from hokma.broker import desk_accounts
+
+    return _dump(_broker_call(desk_accounts.bind_strategy, _own_desk_for_accounts(c, a), a["strategy_key"], a["account_id"]))
+
+
+def desk_rule_propose(u, c: Caller, a: dict) -> str:
+    """Write down a rule for a desk as a PROPOSAL (SPEC-025). Nothing is applied: it waits in the Rules tab until the owner approves it."""
+    from hokma.broker import desk_rules
+
+    desk_id = a.get("desk_id", _own_desk_id(c))
+    if desk_id is None:
+        raise ValueError("the active project is not a desk; pass desk_id (see desk_list)")
+    _own_desk_only(c, desk_id)
+    item = _broker_call(lambda: desk_rules.propose(desk_id, a["text"], control_id=a.get("control_id"), value=a.get("value"),
+                                                   match=a.get("match"), mode=a.get("mode"), on_trip=a.get("on_trip"),
+                                                   timeout_min=a.get("timeout_min"), account_id=a.get("account_id"),
+                                                   only_desk=bool(a.get("only_desk"))))
+    return _dump({"proposed": item, "tell_the_owner": "I left it in Rules for you to approve."})
+
+
+def _panel_change(c: Caller, a: dict, change) -> str:
+    """Add or take off a panel of the screen of a desk (SPEC-025, delivery 3). It is applied at once and never asked: a panel moves no money and
+    no rule. A chief works only on the desk of its project."""
+    from hokma.desks import service
+    from hokma.desks.errors import DeskError
+
+    desk_id = a.get("desk_id", _own_desk_id(c))
+    if desk_id is None:
+        raise ValueError("the active project is not a desk; pass desk_id (see desk_list)")
+    _own_desk_only(c, desk_id)
+    try:
+        desk = change(service, desk_id, a["panel"])
+    except DeskError as exc:
+        raise LookupError(exc.message) from exc
+    return _dump({"desk_id": desk_id, "panels": desk["panels"]})
+
+
+def desk_calendar_show(u, c: Caller, a: dict) -> str:
+    """Put the Calendar panel on the screen of a desk (SPEC-028, delivery 7) and answer with the reports of that week. The panel opens on its own
+    week: what the owner sees is the current week, and what this answers is the week asked."""
+    from datetime import date, timedelta
+
+    from hokma.desks import earnings, service
+    from hokma.desks.errors import DeskError
+
+    desk_id = a.get("desk_id", _own_desk_id(c))
+    if desk_id is None:
+        raise ValueError("the active project is not a desk; pass desk_id (see desk_list)")
+    _own_desk_only(c, desk_id)
+    try:
+        monday = date.fromisoformat(str(a["week"])) if a.get("week") else date.today()
+    except ValueError as exc:
+        raise ValueError("week must be a day as YYYY-MM-DD") from exc
+    monday -= timedelta(days=monday.weekday())
+    try:
+        desk = service.add_panel(desk_id, "calendar")
+        week = earnings.calendar(desk_id, monday.isoformat(), (monday + timedelta(days=4)).isoformat(), a.get("filter") or "all")
+    except DeskError as exc:
+        raise LookupError(exc.message) from exc
+    return _dump({"desk_id": desk_id, "panels": desk["panels"], "week": week})
+
+
+def desk_panel_add(u, c: Caller, a: dict) -> str:
+    return _panel_change(c, a, lambda service, desk_id, panel: service.add_panel(desk_id, panel))
+
+
+def desk_strategies_suggest(u, c: Caller, a: dict) -> str:
+    """The Strategies panel by chat (SPEC-028, delivery 5, E6): adds the panel to the desk, runs the same consultation as its form, and answers the cards.
+    The panel shows them with the fields filled when the owner opens it."""
+    from hokma.desks import service, strategies
+    from hokma.desks.errors import DeskError
+
+    desk_id = a.get("desk_id", _own_desk_id(c))
+    if desk_id is None:
+        raise ValueError("the active project is not a desk; pass desk_id (see desk_list)")
+    _own_desk_only(c, desk_id)
+    try:
+        strategies.check_arguments(a["symbol"], a["view"], a.get("target"), a.get("budget"), a.get("expiration"), a.get("priority") or "balanced")      # before the panel: a bad ask adds nothing
+        panels = service.add_panel(desk_id, "strategies")["panels"]
+        result = strategies.suggest(desk_id, a["symbol"], a["view"], a.get("target"), a.get("budget"), a.get("expiration"), a.get("priority") or "balanced")
+    except DeskError as exc:
+        raise ValueError(exc.message) from exc
+    return _dump({"desk_id": desk_id, "panels": panels, **strategies.chat_view(result), "tell_the_owner": "The Strategies panel is on the desk screen with these fields filled."})
+
+
+def _desk_for_detail(c: Caller, a: dict) -> int:
+    desk_id = a.get("desk_id", _own_desk_id(c))
+    if desk_id is None:
+        raise ValueError("the active project is not a desk; pass desk_id (see desk_list)")
+    _own_desk_only(c, desk_id)
+    return desk_id
+
+
+def desk_option_detail(u, c: Caller, a: dict) -> str:
+    """The Option detail panel by chat (SPEC-028, delivery 6): adds the panel, leaves it open on this strategy and answers its figures. The table and the
+    charts are on the screen; nothing is proposed and no order moves."""
+    from hokma.desks import option_actions, option_detail, service
+    from hokma.desks.errors import DeskError
+
+    desk_id = _desk_for_detail(c, a)
+    try:
+        asked = (a["symbol"], a["expiration"], a.get("legs"), a.get("structure"), a.get("strikes"), a.get("quantity"), a.get("range_pct"), a.get("iv_mult"))
+        panels = service.add_panel(desk_id, "option_detail")["panels"]
+        option_actions.remember(desk_id, *asked)
+        result = option_detail.option_detail(desk_id, *asked[:6], range_pct=asked[6], iv_mult=asked[7])
+    except DeskError as exc:
+        raise ValueError(exc.message) from exc
+    return _dump({"desk_id": desk_id, "panels": panels, **option_actions.chat_view(result), "tell_the_owner": "The Option detail panel is open on the desk screen with this strategy."})
+
+
+def desk_strategy_propose(u, c: Caller, a: dict) -> str:
+    """Propose a strategy of the desk by chat (SPEC-028, delivery 6): the same door as the Propose button. It sends nothing by itself: the answer says whether
+    it waits for the owner, was refused (with the reason), or needs an account."""
+    from hokma.desks import option_actions
+    from hokma.desks.errors import DeskError
+
+    desk_id = _desk_for_detail(c, a)
+    who = _who(c)
+    try:
+        if a.get("legs") is None and a.get("structure") is None:
+            if not a.get("strategy_key"):
+                raise ValueError("pass strategy_key (a saved strategy of the desk) or the symbol, the expiration and the legs or structure with its strikes")
+            out = option_actions.propose_saved(desk_id, a["strategy_key"], a.get("quantity"), who, c.agent or "chief")
+        else:
+            out = option_actions.propose(desk_id, a.get("symbol"), a.get("expiration"), a.get("legs"), a.get("structure"), a.get("strikes"), a.get("quantity"),
+                                         a.get("strategy_key"), who, c.agent or "chief")
+    except DeskError as exc:
+        raise ValueError(exc.message) from exc
+    return _dump({"desk_id": desk_id, **out, "tell_the_owner": "A proposal never sends by itself: say the status and, if refused, the reason; if it needs an account, ask which one."})
+
+
+def desk_panel_remove(u, c: Caller, a: dict) -> str:
+    return _panel_change(c, a, lambda service, desk_id, panel: service.remove_panel(desk_id, panel))
 
 
 # ---- orders of a desk (SPEC-015 18.4): the same service as the routes of the app. Only account_ref and the mask ever show.
@@ -890,7 +1044,7 @@ def desk_create(u, c: Caller, a: dict) -> str:
     _desk_call(service.check_symbols, a.get("assets"))
     _name_taken(name)
     desk = _desk_call(lambda: service.create_desk(
-        name, a["capital"], template=a.get("template", "standard"), mandate=a.get("mandate"),
+        name, a.get("capital"), template=a.get("template", "standard"), mandate=a.get("mandate"),
         assets=a.get("assets"), token_budget=a.get("token_budget")))
     return _dump(_desk_out(desk))
 
@@ -910,7 +1064,7 @@ def _loosening(current: dict, a: dict) -> list[str]:
 
     found = []
     capital = a.get("capital")
-    if isinstance(capital, int) and not isinstance(capital, bool) and capital > current["capital"]:
+    if isinstance(capital, int) and not isinstance(capital, bool) and current["capital"] is not None and capital > current["capital"]:
         found.append("raising the capital")
     if "limits" in a:
         try:
@@ -1136,10 +1290,10 @@ def bug_list(u, c: Caller, a: dict) -> str:
 Handler = Callable[[Any, Caller, dict], str]
 # these open their own database units
 NO_UNIT = {"ips_compute", "ips_save", "project_create", "agent_save", "skill_save", "skill_install", "desk_list", "desk_show",
-         "desk_create", "desk_configure", "desk_money_set", "market_quote", "market_candles", "options_chain", "company_profile", "company_news",
+         "desk_create", "desk_configure", "desk_money_set", "desk_rule_propose", "desk_panel_add", "desk_panel_remove", "desk_calendar_show", "desk_strategies_suggest", "desk_option_detail", "desk_strategy_propose", "market_quote", "market_candles", "options_chain", "company_profile", "company_news",
          "earnings_calendar", "earnings_surprises", "basic_financials", "economic_calendar", "market_news",
          "watchlist_all", "today_show", "today_configure", "broker_list", "account_create", "account_reset",
-         "desk_assign_account", "desk_unassign_account", "gmail_search", "gmail_read", "gmail_send", "decision_list"} | {
+         "desk_add_demo_account", "desk_add_account", "desk_remove_account", "desk_bind_strategy", "gmail_search", "gmail_read", "gmail_send", "decision_list"} | {
     "order_preview", "order_place", "order_replace", "order_cancel", "order_status", "order_list", "position_list",
     "order_log"} | {
     "schwab_quotes", "schwab_quote", "schwab_option_chain", "schwab_expirations", "schwab_price_history", "schwab_movers",
@@ -1417,25 +1571,131 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
     "account_reset": ("Put an account back at its initial capital and drop what it earned or lost. The owner is asked "
                       "for permission first; that answer is the confirmation.",
                       {"account_id": _i("Account id (see broker_list).")}, ["account_id"], account_reset, True),
-    "desk_assign_account": ("Assign an account to a desk (one account per desk, one desk per account). The owner is "
-                            "asked for permission first. Returns the account of the desk with its balance.", {
-        "desk_id": _i("Desk id (see desk_list)."),
-        "account_id": _i("Account id (see broker_list).")}, ["desk_id", "account_id"], desk_assign_account, True),
-    "desk_unassign_account": ("Take the account off a desk, so the account can serve another desk or this desk can get "
-                              "another account. The account and its money stay. The owner is asked for permission "
-                              "first.", {"desk_id": _i("Desk id (see desk_list).")}, ["desk_id"],
-                              desk_unassign_account, True),
+    "desk_add_demo_account": ("Create a demo account and add it to a desk, in one step (if anything fails nothing is left behind). Use it "
+                              "ONLY after the owner said yes in the chat to 'Do you want a demo account to simulate this?'; the owner is "
+                              "asked for permission too and sees these values. The first account of a desk also becomes the account of "
+                              "its principal strategy, so one yes covers both: say so when you ask. Returns the account.", {
+        "desk_id": _i("Desk id (see desk_list)."), "name": _s("Account name, 1 to 60 characters, not used in that broker."),
+        "initial_capital": _i("Initial capital in USD, a whole number from 100 to 1,000,000,000.")},
+                              ["desk_id", "name", "initial_capital"], desk_add_demo_account, True),
+    "desk_add_account": ("Add an account that already exists in a connected broker (see broker_list) to a desk. It may serve other desks too. "
+                         "Use it ONLY after the owner said yes in the chat to 'I see the account X of broker Y. Is it operated with this "
+                         "desk?'; the owner is asked for permission too. The first account of a desk also becomes the account of its "
+                         "principal strategy. Returns the account as the broker reads it, with the other desks that use it.", {
+        "desk_id": _i("Desk id (see desk_list)."), "account_id": _i("Account id (see broker_list).")},
+                         ["desk_id", "account_id"], desk_add_account, True),
+    "desk_remove_account": ("Take an account out of a desk. Refused (409) while a strategy of the desk trades through it, and while the desk "
+                            "has orders alive in it. The account, its money and its positions stay. The owner is asked for permission first.", {
+        "desk_id": _i("Desk id (see desk_list)."), "account_id": _i("Account id (see broker_list).")},
+                            ["desk_id", "account_id"], desk_remove_account, True),
+    "desk_bind_strategy": ("Say which account a strategy of the desk trades through. The account must already be in the desk. Every desk has "
+                           "the strategy 'principal'. Ask the owner for each strategy when the desk has more than one. The owner is asked "
+                           "for permission first.", {
+        "desk_id": _i("Desk id (see desk_list)."), "strategy_key": _s("Strategy key, 1 to 80 characters ('principal' by default in every desk)."),
+        "account_id": _i("Account id of an account of the desk.")},
+                           ["desk_id", "strategy_key", "account_id"], desk_bind_strategy, True),
+    "desk_rule_propose": ("Write down a rule the owner asked for, as a proposal. NOTHING is applied: it waits in the Rules tab of the desk "
+                          "until the owner approves it, and you tell the owner 'I left it in Rules for you to approve'. Give the sentence "
+                          "in text. If it is a control of the catalog, also give control_id and value: size_premium (USD of premium), "
+                          "size_contracts, size_margin (percent), size_weight (percent), position_value (percent), daily_loss (USD), "
+                          "drawdown (USD), cooldown (minutes between orders), events (minutes around an event; also give match, a word "
+                          "of the event name like FOMC). Without control_id it is classified, and a sentence that is not clearly a "
+                          "control is saved as an instruction that you read in desk_show under limits.instructions and no order is "
+                          "blocked by it. You can never raise or remove a rule. A control is NEVER proposed without asking the owner first: "
+                          "'is it a restriction (it blocks) or only a notice (it asks you)?' and give his answer in mode. For daily_loss "
+                          "and drawdown in restriction also ask 'when it is reached, do I only block new entries, or also close the open "
+                          "positions of that account?' (on_trip: block_entries, block_and_flatten, block_and_flatten_all; shares and ETFs "
+                          "held long are sold only with block_and_flatten_all, and only if he chooses it). For a notice ask how long to wait "
+                          "for his answer (timeout_min, 30 by default). A rule for a whole account (all the desks that use it) takes "
+                          "account_id; only_desk true makes it the part of this desk in that account. Without those answers the tool refuses.", {
+        "desk_id": _i("Desk id; default: the desk of the active project."),
+        "text": _s("The rule in the words of the owner, up to 500 characters."),
+        "control_id": _s("Catalog control, if the rule is one.", enum=[
+            "size_premium", "size_contracts", "size_margin", "size_weight", "position_value", "daily_loss", "drawdown", "cooldown",
+            "events"]),
+        "value": _n("Value of the control in its unit (USD, contracts, percent or minutes)."),
+        "match": _s("Word of the event name, only for events (FOMC, CPI, NFP...)."),
+        "mode": _s("The answer of the owner: restriction or notice. Required for a control.", enum=["restriction", "notice"]),
+        "on_trip": _s("What happens when a loss limit is reached, only for daily_loss and drawdown in restriction.",
+                      enum=["block_entries", "block_and_flatten", "block_and_flatten_all"]),
+        "timeout_min": _i("Minutes a notice waits for the owner, 1 to 1440; 30 if he gives none."),
+        "account_id": _i("Account id, only for a rule of an account (an account of the desk)."),
+        "only_desk": {"type": "boolean", "description": "With account_id: true is the part of this desk in the account only."}},
+                          ["text"], desk_rule_propose, True),
+    "desk_panel_add": ("Add a panel to the screen of a desk. It is applied at once and the owner is not asked: a panel moves no money and no rule. "
+                       "The panel enters before Rules, Agents and Config. Panels you can add: terminal, operations, company (the data of "
+                       "one stock: quote, ratios, next report, quarterly results, news), analysis (the cycle of agents on one share; only on a "
+                       "stock options desk), strategies (option strategies of a view; for a consultation use desk_strategies_suggest), option_detail (profit and loss by date and price of one option strategy; to open it on a strategy use desk_option_detail). Tell the owner which panel you added.", {
+        "desk_id": _i("Desk id; default: the desk of the active project."),
+        "panel": _s("Panel to add.", enum=["terminal", "operations", "company", "calendar", "analysis", "strategies", "option_detail"])}, ["panel"], desk_panel_add, True),
+    "desk_calendar_show": ("Put the Calendar panel (earnings of the week: who reports, before the open or after the close, estimated EPS and, once published, "
+                           "actual EPS and surprise) on the screen of a desk, and read that week for the owner. It is applied at once and the owner is not "
+                           "asked: a panel moves no money and no rule. The panel opens on the current week and the owner moves to other weeks there; "
+                           "this answers the week you ask. filter: all (default), list (only the assets of the desk) or liquid (only tickers with liquid options). "
+                           "If the answer says the data connection is missing, tell the owner to connect it in Connections.", {
+        "desk_id": _i("Desk id; default: the desk of the active project."),
+        "week": _s("Any day of the week to read, as YYYY-MM-DD; default: this week."),
+        "filter": _s("Which reports.", enum=["all", "list", "liquid"])}, [], desk_calendar_show, True),
+    "desk_panel_remove": ("Take a panel off the screen of a desk. It is applied at once and the owner is not asked. Only terminal, operations, "
+                          "company, calendar, analysis, strategies and option_detail can be taken off; rules, agents and config stay (they can only be moved by the owner). Nothing else changes: "
+                          "the data, the rules and the orders stay as they were.", {
+        "desk_id": _i("Desk id; default: the desk of the active project."),
+        "panel": _s("Panel to take off.", enum=["terminal", "operations", "company", "calendar", "analysis", "strategies", "option_detail"])}, ["panel"], desk_panel_remove, True),
+    "desk_strategies_suggest": ("Suggest option strategies for a stock on the Strategies panel of the desk: it adds the panel to the screen (nothing is asked: it moves no "
+                                "money and no rule), reads the real option chain, builds the strategies of the view that fit the budget, and rates them with the options "
+                                "analyst of the desk (one model call that counts against the weekly token budget of the desk). Returns the cards: legs, cost or credit, "
+                                "maximum profit and loss, breakevens, probability of profit, expected value when there is data, and the verdict of each with who backs it. "
+                                "Selling premium shows closed with its reason; a card that does not fit the budget says so with its cost. It proposes and sends NO order. "
+                                "Tell the owner what the cards say and that the panel has them with their payoff charts.", {
+        "desk_id": _i("Desk id; default: the desk of the active project."),
+        "symbol": _s("US stock or ETF symbol, e.g. NVDA."),
+        "view": _s("View of the owner.", enum=["very_bearish", "bearish", "neutral", "directional", "bullish", "very_bullish"]),
+        "target": _n("Target price of the stock; optional."),
+        "budget": _n("Maximum budget in USD for one position; optional."),
+        "expiration": _s("Expiration as YYYY-MM-DD; optional (default: the nearest one of at least 21 days)."),
+        "priority": _s("What matters most; optional.", enum=["balanced", "max_return", "max_probability"])},
+        ["symbol", "view"], desk_strategies_suggest, True),
+    "desk_option_detail": ("Open the Option detail panel of the desk on one option strategy and answer its figures: net debit or credit, maximum profit and loss, "
+                           "breakevens at expiration (exact) and at half of the term (approximate), probability of profit, expected value, and the events before expiration "
+                           "(next earnings report, ex-dividend date). The panel has the table by date and price and the charts. Give either `structure` with its `strikes` "
+                           "(low to high; e.g. debit_call_spread [100, 110]) or the `legs`. Prices come from the real chain. It adds the panel and moves no money. "
+                           "Tell the owner what stands out and that the panel is open on it.", {
+        "desk_id": _i("Desk id; default: the desk of the active project."),
+        "symbol": _s("US stock or ETF symbol, e.g. AAPL."),
+        "expiration": _s("Expiration as YYYY-MM-DD, one of the chain."),
+        "structure": _s("Structure of the catalog (long_call, debit_call_spread, iron_condor, iron_butterfly, covered_call, protective_put...); optional when legs are given."),
+        "strikes": {"type": "array", "items": {"type": "number"}, "description": "Strikes of the structure, low to high, as many as it needs."},
+        "legs": {"type": "array", "items": {"type": "object"}, "description": "Instead of structure: legs {position: long|short, kind: call|put, strike, premium?, quantity?} or {instrument: stock, position, quantity}."},
+        "quantity": _n("Contracts; default 1."),
+        "range_pct": _n("Price range of the table, percent each side, 3 to 20; default 10."),
+        "iv_mult": _n("Multiple of the volatility of the chain, 0.5 to 2; default 1.")},
+        ["symbol", "expiration"], desk_option_detail, True),
+    "desk_strategy_propose": ("Propose an option strategy of the desk, the same as the Propose button of the Option detail panel. It NEVER sends by itself: it goes through the "
+                              "door of execution, the account is the one the strategy_key is bound to, the rules of the owner and the guards decide, and the level of the desk "
+                              "says who approves. Selling premium is refused while its switch is closed. Give `strategy_key` of a strategy the owner saved, or the symbol, "
+                              "the expiration and the structure with strikes or the legs. If the answer is needs_account, ask the owner which account of the desk the "
+                              "strategy trades through (the owner binds it in the app). Report the status and the reason, never say it was sent unless the status is sent or filled.", {
+        "desk_id": _i("Desk id; default: the desk of the active project."),
+        "strategy_key": _s("Key of a saved strategy, or the key the order is bound to (default principal)."),
+        "symbol": _s("Symbol, when no saved strategy is named."),
+        "expiration": _s("Expiration YYYY-MM-DD, when no saved strategy is named."),
+        "structure": _s("Structure of the catalog, with strikes."),
+        "strikes": {"type": "array", "items": {"type": "number"}, "description": "Strikes of the structure, low to high."},
+        "legs": {"type": "array", "items": {"type": "object"}, "description": "Legs instead of structure."},
+        "quantity": _n("Contracts; default 1.")},
+        [], desk_strategy_propose, True),
     "desk_create": ("Create a money desk with the same logic as the app's Create desk. The owner is "
                     "asked for permission first and sees these values: propose them in the chat before you call. "
-                    "template: minimal, standard (default) or debate. capital is the desk capital. assets is a "
-                    "list of market symbols (NQ, ES...). token_budget is the optional weekly token cap; without it "
+                    "template: minimal, standard (default) or debate. capital is optional: leave it out unless "
+                    "the owner gave a figure. The desk is born with its agents and NO account: it never creates one. "
+                    "assets is a list of market symbols (NQ, ES...). token_budget is the optional weekly token cap; without it "
                     "the desk has no cap of its own. Returns the desk with its team.", {
         "name": _s("Desk name, 1 to 80 characters, not used by another desk."),
-        "capital": _i("Desk capital, a whole number."),
+        "capital": _i("Desk capital, a whole number; optional, only if the owner gave one."),
         "template": _s("minimal, standard (default) or debate.", enum=DESK_TEMPLATES),
         "assets": {"type": "array", "items": {"type": "string"}, "description": "Market symbols of the desk."},
         "mandate": _s("What the desk is for and its rules, up to 4000 characters."),
-        "token_budget": _i("Weekly token budget, optional.")}, ["name", "capital"], desk_create, True),
+        "token_budget": _i("Weekly token budget, optional.")}, ["name"], desk_create, True),
     "desk_money_set": ("Raise the capital of a money desk, loosen or turn off its order limits, or add assets while the "
                        "assets_only limit is on. These are the owner's to decide: the owner is asked for permission every "
                        "time, in any mode, and sees these values; propose them in the chat first. desk_configure refuses "

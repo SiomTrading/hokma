@@ -8,6 +8,9 @@ import type { Account, Broker } from "./accountsApi";
 import { AssignAccount } from "./AssignAccount";
 import { formatBalance, formatCapital } from "./format";
 import { NewAccountModal } from "./NewAccountModal";
+import { PnlCell } from "./PnlCell";
+import { PNL_POLL_MS, pnlApi } from "./pnlApi";
+import type { PnlView } from "./pnlApi";
 import { PendingOrders } from "./PendingOrders";
 import { refreshDesks, useDesks } from "./store";
 
@@ -15,7 +18,7 @@ interface BrokerWithAccounts extends Broker {
   accounts: Account[];
 }
 
-type Dialog = { kind: "account" } | { kind: "reset"; account: Account } | { kind: "assign"; account: Account } | { kind: "unassign"; account: Account };
+type Dialog = { kind: "account" } | { kind: "reset"; account: Account } | { kind: "assign"; account: Account } | { kind: "unassign"; account: Account; deskId: number };
 
 /** Confirmation to reset an account: it says the capital it goes back to. */
 function ResetModal({ account, onClose, onDone }: { account: Account; onClose: () => void; onDone: () => void }) {
@@ -57,7 +60,7 @@ function UnassignModal({ account, deskName, deskId, onClose, onDone }: { account
     setBusy(true);
     setError(null);
     try {
-      await accountsApi.unassign(deskId);
+      await accountsApi.removeFromDesk(deskId, account.id);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : t("desks.accounts.error"));
       setBusy(false);
@@ -185,6 +188,26 @@ export function BrokerView() {
   const [brokers, setBrokers] = useState<BrokerWithAccounts[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [pnl, setPnl] = useState<Record<string, PnlView>>({});
+
+  // The day P&L each broker reports: the engine already has it, so asking every few seconds calls no broker.
+  useEffect(() => {
+    let alive = true;
+    const read = () => {
+      pnlApi.all().then(
+        (data) => {
+          if (alive) setPnl(data);
+        },
+        () => undefined, // the column keeps what it had: an error here never hides the accounts
+      );
+    };
+    read();
+    const timer = window.setInterval(read, PNL_POLL_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -201,16 +224,15 @@ export function BrokerView() {
     void load();
     void refreshDesks();
   };
-  const deskName = (id: number | null) => (id === null ? null : (desks.find((d) => d.id === id)?.name ?? `#${id}`));
+  const deskName = (id: number) => desks.find((d) => d.id === id)?.name ?? `#${id}`;
 
   if (brokers === null && error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (brokers === null) return <Loading label={t("desks.accounts.loading")} />;
   // Only a broker that makes its own accounts (the internal one) can take a new account; Schwab's come from its connection.
   const first = brokers.find((b) => !isRealBroker(b));
-  const freeDesks = desks.some((d) => !d.account);
 
   // Desks whose account belongs to a broker with orders (Schwab): the only ones that can hold an order for the owner.
-  const orderDesks = brokers.filter(isRealBroker).flatMap((b) => b.accounts.filter((a) => a.desk_id !== null).map((a) => ({ id: a.desk_id as number, name: deskName(a.desk_id) ?? "", account: a })));
+  const orderDesks = brokers.filter(isRealBroker).flatMap((b) => b.accounts.flatMap((a) => a.desk_ids.map((id) => ({ id, name: deskName(id), account: a }))));
   const orderKey = orderDesks.map((d) => d.id).join(",");
 
   return (
@@ -242,7 +264,7 @@ export function BrokerView() {
                 <div className="brk-stats">
                   <div><span className="lbl">{t("desks.broker.accounts")}</span><b className="mono">{b.accounts.length}</b></div>
                   {real ? null : <div><span className="lbl">{t("desks.broker.capital")}</span><b className="mono">{formatCapital(capital, locale)}</b></div>}
-                  <div><span className="lbl">{t("desks.broker.inDesks")}</span><b className="mono">{t("desks.broker.of", { n: String(b.accounts.filter((a) => a.desk_id !== null).length), total: String(b.accounts.length) })}</b></div>
+                  <div><span className="lbl">{t("desks.broker.inDesks")}</span><b className="mono">{t("desks.broker.of", { n: String(b.accounts.filter((a) => a.desk_ids.length > 0).length), total: String(b.accounts.length) })}</b></div>
                 </div>
               </div>
             );
@@ -272,6 +294,7 @@ export function BrokerView() {
                   <th scope="col">{t("desks.accounts.broker")}</th>
                   <th scope="col" className="r">{t("desks.accounts.initial")}</th>
                   <th scope="col" className="r">{t("desks.accounts.balance")}</th>
+                  <th scope="col">{t("desks.accounts.pnl")}</th>
                   <th scope="col">{t("desks.accounts.desk")}</th>
                   <th scope="col"><span className="sr-only">{t("desks.accounts.actions")}</span></th>
                 </tr>
@@ -283,11 +306,14 @@ export function BrokerView() {
                     <td>{a.broker}</td>
                     <td className="r mono">{formatCapital(a.initial_capital, locale)}</td>
                     <td className="r mono">{formatBalance(a.equity, locale, t("desks.accounts.unavailable"), a.currency)}</td>
-                    <td>{deskName(a.desk_id) ?? t("desks.accounts.free")}</td>
+                    <td data-testid={"account-pnl-" + a.id}><PnlCell view={pnl[String(a.id)]} currency={a.currency} /></td>
+                    <td>{a.desk_ids.length === 0 ? t("desks.accounts.free") : a.desk_ids.map(deskName).join(", ")}{a.desk_ids.length > 1 ? <small> {t("desks.accounts.shared.many", { n: String(a.desk_ids.length) })}</small> : null}</td>
                     <td className="desk-accounts-actions">
                       {a.can_reset === false ? null : <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "reset", account: a })}>{t("desks.accounts.reset")}</Button>}
-                      {a.desk_id === null && freeDesks ? <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "assign", account: a })}>{t("desks.accounts.assign")}</Button> : null}
-                      {a.desk_id !== null ? <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "unassign", account: a })}>{t("desks.accounts.unassign")}</Button> : null}
+                      {desks.some((d) => !a.desk_ids.includes(d.id)) ? <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "assign", account: a })}>{t("desks.accounts.assign")}</Button> : null}
+                      {a.desk_ids.map((id) => (
+                        <Button key={id} variant="ghost" size="sm" onClick={() => setDialog({ kind: "unassign", account: a, deskId: id })}>{t("desks.accounts.unassign", { desk: deskName(id) })}</Button>
+                      ))}
                     </td>
                   </tr>
                 ))}
@@ -299,8 +325,8 @@ export function BrokerView() {
       </section>
       {dialog?.kind === "account" ? <NewAccountModal brokers={brokers.filter((b) => !isRealBroker(b))} onClose={() => setDialog(null)} onDone={reload} /> : null}
       {dialog?.kind === "reset" ? <ResetModal account={dialog.account} onClose={() => setDialog(null)} onDone={reload} /> : null}
-      {dialog?.kind === "unassign" && dialog.account.desk_id !== null ? (
-        <UnassignModal account={dialog.account} deskId={dialog.account.desk_id} deskName={deskName(dialog.account.desk_id) ?? ""} onClose={() => setDialog(null)} onDone={reload} />
+      {dialog?.kind === "unassign" ? (
+        <UnassignModal account={dialog.account} deskId={dialog.deskId} deskName={deskName(dialog.deskId)} onClose={() => setDialog(null)} onDone={reload} />
       ) : null}
       {dialog?.kind === "assign" ? <AssignAccount account={dialog.account} onClose={() => setDialog(null)} onDone={reload} /> : null}
     </>

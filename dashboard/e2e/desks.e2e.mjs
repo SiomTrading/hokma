@@ -19,14 +19,13 @@ await runSuite("desks", { script: "desks-serve.py", signedIn: true }, async ({ p
   const tab = (key) => page.getByRole("tab", { name: msg(`desks.tab.${key}`), exact: true });
   await page.goto(server.base);
 
-  // 1. menu, Money desks, Create desk, From a template, Standard, name, capital, asset, budget
+  // 1. menu, Money desks, Create desk, From a template, Standard, name, asset, budget (the capital comes from the accounts now)
   await page.getByRole("button", { name: msg("nav.desks") }).first().click();
   await page.getByText(msg("desks.fund.empty.title")).waitFor();
   await page.getByRole("button", { name: msg("desks.create.button"), exact: true }).click();
   await page.getByRole("dialog", { name: msg("desks.start.title") }).getByRole("button", { name: new RegExp("^" + msg("desks.start.template.name")) }).click();
   const wizard = page.getByRole("dialog", { name: msg("desks.wizard.title") });
   await wizard.getByLabel(msg("desks.field.name")).fill("Futuros NQ");
-  await wizard.getByLabel(msg("desks.field.capital")).fill("10000");
   await wizard.getByRole("button", { name: msg("desks.wizard.next.team") }).click();
   await wizard.getByRole("radio", { name: new RegExp(msg("desks.tpl.standard.name")) }).click();
   await wizard.getByRole("button", { name: msg("desks.wizard.next.rules") }).click();

@@ -337,6 +337,26 @@ class HokmaLink(TelegramLink):
                                                   (self._t("telegram.order_btn_approve"), self._t("telegram.order_btn_reject")))
         return bool(result.success)
 
+    async def send_order_notice(self, proposal_id: int, nonce: str, text: str) -> bool:
+        """The notice of a rule with its three buttons (Follow, No, Close). False when it could not be sent."""
+        chat_id, destination = self._destination(None)
+        if self._ui is None or chat_id is None or not hasattr(self._ui, "send_order_notice"):
+            return False
+        labels = (self._t("telegram.notice_btn_follow"), self._t("telegram.notice_btn_no"), self._t("telegram.notice_btn_close"),
+                  self._t("telegram.notice_btn_one"), self._t("telegram.notice_btn_day"))
+        result = await self._ui.send_order_notice(chat_id, destination, proposal_id, nonce, text, labels)
+        return bool(result.success)
+
+    async def send_cap_notice(self, cap_id: int, nonce: str, text: str) -> bool:
+        """The notice of a cap with no order in the way, with its three buttons (keep trading today, block entries today, close positions). False when it could not be sent."""
+        chat_id, destination = self._destination(None)
+        if self._ui is None or chat_id is None or not hasattr(self._ui, "send_cap_notice"):
+            return False
+        labels = (self._t("telegram.cap_btn_follow"), self._t("telegram.cap_btn_block"), self._t("telegram.cap_btn_close"), self._t("telegram.cap_btn_confirm"),
+                  self._t("telegram.cap_btn_back"))
+        result = await self._ui.send_cap_notice(chat_id, destination, cap_id, nonce, text, labels)
+        return bool(result.success)
+
     async def send_exec_approval(self, command: str, request_id: str, description: str = "", *,
                                  thread_id: int | None = None, origin: str | None = None, **kwargs: Any):
         from hokma.telegram.core.approvals_ui import SendResult
@@ -531,6 +551,8 @@ class TelegramGlue:
             from hokma.exec import telegram_approval
 
             telegram_approval.set_button_sender(self.link.send_order_ticket)     # the tickets of the orders go out with their buttons
+            telegram_approval.set_notice_sender(self.link.send_order_notice)     # and the notices of the rules with Follow, No and Close
+            telegram_approval.set_cap_sender(self.link.send_cap_notice)          # and the notice of a cap that nobody is waiting on, with its three buttons
         self.connect_error = None
         await self._revalidate_avisos()
         return True

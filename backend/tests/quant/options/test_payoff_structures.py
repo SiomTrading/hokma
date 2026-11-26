@@ -207,15 +207,73 @@ def test_covered_call_and_greeks_of_a_structure_ECT_098(chain):
     assert condor["greeks"]["gamma_per_dollar"] < 0 and condor["greeks"]["vega_usd_per_point"] < 0 and condor["greeks"]["theta_usd_per_day"] > 0
 
 
-def test_negative_expected_value_and_strike_distance_are_reported_ECT_098():
-    # the skill presented an iron condor whose own numbers lose money (0.60 * 1150 - 0.40 * 2200 = -190): here the module says so
-    res = call("options.structure_profile", structure="iron_condor", strikes=[560.0, 570.0, 610.0, 620.0], premiums=[0.5, 1.5, 1.5, 0.5], quantity=1,
-               multiplier=100, spot=590.0, p_profit=0.6)
-    assert res.value["expected_value_usd"] == pytest.approx(0.6 * 200 - 0.4 * 800)
-    assert any("loses money" in w for w in res.warnings)
-    good = call("options.structure_profile", structure="iron_condor", strikes=[560.0, 570.0, 610.0, 620.0], premiums=[0.5, 1.5, 1.5, 0.5], quantity=1,
-                multiplier=100, spot=590.0, p_profit=0.9)
-    assert good.value["expected_value_usd"] == pytest.approx(0.9 * 200 - 0.1 * 800) and not good.warnings
+def numeric_mean(legs, spot, rate, vol, years):
+    """The mean payoff by brute force: the integral of the dollar payoff against the lognormal density, on a fine grid of log prices."""
+    import numpy as np
+
+    from hokma.quant.options import payoff as pay
+
+    mu, sd = math.log(spot) + (rate - vol * vol / 2) * years, vol * math.sqrt(years)
+    z = np.linspace(-9.0, 9.0, 600_001)
+    prices = np.exp(mu + sd * z)
+    weights = np.exp(-z * z / 2) / math.sqrt(2 * math.pi)
+    return float(np.trapezoid(pay.pnl_at(legs, prices) * weights, z))
+
+
+EV_CASES = {
+    "iron_condor": ([560.0, 570.0, 610.0, 620.0], [0.5, 1.5, 1.5, 0.5]),
+    "iron_butterfly": ([95.0, 100.0, 105.0], [1.0, 3.0, 3.2, 1.1]),
+    "credit_put_spread": ([95.0, 100.0], [1.2, 3.1]),
+    "cash_secured_put": ([100.0], [3.0]),
+    "debit_call_spread": ([100.0, 110.0], [5.0, 2.0]),
+    "covered_call": ([105.0], [4.0]),
+}
+
+
+@pytest.mark.parametrize("structure", sorted(EV_CASES))
+def test_expected_value_is_the_exact_lognormal_mean_of_the_payoff_ECT_098(structure):
+    from hokma.quant.options.structures import build_legs
+
+    strikes, premiums = EV_CASES[structure]
+    spot = 590.0 if structure == "iron_condor" else 100.0
+    res = call("options.structure_profile", structure=structure, strikes=strikes, premiums=premiums, quantity=2, multiplier=100, spot=spot,
+               rate=0.04, volatility=0.25, time_to_expiration=0.1)
+    legs = build_legs(structure, strikes, premiums, 2, 100, spot)
+    assert res.value["expected_value_usd"] == pytest.approx(numeric_mean(legs, spot, 0.04, 0.25, 0.1), abs=1e-3)
+
+
+def test_expected_value_of_fairly_priced_legs_is_zero_not_the_two_point_average_ECT_098():
+    # at rate 0 the Black-Scholes price of each leg is its mean payoff, so any structure built from them has a mean of exactly zero. The old figure
+    # p * max_profit - (1 - p) * max_loss gave +11 dollars for the condor of Vera's check.
+    from statistics import NormalDist
+
+    n = NormalDist().cdf
+    spot, vol, years = 590.0, 0.16, 0.1
+    sd = vol * math.sqrt(years)
+
+    def fair(kind, k):
+        d1 = (math.log(spot / k) + 0.5 * sd * sd) / sd
+        d2 = d1 - sd
+        return spot * n(d1) - k * n(d2) if kind == "call" else k * n(-d2) - spot * n(-d1)
+
+    strikes = [560.0, 570.0, 610.0, 620.0]
+    premiums = [fair("put", 560.0), fair("put", 570.0), fair("call", 610.0), fair("call", 620.0)]
+    res = call("options.structure_profile", structure="iron_condor", strikes=strikes, premiums=premiums, quantity=1, multiplier=100, spot=spot,
+               rate=0.0, volatility=vol, time_to_expiration=years).value
+    assert res["expected_value_usd"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_expected_value_needs_spot_rate_volatility_and_time_and_is_omitted_without_them_ECT_098():
+    base = dict(structure="iron_condor", strikes=[560.0, 570.0, 610.0, 620.0], premiums=[0.5, 1.5, 1.5, 0.5], quantity=1, multiplier=100)
+    assert "expected_value_usd" not in call("options.structure_profile", **base, spot=590.0).value
+    assert "expected_value_usd" not in call("options.structure_profile", **base, spot=590.0, rate=0.04, volatility=0.2).value
+    assert "expected_value_usd" in call("options.structure_profile", **base, spot=590.0, rate=0.04, volatility=0.2, time_to_expiration=0.1).value
+
+
+def test_negative_expected_value_warns_and_strike_distance_is_reported_ECT_098():
+    res = call("options.structure_profile", structure="short_strangle", strikes=[95.0, 105.0], premiums=[0.2, 0.2], quantity=1, multiplier=100,
+               spot=100.0, rate=0.04, volatility=0.4, time_to_expiration=0.25)
+    assert res.value["expected_value_usd"] < 0 and any("expected value is" in w for w in res.warnings)
     # the strikes of that condor were called "beyond 1 sigma" at 4.4 percent over a 5.6 percent move: that is 0.79 sigma, and it is reported as such
     sigma = call("options.structure_profile", structure="short_strangle", strikes=[100.0 * math.exp(-0.044), 100.0 * math.exp(0.044)], premiums=[1.0, 1.0],
                  quantity=1, multiplier=100, spot=100.0, volatility=0.28, time_to_expiration=0.04).value
@@ -224,8 +282,6 @@ def test_negative_expected_value_and_strike_distance_are_reported_ECT_098():
     # the premiums are checked against the class of the structure
     odd = call("options.structure_profile", structure="debit_call_spread", strikes=[100.0, 110.0], premiums=[2.0, 5.0], quantity=1, multiplier=100)
     assert odd.value["premium_type"] == "credit" and any("normally a debit" in w for w in odd.warnings)
-    assert any("bounded" in w for w in call("options.structure_profile", structure="long_call", strikes=[100.0], premiums=[3.0], quantity=1, multiplier=100,
-                                              p_profit=0.5).warnings)
 
 
 def test_profile_bad_input_ECT_098():
@@ -237,7 +293,6 @@ def test_profile_bad_input_ECT_098():
     assert_empty(call("options.structure_profile", **{**base, "premiums": [0.5, float("nan"), 1.5, 0.5]}))
     assert_empty(call("options.structure_profile", **{**base, "multiplier": 0}), "positive")
     assert_empty(call("options.structure_profile", **{**base, "quantity": float("nan")}))
-    assert_empty(call("options.structure_profile", **base, p_profit=1.5), "p_profit")
     assert_empty(call("options.structure_profile", structure="covered_call", strikes=[105.0], premiums=[4.0], quantity=1, multiplier=100), "spot")
     with pytest.raises(BadInput):
         call("options.structure_profile", **{**base, "strikes": "90,95"})
