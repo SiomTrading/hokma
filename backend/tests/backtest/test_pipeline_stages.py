@@ -62,7 +62,7 @@ class NeedsAtr(Fixed):
 
 class Limit(Fixed):
     def on_bar(self, ctx):
-        return [buy(NQ, 1, limit=25000)] if ctx.index == 2 else []
+        return [buy(NQ, 1, limit=25000, stop=25001)] if ctx.index == 2 else []         # a stop limit: the engine fills market and limit entries only
 
 
 def raising_source(error):

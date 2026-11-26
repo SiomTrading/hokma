@@ -60,9 +60,9 @@ def test_quick_signal_goes_from_the_card_to_the_optimizer_and_is_found_again_by_
     [summary] = sorted((hokma_home() / got["folder"] / "results").glob("OPT-1-*.md"))
     text = summary.read_text(encoding="utf-8")
     assert "Code: STR-001" in text and "u_str001_v1" in text and "Status: done" in text
-    # the variant that needs limit orders is refused by the engine and says so
+    # the variant with two limit entries of different targets is refused with its own code: the engine holds one target per position
     refused = call("backtest_run", {**base, "code": "STR-001", "params": {"full": 1}}, caller("hokma"))
-    assert "order_type_unsupported" in json.dumps(refused[0]) or refused[1]
+    assert "multiple_targets_unsupported" in json.dumps(refused[0]) or refused[1]
     # another day: the registry is built again from the bank and finds the strategy by its code
     user_rules._LOADED.clear()
     registry = factory_spec.default_registry()

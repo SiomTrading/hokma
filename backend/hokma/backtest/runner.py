@@ -28,7 +28,7 @@ from hokma.backtest.continuous import Adjustment, ChainError, ContractBars, Roll
 from hokma.backtest import continuous
 from hokma.backtest.data_feed import DataFeedError
 from hokma.backtest.engine import EngineUnavailable, Expiry, RunOutput
-from hokma.backtest.fills import Decision, against, stop_first, stop_price, target_price
+from hokma.backtest.fills import Decision, against, limit_fill, stop_first, stop_price, target_price
 from hokma.backtest.guards_bridge import SimAccount, SimPosition
 from hokma.backtest.results import BacktestResult, BarRange, EquityCurve, Fill
 from hokma.backtest.spec import BacktestSpec, SpecError, sequence_same_bar
@@ -39,7 +39,7 @@ from hokma.db import Database, get_database
 from hokma.db.timeutil import to_db_time, utcnow
 from hokma.desks.core import paths
 from hokma.exec.guards import Leg, OrderProposal
-from hokma.factory.orders import BadSize, OrderIntent, intent_quantity, stop_units
+from hokma.factory.orders import BadOrder, BadSize, LoosenStop, OrderIntent, Protection, adjust_protection, intent_quantity, stop_units
 from hokma.factory.parts import build_composite
 from hokma.factory.registry import Registry
 from hokma.factory.strategy import BadStrategy, InitContext, Position, build_context, check_strategy, compute_indicator
@@ -326,6 +326,7 @@ class StrategyDriver:
         self._strategy = strategy
         self._span = span_ns or SPAN_NS[spec.bar]
         self._pending: list[Decision] = []
+        self._live_limits: list[tuple[Decision, int]] = []             # limit entries still waiting for a bar to cross them, with the bars they have left
         self._levels: tuple[Decimal | None, Decimal | None] = (None, None)
         self._level_side: str | None = None
         self._limits, self._level = desk_limits, level
@@ -349,18 +350,30 @@ class StrategyDriver:
         self._wait = max(init.warmup_bars, 1)
 
     # -- the account the strategy and the guards see
-    def _apply(self, decision: Decision, bar: Bar) -> None:
+    def _apply(self, decision: Decision, bar: Bar, price: Decimal | None = None) -> None:
         cid, broker = self.data.instrument, self.broker
+        if decision.action == "reduce":
+            held = broker.position(cid)
+            if held is not None:
+                broker.fill(cid, "sell" if held.qty > 0 else "buy", min(decision.qty, abs(held.qty)), bar.open, bar.ts)
+            return
+        if decision.action == "modify":
+            if broker.position(cid) is not None:
+                stop, target = self._levels
+                self._levels = (decision.new_stop if decision.new_stop is not None else stop, decision.new_target if decision.new_target is not None else target)
+            return
         if decision.action == "exit":
+            self._live_limits = []
             held = broker.position(cid)
             if held is not None:
                 broker.fill(cid, "sell" if held.qty > 0 else "buy", abs(held.qty), bar.open, bar.ts)
             self._levels, self._level_side = (None, None), None
             return
         side = "buy" if decision.side == "long" else "sell"
-        broker.fill(cid, side, decision.qty, bar.open, bar.ts)
-        stop = None if decision.stop_points is None else stop_price(decision.side, bar.open, decision.stop_points)    # type: ignore[arg-type]
-        target = None if decision.target_points is None else target_price(decision.side, bar.open, decision.target_points)  # type: ignore[arg-type]
+        ref = bar.open if price is None else price                      # a limit fills at its price, or at the open when the bar gaps through it
+        broker.fill(cid, side, decision.qty, ref, bar.ts)
+        stop = None if decision.stop_points is None else stop_price(decision.side, ref, decision.stop_points)    # type: ignore[arg-type]
+        target = None if decision.target_points is None else target_price(decision.side, ref, decision.target_points)  # type: ignore[arg-type]
         self._levels, self._level_side = (stop, target), decision.side
 
     def _sync(self, bar: Bar, side: Any) -> None:
@@ -368,8 +381,19 @@ class StrategyDriver:
         longer holds was closed by its stop or target, and the equity is marked at the close."""
         cid, broker = self.data.instrument, self.broker
         for decision in self._pending:
-            self._apply(decision, bar)
+            if decision.action == "enter" and decision.limit is not None:
+                self._live_limits.append((decision, decision.valid_bars))
+            else:
+                self._apply(decision, bar)
         self._pending = []
+        waiting, self._live_limits = self._live_limits, []
+        for decision, left in waiting:                                   # the same rule as the engine: the bar crosses the limit or the order loses a bar
+            reach = limit_fill(decision.side, decision.limit, bar)       # type: ignore[arg-type]
+            if reach is None:
+                if left > 1:
+                    self._live_limits.append((decision, left - 1))
+                continue
+            self._apply(decision, bar, reach[0])
         held = broker.position(cid)
         if held is not None and side is None:
             stop, target = self._levels
@@ -413,8 +437,13 @@ class StrategyDriver:
         for intent in emitted:
             if intent.contract_id != cid:
                 raise StageError("signal", "wrong_contract", f"the strategy ordered {intent.contract_id} in a run of {cid}")
-            if intent.order_type != "market":
-                raise StageError("fill", "order_type_unsupported", f"the run fills market orders; {intent.order_type} is not supported yet")
+            moved = self._moved_stop(intent, current, bar)
+            if moved is not None:
+                exits.append(moved)
+                continue
+            if intent.order_type not in ("market", "limit") or intent.order_type == "limit" and (intent.reduce_only or current is not None and (
+                    "buy" if current.qty > 0 else "sell") != intent.side):     # type: ignore[union-attr]
+                raise StageError("fill", "order_type_unsupported", f"the run fills market orders and limit entries; {intent.order_type} is not supported yet")
             try:
                 qty, notes = intent_quantity(intent, sheet=self.sheet, price=bar.close, equity=broker.equity(), mode=spec.qty_mode)
             except (BadSize, ValueError, ArithmeticError) as exc:
@@ -422,8 +451,11 @@ class StrategyDriver:
             self.warnings.extend(n for n in notes if n not in self.warnings)
             held_side = None if current is None else ("buy" if current.qty > 0 else "sell")
             if held_side is not None and intent.side != held_side:                 # the other side of a position: it closes it
-                if qty <= 0 or intent.reduce_only and qty < abs(current.qty):       # type: ignore[union-attr]
-                    raise StageError("fill", "partial_close_unsupported", "the run closes a position whole; reduce_only with a smaller size is not supported yet")
+                if qty <= 0:
+                    raise StageError("fill", "partial_close_unsupported", "an exit needs a quantity above zero")
+                if intent.reduce_only and qty < abs(current.qty):                    # type: ignore[union-attr]
+                    exits.append(Decision("reduce", qty=qty))                         # a partial exit: the rest stays with its protective orders
+                    continue
                 exits.append(Decision("exit"))
                 if not intent.reduce_only and qty > abs(current.qty):               # type: ignore[union-attr]
                     entries.append((self._entry(intent, qty - abs(current.qty), bar), intent))   # type: ignore[union-attr]
@@ -433,6 +465,8 @@ class StrategyDriver:
                 self.warnings.append("size_zero") if "size_zero" not in self.warnings else None
                 continue
             entries.append((self._entry(intent, qty, bar), intent))
+        if len({(d.side, d.stop_points, d.target_points, d.limit) for d, _i in entries}) > 1:
+            raise StageError("fill", "multiple_targets_unsupported", "the run holds one stop and one target per position: entries of one bar with different levels are not supported yet")
         ordered, notes = sequence_same_bar(exits, entries, holding_side=None if held is None else ("buy" if held.qty > 0 else "sell"),
                                            accumulate=spec.accumulate, entry_side=lambda e: "buy" if e[0].side == "long" else "sell")
         self.warnings.extend(n for n in notes if n not in self.warnings)
@@ -448,14 +482,30 @@ class StrategyDriver:
         self._pending = list(out)
         return out
 
+    def _moved_stop(self, intent: OrderIntent, current: Any, bar: Bar) -> Decision | None:
+        """A reduce-only stop order on the protective side of a position that has a live stop is the move of that stop (breakeven and trailing by
+        hand): the live protective order goes to the price of the order from the next bar, whatever the quantity. A move against the position is refused."""
+        if not (intent.reduce_only and intent.order_type == "stop" and current is not None and self._level_side in ("long", "short")):
+            return None
+        held_side = "buy" if current.qty > 0 else "sell"
+        if intent.side == held_side:
+            return None
+        stop, target = self._levels
+        try:
+            adjust_protection(held_side, Protection(stop, target), new_sl=intent.stop)      # type: ignore[arg-type]
+        except (BadOrder, LoosenStop) as exc:
+            raise StageError("fill", _code(exc), str(exc)[:500]) from exc
+        return Decision("modify", new_stop=intent.stop)
+
     def _entry(self, intent: OrderIntent, qty: Decimal, bar: Bar) -> Decision:
         side = "long" if intent.side == "buy" else "short"
+        ref = bar.close if intent.limit is None else intent.limit              # a limit entry measures its stop and target from the price it waits for
         try:
-            stop = None if intent.sl is None else stop_units(intent.sl, entry=bar.close, sheet=self.sheet)
-            target = None if intent.tp is None else stop_units(intent.tp, entry=bar.close, sheet=self.sheet)
+            stop = None if intent.sl is None else stop_units(intent.sl, entry=ref, sheet=self.sheet)
+            target = None if intent.tp is None else stop_units(intent.tp, entry=ref, sheet=self.sheet)
         except ValueError as exc:
             raise StageError("size", _code(exc), str(exc)[:500]) from exc
-        return Decision("enter", side, qty, stop, target)
+        return Decision("enter", side, qty, stop, target, limit=intent.limit)
 
     def _filtered(self, decision: Decision, bar: Bar) -> Decision | None:
         """The filter before an order, only for a run of a desk: the guards of H2 judge the order against the simulated account."""

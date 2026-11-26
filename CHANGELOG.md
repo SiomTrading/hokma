@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.4
+
+- New: The backtest of the engine fills limit entries: a long fills when the low reaches the limit, a short when the high does, at the limit price (at the open when the bar gaps through it, with no tick against). The order lives one bar and cancels itself when it does not fill.
+- New: A reduce-only order smaller than the position is a partial exit: it closes that quantity with its costs and the rest keeps its stop and target.
+- New: A reduce-only stop order on the protective side moves the live stop (breakeven) from the next bar. A move against the position is refused with loosen_stop.
+- Known: stop limit and trailing orders still answer order_type_unsupported, and two entries of one bar with different stops or targets answer multiple_targets_unsupported.
+
 ## 1.2.3
 
 - Changed: Ian, Sam and Ben work like Diego, Joel and Vera and have the normal tools of the engine (Read, Write, Edit, Glob, Grep, Bash, Agent) plus their task, project, journal and decision tools. Only the hard locks stay: nothing reaches real money or a broker, the integrity and hard-block hooks, the author of a version never gives its verdict, and the owner approves for real money.

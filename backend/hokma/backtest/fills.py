@@ -54,17 +54,27 @@ class Order:
 @dataclass(frozen=True)
 class Decision:
     """What a strategy decides at the close of a bar: open a position (with optional protective distances in price points) or leave it."""
-    action: Literal["enter", "exit"]
+    action: Literal["enter", "exit", "reduce", "modify"]
     side: PositionSide | None = None
     qty: Decimal = Decimal(1)
     stop_points: Decimal | None = None
     target_points: Decimal | None = None
+    limit: Decimal | None = None           # enter: a limit entry, filled when the bar crosses this price (1.2.4)
+    valid_bars: int = 1                    # enter with a limit: the bars the order lives, counted from the one that follows the decision
+    new_stop: Decimal | None = None        # modify: the price of the live stop from the next bar on
+    new_target: Decimal | None = None      # modify: the price of the live target from the next bar on
 
     def __post_init__(self) -> None:
         if self.action == "enter" and (self.side not in ("long", "short") or self.qty <= 0):
             raise SpecError("an entry needs a side and a positive quantity")
-        if self.action == "exit" and (self.stop_points is not None or self.target_points is not None):
+        if self.action in ("exit", "reduce", "modify") and (self.stop_points is not None or self.target_points is not None):
             raise SpecError("an exit carries no protective distance")
+        if self.action == "reduce" and self.qty <= 0:
+            raise SpecError("a partial exit needs a positive quantity")
+        if self.action == "modify" and self.new_stop is None and self.new_target is None:
+            raise SpecError("a modify moves the stop, the target or both")
+        if self.limit is not None and (self.action != "enter" or self.limit <= 0 or self.valid_bars < 1):
+            raise SpecError("a limit belongs to an entry, above zero, with a life of one bar or more")
         if self.target_points is not None and self.stop_points is None:
             raise SpecError("a target without a stop is not allowed: every protective order set has its stop")
         if any(p is not None and p <= 0 for p in (self.stop_points, self.target_points)):
@@ -133,6 +143,15 @@ def target_price(side: PositionSide, fill_ref: Decimal, distance: Decimal) -> De
     if distance <= 0:
         raise SpecError("a target distance is above zero")
     return fill_ref + distance if side == "long" else fill_ref - distance
+
+
+def limit_fill(side: PositionSide, limit: Decimal, bar: Bar) -> tuple[Decimal, bool] | None:
+    """Whether a limit entry fills in `bar`: (price, at_open). A long fills when the low reaches the limit, a short when the high does; at the
+    limit, or at the open when the bar opens through it (a gap in favour). None when the bar does not cross it."""
+    long = side == "long"
+    if bar.open <= limit if long else bar.open >= limit:
+        return bar.open, True
+    return (limit, False) if (bar.low <= limit if long else bar.high >= limit) else None
 
 
 def stop_first(position: PositionSide, stop: Decimal, target: Decimal | None, bar: Bar) -> ExitChoice:

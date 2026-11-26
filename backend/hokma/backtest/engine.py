@@ -312,11 +312,14 @@ def run(spec: BacktestSpec, bars: Sequence[Bar], decide: Decide, *, tick_size: D
             committed[0] = ZERO
         allowed: list[Decision] = []
         for d in decisions:
+            if d.action in ("reduce", "modify"):
+                allowed.append(d)
+                continue
             if d.action == "exit":
                 committed[0] = ZERO
                 allowed.append(d)
                 continue
-            need = bars[i + 1].open * d.qty * multiplier
+            need = (bars[i + 1].open if d.limit is None else d.limit) * d.qty * multiplier
             if d.side == "short" or committed[0] + need > spec.capital_usd:
                 refused["cash_account"] += 1                     # a cash account does not sell short and pays in full
                 continue

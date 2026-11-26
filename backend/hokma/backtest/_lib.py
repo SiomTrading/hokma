@@ -14,7 +14,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Literal
 
-from hokma.backtest.fills import Decision, reject_prob, stop_first, stop_price, target_price
+from hokma.backtest.fills import Decision, limit_fill, reject_prob, stop_first, stop_price, target_price
 from hokma.backtest.spec import FillRules, SpecError
 from hokma.backtest.ticks import BAR_NS, Bar, PositionSide, SyntheticTick, bar_to_ticks
 
@@ -186,6 +186,8 @@ def _strategy_class() -> type:
             self.pending: list[Decision] = []
             self.meta: dict[Any, tuple[str, Decimal | None, Any]] = {}     # client order id -> (kind, reference, levels of an entry)
             self.protective: dict[str, Any] = {}
+            self.fixed: dict[Any, Decimal] = {}
+            self.limits: list[tuple[Decision, int]] = []          # limit entries that wait for the bar to cross them, with the bars they have left
 
         def on_start(self) -> None:
             self.subscribe_bars(self.bar_type)
@@ -197,11 +199,11 @@ def _strategy_class() -> type:
             i = run.bar_index
             run.bar_index += 1
             self.pending += list(run.decide(i, run.bars[i], run.side()))
-            if run.feed == "engine_default" and self.pending and i + 1 < len(run.bars):
+            if run.feed == "engine_default" and (self.pending or self.limits) and i + 1 < len(run.bars):
                 self._send(run.bars[i + 1].open)
 
         def on_trade_tick(self, tick: Any) -> None:
-            if self.pending and tick.trade_id.value.startswith("o"):
+            if (self.pending or self.limits) and tick.trade_id.value.startswith("o"):
                 self._send(tick.price.as_decimal())
 
         def _send(self, ref: Decimal) -> None:
@@ -212,17 +214,67 @@ def _strategy_class() -> type:
                     run.rejected += 1
                     continue
                 if decision.action == "exit":
+                    self.limits = []
                     self._exit()
+                elif decision.action == "reduce":
+                    self._reduce(decision.qty)
+                elif decision.action == "modify":
+                    self._modify(decision)
+                elif decision.limit is not None:
+                    self.limits.append((decision, decision.valid_bars))
                 else:
                     self._enter(decision, ref)
+            self._try_limits()
 
-        def _enter(self, decision: Decision, ref: Decimal) -> None:
+        def _try_limits(self) -> None:
+            """The limit entries against the bar that opens now: one that the bar crosses is sent (at the open when it gaps through, at its price
+            otherwise); one that is not crossed loses a bar of its life and is cancelled when it has none left."""
+            run, waiting, self.limits = self.run, self.limits, []
+            if not waiting or run.bar_index >= len(run.bars):
+                return
+            bar = run.bars[run.bar_index]
+            for decision, left in waiting:
+                reach = limit_fill(decision.side, decision.limit, bar)
+                if reach is None:
+                    if left > 1:
+                        self.limits.append((decision, left - 1))
+                    continue
+                self._enter(decision, reach[0], fixed=reach[0])
+
+        def _reduce(self, qty: Decimal) -> None:
+            run = self.run
+            net = run.net
+            if net == 0:
+                return
+            take = min(qty, abs(net))
+            self.cancel_all_orders(self.iid)
+            self.protective.clear()
+            order = self.order_factory.market(self.iid, OrderSide.SELL if net > 0 else OrderSide.BUY, Quantity.from_str(str(take)))
+            self.meta[order.client_order_id] = ("exit", None, None)
+            run.inflight += -take if net > 0 else take
+            self.submit_order(order)
+
+        def _modify(self, decision: Decision) -> None:
+            run = self.run
+            if run.net == 0:
+                return
+            stop, target = run.levels
+            run.levels = (decision.new_stop if decision.new_stop is not None else stop, decision.new_target if decision.new_target is not None else target)
+            self.cancel_all_orders(self.iid)
+            self.protective.clear()
+            self._protect("buy" if run.net > 0 else "sell", abs(run.net), *run.levels)
+
+        def _enter(self, decision: Decision, ref: Decimal, fixed: Decimal | None = None) -> None:
+            """`fixed` is the price of a limit entry that the bar crossed: the order goes as a market order and its fill is recorded at that price, because a
+            limit never pays the ticks against and never fills worse than its price."""
             run = self.run
             side = decision.side
             stop = None if decision.stop_points is None else stop_price(side, ref, decision.stop_points)
             target = None if decision.target_points is None else target_price(side, ref, decision.target_points)
             order = self.order_factory.market(self.iid, OrderSide.BUY if side == "long" else OrderSide.SELL, Quantity.from_str(str(decision.qty)))
             self.meta[order.client_order_id] = ("entry", ref, (stop, target))
+            if fixed is not None:
+                self.fixed[order.client_order_id] = fixed
             run.inflight += decision.qty if side == "long" else -decision.qty
             run.levels = (stop, target)
             self.submit_order(order)
@@ -262,9 +314,11 @@ def _strategy_class() -> type:
             run.net += signed
             if kind in ("entry", "exit"):
                 run.inflight -= signed
-            run.fills.append(EngineFill(int(event.ts_event), side, qty, event.last_px.as_decimal(), event.commission.as_decimal(), kind, ref))
+            run.fills.append(EngineFill(int(event.ts_event), side, qty, self.fixed.pop(event.client_order_id, event.last_px.as_decimal()), event.commission.as_decimal(), kind, ref))
             if kind == "entry" and levels != (None, None):
                 self._protect(side, qty, *levels)
+            elif kind == "exit" and run.net != 0 and run.levels != (None, None):          # a partial exit: the rest keeps its protective orders
+                self._protect("buy" if run.net > 0 else "sell", abs(run.net), *run.levels)
             elif kind in ("stop", "target"):
                 other = self.protective.pop("target" if kind == "stop" else "stop", None)
                 self.protective.pop(kind, None)
