@@ -44,9 +44,8 @@ def test_who_calls_and_where_it_was_created_are_never_arguments(db):
 
 def test_the_requirement_tool_classifies_what_it_refuses_and_answers_with_the_next_step(db):
     bank_id, made = written(db)
-    assert made["folder"] == "strategies/inside_bar" and made["rule_id"] >= 1 and "dry_run" in made["next"]
+    assert made["folder"].startswith("service/strategies/STR-001-") and made["rule_id"] >= 1 and "dry_run" in made["next"]
     assert failed("strategy_brief_write", {"bank_id": bank_id, "slug": "other", "title": "t", "brief": {"summary": "x"}}, caller(RESEARCHER))["error_code"] == "bad_input"
-    assert failed("strategy_brief_write", {"bank_id": bank_id, "slug": "other", "title": "t", "brief": brief(inputs=["order_book"])}, caller(RESEARCHER))["error_code"] == "blocked"
     assert failed("strategy_brief_write", {"bank_id": 999, "slug": "other", "title": "t", "brief": BRIEF}, caller(RESEARCHER))["error_code"] == "no_data"
 
 
@@ -56,7 +55,7 @@ def test_the_save_tool_is_blocked_without_a_requirement_and_checks_with_dry_run_
         rule_id = u.session.insert("user_rules", {"slug": SLUG, "kind": "strategy", "title": "t", "bank_id": bank_id, "component": "strategy", "created_by": RESEARCHER})
     put_files(SLUG)
     blocked = failed("strategy_code_save", {"rule_id": rule_id}, caller(CODER))
-    assert blocked["error_code"] == "blocked" and "no requirement" in blocked["message"]
+    assert blocked["error_code"] == "blocked" and "no spec" in blocked["message"]
     made = ok("strategy_brief_write", {"bank_id": bank_id, "slug": "second", "title": "second", "brief": BRIEF}, caller(RESEARCHER))
     put_files("second", test=TEST.replace('== "hold"', '== "long"'))
     dry = ok("strategy_code_save", {"rule_id": made["rule_id"], "dry_run": True}, caller(CODER))
@@ -64,23 +63,23 @@ def test_the_save_tool_is_blocked_without_a_requirement_and_checks_with_dry_run_
     put_files("second")
     assert ok("strategy_code_save", {"rule_id": made["rule_id"], "dry_run": True}, caller(CODER))["ok"] is True and rows(db, "SELECT * FROM user_rule_versions") == []
     kept = ok("strategy_code_save", {"rule_id": made["rule_id"]}, caller(CODER))
-    assert kept["saved"] and kept["status"] == "draft" and kept["registry_id"] == "u_second_v1"
+    assert kept["saved"] and kept["status"] == "draft" and kept["registry_id"] == "u_str001_v1"
 
 
 def test_the_reviewer_reads_runs_again_and_gives_the_verdict_and_the_listing_shows_stage_and_origin(db):
     bank_id, made = written(db)
-    put_files(SLUG)
+    files = put_files(SLUG)
     kept = ok("strategy_code_save", {"rule_id": made["rule_id"]}, caller(CODER))
     got = ok("strategy_code_get", {"rule_version_id": kept["rule_version_id"], "rerun": True}, caller(REVIEWER))
-    assert got["code"] == STRATEGY and got["test_file"] == TEST and got["stage"] == "draft" and got["rerun"]["ok"] is True and "RESULT green" in got["rerun"]["output"]
+    assert got["code"] == (files / "strategy.py").read_text(encoding="utf-8") and got["test_file"] == TEST and got["stage"] == "draft" and got["rerun"]["ok"] is True and "RESULT green" in got["rerun"]["output"]
     assert got["requirement"]["current"] is True and got["requirement"]["brief"]["market"] == "NQ" and got["origin"] == {"kind": "hokma"}
-    assert ok("strategy_code_get", {"rule_id": made["rule_id"]}, caller(REVIEWER))["registry_id"] == "u_inside_bar_v1"
-    assert ok("strategy_code_get", {"registry_id": "u_inside_bar_v1"}, caller(RESEARCHER))["rule_version_id"] == kept["rule_version_id"]
+    assert ok("strategy_code_get", {"rule_id": made["rule_id"]}, caller(REVIEWER))["registry_id"] == "u_str001_v1"
+    assert ok("strategy_code_get", {"registry_id": "u_str001_v1"}, caller(RESEARCHER))["rule_version_id"] == kept["rule_version_id"]
     assert failed("strategy_code_get", {"registry_id": "u_nothing_v9"}, caller(REVIEWER))["error_code"] == "no_data"
     assert failed("strategy_code_verdict", {"rule_version_id": kept["rule_version_id"], "verdict": "rejected"}, caller(REVIEWER))["error_code"] == "bad_input"
     rejected = ok("strategy_code_verdict", {"rule_version_id": kept["rule_version_id"], "verdict": "rejected", "findings": [{"severity": "major", "message": "no case for the short side with a minimum range", "line": 17}]}, caller(REVIEWER))
     assert rejected["status"] == "failed" and rejected["attempts_left"] == 2
-    assert ok("strategy_code_list", {"stage": "failed"}, caller(CODER))["rows"][0]["registry_id"] == "u_inside_bar_v1"
+    assert ok("strategy_code_list", {"stage": "failed"}, caller(CODER))["rows"][0]["registry_id"] == "u_str001_v1"
     assert ok("strategy_code_list", {"origin": "desk"}, caller(CODER))["rows"] == [] and ok("strategy_code_list", {"bank_id": bank_id}, caller(CODER))["rows"][0]["origin"] == {"kind": "hokma"}
     assert call("strategy_code_list", {"stage": "lost"}, caller(CODER))[1]                       # the schema refuses a stage that is not one of the six
     assert "findings" in ok("strategy_code_get", {"rule_version_id": kept["rule_version_id"]}, caller(REVIEWER))["reviews"][0]

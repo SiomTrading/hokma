@@ -42,8 +42,9 @@ def test_the_main_session_and_any_subagent_carry_the_flow_and_nobody_approves_th
 
 
 def test_no_code_without_a_requirement_for_any_agent(db):
-    put_files("no_brief")
-    assert gate("Write", {"file_path": str(hokma_home() / "strategies" / "no_brief" / "strategy.py")}, "hokma") == 2
+    make_bank(db, spec=False)
+    path = put_files("no_brief") / "strategy.py"                    # the folder of the card exists; its spec.md does not
+    assert gate("Write", {"file_path": str(path)}, "hokma") == 2
 
 
 def tools_of(name):
@@ -56,9 +57,9 @@ def test_the_main_agent_and_the_desk_chief_hold_the_creator_tools_and_ian_launch
         assert creator <= tools_of(name), name
     assert "Agent" not in tools_of("agents/desk-chief.md") and "Agent" in tools_of("agents/hokma.md") and "Agent" in tools_of("service/agents/strategy-researcher.md")
     for name in ("service/agents/strategy-coder.md", "service/agents/strategy-reviewer.md", "service/agents/strategy-researcher.md"):
-        assert not {"Bash", "mcp__hokma__order_place", "mcp__hokma__order_preview", "mcp__hokma__desk_configure"} & tools_of(name), name
-    for name in ("service/agents/strategy-coder.md", "service/agents/strategy-reviewer.md"):
-        assert "Agent" not in tools_of(name)
+        assert not {"mcp__hokma__order_place", "mcp__hokma__order_preview", "mcp__hokma__desk_configure"} & tools_of(name), name
+    for name in ("service/agents/strategy-coder.md", "service/agents/strategy-reviewer.md", "service/agents/strategy-researcher.md"):
+        assert {"Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent"} <= tools_of(name), name          # they work like Diego, Joel and Vera: the normal tools of the engine
     rule = "launch strategy-researcher (Ian) right away; Ian writes the requirement, then launches strategy-coder (Sam) and strategy-reviewer (Ben)"
     assert "launch strategy-researcher (Ian) right away" in (ROOT / "kit" / "template" / "agents" / "desk-chief.md").read_text(encoding="utf-8")          # the chief has no dispatch tool: it assigns a task to Ian
     for name in ("CLAUDE.md", "desks/CLAUDE.desk.md"):

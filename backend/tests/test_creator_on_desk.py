@@ -51,7 +51,7 @@ def test_what_the_services_create_from_a_desk_says_the_desk_and_the_main_chat_sa
     kept, is_error = run("strategy_code_save", {"rule_id": made["rule_id"]}, "strategy-coder", task)
     assert not is_error and kept["saved"], kept
     with desks_db.read() as u:
-        rule = u.session.one("SELECT origin_desk_id, origin_desk_name FROM user_rules WHERE slug = 'from_desk'")
+        rule = u.session.one("SELECT origin_desk_id, origin_desk_name FROM user_rules WHERE kind = 'strategy'")
         version = u.session.one("SELECT origin_desk_id, origin_desk_name FROM user_rule_versions")
     assert (rule["origin_desk_id"], rule["origin_desk_name"]) == (desk["id"], desk["name"]) == (version["origin_desk_id"], version["origin_desk_name"])
     approved, is_error = run("strategy_code_verdict", {"rule_version_id": kept["rule_version_id"], "verdict": "approved"}, "strategy-reviewer", task)

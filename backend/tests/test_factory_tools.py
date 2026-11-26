@@ -30,7 +30,7 @@ def test_the_five_tools_are_published_with_a_strict_schema_and_need_no_database_
         assert listed[name]["inputSchema"]["additionalProperties"] is False and name in hokma_tools.NO_UNIT
     assert [hokma_tools.TOOLS[n][4] for n in NAMES] == [False, False, True, True, False]
     premium = {"premium_calibrate", "premium_switch_state"}        # the threshold of the premium is for the owner and the monthly routine, never for Ian
-    assert set(NAMES) | (set(backtest_tools.TOOLS) - premium) | {"quant_call", "data_bars", "data_snapshot"} | set(source_tools.TOOLS) | {"strategy_brief_write", "strategy_code_list", "strategy_code_get"} | set(verdict_tools.TOOLS) == set(researcher.TOOLS)
+    assert set(NAMES) | (set(backtest_tools.TOOLS) - premium) | {"quant_call", "data_bars", "data_snapshot"} | set(source_tools.TOOLS) | {"strategy_brief_write", "strategy_code_list", "strategy_code_get"} | set(verdict_tools.TOOLS) | {"task_create", "task_link", "task_reopen", "project_list", "project_show", "project_create", "decision_propose", "decision_list", "task_show", "task_list", "task_claim", "task_heartbeat", "task_complete", "task_block", "task_comment", "journal_write", "journal_search", "ips_read"} == set(researcher.TOOLS)
 
 
 def test_the_tool_file_has_no_road_to_a_broker_an_order_or_a_desk():

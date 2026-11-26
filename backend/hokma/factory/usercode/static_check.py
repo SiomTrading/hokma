@@ -96,6 +96,8 @@ class _Stop(Exception):
 
 
 class _Checker:
+    engine = False
+
     def __init__(self, tree: ast.Module, kind: str) -> None:
         self.tree, self.kind = tree, kind
         self.findings: list[Finding] = []
@@ -331,7 +333,7 @@ class _Checker:
         if not (isinstance(node, ALLOWED_NODES) or (self.kind == "test" and isinstance(node, ast.Assert))):
             self.add(node, "node_not_allowed", f"{type(node).__name__} is not allowed in a rule")
         post = in_post_init or (isinstance(node, ast.FunctionDef) and node.name == "__post_init__")
-        if isinstance(node, ast.Raise) and not post:
+        if isinstance(node, ast.Raise) and not post and not self.engine:
             self.add(node, "node_not_allowed", "raise is allowed only as ValueError(...) in __post_init__")
         elif isinstance(node, (ast.Import, ast.ImportFrom)) and not self.is_top_level_import(node):
             self.add(node, "import_not_allowed", "imports go at the top of the module, never inside a function or a class")
@@ -408,6 +410,136 @@ class _Checker:
                     self.add(node, "name_not_allowed", f"{node.id} can only be used as {node.id}.<name>")
 
 
+# ---------------------------------------------------------------------------------------------------- the strategy written against the engine (1.2.3)
+ENGINE_MODULES = frozenset({"hokma.factory.strategy", "hokma.factory.orders", "hokma.factory.indicator_library", "hokma.factory.params"})
+TEST_ENGINE_MODULES = ENGINE_MODULES | {"hokma.factory.strategy_replay"}
+PLAIN_FROM = {"dataclasses": frozenset({"dataclass"}), "decimal": frozenset({"Decimal"}), "typing": frozenset({"ClassVar"}), "__future__": frozenset({"annotations"})}
+
+
+def _engine_module(module: str | None) -> bool:
+    return (module or "").startswith("hokma.") and module != "hokma.factory.user_api"
+
+
+def is_engine_source(source: Any) -> bool:
+    """A strategy that imports from hokma.factory.* is written against the contract of the engine (strategy.py and orders.py), not against user_api."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError, MemoryError, TypeError):
+        return False
+    return any(isinstance(n, ast.ImportFrom) and _engine_module(n.module) for n in tree.body)
+
+
+def _engine_name_ok(module: str, name: str) -> bool:
+    """A name taken from a module of the engine must be something that module itself defines (a class, a function, a constant), never a module or a library it imported. The file of the
+    module is read, never imported: the check loads nothing."""
+    from pathlib import Path
+
+    try:
+        path = Path(__file__).resolve().parents[2].joinpath(*module.split(".")[1:]).with_suffix(".py")
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except Exception:                                                  # noqa: BLE001
+        return False
+    for node in tree.body:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name == name:
+            return True
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+            return True
+    return False
+
+
+class _EngineChecker(_Checker):
+    """Same permitted nodes, names and attributes as the other check; what changes is the list of imports and the shape of the class: any class that follows the contract
+    of the engine (SCHEMA, init(ctx), on_bar(ctx) returning OrderIntent values). No broker, no exec, no network, no files."""
+
+    engine = True
+
+    def module(self) -> None:
+        classes = []
+        for index, stmt in enumerate(self.tree.body):
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str) and index == 0:
+                continue
+            if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+                self.import_statement(stmt)
+            elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+                continue
+            elif isinstance(stmt, ast.FunctionDef):
+                if stmt.decorator_list:
+                    self.add(stmt, "node_not_allowed", "a helper function has no decorators")
+            elif isinstance(stmt, ast.ClassDef):
+                classes.append(stmt)
+            else:
+                self.add(stmt, "node_not_allowed", f"{type(stmt).__name__} cannot run when the module loads: only imports, assignments, helper functions and one class")
+        if self.kind == "test":
+            if not any(isinstance(s, ast.FunctionDef) and s.name.startswith("test_") for s in self.tree.body):
+                self.add(self.tree, "contract", "the test file needs at least one function named test_...")
+            return
+        if len(classes) != 1:
+            self.add(classes[1] if len(classes) > 1 else self.tree, "contract", f"the code must define exactly one class, found {len(classes)}")
+        if classes:
+            self.the_class(classes[0])
+
+    def import_statement(self, node: ast.Import | ast.ImportFrom) -> None:
+        if isinstance(node, ast.Import):
+            ok = len(node.names) == 1 and ((node.names[0].name == "math" and node.names[0].asname is None) or (node.names[0].name == "numpy" and node.names[0].asname == "np")
+                                           or (self.kind == "test" and node.names[0].name == "strategy" and node.names[0].asname is None))
+            if not ok:
+                self.add(node, "import_not_allowed", "only 'import math', 'import numpy as np' and, in a test, 'import strategy' are allowed")
+            return
+        if node.level:
+            self.add(node, "import_not_allowed", "relative imports are not allowed")
+            return
+        module = node.module or ""
+        names = [a.name for a in node.names]
+        if any(a.asname for a in node.names):
+            self.add(node, "import_not_allowed", "names are imported without an alias")
+        elif module in PLAIN_FROM:
+            if not set(names) <= PLAIN_FROM[module]:
+                self.add(node, "import_not_allowed", f"from {module} allows only {', '.join(sorted(PLAIN_FROM[module]))}")
+        elif module in (TEST_ENGINE_MODULES if self.kind == "test" else ENGINE_MODULES):
+            for name in names:
+                if name.startswith("_") or not _engine_name_ok(module, name):
+                    self.add(node, "import_not_allowed", f"{name!r} is not a public name defined by {module}")
+        elif self.kind == "test" and module == "strategy":
+            return
+        else:
+            self.add(node, "import_not_allowed", f"module {module!r} is not on the list: math, numpy as np, hokma.factory.strategy, orders, indicator_library and params")
+
+    def the_class(self, cls: ast.ClassDef) -> None:
+        d = cls.decorator_list
+        frozen = (len(d) == 1 and isinstance(d[0], ast.Call) and isinstance(d[0].func, ast.Name) and d[0].func.id == "dataclass" and not d[0].args
+                  and len(d[0].keywords) == 1 and d[0].keywords[0].arg == "frozen" and isinstance(d[0].keywords[0].value, ast.Constant) and d[0].keywords[0].value.value is True)
+        if not frozen:
+            self.add(cls, "contract", "the class must be decorated exactly with @dataclass(frozen=True)")
+        if cls.bases or cls.keywords:
+            self.add(cls, "contract", "the class has no base classes")
+        attrs: set[str] = set()
+        methods: dict[str, ast.FunctionDef] = {}
+        for index, stmt in enumerate(cls.body):
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str) and index == 0:
+                continue
+            if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+                attrs.add(stmt.targets[0].id)
+            elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                attrs.add(stmt.target.id)
+            elif isinstance(stmt, ast.FunctionDef):
+                methods[stmt.name] = stmt
+                if stmt.decorator_list:
+                    self.add(stmt, "node_not_allowed", "a method has no decorators")
+            else:
+                self.add(stmt, "node_not_allowed", f"{type(stmt).__name__} is not allowed in the body of the class")
+        if "SCHEMA" not in attrs:
+            self.add(cls, "contract", "the class must define SCHEMA = ParamSchema(...)")
+        for name in ("init", "on_bar"):
+            if name not in methods:
+                self.add(cls, "contract", f"the class must define the method {name}")
+            else:
+                self.signature(methods[name])
+        for name, fn in methods.items():
+            if name not in ("init", "on_bar", "__post_init__") and name.startswith("__"):
+                self.add(fn, "contract", f"the dunder method {name!r} is not allowed")
+
+
 def _is_plain_constant(node: ast.expr) -> bool:
     if isinstance(node, ast.Constant):
         return isinstance(node.value, (int, float, str, bool)) or node.value is None
@@ -470,7 +602,8 @@ def _check(source: Any, kind: Any) -> list[Finding]:
         return [Finding(exc.lineno or 1, max((exc.offset or 1) - 1, 0), "syntax", f"syntax error: {exc.msg}"[:200])]
     except (ValueError, RecursionError, MemoryError) as exc:
         return [Finding(1, 0, "syntax", f"the source cannot be parsed: {type(exc).__name__}")]
-    checker = _Checker(tree, kind if isinstance(kind, str) else "")
+    engine = kind in STRATEGY_KINDS and any(isinstance(n, ast.ImportFrom) and _engine_module(n.module) for n in tree.body)
+    checker = (_EngineChecker if engine else _Checker)(tree, kind if isinstance(kind, str) else "")
     if kind not in ALL_KINDS:
         checker.add(tree, "contract", f"kind must be one of {', '.join(ALL_KINDS)}")
         return checker.findings

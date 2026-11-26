@@ -75,9 +75,9 @@ def test_the_frontmatter_has_exactly_the_tools_of_the_spec_and_nothing_that_move
     assert (meta["model"], meta["hokma-tier"]) == (coder.DEFAULT_MODEL, coder.DEFAULT_TIER) == ("opus", "deep")
     tools = [t.strip() for t in meta["tools"].split(",")]
     assert tools == [*coder.ENGINE_TOOLS, *(coder.MCP_PREFIX + t for t in coder.TOOLS)]
-    assert tools[:11] == ["Read", "Write", "Edit", "Glob", "Grep", "mcp__hokma__strategy_code_get", "mcp__hokma__strategy_code_list", "mcp__hokma__strategy_code_save", "mcp__hokma__bank_get", "mcp__hokma__factory_describe", "mcp__hokma__library_list"]
-    assert set(tools[11:]) == NEW_TOOLS and "Bash" not in tools and not any(re.search(r"approve|task_create|review_approve|request_changes", t) for t in tools)
-    assert not any(re.search(FORBIDDEN_TOOLS, t) for t in tools if t not in NEW_TOOLS) and "strategy_code_verdict" not in " ".join(tools) and "Agent" not in tools
+    assert tools[:12] == ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "mcp__hokma__strategy_code_get", "mcp__hokma__strategy_code_list", "mcp__hokma__strategy_code_save", "mcp__hokma__bank_get", "mcp__hokma__factory_describe", "mcp__hokma__library_list"][:12]
+    assert NEW_TOOLS <= set(tools) and not any(re.search(r"approve|review_approve|request_changes", t) for t in tools)
+    assert not any(re.search(FORBIDDEN_TOOLS, t) for t in tools if t not in NEW_TOOLS) and "strategy_code_verdict" not in " ".join(tools)
 
 
 def test_the_agent_names_its_skills_its_tools_and_what_it_cannot_do():
@@ -87,8 +87,8 @@ def test_the_agent_names_its_skills_its_tools_and_what_it_cannot_do():
     for tool in coder.TOOLS:
         assert tool in text, tool
     flat = " ".join(text.split())
-    for phrase in ("writes the tests first", "He writes only in", "place, change or cancel an order", "review, approve or judge his own code", "change the cases of the requirement",
-                   "write a document, a note or any file other than the two", "CodeReport", "rule_id, rule_version_id, registry_id"):
+    for phrase in ("writes the tests first", "He writes the code of a strategy in", "place, change or cancel an order", "review, approve or judge his own code", "change the cases of the requirement",
+                   "overwrite a version that was saved", "CodeReport", "rule_id, rule_version_id, registry_id"):
         assert phrase in flat, phrase
 
 

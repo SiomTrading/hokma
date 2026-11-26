@@ -79,7 +79,7 @@ class UserRuleError(SourceError):
 # ---------------------------------------------------------------------------------------------------- places
 def drafts_dir() -> Path:
     """Where the coder writes: the working folder of the owner, one folder for each strategy."""
-    return hokma_home() / "strategies"
+    return hokma_home() / "service" / "strategies"
 
 
 def copies_dir() -> Path:
@@ -89,6 +89,32 @@ def copies_dir() -> Path:
 
 def copy_folder(slug: str, version: int, sha: str) -> Path:
     return copies_dir() / slug / f"v{version}-{sha[:12]}"
+
+
+def code_of(bank_id: int) -> str:
+    """The code of a strategy: STR-{NNN}, NNN the id of its card in the bank with three digits."""
+    return f"STR-{int(bank_id):03d}"
+
+
+def strategy_folder(bank_id: int, slug: str) -> Path | None:
+    """The folder of a strategy in the fund: service/strategies/STR-{NNN}-{slug}/, created with its card in the bank. It holds spec.md, checklist.md, plan.md, tasks.md, adr/, results/ and
+    versions/v{N}/strategy.py with versions/v{N}/test_strategy.py. A version that was saved is never written over: the next one is v{N+1}."""
+    folder = drafts_dir() / f"{code_of(bank_id)}-{slug}"
+    return folder if folder.is_dir() and not folder.is_symlink() else None
+
+
+def spec_file(bank_id: int, slug: str) -> Path | None:
+    folder = strategy_folder(bank_id, slug)
+    path = None if folder is None else folder / "spec.md"
+    return path if path is not None and path.is_file() and not path.is_symlink() else None
+
+
+def version_folder(bank_id: int, slug: str, version: int) -> Path:
+    return drafts_dir() / f"{code_of(bank_id)}-{slug}" / "versions" / f"v{int(version)}"
+
+
+def rel_folder(folder: Path) -> str:
+    return folder.relative_to(hokma_home()).as_posix()
 
 
 def _db(db: Database | None) -> Database:
@@ -131,76 +157,15 @@ def _event(session: Any, version_id: int, from_status: str | None, to_status: st
 
 # ---------------------------------------------------------------------------------------------------- the requirement (gate 1)
 def validate_brief(brief: Any) -> dict[str, Any]:
-    """The requirement checked and normalized. It is the input of the first gate and is never shown as a document."""
+    """The brief of the base: the summary of the spec and, optionally, its path. The requirement itself is the numbered spec.md (spec-four-phases), never this record."""
     if not isinstance(brief, Mapping):
         raise UserRuleError("bad_input", "brief is a mapping")
-    allowed = {"summary", "quote", "market", "timeframe", "inputs", "params", "behavior", "cases", "out_of_scope"}
-    extra = sorted(set(brief) - allowed)
-    if extra:
-        raise UserRuleError("bad_input", f"brief has the keys {', '.join(sorted(allowed))}; not {', '.join(extra)}")
-    missing = sorted(allowed - {"out_of_scope"} - set(brief))
-    if missing:
-        raise UserRuleError("bad_input", f"brief needs {', '.join(missing)}")
-    out: dict[str, Any] = {"summary": _text(brief["summary"], "summary", 10, 1000), "quote": _text(brief["quote"], "quote", 1, 300),
-                           "market": _text(brief["market"], "market", 1, 40)}
-    if not isinstance(brief["timeframe"], str) or not TIMEFRAME.match(brief["timeframe"]):
-        raise UserRuleError("bad_input", "timeframe is a bar size like 5m, 1h or 1d")
-    out["timeframe"] = brief["timeframe"]
-    inputs = brief["inputs"]
-    if not isinstance(inputs, list) or not 1 <= len(inputs) <= 12 or not all(isinstance(i, str) for i in inputs):
-        raise UserRuleError("bad_input", "inputs is a list of 1 to 12 names: bar fields and indicators of the library")
-    unknown = [i for i in inputs if i not in BAR_FIELDS and i not in user_api.INDICATORS]
-    if unknown:
-        raise UserRuleError("blocked", f"the strategy needs data that Hokma does not have as bars or as an indicator of its library: {', '.join(unknown)}",
-                            ["Say what is missing to the owner: the strategy stays in the bank with that cause."])
-    out["inputs"] = list(inputs)
-    params = brief["params"]
-    if not isinstance(params, list) or len(params) > 20:
-        raise UserRuleError("bad_input", "params is a list of up to 20 parameters")
-    clean = []
-    for item in params:
-        if not isinstance(item, Mapping) or set(item) - {"name", "type", "value", "min", "max", "origin"} or not {"name", "type", "value", "origin"} <= set(item):
-            raise UserRuleError("bad_input", "a parameter has name, type, value, origin and optionally min and max")
-        if not isinstance(item["name"], str) or not re.match(r"^[a-z][a-z0-9_]{0,47}$", item["name"]) or item["name"].startswith("sizer"):
-            raise UserRuleError("bad_input", "a parameter name is lower case letters, digits and underscores and does not start with sizer")
-        if item["type"] not in ("int", "float", "bool", "str"):
-            raise UserRuleError("bad_input", "a parameter type is int, float, bool or str")
-        if item["origin"] not in ("source", "proposed"):
-            raise UserRuleError("bad_input", "a parameter origin is source or proposed")
-        clean.append({k: item[k] for k in item})
-    out["params"] = clean
-    behavior = brief["behavior"]
-    if not isinstance(behavior, list) or not 1 <= len(behavior) <= 10:
-        raise UserRuleError("bad_input", "behavior is a list of 1 to 10 statements with given, when and then")
-    out["behavior"] = []
-    for item in behavior:
-        if not isinstance(item, Mapping) or set(item) != {"given", "when", "then"}:
-            raise UserRuleError("bad_input", "a behavior statement has given, when and then")
-        out["behavior"].append({k: _text(item[k], f"behavior {k}", 3, 400) for k in ("given", "when", "then")})
-    cases = brief["cases"]
-    if not isinstance(cases, list) or not 3 <= len(cases) <= 30:
-        raise UserRuleError("bad_input", "cases is a list of at least 3 and at most 30 checkable cases")
-    out["cases"] = []
-    for item in cases:
-        if not isinstance(item, Mapping) or "name" not in item or item.get("expect") not in user_api.ACTIONS or not (("closes" in item) != ("bars" in item)):
-            raise UserRuleError("bad_input", "a case has name, expect (long, short, flat or hold) and either closes or bars")
-        case: dict[str, Any] = {"name": _text(item["name"], "case name", 1, 120), "expect": item["expect"]}
-        if "closes" in item:
-            closes = item["closes"]
-            if not isinstance(closes, list) or not 2 <= len(closes) <= 500 or not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in closes):
-                raise UserRuleError("bad_input", "closes is a list of 2 to 500 numbers")
-            case["closes"] = closes
-        else:
-            try:
-                strategy_replay.bar_arrays(item["bars"])
-            except ValueError as exc:
-                raise UserRuleError("bad_input", f"bars of case {case['name']}: {exc}") from None
-            case["bars"] = item["bars"]
-        out["cases"].append(case)
-    scope = brief.get("out_of_scope", [])
-    if not isinstance(scope, list) or len(scope) > 10 or not all(isinstance(s, str) and 1 <= len(s) <= 300 for s in scope):
-        raise UserRuleError("bad_input", "out_of_scope is a list of up to 10 statements")
-    out["out_of_scope"] = scope
+    if "summary" not in brief:
+        raise UserRuleError("bad_input", "brief needs summary")
+    out: dict[str, Any] = {"summary": _text(brief["summary"], "summary", 10, 1000)}
+    for key, high in (("quote", 300), ("market", 40), ("timeframe", 10)):
+        if key in brief:
+            out[key] = _text(brief[key], key, 1, high)
     return out
 
 
@@ -210,7 +175,7 @@ def write_brief(*, brief: Any, caller: str, bank_id: int | None = None, slug: st
     previous one stops being current. The folder where the coder works is created here."""
     who = require_role(caller, RESEARCHER, "the requirement")
     clean = validate_brief(brief)
-    if PREMIUM_WORDS.search(" ".join([clean["summary"], clean["quote"], title or ""])):
+    if PREMIUM_WORDS.search(" ".join([clean["summary"], clean.get("quote", ""), title or ""])):
         raise UserRuleError("blocked", "selling option premium is off: this strategy cannot be built")
     database = _db(db)
     with database.write() as u:
@@ -225,7 +190,7 @@ def write_brief(*, brief: Any, caller: str, bank_id: int | None = None, slug: st
                 raise UserRuleError("bad_input", "the first requirement needs bank_id, slug and title")
             bank_ref = _whole(bank_id, "bank_id")
             rule = None
-        bank = s.one("SELECT id, status FROM strategy_bank WHERE id = :i", {"i": bank_ref})
+        bank = s.one("SELECT id, status, slug FROM strategy_bank WHERE id = :i", {"i": bank_ref})
         if bank is None:
             raise UserRuleError("no_data", f"there is no strategy {bank_ref} in the bank")
         if bank["status"] == "not_working":
@@ -234,7 +199,7 @@ def write_brief(*, brief: Any, caller: str, bank_id: int | None = None, slug: st
         if last is None:
             raise UserRuleError("no_data", "the strategy of the bank has no version to answer")
         if rule is None:
-            name = _slug(slug)
+            name = _slug(bank["slug"].replace("-", "_"))                     # the rule carries the slug of the card: the folder is STR-{NNN}-{slug}
             if s.one("SELECT 1 AS x FROM user_rules WHERE slug = :s", {"s": name}) is not None:
                 raise UserRuleError("bad_input", f"there is already a rule named {name}: give rule_id to write its next requirement")
             rule_id = s.insert("user_rules", {"slug": name, "kind": "strategy", "title": _text(title, "title", 1, 160), "bank_id": bank_ref, "component": "strategy",
@@ -242,6 +207,10 @@ def write_brief(*, brief: Any, caller: str, bank_id: int | None = None, slug: st
             slug_out = name
         else:
             rule_id, slug_out = int(rule["id"]), rule["slug"]
+        spec = spec_file(bank_ref, bank["slug"])
+        if spec is None:
+            raise UserRuleError("blocked", f"there is no spec for {code_of(bank_ref)}: write service/strategies/{code_of(bank_ref)}-{bank['slug']}/spec.md first (spec-four-phases), then the brief")
+        clean["folder"], clean["spec_path"] = rel_folder(spec.parent), rel_folder(spec.parent) + "/spec.md"
         sha = _sha_of(clean)
         same = s.one("SELECT id, version, status FROM user_rule_briefs WHERE rule_id = :r AND brief_sha256 = :h", {"r": rule_id, "h": sha})
         if same is not None:
@@ -254,8 +223,7 @@ def write_brief(*, brief: Any, caller: str, bank_id: int | None = None, slug: st
             number, duplicate = int(top) + 1, False
             brief_id = s.insert("user_rule_briefs", {"rule_id": rule_id, "version": number, "request_version": int(last["id"]), "brief_json": json.dumps(clean, sort_keys=True),
                                                       "brief_sha256": sha, "status": "current", "origin_desk_id": origin[0], "origin_desk_name": origin[1], "created_by": who})
-    (drafts_dir() / slug_out).mkdir(parents=True, exist_ok=True)
-    return {"rule_id": rule_id, "brief_id": brief_id, "version": number, "slug": slug_out, "folder": f"strategies/{slug_out}", "duplicate": duplicate}
+    return {"rule_id": rule_id, "brief_id": brief_id, "version": number, "slug": slug_out, "folder": clean["folder"], "spec_path": clean["spec_path"], "duplicate": duplicate}
 
 
 def current_brief(session: Any, rule_id: int) -> dict[str, Any] | None:
@@ -285,25 +253,21 @@ def run_rule_check(folder: Path, timeout: int = CHECK_TIMEOUT) -> dict[str, Any]
 
 
 def _only_two_files(folder: Path) -> None:
-    """The folder of a strategy holds strategy.py and test_strategy.py and nothing else (a file or folder written by Bash, a link, a cache): anything more is refused."""
-    try:
-        names = sorted(p.name for p in folder.iterdir())
-    except OSError:
-        raise UserRuleError("no_data", f"strategies/{folder.name} does not exist: write the test first, then the strategy") from None
-    extra = [n for n in names if n not in STRATEGY_FOLDER_FILES]
-    if extra:
-        raise UserRuleError("blocked", f"strategies/{folder.name}/ holds only {STRATEGY_FILE} and {TEST_FILE}; remove {', '.join(extra[:5])}")
+    """The folder of a strategy must exist. Its other files (spec, plan, tasks, adr) are documents of the flow and are not checked here."""
+    if not folder.is_dir():
+        raise UserRuleError("no_data", f"{rel_folder(folder) if folder.is_relative_to(hokma_home()) else folder.name} does not exist: write the spec first, then the test, then the strategy")
 
 
-def _read_draft(slug: str) -> tuple[str, str]:
-    """The two files of the draft folder as text. Only a regular file inside the folder is read; a link is refused."""
-    folder = drafts_dir() / slug
-    _only_two_files(folder)
+def _read_draft(bank_id: int, bank_slug: str, version: int) -> tuple[str, str]:
+    """The two files of versions/v{N}/ as text. Only a regular file inside the folder is read; a link is refused."""
+    folder = version_folder(bank_id, bank_slug, version)
+    if not folder.is_dir() or folder.is_symlink():
+        raise UserRuleError("no_data", f"{code_of(bank_id)}-{bank_slug}/versions/v{version}/ does not exist: write the spec first, then the test and the strategy of v{version}")
     texts = []
     for name in (STRATEGY_FILE, TEST_FILE):
         path = folder / name
         if path.is_symlink() or not path.is_file():
-            raise UserRuleError("no_data", f"strategies/{slug}/{name} does not exist: write the test first, then the strategy")
+            raise UserRuleError("no_data", f"{rel_folder(folder)}/{name} does not exist: write the test first, then the strategy")
         raw = path.read_bytes()
         if len(raw) > static_check.MAX_BYTES:
             raise UserRuleError("bad_input", f"{name} is over {static_check.MAX_BYTES // 1024} KB")
@@ -315,7 +279,7 @@ def _read_draft(slug: str) -> tuple[str, str]:
 
 
 def save_code(*, rule_id: int, caller: str, dry_run: bool = False, origin: tuple[int | None, str | None] = (None, None), db: Database | None = None,
-              check: Callable[..., dict[str, Any]] | None = None) -> dict[str, Any]:
+              check: Callable[..., dict[str, Any]] | None = None, version: int | None = None) -> dict[str, Any]:
     """Gate 1 and the checks. The code is saved only when a current requirement exists and every check is green; otherwise the answer is the output of the
     checks and nothing is stored. With dry_run the checks run on the draft and nothing is stored either way."""
     who = require_role(caller, CODER, "saving code")
@@ -329,35 +293,46 @@ def save_code(*, rule_id: int, caller: str, dry_run: bool = False, origin: tuple
         brief = current_brief(s, int(rule["id"]))
         rejected = int(s.scalar("SELECT COUNT(*) FROM user_rule_reviews r JOIN user_rule_versions v ON v.id = r.rule_version_id WHERE v.rule_id = :r AND r.verdict = 'rejected'",
                                 {"r": int(rule["id"])}))
-    if brief is None:
-        raise UserRuleError("blocked", "no requirement: the strategy researcher writes the requirement first, and without it no code is saved")
+        bank_slug = s.one("SELECT slug FROM strategy_bank WHERE id = :i", {"i": int(rule["bank_id"])})["slug"]
+        next_number = int(s.scalar("SELECT COALESCE(MAX(version), 0) FROM user_rule_versions WHERE rule_id = :r", {"r": int(rule["id"])})) + 1
+    bank_ref = int(rule["bank_id"])
+    if brief is None or spec_file(bank_ref, bank_slug) is None:
+        raise UserRuleError("blocked", "no spec: the numbered spec.md (service/strategies/{NNN}-{slug}/spec.md) is written first, and without it no code is saved")
     if rejected >= MAX_REJECTIONS:
         raise UserRuleError("blocked", f"the reviewer rejected this strategy {rejected} times: stop and tell the owner why")
     slug = rule["slug"]
-    strategy_text, test_text = _read_draft(slug)
+    wanted = next_number if version is None else _whole(version, "version")
+    if version is None and next_number > 1 and not version_folder(bank_ref, bank_slug, next_number).is_dir():
+        wanted = next_number - 1                                    # v{N+1} is not written: the call is about the last saved version
+    if wanted > next_number:
+        raise UserRuleError("bad_input", f"the next version is v{next_number}: versions are numbered in sequence")
+    strategy_text, test_text = _read_draft(bank_ref, bank_slug, wanted)
     findings = [{"file": STRATEGY_FILE, **f.to_data()} for f in static_check.check(strategy_text, kind="strategy").findings]
     findings += [{"file": TEST_FILE, **f.to_data()} for f in static_check.check(test_text, kind="test").findings]
+    head = strategy_text.lstrip()[:400]
+    if code_of(bank_ref) not in head or f"v{wanted}" not in head:
+        findings.append({"file": STRATEGY_FILE, "line": 1, "col": 0, "rule": "contract", "message": f"strategy.py starts with a docstring that names the code {code_of(bank_ref)}, the version v{wanted} and the path of the spec"})
     if findings:
         return {"saved": False, "ok": False, "static": findings, "output": "\n".join(f"STATIC {f['file']} line {f['line']}: {f['message']}" for f in findings)}
     sha = static_check.code_sha256(strategy_text)
     if dry_run:
-        report = runner(drafts_dir() / slug)
-        _only_two_files(drafts_dir() / slug)                 # what the checks leave behind is a change outside the two files too
+        report = runner(version_folder(bank_ref, bank_slug, wanted))
         return {"saved": False, "ok": bool(report.get("ok")), "tests": len(report.get("tests", [])), "output": report.get("output", report.get("error", "")), "report": _brief_report(report)}
     with database.read() as u:
         known = u.session.one("SELECT id, version, registry_id, status FROM user_rule_versions WHERE rule_id = :r AND code_sha256 = :h", {"r": int(rule["id"]), "h": sha})
+    if known is None and wanted < next_number:
+        raise UserRuleError("blocked", f"v{wanted} was saved with other code: a saved version is never written over, the change goes in v{next_number}")
     if known is not None:
         return {"saved": True, "duplicate": True, "rule_version_id": int(known["id"]), "version": int(known["version"]), "registry_id": known["registry_id"], "status": known["status"]}
     for attempt in range(3):
-        with database.read() as u:
-            number = int(u.session.scalar("SELECT COALESCE(MAX(version), 0) FROM user_rule_versions WHERE rule_id = :r", {"r": int(rule["id"])})) + 1
+        number = next_number
         folder = copy_folder(slug, number, sha)
         _copy(slug, folder, strategy_text, test_text)
         report = runner(folder)
         if not report.get("ok") or report.get("strategy_sha256") != hashlib.sha256(strategy_text.encode("utf-8")).hexdigest():
             _discard(folder)
             return {"saved": False, "ok": False, "tests": len(report.get("tests", [])), "output": report.get("output", report.get("error", "")), "report": _brief_report(report)}
-        registry_id = f"u_{slug}_v{number}"
+        registry_id = f"u_str{bank_ref:03d}_v{number}"
         try:
             with database.write() as u:
                 s = u.session
@@ -370,11 +345,54 @@ def save_code(*, rule_id: int, caller: str, dry_run: bool = False, origin: tuple
                     "origin_desk_id": rule["origin_desk_id"] if rule["origin_desk_id"] is not None else origin[0],
                     "origin_desk_name": rule["origin_desk_name"] if rule["origin_desk_name"] is not None else origin[1]})
                 _event(s, version_id, None, "draft", f"saved with {len(report['tests'])} tests, all green", who)
+            versions_row(bank_ref, bank_slug, number, sha, author=who, reviewer="", verdict="pending")
             return {"saved": True, "duplicate": False, "rule_version_id": version_id, "version": number, "registry_id": registry_id, "code_sha256": sha, "status": "draft",
+                    "str_code": code_of(bank_ref), "folder": rel_folder(version_folder(bank_ref, bank_slug, number)), "file": rel_folder(version_folder(bank_ref, bank_slug, number)) + "/strategy.py",
                     "tests": len(report["tests"]), "output": report.get("output", "")}
         except IntegrityViolation:
             _discard(folder)                                         # another save took the number: try again with the next one
     raise UserRuleError("blocked", "the version could not be saved: try again")
+
+
+def versions_row(bank_id: int, bank_slug: str, version: int, sha: str, *, author: str, reviewer: str, verdict: str) -> None:
+    """The row of the table Versions in the spec.md of the strategy: one row for each version, updated at each step (saved, reviewed). A problem writing it never undoes a save."""
+    from datetime import datetime, timezone
+
+    spec = spec_file(bank_id, bank_slug)
+    if spec is None:
+        return
+    head = "| Version | File | sha256 | Author | Reviewer | Verdict | Date |"
+    row = f"| v{version} | versions/v{version}/strategy.py | {sha} | {author} | {reviewer} | {verdict} | {datetime.now(timezone.utc).strftime('%Y-%m-%d')} |"
+    try:
+        lines = spec.read_text(encoding="utf-8").split("\n")
+        at = next((i for i, line in enumerate(lines) if line.strip().lower() == "## versions"), None)
+        if at is None:
+            lines += ["", "## Versions", "", head, "|---|---|---|---|---|---|---|", row, ""]
+        else:
+            end = at + 1
+            while end < len(lines) and (not lines[end].strip() or lines[end].lstrip().startswith("|")):
+                end += 1
+            body = lines[at + 1:end]
+            if not any(line.startswith("| Version") for line in body):
+                body = ["", head, "|---|---|---|---|---|---|---|"]
+            mine = next((i for i, line in enumerate(body) if line.startswith(f"| v{version} |")), None)
+            if mine is None:
+                body.append(row)
+            else:
+                body[mine] = row
+            lines[at + 1:end] = body
+        spec.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def rule_of_bank(bank_id: Any, *, db: Database | None = None) -> int:
+    """The strategy rule of a card of the bank (the last one)."""
+    with _db(db).read() as u:
+        row = u.session.one("SELECT id FROM user_rules WHERE kind = 'strategy' AND bank_id = :b ORDER BY id DESC LIMIT 1", {"b": _whole(bank_id, "bank_id")})
+    if row is None:
+        raise UserRuleError("no_data", "that strategy has no rule yet: write its spec.md and register it with strategy_brief_write")
+    return int(row["id"])
 
 
 def _discard(folder: Path) -> None:
@@ -401,7 +419,7 @@ def _copy(slug: str, folder: Path, strategy_text: str, test_text: str) -> None:
 
 
 def _version_row(session: Any, *, rule_version_id: int | None = None, rule_id: int | None = None, registry_id: str | None = None, version: int | None = None) -> dict[str, Any]:
-    sql = ("SELECT v.*, r.slug AS rule_slug, r.title AS rule_title, r.bank_id AS bank_id FROM user_rule_versions v JOIN user_rules r ON r.id = v.rule_id WHERE r.kind = 'strategy' AND ")
+    sql = ("SELECT v.*, r.slug AS rule_slug, r.title AS rule_title, r.bank_id AS bank_id, (SELECT slug FROM strategy_bank WHERE id = r.bank_id) AS bank_slug FROM user_rule_versions v JOIN user_rules r ON r.id = v.rule_id WHERE r.kind = 'strategy' AND ")
     if rule_version_id is not None:
         row = session.one(sql + "v.id = :i", {"i": rule_version_id})
     elif registry_id is not None:
@@ -463,13 +481,68 @@ def origin_of(row: Mapping[str, Any]) -> dict[str, Any]:
     return {"kind": "hokma"} if desk is None else {"kind": "desk", "desk_id": int(desk), "desk_name": row.get("origin_desk_name")}
 
 
+def _read_text(path: Path, limit: int = 40000) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")[:limit] if path.is_file() and not path.is_symlink() else None
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def rule_view(s: Any, rule: Mapping[str, Any]) -> dict[str, Any]:
+    """Everything a strategy has outside the database lock, in one answer: its folder, its spec, its files, the draft in the folder, the current brief and every saved version with its verdicts.
+    It works when there is no code yet."""
+    slug = s.one("SELECT slug FROM strategy_bank WHERE id = :i", {"i": int(rule["bank_id"])})["slug"]
+    folder = strategy_folder(int(rule["bank_id"]), slug)
+    brief = current_brief(s, int(rule["id"]))
+    versions = s.query("SELECT v.id, v.version, v.registry_id, v.status, v.code_sha256, v.created_by FROM user_rule_versions v WHERE v.rule_id = :r ORDER BY v.version", {"r": int(rule["id"])})
+    items = []
+    for v in versions:
+        reviews = s.query("SELECT verdict, findings_json, reviewer FROM user_rule_reviews WHERE rule_version_id = :i ORDER BY id", {"i": v["id"]})
+        items.append({"rule_version_id": int(v["id"]), "version": int(v["version"]), "registry_id": v["registry_id"], "stage": v["status"], "code_sha256": v["code_sha256"], "saved_by": v["created_by"],
+                      "load_problem": LOAD_PROBLEMS.get(v["registry_id"]),
+                      "reviews": [{"verdict": r["verdict"], "reviewer": r["reviewer"], "findings": json.loads(r["findings_json"])} for r in reviews]})
+    spec = None if folder is None else _read_text(folder / "spec.md")
+    last = next((i for i in reversed(items) if i["stage"] in APPROVED), None)
+    return {"str_code": code_of(int(rule["bank_id"])), "current": last, "rule_id": int(rule["id"]), "bank_id": int(rule["bank_id"]), "slug": slug, "title": rule["title"], "folder": None if folder is None else rel_folder(folder),
+            "spec_path": None if spec is None else rel_folder(folder) + "/spec.md", "spec": spec,
+            "files": [] if folder is None else sorted(p.relative_to(folder).as_posix() + ("/" if p.is_dir() else "") for p in folder.iterdir() if not p.name.startswith(".") and p.name != "__pycache__"),
+            "brief": None if brief is None else {"brief_id": int(brief["id"]), "version": int(brief["version"]), "brief": json.loads(brief["brief_json"])},
+            "draft_code": None if folder is None else _read_text(version_folder(int(rule["bank_id"]), slug, len(items) + 1) / STRATEGY_FILE),
+            "draft_test": None if folder is None else _read_text(version_folder(int(rule["bank_id"]), slug, len(items) + 1) / TEST_FILE),
+            "saved_files": [{"version": i["version"], "file": rel_folder(version_folder(int(rule["bank_id"]), slug, i["version"])) + "/strategy.py"} for i in items] if folder is not None else [],
+            "stage": items[-1]["stage"] if items else ("no_code" if spec is not None else "no_spec"),
+            "versions": items}
+
+
+def creator_view(bank_id: int, *, db: Database | None = None) -> list[dict[str, Any]]:
+    """The creator side of a strategy of the bank (bank_get and bank_list read it): one entry for each strategy rule it has."""
+    try:
+        with _db(db).read() as u:
+            rules = u.session.query("SELECT * FROM user_rules WHERE kind = 'strategy' AND bank_id = :b ORDER BY id", {"b": int(bank_id)})
+            return [rule_view(u.session, r) for r in rules]
+    except Exception:                                                     # noqa: BLE001  a base without the tables has no creator side
+        return []
+
+
 def get_code(*, rule_version_id: int | None = None, rule_id: int | None = None, registry_id: str | None = None, rerun: bool = False, db: Database | None = None,
-             check: Callable[..., dict[str, Any]] | None = None) -> dict[str, Any]:
+             check: Callable[..., dict[str, Any]] | None = None, bank_id: int | None = None, slug: str | None = None) -> dict[str, Any]:
     """The requirement, the code, the checks and the verdicts of a version (the last one of a rule by default). With rerun the checks run again on the copy
     and the answer carries their fresh output: this is how the reviewer runs the tests."""
     with _db(db).read() as u:
         s = u.session
+        if rule_version_id is None and registry_id is None and rule_id is None and (bank_id is not None or slug is not None):
+            found = s.one("SELECT * FROM user_rules WHERE kind = 'strategy' AND " + ("bank_id = :k" if bank_id is not None else "slug = :k") + " ORDER BY id DESC LIMIT 1", {"k": bank_id if bank_id is not None else slug})
+            if found is None:
+                raise UserRuleError("no_data", "that strategy has no rule yet: the spec is written first and registered with strategy_brief_write")
+            rule_id = int(found["id"])
+        if rule_version_id is None and registry_id is None and rule_id is not None:
+            rule = s.one("SELECT * FROM user_rules WHERE id = :i AND kind = 'strategy'", {"i": _whole(rule_id, "rule_id")})
+            if rule is None:
+                raise UserRuleError("no_data", f"there is no strategy rule {rule_id}")
+            if s.one("SELECT 1 AS x FROM user_rule_versions WHERE rule_id = :r", {"r": int(rule["id"])}) is None:
+                return rule_view(s, rule)                                   # no code yet: the spec, the files and the draft still answer
         row = _version_row(s, rule_version_id=rule_version_id, rule_id=rule_id, registry_id=registry_id)
+        view = rule_view(s, s.one("SELECT * FROM user_rules WHERE id = :i", {"i": int(row["rule_id"])}))
         brief = s.one("SELECT id, version, brief_json, status FROM user_rule_briefs WHERE id = :i", {"i": row["brief_id"]}) if row["brief_id"] is not None else None
         reviews = s.query("SELECT id, verdict, findings_json, reviewer, code_sha256, created_at FROM user_rule_reviews WHERE rule_version_id = :i ORDER BY id", {"i": row["id"]})
         link = s.one("SELECT strategy_id, spec_version FROM strategy_spec_rules WHERE rule_version_id = :i", {"i": row["id"]})
@@ -483,6 +556,7 @@ def get_code(*, rule_version_id: int | None = None, rule_id: int | None = None, 
                      "at": str(r["created_at"])} for r in reviews],
         "spec": None if link is None else {"strategy_id": link["strategy_id"], "spec_version": int(link["spec_version"])},
         "bank_version": None if bank is None else int(bank["version"]), "agent_reviewed": row["status"] in APPROVED, "owner_reviewed": row["status"] == "owner_reviewed"}
+    out.update({k: view[k] for k in ("folder", "spec_path", "spec", "files", "draft_code", "draft_test", "versions")})
     if rerun:
         folder = copy_folder(row["rule_slug"], int(row["version"]), row["code_sha256"])
         report = (check or run_rule_check)(folder)
@@ -539,17 +613,27 @@ def verdict(*, rule_version_id: int, verdict: str, findings: Any, reviewer: str,
                                            "verdict": "rejected", "findings_json": json.dumps(items), "reviewer": who})
             s.execute("UPDATE user_rule_versions SET status = 'failed' WHERE id = :i AND status = 'draft'", {"i": int(row["id"])})
             _event(s, int(row["id"]), "draft", "failed", "; ".join(f["message"] for f in items)[:500], who)
+        _table_after_verdict(database, row, who, "rejected")
         return {"verdict": "rejected", "status": "failed", "attempts_left": max(0, MAX_REJECTIONS - total - 1), "rule_version_id": int(row["id"])}
     result = _approve(database, row, report, items, who)
+    _table_after_verdict(database, row, who, "approved")
     if notify is not None:
         notify(result)
     return result
 
 
+def _table_after_verdict(database: Database, row: Mapping[str, Any], who: str, verdict_name: str) -> None:
+    with database.read() as u:
+        bank = u.session.one("SELECT slug FROM strategy_bank WHERE id = :i", {"i": int(row["bank_id"])})
+    if bank is not None:
+        versions_row(int(row["bank_id"]), bank["slug"], int(row["version"]), row["code_sha256"], author=row["created_by"], reviewer=who,
+                     verdict="approved, ready for backtest" if verdict_name == "approved" else "rejected")
+
+
 def _approve(database: Database, row: Mapping[str, Any], report: Mapping[str, Any], items: list[dict[str, Any]], who: str) -> dict[str, Any]:
     manifest = json.loads(row["manifest_json"])
     registry_id = row["registry_id"]
-    defaults = adapter_schema(schema_from_manifest(manifest["schema"])).defaults()
+    defaults = (schema_from_manifest(manifest["schema"]) if manifest.get("engine") else adapter_schema(schema_from_manifest(manifest["schema"]))).defaults()
     brief = None
     with database.write() as u:
         s = u.session
@@ -780,16 +864,24 @@ def build_adapter(registry_id: str, user_class: Any, manifest: Mapping[str, Any]
 
 # ---------------------------------------------------------------------------------------------------- the load (R3)
 _LOADED: dict[tuple[str, str], type] = {}
+LOAD_PROBLEMS: dict[str, str] = {}
 
 
 def load_class(registry_id: str, *, db: Database | None = None) -> type:
     """The registry class of a generated strategy. It loads only when the state is generated or owner_reviewed, the file is the one whose hash the base keeps and
     the static check is green now. The module is named after the registry id; the file is the read only copy, never the draft."""
     with _db(db).read() as u:
-        row = u.session.one("SELECT v.*, r.slug AS rule_slug, r.title AS rule_title, r.bank_id AS bank_id FROM user_rule_versions v JOIN user_rules r ON r.id = v.rule_id WHERE v.registry_id = :r",
+        row = u.session.one("SELECT v.*, r.slug AS rule_slug, r.title AS rule_title, r.bank_id AS bank_id, (SELECT slug FROM strategy_bank WHERE id = r.bank_id) AS bank_slug FROM user_rule_versions v JOIN user_rules r ON r.id = v.rule_id WHERE v.registry_id = :r",
                             {"r": registry_id})
     if row is None or row["status"] not in APPROVED:
         raise UserRuleError("blocked", f"{registry_id} is not an approved strategy: it does not load")
+    fund = version_folder(int(row["bank_id"]), row["bank_slug"], int(row["version"])) / STRATEGY_FILE
+    try:
+        in_fund = static_check.code_sha256(fund.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError):
+        in_fund = None
+    if in_fund != row["code_sha256"]:
+        raise UserRuleError("blocked", f"{registry_id} does not load: {rel_folder(fund) if fund.is_relative_to(hokma_home()) else fund} is not the file that was saved (its sha256 changed or it is gone)")
     key = (registry_id, row["code_sha256"])
     if key in _LOADED:
         _file_ok(row)                                                   # a cached class is still only served while its file is intact
@@ -798,6 +890,8 @@ def load_class(registry_id: str, *, db: Database | None = None) -> type:
     text = static_check.normalize_source((folder / STRATEGY_FILE).read_bytes().decode("utf-8"))
     if static_check.check(text, kind="strategy").findings:
         raise UserRuleError("blocked", f"the static check of {registry_id} is not green")
+    if static_check.is_engine_source(text) and not json.loads(row["manifest_json"] or "{}").get("engine"):
+        raise UserRuleError("blocked", f"{registry_id} imports the engine but its manifest says it does not")
     name = f"hokma.factory.strategies.user.{registry_id}"
     module = types.ModuleType(name)
     sys.modules[name] = module
@@ -809,7 +903,8 @@ def load_class(registry_id: str, *, db: Database | None = None) -> type:
     classes = [v for v in vars(module).values() if isinstance(v, type) and v.__module__ == name]
     if len(classes) != 1:
         raise UserRuleError("blocked", f"{registry_id} must define exactly one class")
-    built = build_adapter(registry_id, classes[0], json.loads(row["manifest_json"] or "{}"))
+    manifest = json.loads(row["manifest_json"] or "{}")
+    built = classes[0] if manifest.get("engine") else build_adapter(registry_id, classes[0], manifest)
     _LOADED[key] = built
     return built
 
@@ -837,7 +932,9 @@ def add_user_rules(registry: Registry, *, db: Database | None = None, stages: Se
     for row in rows:
         try:
             cls = load_class(row["registry_id"], db=db)
-        except UserRuleError:
+            LOAD_PROBLEMS.pop(row["registry_id"], None)
+        except UserRuleError as exc:
+            LOAD_PROBLEMS[row["registry_id"]] = str(exc)                 # it is not loaded and it says why: bank_get shows it
             continue
         registry.add(Entry(row["registry_id"], "strategy", cls, row["line"], f"Generated strategy: {row['title']}"[:300], cls.SCHEMA.defaults(), f"user:{row['registry_id']}"))
         added += 1

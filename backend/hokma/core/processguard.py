@@ -37,11 +37,13 @@ SERVER = "server"
 OWNER_CLI = "owner_cli"
 MCP = "mcp"
 PROBE = "probe"
+RULE_CHECK = "rule_check"            # the child that checks a strategy written against the engine (1.2.3): it must import the contract of the engine, and it runs the code only after its static check
 ENTRY_POINTS = {
     "hokma_cli.main": (OWNER_CLI,),                     # `hokma engine` is marked by engine_main, after the launch proof
     "hokma.core.engine_main": (SERVER,),
     "hokma.kit.trash_mcp": (MCP,),
     "hokma.core.nativeprobe": (PROBE,),
+    "hokma.factory.rule_check": (RULE_CHECK,),
     "scripts.vec_load_smoke": (OWNER_CLI,),            # the developer's scripts of this repository
     "scripts.r1_probe": (OWNER_CLI,),
     "scripts.measure_providers": (OWNER_CLI,),

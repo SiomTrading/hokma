@@ -45,7 +45,7 @@ def test_the_notice_reads_the_generated_versions_and_the_owner_approves_after_co
     assert owner.client.get("/api/strategy-code?stage=generated", headers=HEADERS).json()["rows"] == []
     approve_by_reviewer(kept)
     [row] = owner.client.get("/api/strategy-code?stage=generated", headers=HEADERS).json()["rows"]
-    assert (row["registry_id"], row["stage"], row["origin"], row["tests"], row["reviewer"]) == ("u_inside_bar_v1", "generated", {"kind": "hokma"}, 4, REVIEWER)
+    assert (row["registry_id"], row["stage"], row["origin"], row["tests"], row["reviewer"]) == ("u_str001_v1", "generated", {"kind": "hokma"}, 4, REVIEWER)
     assert "inside bar" in row["summary"]
     detail = owner.client.get(f"/api/strategy-code/{kept['rule_version_id']}", headers=HEADERS).json()
     assert "class InsideBarBreakout" in detail["code"] and detail["agent_reviewed"] is True and detail["owner_reviewed"] is False

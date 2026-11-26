@@ -136,7 +136,11 @@ def bank_create(u, c, a: dict) -> str:
         raise ToolError("bad_input", f"extraction is at most {MAX_EXTRACTION_BYTES // 1024} KB")
     made = bank.create(title=a["title"], source_id=a["source_id"], extraction=a["extraction"], line=a.get("line"), strategy_id=a.get("strategy_id"),
                        spec_version=a.get("spec_version"), bank_id=a.get("bank_id"), derived_from=a.get("derived_from"), caller=_caller(c), origin=own_desk(c))
-    return _dump({"bank_id": made.bank_id, "slug": made.slug, "version": made.version, "version_id": made.version_id, "status": made.status, "complete": made.complete,
+    from hokma.factory import user_rules
+
+    folder = user_rules.drafts_dir() / f"{user_rules.code_of(made.bank_id)}-{made.slug}"          # the code STR-{NNN} and the folder of the strategy are born with its card
+    folder.mkdir(parents=True, exist_ok=True)
+    return _dump({"bank_id": made.bank_id, "code": user_rules.code_of(made.bank_id), "folder": user_rules.rel_folder(folder), "slug": made.slug, "version": made.version, "version_id": made.version_id, "status": made.status, "complete": made.complete,
                   "missing": made.missing, "needs_new_rule": made.needs_new_rule, "proposed": made.proposed, "citations_checked": made.citations_checked,
                   "strategy": made.strategy})
 
@@ -149,17 +153,34 @@ def bank_create(u, c, a: dict) -> str:
 def bank_list(u, c, a: dict) -> str:
     from hokma.factory import bank
 
-    return _dump(bank.list_bank(status=a.get("status"), line=a.get("line"), needs_rule=a.get("needs_rule"), origin=a.get("origin"), limit=a.get("limit", 100)))
+    from hokma.factory import user_rules
+
+    out = bank.list_bank(status=a.get("status"), line=a.get("line"), needs_rule=a.get("needs_rule"), origin=a.get("origin"), limit=a.get("limit", 100))
+    for row in out.get("rows", []) if isinstance(out, dict) else []:
+        bid = row.get("bank_id", row.get("id"))
+        if bid is not None:
+            row["code"] = user_rules.code_of(int(bid))
+            row["folder"] = user_rules.rel_folder(user_rules.drafts_dir() / f"{row['code']}-{row['slug']}")
+            row["creator"] = [{k: v[k] for k in ("slug", "folder", "spec_path", "stage", "current")} for v in user_rules.creator_view(int(bid))]
+    return _dump(out)
 
 
 @TOOLSET.tool("bank_get", "Read one strategy of the bank, by bank_id or slug, with a version (the last by default): its extraction sheet, the rules still pending, where it comes from "
-              "(reference and locators; the text of a source only when it is the owner's own), its versions and the events of its state. Reading only.", {
+              "(reference and locators; the text of a source only when it is the owner's own), its versions and the events of its state, and its creator side: folder, spec, files, code and verdicts. Reading only.", {
     "bank_id": _i("The strategy."), "slug": _s("Or its slug."), "version": _i("A version (default: the last).")})
 @_guarded
 def bank_get(u, c, a: dict) -> str:
     from hokma.factory import bank
 
-    return _dump(bank.get(a.get("bank_id"), slug=a.get("slug"), version=a.get("version")))
+    from hokma.factory import user_rules
+
+    out = bank.get(a.get("bank_id"), slug=a.get("slug"), version=a.get("version"))
+    key = out.get("bank_id", out.get("id")) if isinstance(out, dict) else None
+    if isinstance(out, dict) and key is not None:
+        out["code"] = user_rules.code_of(int(key))
+        out["folder"] = user_rules.rel_folder(user_rules.drafts_dir() / f"{out['code']}-{out['slug']}")
+        out["creator"] = user_rules.creator_view(int(key))          # folder, spec, files, draft code, versions and verdicts: all readable without the database
+    return _dump(out)
 
 
 @TOOLSET.tool("bank_set_status", "Change the state of a strategy of the bank: idea, draft or not_working. Closing as not_working needs the reason, 20 to 4000 characters. The states of "

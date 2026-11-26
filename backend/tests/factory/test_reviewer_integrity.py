@@ -75,9 +75,9 @@ def test_the_frontmatter_has_exactly_the_tools_of_the_spec_and_cannot_write_or_s
     assert (meta["model"], meta["hokma-tier"]) == (reviewer.DEFAULT_MODEL, reviewer.DEFAULT_TIER) == ("opus", "deep")
     tools = [t.strip() for t in meta["tools"].split(",")]
     assert tools == [*reviewer.ENGINE_TOOLS, *(reviewer.MCP_PREFIX + t for t in reviewer.TOOLS)]
-    assert tools[:7] == ["Read", "Glob", "Grep", "mcp__hokma__strategy_code_get", "mcp__hokma__strategy_code_list", "mcp__hokma__strategy_code_verdict", "mcp__hokma__bank_get"]
-    assert set(tools[7:]) == NEW_TOOLS and "Bash" not in tools and not any(re.search(r"task_create|task_request_review|task_complete|task_block", t) for t in tools)
-    assert not {"Write", "Edit", "MultiEdit", "NotebookEdit", "Agent"} & set(tools) and "strategy_code_save" not in " ".join(tools)
+    assert tools[:10] == ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "mcp__hokma__strategy_code_get", "mcp__hokma__strategy_code_list", "mcp__hokma__strategy_code_verdict"]
+    assert NEW_TOOLS <= set(tools) and not any(re.search(r"task_request_review|task_complete|task_block", t) for t in tools)
+    assert "strategy_code_save" not in " ".join(tools)
     assert not any(re.search(FORBIDDEN_TOOLS, t) for t in tools if t not in NEW_TOOLS)
 
 
@@ -88,7 +88,7 @@ def test_the_agent_names_its_skills_its_tools_and_what_it_cannot_do():
     for tool in reviewer.TOOLS:
         assert tool in text, tool
     flat = " ".join(text.split())
-    for phrase in ("write, edit or delete a file", "approve code that he did not run the checks on", "approve for the owner", "A rejection needs findings", "rerun true", "What was not checked is not approved"):
+    for phrase in ("edit the code he reviews", "approve code that he did not run the checks on", "approve for the owner", "A rejection needs findings", "rerun true", "What was not checked is not approved"):
         assert phrase in flat, phrase
 
 

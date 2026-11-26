@@ -115,7 +115,7 @@ def test_after_three_failed_attempts_the_strategy_is_closed_until_the_root_cause
 
 
 def test_he_is_offered_no_tool_of_a_desk_or_an_order_and_the_guard_refuses_one_even_if_it_is_asked_for(world):
-    assert set(offered_tools()) == {*researcher.ENGINE_TOOLS, *researcher.TOOLS} and len(offered_tools()) == 42
+    assert set(offered_tools()) == {*researcher.ENGINE_TOOLS, *researcher.TOOLS} and len(offered_tools()) == len(researcher.ENGINE_TOOLS) + len(researcher.TOOLS)
     assert not [t for t in offered_tools() if re.search(r"exec|order|desk|broker|submit|approve|flatten|premium|account|position", t)]
     assert set(offered_tools()) - set(researcher.ENGINE_TOOLS) <= set(hokma_tools.TOOLS)                                               # and every tool he is offered exists
     guard = ResearchRun(handlers=backtest_tools._HANDLERS)

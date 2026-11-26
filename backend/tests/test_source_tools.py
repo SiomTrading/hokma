@@ -46,9 +46,8 @@ def test_the_five_tools_are_published_with_a_strict_schema_need_no_unit_and_belo
     for name in NAMES:
         assert listed[name]["inputSchema"]["additionalProperties"] is False and name in hokma_tools.NO_UNIT
     assert [hokma_tools.TOOLS[n][4] for n in NAMES] == [True, True, False, False, True]
-    assert listed["source_ingest"]["inputSchema"]["required"] == ["action"] and set(NAMES) <= set(researcher.TOOLS) and len(researcher.TOOLS) == 23
-    assert set(NAMES) | {"factory_list", "factory_describe", "factory_draft", "factory_propose", "quant_call", "data_bars", "data_snapshot", "data_papers", "strategy_brief_write", "strategy_code_list", "strategy_code_get"} \
-        | set(backtest_tools.TOOLS) >= set(researcher.TOOLS)
+    assert listed["source_ingest"]["inputSchema"]["required"] == ["action"] and set(NAMES) <= set(researcher.TOOLS) and len(researcher.TOOLS) == 46
+    assert set(researcher.TOOLS) >= set(NAMES) | {"factory_list", "factory_describe", "factory_draft", "factory_propose", "quant_call", "data_bars", "data_snapshot", "data_papers", "strategy_brief_write", "strategy_code_list", "strategy_code_get"}
 
 
 def test_the_tool_file_has_no_road_to_a_broker_and_no_argument_names_a_path():
@@ -172,7 +171,7 @@ def test_bank_create_answers_with_what_it_checked_and_what_is_missing(db):
     saved = ok("factory_draft", {"spec_yaml": spec_yaml()}, IAN)
     made = ok("bank_create", {"title": "Morning EMA cross", "source_id": src_id, "extraction": sheet_for(src_id), "strategy_id": saved["strategy_id"],
                               "spec_version": saved["version"]}, IAN)
-    assert made == {"bank_id": 1, "slug": "morning-ema-cross", "version": 1, "version_id": 1, "status": "draft", "complete": True, "missing": [], "needs_new_rule": [],
+    assert made == {"bank_id": 1, "code": "STR-001", "folder": "service/strategies/STR-001-morning-ema-cross", "slug": "morning-ema-cross", "version": 1, "version_id": 1, "status": "draft", "complete": True, "missing": [], "needs_new_rule": [],
                     "proposed": ["signal_logic.inputs", "sizing.method", "execution"], "citations_checked": 1, "strategy": {"strategy_id": "idea_ema_morning", "spec_version": 1}}
     assert [r["created_by"] for r in rows(db, "strategy_bank_versions")] == ["strategy-researcher"] and rows(db, "strategy_bank_events")[0]["actor"] == "strategy-researcher"
 
@@ -214,7 +213,7 @@ def test_list_get_and_set_status_contract(db):
     src_id = ok("source_ingest", {"action": "ingest", "kind": "text", "text": IDEA}, IAN)["source_id"]
     made = ok("bank_create", {"title": "Morning EMA cross", "source_id": src_id, "extraction": sheet_for(src_id)}, IAN)
     [row] = ok("bank_list", {"status": "draft"}, IAN)["rows"]
-    assert set(row) == {"bank_id", "slug", "title", "line", "status", "version", "source", "needs_new_rule", "strategy_id", "spec_version", "updated_at", "origin", "code", "agent_reviewed", "owner_reviewed"}
+    assert set(row) == {"bank_id", "slug", "title", "line", "status", "version", "source", "needs_new_rule", "strategy_id", "spec_version", "updated_at", "origin", "code", "agent_reviewed", "owner_reviewed", "folder", "creator"}
     assert ok("bank_list", {"status": "idea"}, IAN) == {"rows": [], "total": 0} and failed("bank_list", {"limit": 0}, IAN)["error_code"] == "bad_input"
     got = ok("bank_get", {"slug": "morning-ema-cross"}, IAN)
     assert got["bank_id"] == made["bank_id"] and got["version"]["extraction"]["schema"] == 1 and got["source"]["cited"][0]["body"] == IDEA

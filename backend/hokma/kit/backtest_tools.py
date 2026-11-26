@@ -457,6 +457,11 @@ def research_session(caller: Any):
 def _bank_target(args: dict) -> dict:
     """A run tool names its strategy by strategy_id and version, or by bank_id: the strategy of the bank, with the id and the saved spec of its last version. A bank
     strategy with no saved spec (no code yet, or a rule pending) has nothing to run and the answer says so."""
+    if args.get("code") is not None:
+        found = re.match(r"^STR-(\d{3,})$", str(args["code"]))
+        if found is None:
+            raise ToolError("bad_input", "code is like STR-001")
+        args = {**{k: v for k, v in args.items() if k != "code"}, "bank_id": int(found.group(1))}
     if args.get("bank_id") is None:
         if "strategy_id" not in args or "version" not in args:
             raise ToolError("bad_input", "give strategy_id and version, or bank_id")
@@ -506,6 +511,7 @@ def loop_score(objective: str = "sharpe", *, services_of: Callable[[], Any] | No
 RUN_PROPS: dict[str, Any] = {
     "strategy_id": _s("Id of the strategy (the one of its saved spec, or of the registry). Not needed with bank_id."), "version": _i("Version of the saved spec; 1 for a registry strategy. Not needed with bank_id."),
     "bank_id": _i("Instead of strategy_id and version: the strategy of the bank, run with the id and the saved spec of its last version."),
+    "code": _s("Or the code of the strategy, like STR-001 (its bank id): the last approved version."),
     "line": _s("Only for a strategy with no saved spec: DT, SWC, SWO, LP or RF. A saved spec fixes it."),
     "instruments": {"type": "array", "items": {"type": "string"}, "description": "Canonical contract ids, for example CONT:NQ."},
     "bar": _s("Bar size; the line decides which are allowed.", enum=["1m", "5m", "15m", "1h", "1d", "1w"]),
@@ -552,7 +558,40 @@ def backtest_result(u, c, a: dict) -> str:
               [*RUN_REQUIRED, "space", "method", "n_trials", "objective"], writes=True)
 @safe
 def backtest_optimize(u, c, a: dict) -> str:
-    return _call(c, "backtest_optimize", a)
+    out = _call(c, "backtest_optimize", a)
+    _leave_summary(a, out)
+    return out
+
+
+def _leave_summary(a: dict, out: str) -> None:
+    """An optimization of a strategy of the creator leaves its summary in the folder of the strategy: results/OPT-{n}-{date}.md with the run id and the numbers. The verdict of the
+    optimizer is bound to the same strategy by its id (u_str{NNN}_v{N}) and version. A problem here never changes the answer of the tool."""
+    try:
+        from datetime import datetime, timezone
+
+        from hokma.factory import user_rules
+
+        bank_id = a.get("bank_id")
+        if bank_id is None and a.get("code") is not None:
+            bank_id = int(str(a["code"]).split("-")[1])
+        if bank_id is None:
+            return
+        data = json.loads(out)
+        with services().database().read() as u:
+            bank = u.session.one("SELECT slug FROM strategy_bank WHERE id = :b", {"b": int(bank_id)})
+        folder = None if bank is None else user_rules.strategy_folder(int(bank_id), bank["slug"])
+        if folder is None:
+            return
+        results = folder / "results"
+        results.mkdir(exist_ok=True)
+        number = len(list(results.glob("OPT-*.md"))) + 1
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        lines = [f"# OPT-{number}: optimization of {user_rules.code_of(int(bank_id))}", "", f"- Code: {user_rules.code_of(int(bank_id))}", f"- Bank id: {int(bank_id)}", f"- Date: {stamp}",
+                 f"- Strategy id: {data.get('strategy_id')}", f"- Run id: {data.get('run_id')}", f"- Status: {data.get('status')}", f"- Method: {a.get('method')}, objective {a.get('objective')}, trials {data.get('n_trials')}",
+                 f"- Best: {json.dumps(data.get('best'), default=str)}", "- Verdict: not given yet; optimizer_verdict on this strategy id and version writes it, bound to the bank id and the version", ""]
+        (results / f"OPT-{number}-{stamp}.md").write_text("\n".join(lines), encoding="utf-8")
+    except Exception:                                                     # noqa: BLE001
+        pass
 
 
 @TOOLSET.tool("backtest_walkforward", "Walk forward (rolling or anchored) or combinatorial purged validation of the points of a space: every window picks its point on its "

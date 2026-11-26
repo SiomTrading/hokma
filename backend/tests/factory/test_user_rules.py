@@ -32,10 +32,10 @@ def approve(db, out, **kw):
 
 def test_the_requirement_creates_the_rule_and_the_folder_and_a_new_one_replaces_the_current_one(db, env):
     bank_id, made = setup_rule(db)
-    assert made["version"] == 1 and made["folder"] == "strategies/inside_bar" and made["duplicate"] is False
-    assert (env / "work" / "strategies" / SLUG).is_dir()
+    assert made["version"] == 1 and made["folder"] == "service/strategies/STR-001-inside-bar-breakout" and made["duplicate"] is False
+    assert (env / "work" / made["folder"]).is_dir()
     [rule] = rows(db, "SELECT kind, slug, bank_id, component, created_by, origin_desk_id FROM user_rules")
-    assert (rule["kind"], rule["slug"], rule["bank_id"], rule["component"], rule["created_by"], rule["origin_desk_id"]) == ("strategy", SLUG, bank_id, "strategy", RESEARCHER, None)
+    assert (rule["kind"], rule["slug"], rule["bank_id"], rule["component"], rule["created_by"], rule["origin_desk_id"]) == ("strategy", made["slug"], bank_id, "strategy", RESEARCHER, None)
     again = user_rules.write_brief(rule_id=made["rule_id"], brief=BRIEF, caller=RESEARCHER, db=db)
     assert again["duplicate"] is True and again["brief_id"] == made["brief_id"]
     newer = user_rules.write_brief(rule_id=made["rule_id"], brief=brief(market="ES"), caller=RESEARCHER, db=db)
@@ -48,19 +48,13 @@ def test_the_requirement_creates_the_rule_and_the_folder_and_a_new_one_replaces_
 def test_a_requirement_that_is_incomplete_or_asks_for_what_hokma_does_not_have_is_refused(db):
     bank_id = make_bank(db)
     ask = lambda data, **kw: user_rules.write_brief(bank_id=bank_id, slug=kw.get("slug", SLUG), title="t", brief=data, caller=RESEARCHER, db=db)  # noqa: E731
-    for bad in ({k: v for k, v in BRIEF.items() if k != "cases"}, brief(cases=BRIEF["cases"][:2]), brief(extra=1), brief(timeframe="five minutes"), brief(inputs=[]),
-                brief(cases=[{"name": "x", "expect": "buy", "closes": [1, 2]}] * 3), brief(params=[{"name": "sizer_n", "type": "int", "value": 1, "origin": "proposed"}])):
+    for bad in ({k: v for k, v in BRIEF.items() if k != "summary"}, brief(summary="short"), "not a mapping"):
         with pytest.raises(UserRuleError) as raised:
             ask(bad)
         assert raised.value.code == "bad_input"
     with pytest.raises(UserRuleError) as raised:
-        ask(brief(inputs=["close", "order_book_imbalance"]))
-    assert raised.value.code == "blocked" and "order_book_imbalance" in raised.value.message
-    with pytest.raises(UserRuleError) as raised:
         ask(brief(summary="Sells a covered call every month against the shares that the owner holds."))
     assert raised.value.code == "blocked" and "premium" in raised.value.message
-    with pytest.raises(UserRuleError):
-        user_rules.write_brief(bank_id=bank_id, slug="Bad Slug", title="t", brief=BRIEF, caller=RESEARCHER, db=db)
     assert rows(db, "SELECT * FROM user_rules") == []                       # nothing of the refused ones was kept
     bank.set_status(bank_id, "not_working", reason="the rule depends on a data feed that we do not have", actor="iris", db=db)
     with pytest.raises(UserRuleError, match="does not work"):
@@ -74,19 +68,19 @@ def test_without_a_current_requirement_no_code_is_saved_even_when_the_files_exis
     put_files(SLUG)
     with pytest.raises(UserRuleError) as raised:
         user_rules.save_code(rule_id=rule_id, caller=CODER, db=db)
-    assert raised.value.code == "blocked" and "no requirement" in raised.value.message
+    assert raised.value.code == "blocked" and "no spec" in raised.value.message
     assert rows(db, "SELECT * FROM user_rule_versions") == []
 
 
 def test_green_code_is_saved_as_a_draft_with_its_hash_its_read_only_copy_and_its_requirement(db, env):
     bank_id, made, out = saved(db)
-    assert out["saved"] is True and out["status"] == "draft" and out["registry_id"] == "u_inside_bar_v1" and out["tests"] == 4
+    assert out["saved"] is True and out["status"] == "draft" and out["registry_id"] == "u_str001_v1" and out["tests"] == 4
     [row] = rows(db, "SELECT * FROM user_rule_versions")
-    assert row["brief_id"] == made["brief_id"] and row["code_text"] == STRATEGY and row["code_sha256"] == out["code_sha256"] and row["status"] == "draft"
+    assert row["brief_id"] == made["brief_id"] and row["code_text"].endswith(STRATEGY) and row["code_sha256"] == out["code_sha256"] and row["status"] == "draft"
     assert json.loads(row["test_json"])["ok"] is True and json.loads(row["manifest_json"])["schema"][0]["name"] == "min_range"
     assert json.loads(row["cases_json"])["test_file"] == TEST and (row["origin_desk_id"], row["created_by"]) == (None, CODER)
-    copy = user_rules.copy_folder(SLUG, 1, out["code_sha256"]) / "strategy.py"
-    assert copy.read_text(encoding="utf-8") == STRATEGY and not os.access(copy, os.W_OK)
+    copy = user_rules.copy_folder(made["slug"], 1, out["code_sha256"]) / "strategy.py"
+    assert copy.read_text(encoding="utf-8") == row["code_text"] and row["code_text"].endswith(STRATEGY) and not os.access(copy, os.W_OK)
     assert [e["to_status"] for e in rows(db, "SELECT to_status FROM user_rule_events")] == ["draft"]
     again = user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
     assert again["duplicate"] is True and again["rule_version_id"] == out["rule_version_id"] and len(rows(db, "SELECT * FROM user_rule_versions")) == 1
@@ -104,16 +98,17 @@ def test_red_code_and_a_static_violation_are_not_saved_and_say_why_and_a_dry_run
     dry = user_rules.save_code(rule_id=made["rule_id"], caller=CODER, dry_run=True, db=db)
     assert dry == {**dry, "saved": False, "ok": True, "tests": 4} and "RESULT green" in dry["output"]
     assert rows(db, "SELECT * FROM user_rule_versions") == [] and not (user_rules.copies_dir() / SLUG).exists()
+    (put_files(SLUG) / "strategy.py").unlink()
     with pytest.raises(UserRuleError, match="does not exist"):
-        user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db) if (user_rules.drafts_dir() / SLUG / "strategy.py").unlink() is None else None
+        user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
 
 
 def test_a_new_version_gets_the_next_number_and_a_new_copy(db):
     bank_id, made, first = saved(db)
-    put_files(SLUG, strategy=STRATEGY.replace("min_range: float = 0.0", "min_range: float = 0.0\n    # second version"))
+    put_files(SLUG, strategy=STRATEGY.replace("min_range: float = 0.0", "min_range: float = 0.0\n    # second version"), version=2)
     second = user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
-    assert (second["version"], second["registry_id"]) == (2, "u_inside_bar_v2") and second["code_sha256"] != first["code_sha256"]
-    assert user_rules.copy_folder(SLUG, 1, first["code_sha256"]).is_dir() and user_rules.copy_folder(SLUG, 2, second["code_sha256"]).is_dir()
+    assert (second["version"], second["registry_id"]) == (2, "u_str001_v2") and second["code_sha256"] != first["code_sha256"]
+    assert user_rules.copy_folder(made["slug"], 1, first["code_sha256"]).is_dir() and user_rules.copy_folder(made["slug"], 2, second["code_sha256"]).is_dir()
 
 
 def test_a_rejection_needs_findings_marks_the_version_failed_and_the_third_one_blocks_the_rule(db):
@@ -127,11 +122,11 @@ def test_a_rejection_needs_findings_marks_the_version_failed_and_the_third_one_b
     with pytest.raises(UserRuleError, match="only a draft"):
         user_rules.verdict(rule_version_id=out["rule_version_id"], verdict="approved", findings=[], reviewer=REVIEWER, db=db)
     for n in (2, 3):
-        put_files(SLUG, strategy=STRATEGY + f"\n# change {n}\n")
+        put_files(SLUG, strategy=STRATEGY + f"\n# change {n}\n", version=n)
         again = user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
         last = user_rules.verdict(rule_version_id=again["rule_version_id"], verdict="rejected", findings=finding, reviewer=REVIEWER, db=db)
     assert last["attempts_left"] == 0
-    put_files(SLUG, strategy=STRATEGY + "\n# change 4\n")
+    put_files(SLUG, strategy=STRATEGY + "\n# change 4\n", version=4)
     with pytest.raises(UserRuleError) as raised:
         user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
     assert raised.value.code == "blocked" and "3 times" in raised.value.message
@@ -151,20 +146,20 @@ def test_an_approval_generates_the_version_and_creates_the_bank_version_the_spec
     bank_id, made, out = saved(db)
     told = []
     result = approve(db, out, notify=told.append)
-    assert told == [result] and (result["status"], result["bank_version"], result["strategy_id"], result["spec_version"]) == ("generated", 2, "u_inside_bar_v1", 1)
+    assert told == [result] and (result["status"], result["bank_version"], result["strategy_id"], result["spec_version"]) == ("generated", 2, "u_str001_v1", 1)
     assert rows(db, "SELECT status FROM user_rule_versions")[0]["status"] == "generated"
     [review] = rows(db, "SELECT verdict, reviewer, code_sha256, brief_id FROM user_rule_reviews")
     assert (review["verdict"], review["reviewer"], review["code_sha256"], review["brief_id"]) == ("approved", REVIEWER, out["code_sha256"], made["brief_id"])
     versions = rows(db, "SELECT version, strategy_id, spec_version, needs_rule_json, origin_desk_id, created_by, derived_from FROM strategy_bank_versions ORDER BY version")
-    assert [(v["version"], v["strategy_id"], v["needs_rule_json"]) for v in versions] == [(1, None, versions[0]["needs_rule_json"]), (2, "u_inside_bar_v1", "[]")]
+    assert [(v["version"], v["strategy_id"], v["needs_rule_json"]) for v in versions] == [(1, None, versions[0]["needs_rule_json"]), (2, "u_str001_v1", "[]")]
     assert versions[0]["needs_rule_json"] != "[]" and versions[1]["derived_from"] is not None and versions[1]["origin_desk_id"] is None
     [row] = rows(db, "SELECT strategy_id, version, line, status, spec_yaml FROM strategy_specs")
-    assert (row["strategy_id"], row["version"], row["status"]) == ("u_inside_bar_v1", 1, "draft") and "alpha: u_inside_bar_v1" in row["spec_yaml"] and "sizer: fixed_contracts" in row["spec_yaml"]
+    assert (row["strategy_id"], row["version"], row["status"]) == ("u_str001_v1", 1, "draft") and "alpha: u_str001_v1" in row["spec_yaml"] and "sizer: fixed_contracts" in row["spec_yaml"]
     [spec_link] = rows(db, "SELECT strategy_id, spec_version, code_sha256 FROM strategy_spec_rules")
-    assert (spec_link["strategy_id"], spec_link["code_sha256"]) == ("u_inside_bar_v1", out["code_sha256"])
+    assert (spec_link["strategy_id"], spec_link["code_sha256"]) == ("u_str001_v1", out["code_sha256"])
     assert bank.get(bank_id, db=db)["status"] == "draft"
     got = bank.get(bank_id, db=db)["version"]
-    assert (got["strategy_id"], got["code"], got["agent_reviewed"], got["owner_reviewed"], got["origin"]) == ("u_inside_bar_v1", None, True, False, {"kind": "hokma"})
+    assert (got["strategy_id"], got["code"], got["agent_reviewed"], got["owner_reviewed"], got["origin"]) == ("u_str001_v1", None, True, False, {"kind": "hokma"})
     [listed] = bank.list_bank(db=db)["rows"]
     assert (listed["code"], listed["agent_reviewed"], listed["owner_reviewed"], listed["origin"], listed["needs_new_rule"]) == (None, True, False, {"kind": "hokma"}, False)
     assert bank.list_bank(origin="desk", db=db)["rows"] == [] and len(bank.list_bank(origin="hokma", db=db)["rows"]) == 1
@@ -201,25 +196,26 @@ def test_only_an_approved_intact_version_loads_and_the_registry_marks_it_as_gene
 
 def test_a_file_edited_by_hand_stops_loading_and_cannot_be_approved(db):
     bank_id, made, out = saved(db)
-    copy = user_rules.copy_folder(SLUG, 1, out["code_sha256"]) / "strategy.py"
+    copy = user_rules.copy_folder(made["slug"], 1, out["code_sha256"]) / "strategy.py"
+    STRATEGY_SAVED = copy.read_text(encoding="utf-8")
     os.chmod(copy, 0o644)
-    copy.write_text(STRATEGY + "\n# a change by hand\n", encoding="utf-8")
+    copy.write_text(STRATEGY_SAVED + "\n# a change by hand\n", encoding="utf-8")
     with pytest.raises(UserRuleError, match="not the code the base keeps"):
         approve(db, out)
-    copy.write_text(STRATEGY, encoding="utf-8")
+    copy.write_text(STRATEGY_SAVED, encoding="utf-8")
     approve(db, out)
-    assert "u_inside_bar_v1" in factory_spec.default_registry().entries
+    assert "u_str001_v1" in factory_spec.default_registry().entries
     os.chmod(copy, 0o644)
-    copy.write_text(STRATEGY.replace("min_range: float = 0.0", "min_range: float = 5.0"), encoding="utf-8")
-    assert "u_inside_bar_v1" not in factory_spec.default_registry().entries      # the next call of the registry no longer finds it
+    copy.write_text(STRATEGY_SAVED.replace("min_range: float = 0.0", "min_range: float = 5.0"), encoding="utf-8")
+    assert "u_str001_v1" not in factory_spec.default_registry().entries      # the next call of the registry no longer finds it
     with pytest.raises(UserRuleError, match="not the code the base keeps"):
-        user_rules.load_class("u_inside_bar_v1", db=db)
+        user_rules.load_class("u_str001_v1", db=db)
 
 
 def test_a_failed_version_never_loads_and_the_base_refuses_to_generate_it_without_a_verdict(db):
     bank_id, made, out = saved(db)
     user_rules.verdict(rule_version_id=out["rule_version_id"], verdict="rejected", findings=[{"severity": "major", "message": "wrong"}], reviewer=REVIEWER, db=db)
-    assert "u_inside_bar_v1" not in factory_spec.default_registry().entries
+    assert "u_str001_v1" not in factory_spec.default_registry().entries
     bank_id, made, out = (bank_id, made, out)
     with pytest.raises(Exception, match="code reviewer has not approved"):
         with db.write() as u:

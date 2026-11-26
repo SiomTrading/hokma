@@ -86,12 +86,21 @@ def test_nothing_happens_before_the_warm_up():
 """
 
 
-def make_bank(db, title: str = "Inside bar breakout") -> int:
-    """A strategy of the bank whose entry rule no piece of the factory does: it waits for code."""
+def make_bank(db, title: str = "Inside bar breakout", spec: bool = True) -> int:
+    """A strategy of the bank whose entry rule no piece of the factory does: it waits for code. Its folder STR-{NNN}-{slug} is born with the card; the spec.md goes in it unless spec is false."""
     source = ok("source_ingest", {"action": "ingest", "kind": "text", "text": IDEA}, caller("hokma"))
     pid = source["passages"][0]["passage_id"]
     made = ok("bank_create", {"title": title, "source_id": source["source_id"], "extraction": pending_sheet(pid)}, caller(RESEARCHER))
+    if spec:
+        write_spec(made["folder"], made["code"], made["bank_id"], title)
     return made["bank_id"]
+
+
+def write_spec(folder: str, code: str, bank_id: int, title: str = "x") -> Path:
+    path = hokma_home() / folder / "spec.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"# {title}\n\n- Code: {code}\n- Name: {title}\n- Bank id: {bank_id}\n- Source: text\n- Folder: {folder}\n- Status: draft\n", encoding="utf-8")
+    return path
 
 
 def brief(**over):
@@ -100,13 +109,26 @@ def brief(**over):
     return data
 
 
-def put_files(slug: str, strategy: str = STRATEGY, test: str = TEST) -> Path:
-    """The two files where the coder writes them: the working folder of the owner."""
-    folder = hokma_home() / "strategies" / slug
+def put_files(slug: str, strategy: str = STRATEGY, test: str = TEST, version: int | None = None) -> Path:
+    """The two files where the coder writes them: versions/v{N}/ in the strategy folder of the fund (the only folder there, or the one that ends in the slug). The docstring that names the code,
+    the version and the spec is put first."""
+    root = hokma_home() / "service" / "strategies"
+    dirs = sorted(p for p in root.glob("STR-*") if p.is_dir())
+    pick = [p for p in dirs if p.name.endswith(slug.replace("_", "-")) or p.name.endswith(slug)] or dirs
+    base = pick[-1]
+    version = version or 1
+    folder = base / "versions" / f"v{version}"
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "strategy.py").write_text(strategy, encoding="utf-8", newline="\n")
+    (folder / "strategy.py").write_text(_headed(base, version, strategy), encoding="utf-8", newline="\n")
     (folder / "test_strategy.py").write_text(test, encoding="utf-8", newline="\n")
     return folder
+
+
+def _headed(base: Path, version: int, strategy: str) -> str:
+    code = base.name[:7]
+    if strategy.lstrip().startswith('"""'):
+        return strategy                                   # it carries its own docstring with the code and the version
+    return f'"""Code {code}, version v{version}, spec {base.name}/spec.md."""\n' + strategy
 
 
 def rows(db, sql: str, **params):

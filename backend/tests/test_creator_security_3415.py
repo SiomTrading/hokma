@@ -39,27 +39,24 @@ def test_the_one_that_saved_a_version_never_gives_its_verdict_and_another_agent_
     assert ok("strategy_code_verdict", {"rule_version_id": version, "verdict": "approved"}, caller("vera"))["status"] == "generated"          # any other agent
 
 
-def test_a_folder_with_anything_besides_the_two_files_is_not_saved_and_not_checked(db):
+def test_a_saved_version_is_never_written_over_and_the_versions_table_of_the_spec_follows_each_step(db):
     bank_id = make_bank(db)
     made = user_rules.write_brief(bank_id=bank_id, slug=SLUG, title="t", brief=BRIEF, caller=RESEARCHER, db=db)
     folder = put_files(SLUG)
-    for plant in ("notes.md", "helper.py", ".hidden", "__pycache__"):
-        path = folder / plant
-        path.mkdir() if plant == "__pycache__" else path.write_text("x = 1\n", encoding="utf-8")
-        for dry in (True, False):
-            with pytest.raises(UserRuleError, match="holds only strategy.py and test_strategy.py"):
-                user_rules.save_code(rule_id=made["rule_id"], caller=CODER, dry_run=dry, db=db)
-        assert failed("strategy_code_save", {"rule_id": made["rule_id"]}, caller(CODER))["error_code"] == "blocked"
-        path.rmdir() if plant == "__pycache__" else path.unlink()
-    link = folder / "extra.py"
-    link.symlink_to(folder / "strategy.py")
-    with pytest.raises(UserRuleError, match="extra.py"):
-        user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
-    link.unlink()
-    assert rows(db, "SELECT id FROM user_rule_versions") == []
-    assert user_rules.save_code(rule_id=made["rule_id"], caller=CODER, dry_run=True, db=db)["ok"] is True
-    assert sorted(p.name for p in folder.iterdir()) == ["strategy.py", "test_strategy.py"]          # the checks leave nothing behind
-    assert user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)["saved"] is True
+    saved = user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
+    assert saved["saved"] is True and saved["registry_id"] == "u_str001_v1" and saved["file"].endswith("versions/v1/strategy.py")
+    spec = (folder.parent.parent / "spec.md").read_text(encoding="utf-8")
+    assert "## Versions" in spec and "| v1 | versions/v1/strategy.py |" in spec and "pending" in spec
+    (folder / "strategy.py").write_text((folder / "strategy.py").read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")      # v1 written over
+    with pytest.raises(UserRuleError, match="never written over"):
+        user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db, version=1)
+    again = put_files(SLUG, version=2)
+    kept = user_rules.save_code(rule_id=made["rule_id"], caller=CODER, db=db)
+    assert kept["version"] == 2 and kept["registry_id"] == "u_str001_v2" and again.name == "v2"
+    spec = (folder.parent.parent / "spec.md").read_text(encoding="utf-8")
+    assert "| v1 |" in spec and "| v2 |" in spec
+    approved = user_rules.verdict(rule_version_id=kept["rule_version_id"], verdict="approved", findings=[], reviewer=REVIEWER, db=db)
+    assert approved["status"] == "generated" and "approved, ready for backtest" in (folder.parent.parent / "spec.md").read_text(encoding="utf-8")
 
 
 def test_the_registry_of_real_money_holds_a_generated_strategy_only_after_the_owner_approved_this_code(db):

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.3
+
+- Changed: Ian, Sam and Ben work like Diego, Joel and Vera and have the normal tools of the engine (Read, Write, Edit, Glob, Grep, Bash, Agent) plus their task, project, journal and decision tools. Only the hard locks stay: nothing reaches real money or a broker, the integrity and hard-block hooks, the author of a version never gives its verdict, and the owner approves for real money.
+- New: Each strategy has a code STR-{NNN} (the bank id with three digits) and a folder service/strategies/STR-{NNN}-{slug}/ that is born with its card. Ian writes spec.md, checklist.md, plan.md and tasks.md there; Sam writes versions/v{N}/strategy.py and test_strategy.py; the optimizer leaves results/OPT-{n}-{date}.md. A saved version is never written over: a change is the next version, with its own row in the Versions table of the spec.
+- New: Without the spec.md of the folder no code is written or saved. strategy_code_save takes bank_id and version and registers the strategy as u_str{NNN}_v{N}.
+- Changed: Sam writes against the full contract of the engine (hokma.factory.strategy and orders: market, limit and stop orders, sl and tp, partial close) and not against the trimmed API. The static check allows those modules, math and numpy, and still refuses a broker, exec, the network and files. The checks of this kind of strategy run in their own process.
+- New: bank_get, bank_list and strategy_code_get return the code, the folder, the spec, the files, the versions with sha256 and verdicts and the draft, also when there is no code yet, so nothing needs the locked database. strategy_code_get no longer answers no_data for a strategy with a spec and no code.
+- New: backtest_run, backtest_optimize and backtest_walkforward accept code STR-{NNN}. At start the registry loads every approved version from its saved file and checks its sha256; a file that changed is not loaded and the reason is shown.
+- Known: the backtest of the engine fills market orders and closes a position whole. A limit entry, a partial exit or a move of the stop to breakeven are programmed and checked, and the backtest answers order_type_unsupported or partial_close_unsupported until the engine learns them.
+
 ## 1.2.2
 
 - Changed: Ian, Sam and Ben can read files with Read, Grep and Glob (Ian), work on their tasks (show, list, claim, heartbeat, complete, block, comment; Sam asks for review, Ben approves or asks for changes), write to the journal, read the policy and, Ben, report and list bugs. They still cannot place orders, use a desk, edit limits or run commands.

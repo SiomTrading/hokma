@@ -124,6 +124,44 @@ def fixed_tests(cls: Any) -> dict[str, dict[str, Any]]:
     return results
 
 
+def engine_fixed_tests(cls: Any) -> dict[str, dict[str, Any]]:
+    """The fixed tests of a strategy written against the engine: it builds with the defaults of its SCHEMA, the intents are the same on two runs, and the intents on a bar do not
+    change when the later bars are cut."""
+    from datetime import datetime, timedelta, timezone
+
+    from hokma.factory.strategy import check_strategy, replay_intents
+
+    bars = synthetic_bars()
+    start = datetime(2024, 1, 2, 14, 30, tzinfo=timezone.utc)
+    times = [start + timedelta(minutes=5 * (i + 1)) for i in range(len(bars["close"]))]
+    results: dict[str, dict[str, Any]] = {}
+
+    def play(cut: int | None = None) -> Any:
+        n = len(times) if cut is None else cut
+        return replay_intents(cls(**check_strategy(cls).defaults()), {k: v[:n] for k, v in bars.items()}, times=times[:n], contract_id="NQ").intents
+
+    try:
+        play(10)
+        results["builds"] = {"ok": True}
+    except Exception as exc:
+        results["builds"] = {"ok": False, "message": f"the class does not build or run with the defaults of its SCHEMA: {type(exc).__name__}: {exc}"[:MAX_MESSAGE]}
+        return results
+    try:
+        first, second = play(), play()
+    except Exception as exc:
+        results["decisions"] = {"ok": False, "message": f"{type(exc).__name__}: {exc}"[:MAX_MESSAGE]}
+        return results
+    results["decisions"] = {"ok": True, "entries": len(first), "bars": len(times)}
+    results["deterministic"] = {"ok": first == second} if first == second else {"ok": False, "message": "the same bars gave different intents on two runs"}
+    for cut in CUTS:
+        part = play(cut)
+        if part != tuple(x for x in first if x[0] <= cut):
+            results["causal"] = {"ok": False, "message": f"the intents change when the bars after bar {cut} are cut: the strategy uses the future"}
+            return results
+    results["causal"] = {"ok": True}
+    return results
+
+
 def run(folder: Path) -> dict[str, Any]:
     """Every check on a folder; the dictionary is the report (ok is true only when all pass)."""
     report: dict[str, Any] = {"ok": False, "static": [], "tests": [], "fixed": {}, "strategy_sha256": None, "test_sha256": None}
@@ -165,6 +203,12 @@ def run(folder: Path) -> dict[str, Any]:
                 report["tests"].append({"name": name, "ok": True})
             except Exception as exc:
                 report["tests"].append({"name": name, "ok": False, "message": _failure(exc, sources)})
+    if static_check.is_engine_source(strategy_text):
+        report["fixed"] = engine_fixed_tests(cls)
+        if report["fixed"].get("builds", {}).get("ok"):
+            report["manifest"] = {"class": cls.__name__, "schema": _schema_data(cls), "indicators": [], "extra_warmup": 0, "protective": True, "engine": True}
+        report["ok"] = bool(report["tests"]) and all(t["ok"] for t in report["tests"]) and all(v["ok"] for v in report["fixed"].values()) and "manifest" in report
+        return report
     report["fixed"] = fixed_tests(cls)
     if report["fixed"].get("builds", {}).get("ok"):
         probe = user_api.StrategyInit()
@@ -193,7 +237,10 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: python -I -m hokma.factory.rule_check <folder>", file=sys.stderr)
         return 2
-    report = run(Path(argv[0]))
+    from hokma.core import processguard
+
+    with processguard.allow(processguard.RULE_CHECK):          # the contract of the engine lives in packages that only a marked process may import
+        report = run(Path(argv[0]))
     print(summary(report))
     print(json.dumps(report, default=str, sort_keys=True, separators=(",", ":")))
     return 0 if report["ok"] else 1

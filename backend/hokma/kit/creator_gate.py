@@ -1,10 +1,10 @@
-"""PreToolUse hook, the first gate of the strategy creator (SPEC-031 6.6): without a current requirement nothing is programmed.
+"""PreToolUse hook, the first gate of the strategy creator (SPEC-031 6.6): without a numbered spec.md nothing is programmed.
 
-It blocks, with exit code 2, a write to strategies/<slug>/ when the base has no current requirement for that slug, and a write to anything under strategies/ that is
-not strategy.py or test_strategy.py of a slug folder (the delivery of the creator is the code, never a document). Since 1.2.2 any agent or chat may take any step of the flow: the gate no longer looks at who writes, only at what is written. Outside strategies/ it does not interfere.
+It blocks, with exit code 2, a write of strategy.py or test_strategy.py under service/strategies/ unless it goes in STR-{NNN}-{slug}/versions/v{N}/ of a strategy folder that already holds its spec.md
+(the folder is made with the card of the bank: spec.md, checklist.md, plan.md, tasks.md, adr/, results/ and versions/). The documents of the flow are free. Since 1.2.3 any agent or chat may take any step of the
+flow and only the order is checked: what is written, not who writes. Outside service/strategies/ it does not interfere.
 
-It fails CLOSED: a base it cannot read is a block. It only reads: SQLite opens in read only mode and Postgres sets the session read only. Standard library plus psycopg when the base
-is Postgres; it must not import the database layer of Hokma (only the server may), so it reads the two columns it needs with its own query.
+It only looks at the file system: the spec is a file, so a spec that cannot be found is a block.
 
 Run it by absolute path with an isolated interpreter (`python -I creator_gate.py --data <data> --workdir <work>`), registered in the settings next to the other two hooks and
 protected like them: the agent cannot edit this file nor take its registration out.
@@ -12,17 +12,15 @@ protected like them: the agent cannot edit this file nor take its registration o
 import json
 import os
 import re
-import sqlite3
 import sys
 from datetime import datetime, timezone
 
 BLOCK = 2
 FILE_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
-ALLOWED_NAMES = ("strategy.py", "test_strategy.py")
-SLUG = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
+CODE_NAMES = ("strategy.py", "test_strategy.py")
+FOLDER = re.compile(r"^(STR-\d{3})-([a-z][a-z0-9_-]{1,59})$")
+VERSION = re.compile(r"^v[1-9][0-9]{0,3}$")
 CODER = "strategy-coder"
-DB_FILE = "hokma.db"
-QUERY = "SELECT 1 FROM user_rules r JOIN user_rule_briefs b ON b.rule_id = r.id AND b.status = 'current' WHERE r.slug = {mark} AND r.kind = 'strategy' LIMIT 1"
 
 
 class Denied(Exception):
@@ -35,29 +33,10 @@ def _arguments(args, flag):
     return [args[i + 1] for i, a in enumerate(args) if a == flag and i + 1 < len(args)]
 
 
-def has_requirement(data: str, slug: str) -> bool:
-    """Whether the base keeps a current requirement for this strategy. Any problem reading it raises: the gate then blocks."""
-    config = {}
-    try:
-        with open(os.path.join(data, "database.json"), encoding="utf-8") as handle:
-            config = json.load(handle)
-    except FileNotFoundError:
-        config = {}
-    if isinstance(config, dict) and config.get("engine") == "postgres" and config.get("url"):
-        import psycopg
-
-        with psycopg.connect(config["url"], autocommit=True, connect_timeout=5) as conn:
-            conn.execute("SET default_transaction_read_only = on")
-            return conn.execute(QUERY.format(mark="%s"), (slug,)).fetchone() is not None
-    path = os.path.join(data, DB_FILE)
-    if not os.path.isfile(path):
-        raise OSError("the database file does not exist")
-    uri = "file:" + path.replace("\\", "/").replace("?", "%3f").replace("#", "%23") + "?mode=ro"
-    conn = sqlite3.connect(uri, uri=True, timeout=5)
-    try:
-        return conn.execute(QUERY.format(mark="?"), (slug,)).fetchone() is not None
-    finally:
-        conn.close()
+def has_spec(folder: str) -> bool:
+    """Whether the strategy folder holds its spec.md (spec-four-phases, written like Diego writes his)."""
+    path = os.path.join(folder, "spec.md")
+    return os.path.isfile(path) and not os.path.islink(path)
 
 
 def decide(payload: dict, data: str, workdir: str) -> None:
@@ -73,7 +52,7 @@ def decide(payload: dict, data: str, workdir: str) -> None:
         return                                           # the guard hook is the one that refuses a write with no path
     cwd = payload.get("cwd")
     joined = target if os.path.isabs(target) else os.path.join(cwd if isinstance(cwd, str) else os.getcwd(), target)
-    folder = os.path.join(os.path.realpath(workdir), "strategies")
+    folder = os.path.join(os.path.realpath(workdir), "service", "strategies")
     candidates = {os.path.realpath(joined), os.path.normpath(joined)}
     inside = [c for c in candidates if os.path.commonpath([c, folder]) == folder] if all(os.path.isabs(c) for c in candidates) else []
     if not inside:
@@ -82,14 +61,13 @@ def decide(payload: dict, data: str, workdir: str) -> None:
         raise Denied("file_not_allowed", "the path leads out of strategies/ by a link")
     real = os.path.realpath(joined)
     parts = os.path.relpath(real, folder).replace("\\", "/").split("/")
-    if len(parts) != 2 or parts[1] not in ALLOWED_NAMES or not SLUG.match(parts[0]):
-        raise Denied("file_not_allowed", "strategies/<slug>/ holds strategy.py and test_strategy.py and nothing else: the delivery is the code, not a document")
-    try:
-        found = has_requirement(data, parts[0])
-    except BaseException as exc:                          # noqa: BLE001  fail closed: a base that cannot be read is a block
-        raise Denied("no_requirement", f"the requirement of {parts[0]} cannot be checked ({type(exc).__name__})") from None
-    if not found:
-        raise Denied("no_requirement", f"there is no current requirement for {parts[0]}: the requirement is written first, and without it nothing is programmed")
+    if parts[-1] not in CODE_NAMES:
+        return                                           # the documents of the flow (spec, checklist, plan, tasks, adr, results) are free: only the code waits for the spec
+    match = FOLDER.match(parts[0]) if len(parts) == 4 and parts[1] == "versions" and VERSION.match(parts[2]) else None
+    if match is None:
+        raise Denied("file_not_allowed", "the code of a strategy goes in service/strategies/STR-{NNN}-{slug}/versions/v{N}/strategy.py or test_strategy.py")
+    if not has_spec(os.path.join(folder, parts[0])):
+        raise Denied("no_requirement", f"there is no spec for {match.group(1)}: write service/strategies/{parts[0]}/spec.md first (spec-four-phases), and without it nothing is programmed")
 
 
 def log_block(data: str, tool: str, target: str, rule: str, reason: str) -> None:
