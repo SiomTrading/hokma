@@ -116,7 +116,7 @@ def test_services_save_owner_and_language(db, env):
 # ------------------------------------------------------------------------------------------------- agents
 def test_agents(db):
     with db.write() as u:
-        assert u.agents.count() == 16 and u.agents.count("active") == 4
+        assert u.agents.count() == 19 and u.agents.count("active") == 4
         mine = u.agents.create_custom("my-agent", "Mine", description="d", model_tier="deep")
         assert mine.is_custom and mine.status == "off"
         for bad in ("A", "Upper", "x", "has space", "a" * 41):

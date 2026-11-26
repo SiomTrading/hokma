@@ -70,8 +70,10 @@ RULES: tuple[InjectionRule, ...] = (
     ),
     _rule(
         "trade_instruction", "high", "The text appears to order an order, a trade or a change to a desk or a broker.",
-        r"\b(?:place|send|submit|fire|cancel)\w*\b.{0,30}\b(?:orders?)\b",
-        r"\b(?:mand|env[i\u00ed]|coloc|cancel|ejecut|lanz|emit)\w*\b.{0,30}\b[o\u00f3]rden(?:es)?\b",
+        # An order aimed at the assistant says to do it now or says how much. The description of a rule of a strategy ("cancel the limit order if it is
+        # not filled in 3 bars") has neither, so it is not a finding. The gaps stop at the end of the sentence.
+        r"\b(?:place|send|submit|fire|cancel)\w*\b[^.!?\n]{0,30}\borders?\b[^.!?\n]{0,60}\b(?:\d[\d,.]*\s*(?:contracts?|shares?|lots?|units?)|right\s+now|right\s+away|immediately|now)\b",
+        r"\b(?:mand|env[i\u00ed]|coloc|cancel|ejecut|lanz|emit)\w*\b[^.!?\n]{0,30}\b[o\u00f3]rden(?:es)?\b[^.!?\n]{0,60}\b(?:\d[\d,.]*\s*(?:contratos?|acciones|lotes|unidades)|ya|ahora|inmediatamente|de\s+inmediato)\b",
         r"\b(?:buy|sell|short|compra|vende|compre|venda)\b\s+\d[\d,.]*\s*(?:contracts?|shares?|lots?|units?|contratos?|acciones|lotes)\b",
         r"\b(?:buy|sell|compra|vende)\s+(?:\w+\s+){0,2}(?:right\s+now|immediately|now|ya|ahora|inmediatamente)\b",
         r"\b(?:connect|link|approve|authorize|enable|activate|turn\s+on|switch\s+on|conect|aprueb|autoriz|activ|enciend|prend)\w*\b.{0,40}\b(?:desks?|brokers?|br[o\u00f3]kers?|mesas?)\b",

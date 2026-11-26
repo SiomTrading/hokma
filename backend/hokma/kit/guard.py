@@ -93,6 +93,8 @@ def _identity(path: str) -> tuple[int, int] | None:
         st = os.stat(path)
     except OSError:
         return None
+    if not st.st_ino:
+        return None            # Windows reports inode 0 for a folder it cannot number (cloud synced, redirected): that is no identity, and every such folder would look like the same one
     return (st.st_dev, st.st_ino)
 
 

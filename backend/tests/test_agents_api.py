@@ -11,7 +11,8 @@ from hokma.i18n import t
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths in assertions")
 DESK_KIT = {"desk-chief", "signals", "risk", "bull-case", "bear-case", "judge"}
 KIT = {"axel", "diego", "hokma", "hugo", "iris", "joel", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder",
-       "vera"} | DESK_KIT
+       "vera", "strategy-researcher", "strategy-coder", "strategy-reviewer"} | DESK_KIT
+CREATOR = {"strategy-researcher", "strategy-coder", "strategy-reviewer"}        # Ian, Sam and Ben: registered and on from the start (1.2.1)
 
 
 def by_slug(payload):
@@ -34,10 +35,10 @@ def test_kit_agents_are_listed_and_the_first_state_is_given_once(client, work):
     assert data["orchestrator"]["slug"] == "hokma" and data["orchestrator"]["active"]
     # base kit and Joel's sub-agents on; the rest of the specialists wait for their release
     assert {s for s, a in by_slug(data).items() if a["active"]} == {
-        "hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"}
-    assert data["active"] == 7
-    assert client.get("/api/agents/summary").json() == {"active": 7, "total": 16}
-    assert work.loaded() == {"hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"}
+        "hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"} | CREATOR
+    assert data["active"] == 10
+    assert client.get("/api/agents/summary").json() == {"active": 10, "total": 19}
+    assert work.loaded() == {"hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"} | CREATOR
     assert work.parked() == {"axel", "hugo", "iris"} | DESK_KIT   # the desk agents wait until a desk brings them in
 
 
@@ -104,7 +105,7 @@ def test_create_my_first_agent(client, work, db):
         assert row.is_custom and row.status == "active" and row.file_path == "agents/analista-de-graficos.md"
     # it is what /agente completes from and accepts
     listed = client.get("/api/agents").json()
-    assert "analista-de-graficos" in by_slug(listed) and listed["total"] == 17
+    assert "analista-de-graficos" in by_slug(listed) and listed["total"] == 20
     assert client.post("/api/agents", json=body).json()["detail"]["code"] == "agent_exists"
     # a restart keeps it custom and on
     AgentService().reconcile()

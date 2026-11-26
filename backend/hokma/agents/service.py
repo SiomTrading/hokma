@@ -10,12 +10,13 @@ from typing import Any
 from hokma.agents import files as fl
 from hokma.core.config import hokma_data_dir
 from hokma.db import Database, DbError, NotFound, get_database
+from hokma.db.seeds import creator_services
 
 log = logging.getLogger("hokma.agents")
 
 ORCHESTRATOR_SLUG = "hokma"
 # The kit installs these on; the rest of the agents (and the sub-agents of Joel) follow the table in HOKMA.md.
-BASE_KIT = frozenset({"hokma", "diego", "joel", "vera"})
+BASE_KIT = frozenset({"hokma", "diego", "joel", "vera"})   # `creator_services()` (Ian, Sam, Ben) start on as well: nobody else can create a strategy
 
 
 _synced: dict[str, tuple] = {}
@@ -279,7 +280,8 @@ class AgentService:
                 role = self.files.role_of(agent.slug, agent.file_path)
                 status = agent.status
                 if agent.slug not in seen:
-                    status = "active" if (agent.is_custom or agent.slug in BASE_KIT or role in ("orchestrator", "sub-agent")) \
+                    status = "active" if (agent.is_custom or agent.slug in BASE_KIT or agent.slug in creator_services()
+                                         or role in ("orchestrator", "sub-agent")) \
                         else "off"
                 if (role == "orchestrator" or agent.slug == ORCHESTRATOR_SLUG) and status != "active":
                     status = "active"

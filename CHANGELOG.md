@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1
+
+- New: A new Strategies screen in the left menu shows the bank: name, origin, state, version and source with a search, and each strategy opens with its rules and their citation, its versions, the code of the version (read only) and the buttons Optimize and Approve.
+- Fixed: Ian, Sam and Ben (the strategy creator) are registered as agents of the fund on a new installation and on an update, start on, and work for every desk, so the main agent can launch them and the strategy can be created.
+- Fixed: The text of a rule of a strategy that describes an order ("cancel the limit order if it is not filled in 3 bars") no longer raises the trade instruction warning of the source check: only an order aimed at the assistant, to do now or with a size, does.
+- Fixed: The working folder of the fund and its scratch folder are no longer refused as "stored keys": a folder that the system cannot number no longer looks like Hokma's data folder, and the real credentials stay protected.
+
 ## 1.2.0
 
 - New: Backtest and strategy factory tools for agents: backtest_run, backtest_status, backtest_result (with an HTML report whose text is escaped), backtest_optimize, backtest_walkforward, backtest_montecarlo and backtest_evidence, plus factory_list, factory_describe, factory_draft, factory_propose and data_papers. They take ids and values only, check every size against the quant limits, answer with classified errors (including forbidden_fill, bar_not_allowed_for_line, missing_tests, attempt_budget_spent and evaluator_changed) and send no order: a backtest has no road to a broker. The strategy researcher passes through his guard, so a run needs a spec whose tests pass, three failed attempts close a strategy until its root cause is written, and nothing is declared done without a fresh run id. The deflated Sharpe ratio counts every try of the ledger, failed ones included, once.

@@ -799,6 +799,22 @@ def check_hokma_code(text: str, ctx: Ctx, here: str | None = None, python: bool 
         raise Block("real_money", "hokma runtime interpreter")
 
 
+def in_workfolder_only(candidate: str, ctx: Ctx) -> bool:
+    """True when the path sits under the working folder of the fund (its scratch folder included) and neither the path nor where it really leads
+    is Hokma's data folder. The working folder holds the work of the owner and of the agents: it is never a place of keys. The comparison is by the
+    names of the folders, so an identity that a file system reports badly cannot make the working folder look like the data folder; a link that leads
+    into the data folder is still judged as the data folder."""
+
+    def inside(path: str, root: str) -> bool:
+        low, base = _fold(os.path.normpath(path)), _fold(os.path.normpath(root))
+        return low == base or low.startswith(base.rstrip("\\/") + os.sep)
+
+    real = os.path.realpath(candidate)
+    if any(inside(p, r) for p in (candidate, real) for r in (ctx.data, os.path.realpath(ctx.data))):
+        return False
+    return any(inside(candidate, root) for root in ctx.roots) and any(inside(real, root) or inside(real, os.path.realpath(root)) for root in ctx.roots)
+
+
 def check_real_path(path: str, ctx: Ctx, *, reading: bool = False, here: str | None = None, guarded: bool = True) -> None:
     """Resolve a path (relative to the call's folder) and refuse the secret places and, unless the command only reads,
     the hook files by identity. `guarded=False`: the hook files are judged elsewhere (`guard.decide`)."""
@@ -812,7 +828,7 @@ def check_real_path(path: str, ctx: Ctx, *, reading: bool = False, here: str | N
     candidates = list(dict.fromkeys((full, os.path.realpath(full))))
     for candidate in candidates:
         if SECRET_RE.search(norm_text(candidate)) or (
-                under_any(candidate, [ctx.data]) and read_hidden(candidate, ctx, content=False)):
+                under_any(candidate, [ctx.data]) and not in_workfolder_only(candidate, ctx) and read_hidden(candidate, ctx, content=False)):
             raise Block("secrets", short(path))
     for candidate in candidates:
         if guarded and not reading and under_any(candidate, ctx.protect):
@@ -862,7 +878,7 @@ def check_read_path(path: str, ctx: Ctx, here: str, *, content: bool) -> None:
                 raise Block("secrets", short(path))             # a glob that can reach dot files or climb out of its folder
         full = os.path.dirname(full[:cut]) or "/"
     for candidate in {full, os.path.realpath(full)}:
-        if under_any(candidate, [ctx.data]) and read_hidden(candidate, ctx, content=content):
+        if under_any(candidate, [ctx.data]) and not in_workfolder_only(candidate, ctx) and read_hidden(candidate, ctx, content=content):
             raise Block("secrets", short(path))
 
 

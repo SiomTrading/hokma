@@ -69,18 +69,18 @@ describe("left menu by height (task 3137)", () => {
     expect(menu()).toHaveAttribute("data-density", "tight");
   });
 
-  // 820 px: the Backtest entry (SPEC-032) added a row, so the roomy design needs a taller window than 768 px.
+  // 830 px: the Backtest entry (SPEC-032) and the Strategies entry (1.2.1) each added a row, so the roomy design needs a taller window than 768 px.
   it("follows the menu height live: opening the Terminal tightens it, closing it restores the design", () => {
-    height = menuHeight(820, false);
+    height = menuHeight(830, false);
     renderShell();
     expect(menu()).toHaveAttribute("data-density", "normal");
-    height = menuHeight(820, true);
+    height = menuHeight(830, true);
     act(() => observers.forEach((fire) => fire()));
     expect(menu()).toHaveAttribute("data-density", "compact");
     height = menuHeight(600, true);
     act(() => observers.forEach((fire) => fire()));
     expect(menu()).toHaveAttribute("data-density", "tight");
-    height = menuHeight(820, false);
+    height = menuHeight(830, false);
     act(() => observers.forEach((fire) => fire()));
     expect(menu()).toHaveAttribute("data-density", "normal");
   });

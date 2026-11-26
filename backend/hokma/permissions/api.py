@@ -19,7 +19,9 @@ restore, empty or delete for good. Errors are `{"detail": {"code", "message"}}`.
     GET  /api/checkpoints/{point}/changes        ?project_id=  -> {deleted[], changed[], truncated}
     POST /api/checkpoints/{point}/restore-file   {path, project_id?} -> {restored[], renamed, unchanged}
     POST /api/checkpoints/{point}/restore-deleted {project_id?}     -> {restored[], count, skipped[]}
-    GET  /api/strategy-code                      ?stage= -> {rows[]}   (strategies written as code: the notice of the chat reads the ones in stage generated)
+    GET  /api/strategy-bank                      ?status=&limit= -> {rows[], total}   (the bank of strategies, one row each with its last version; read only)
+    GET  /api/strategy-bank/{bank_id}            ?version= -> one strategy: rules with their citation, versions, events (read only)
+    GET  /api/strategy-code                      ?stage=&bank_id= -> {rows[]}   (strategies written as code: the notice of the chat reads the ones in stage generated)
     GET  /api/strategy-code/{id}                 -> the code, the checks and the verdicts of one version (read only)
     POST /api/strategy-code/{id}/approve         {confirm, note?} -> {status owner_reviewed}   (token + owner; 409 agent_review_required without the reviewer)
     POST /api/strategy-code/{id}/reject          {note?} -> {status rejected}                  (token + owner)
@@ -436,11 +438,36 @@ def create_router(engine_getter=None) -> APIRouter:
             raise _fail({"no_data": 404, "bad_input": 400}.get(exc.code, 409), "agent_review_required" if exc.code == "blocked" else exc.code, exc.message) from exc
 
     @router.get("/api/strategy-code")
-    def strategy_code_rows(stage: str | None = Query(default=None, max_length=20), x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    def strategy_code_rows(stage: str | None = Query(default=None, max_length=20), bank_id: int | None = Query(default=None, ge=1),
+                           x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
         _auth(x_hokma_token, token)
         from hokma.factory import user_rules
 
-        return _code_call(user_rules.list_code, stage=stage, limit=200)
+        return _code_call(user_rules.list_code, stage=stage, bank_id=bank_id, limit=200)
+
+    def _bank_call(fn, **kwargs):
+        from hokma.factory.bank import BankError
+
+        try:
+            return fn(**kwargs)
+        except BankError as exc:
+            raise _fail({"no_data": 404, "bad_input": 400}.get(exc.code, 409), exc.code, exc.message) from exc
+
+    @router.get("/api/strategy-bank")
+    def strategy_bank_rows(status: str | None = Query(default=None, max_length=20), limit: int = Query(default=200, ge=1, le=200),
+                           x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+        _auth(x_hokma_token, token)
+        from hokma.factory import bank
+
+        return _bank_call(bank.list_bank, status=status, limit=limit)
+
+    @router.get("/api/strategy-bank/{bank_id}")
+    def strategy_bank_read(bank_id: int, version: int | None = Query(default=None, ge=1), x_hokma_token: str = Header(default=""),
+                           token: str = Query(default="")) -> dict:
+        _auth(x_hokma_token, token)
+        from hokma.factory import bank
+
+        return _bank_call(bank.get, bank_id=bank_id, version=version)
 
     @router.get("/api/strategy-code/{item_id}")
     def strategy_code_read(item_id: int, x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> dict:

@@ -41,6 +41,7 @@ export const ICONS = {
   power: "M12 3v9M17.7 6.3a8 8 0 1 1-11.4 0",
   desks: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
   backtest: "M3 3v18h18M7 15l3-4 3 3 5-7M15 7h3v3",
+  strategies: "M4 6h16M4 12h16M4 18h10M18 16l2 2 3-4",
   trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
 } as const;
 

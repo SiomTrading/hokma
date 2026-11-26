@@ -91,12 +91,38 @@ def kit_agents_dir() -> Path:
     return app_root() / "kit" / "template" / "agents"
 
 
+def creator_services() -> tuple[str, ...]:
+    from hokma.kit.hokma_tools import CREATOR_SERVICES
+
+    return CREATOR_SERVICES
+
+
+def _service_agents(kit_dir: Path, installed_dir: Path) -> dict[str, dict[str, str]]:
+    """Ian, Sam and Ben (the strategy creator) live in `kit/template/service/agents/`, next to the other services, and not in
+    `agents/`. They are agents of the fund all the same: the file is copied once into the working folder's `agents/` (where every
+    agent file lives, and where the owner's changes to it are kept) and they are read from there like any kit agent."""
+    service_dir = kit_dir.parent / "service" / "agents"
+    found = {s: m for s, m in _read_agents(service_dir).items() if s in creator_services()} if service_dir.is_dir() else {}
+    for slug, meta in found.items() if installed_dir.is_dir() else ():                # no `agents/` yet: the kit itself is the source
+        target = installed_dir / meta["file"]
+        if target.exists() or target.is_symlink():
+            continue
+        try:
+            target.write_text(_substitute((service_dir / meta["file"]).read_text(encoding="utf-8")), encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            pass                                                  # not written: it is read from the kit below and retried at the next start
+    return found
+
+
 def seed_agents(session: Session, *, workdir_agents: Path | None = None, kit_dir: Path | None = None) -> int:
     """Insert or refresh the agents of the kit. Returns how many rows were added or turned off."""
     kit_dir = kit_dir if kit_dir is not None else kit_agents_dir()
     installed_dir = workdir_agents if workdir_agents is not None else hokma_home() / "agents"
     kit = _read_agents(kit_dir) if kit_dir.is_dir() else {}
+    services = _service_agents(kit_dir, installed_dir)
+    kit = {**kit, **services} if (kit or services) else kit
     source = _read_agents(installed_dir) if installed_dir.is_dir() else kit
+    source = {**source, **{s: m for s, m in services.items() if s not in source}}
     repo = AgentsRepo(session)
     changed = 0
     for slug, meta in source.items():

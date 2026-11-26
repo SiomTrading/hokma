@@ -1,0 +1,20 @@
+/* Strategies screen. Glass tokens only. */
+.str-page { display: flex; flex-direction: column; gap: 14px; padding: 22px 24px 32px; max-width: 980px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.str-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--glass-subtle); overflow: hidden; font: 500 13px/1.4 Montserrat, sans-serif; color: var(--t1); }
+.str-table th { text-align: left; padding: 9px 12px; color: var(--t2); font-weight: 600; font-size: 12px; border-bottom: 1px solid var(--border); }
+.str-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.str-table tr:last-child td { border-bottom: 0; }
+.str-row { cursor: pointer; }
+.str-row:hover, .str-row:focus-visible { background: var(--glass-subtle); outline: none; box-shadow: inset 2px 0 0 var(--acc); }
+.str-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.str-head h1 { margin: 0; flex: 1; min-width: 0; }
+.str-meta { color: var(--t2); font: 500 12px/1.4 Montserrat, sans-serif; display: flex; gap: 12px; flex-wrap: wrap; }
+.str-section { border: 1px solid var(--border); border-radius: 12px; background: var(--glass-subtle); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.str-section h2 { margin: 0; font: 600 13px/1.4 Montserrat, sans-serif; color: var(--t1); }
+.str-rule { display: flex; flex-direction: column; gap: 2px; font: 500 13px/1.45 Montserrat, sans-serif; color: var(--t1); overflow-wrap: anywhere; }
+.str-rule-path { color: var(--t3); font-size: 11px; }
+.str-rule-cite { color: var(--t2); font-size: 12px; }
+.str-versions { display: flex; gap: 6px; flex-wrap: wrap; }
+.str-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.str-code { margin: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--glass-subtle); color: var(--t1); font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; overflow: auto; max-height: 420px; white-space: pre; }
+.str-note { color: var(--t2); font: 500 12px/1.4 Montserrat, sans-serif; }
