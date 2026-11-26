@@ -19,7 +19,7 @@ FINDING = {"type": "object", "description": "severity (blocker, major, minor or 
     "required": ["severity", "message"], "additionalProperties": False}
 
 
-@TOOLSET.tool("strategy_brief_write", "Register in the bank the spec of a strategy that will be programmed. The requirement itself is the numbered spec.md (spec-four-phases): write projects/{project}/specs/{NNN}-{slug}/spec.md "
+@TOOLSET.tool("strategy_brief_write", "Register in the bank the spec of a strategy that will be programmed. The requirement itself is the numbered spec.md (spec-four-phases): write service/strategies/STR-{NNN}-{slug}/spec.md "
               "with Write first, then call this with bank_id, slug and title the first time (the strategy rule is created with its folder) or rule_id for the next version. The brief is only its summary; the "
               "path of the spec is found and kept. Without that spec.md no code is saved.", {
     "bank_id": _i("The strategy of the bank that needs code (first requirement)."), "slug": _s("Lower case letters, digits and underscores, 2 to 40 characters (first requirement)."),

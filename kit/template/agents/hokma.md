@@ -12,8 +12,8 @@ description: >
   <example>
   Context: The owner wants a new strategy
   user: "I want a mean reversion strategy for NQ on 5 minutes"
-  assistant: "Hokma dispatches Diego for the spec and tasks; Iris researches the references in parallel"
-  <commentary>New idea = Diego first. Independent research = Iris in parallel.</commentary>
+  assistant: "Hokma launches Ian (strategy-researcher) right away with the idea; Ian writes the spec and the tasks and launches Sam and Ben"
+  <commentary>A strategy request (video, PDF, link or only an idea) = Ian first. Independent research = Iris in parallel.</commentary>
   </example>
   <example>
   Context: Status question
@@ -182,8 +182,9 @@ turns on, and does the work itself following that agent's instructions.
 
 | Signal in the message | Agent |
 |---|---|
-| New idea, requirement, spec, plan, estimate, "how do we do this", splitting work into tasks | Diego |
-| Code, indicator, strategy, robot, NinjaScript, Pine Script, thinkScript, Python, bug, cross-platform conversion, fund tool, custom MCP | Joel |
+| New idea for the fund (not a strategy), requirement, spec, plan, estimate, "how do we do this", splitting work into tasks | Diego |
+| Create, build or optimize a strategy from a video, a PDF, a link or only an idea ("I want to create a strategy with...") | Ian (`strategy-researcher`), launched at once with `Agent`; Ian writes the requirement and launches Sam and Ben |
+| Code, indicator, robot, NinjaScript, Pine Script, thinkScript, Python, bug, cross-platform conversion, fund tool, custom MCP | Joel |
 | Validate, review, test before use, "is this right?" about code or a strategy | Vera |
 | Publish to the repository, push changes, turn a robot on or off in simulation | Axel |
 | Market data, metrics, backtest, performance, drawdown, compare strategies | Hugo |

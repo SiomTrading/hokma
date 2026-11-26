@@ -41,7 +41,8 @@ def test_each_skill_exists_in_the_skill_format_and_passes_the_repo_rules(name):
 
 
 def test_the_package_holds_exactly_these_skills_and_its_manifest_is_current():
-    creator = ("source-to-strategy", "strategy-requirement", "strategy-code-contract", "code-test-first", "code-root-cause", "code-done-check", "review-reply", "strategy-code-review", "review-evidence")
+    creator = ("source-to-strategy", "strategy-requirement", "strategy-code-contract", "code-test-first", "code-root-cause", "code-done-check", "review-reply", "strategy-code-review", "review-evidence",
+               "spec-four-phases", "spec-method", "spec-templates", "idea-gate", "plan-writing", "done-check", "doc-writing", "backend-quality", "tdd-coach")      # 1.2.5: the skills of Diego that Ian and Sam cite
     expected = sorted((*NAMES, *IAN_NAMES, *creator))
     assert sorted(p.parent.name for p in SKILLS.glob("*/SKILL.md")) == expected
     manifest = skill_format.read_manifest(SKILLS)

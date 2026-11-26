@@ -16,7 +16,8 @@ from hokma.desks.core.signal import LINES
 from hokma.factory import research_loop, researcher
 
 ROOT = Path(__file__).resolve().parents[3]
-LAUNCHERS = ("kit/template/CLAUDE.md", "kit/template/desks/CLAUDE.desk.md", "kit/template/agents/desk-chief.md", "kit/template/agents/hokma.md")      # 1.2.2: they name the agents to launch them
+LAUNCHERS = ("kit/template/CLAUDE.md", "kit/template/desks/CLAUDE.desk.md", "kit/template/agents/desk-chief.md", "kit/template/agents/hokma.md",
+             "kit/template/agents/hugo.md", "kit/template/agents/iris.md", "kit/template/agents/risk.md", "kit/template/agents/signals.md")      # 1.2.2: they name the agents to launch them; 1.2.5: so do the agents of a desk
 SERVICE = ROOT / "kit" / "template" / "service"
 SKILLS = SERVICE / "skills"
 AGENT = SERVICE / "agents" / "strategy-researcher.md"

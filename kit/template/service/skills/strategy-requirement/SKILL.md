@@ -20,7 +20,7 @@ avoid:
 ---
 ## Shape of the requirement
 
-It is saved with `strategy_brief_write` and lives only in the base. It is for the coder; the owner never reads it as a document.
+The requirement is the file spec.md in the folder of the strategy, service/strategies/STR-{NNN}-{slug}/spec.md, written with `Write`. Then `strategy_brief_write` registers its summary. It is for the coder; the owner never reads it as a document.
 
 - summary: one or two sentences.
 - quote: the locator of the passage (a time or a page).

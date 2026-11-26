@@ -118,6 +118,19 @@ def _spec_maps(spec: factory_spec.StrategySpec) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------------------------------- create
+def idea_sheet(idea: str) -> dict[str, Any]:
+    """The sheet of an idea that comes alone, with no source to cite: every field is not specified, so nothing is guessed and the strategy is born as an idea.
+    Ian fills it in later, with the next version of the card, from the spec he writes."""
+    from hokma.sources import extraction as xt
+
+    blank = {"value": xt.NOT_SPECIFIED}
+    sheet: dict[str, Any] = {"schema": xt.SCHEMA, "summary": " ".join(idea.split())[:xt.MAX_SUMMARY], "instruments": dict(blank), "timeframe": dict(blank),
+                             "execution": dict(blank), "needs_new_rule": []}
+    for component, keys in xt.LEAF_KEYS.items():
+        sheet[component] = {key: dict(blank) for key in keys}
+    return sheet
+
+
 def _bank_row(session: Any, bank_id: int) -> dict[str, Any]:
     row = session.one("SELECT * FROM strategy_bank WHERE id = :i", {"i": bank_id})
     if row is None:

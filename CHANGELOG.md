@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.5
+
+- New: Asking for a strategy from any chat (the main chat or the chat of a desk, with any agent) hands the request to Ian first, whether it comes with a video, a PDF, a link or only an idea. Any agent of a desk that has no way to launch an agent creates a task assigned to Ian; the main chat launches him. Ian writes the requirement and then launches Sam and Ben.
+- New: An idea with no source is enough: bank_create takes the idea in text, saves it as a source of the owner and makes the card (an idea with nothing specified) and its folder STR-{NNN}-{slug}.
+- Changed: The spec.md of a strategy lives in service/strategies/STR-{NNN}-{slug}/spec.md in the tool text, the messages, the skill of the requirement and the decisions, plans and retrospectives of Ian. Ian writes it himself and launches Sam and Ben with the Agent tool, one road only.
+- New: The skills that Ian and Sam cite now exist: spec-four-phases, spec-method, spec-templates, idea-gate, plan-writing, done-check and doc-writing for Ian, and backend-quality and tdd-coach for Sam.
+- Fixed: The registered copy of Ian, Sam and Ben (the one Claude Code loads, in the main chat and in every desk) always carries Read, Write, Edit and Agent next to their bank tools. An older copy that kept only the bank tools is renewed from the kit at the next start, and a source file that was edited or narrowed is repaired when the copy is registered. The model the owner chose stays.
+
 ## 1.2.4
 
 - New: The backtest of the engine fills limit entries: a long fills when the low reaches the limit, a short when the high does, at the limit price (at the open when the bar gaps through it, with no tick against). The order lives one bar and cancels itself when it does not fill.

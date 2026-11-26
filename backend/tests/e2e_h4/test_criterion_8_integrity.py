@@ -57,8 +57,9 @@ def test_the_skills_and_the_agent_reach_no_other_agent_no_desk_role_and_no_clerk
         for name in (*SKILLS_OF_THE_SPEC, researcher.AGENT_SLUG):
             if (rel(path), name) == IRIS:
                 continue                                                                     # her own skill, bundled before this spec, shares the name
-            if name == researcher.AGENT_SLUG and rel(path) in ("kit/template/CLAUDE.md", "kit/template/desks/CLAUDE.desk.md", "kit/template/agents/desk-chief.md", "kit/template/agents/hokma.md"):
-                continue          # 1.2.2: they name the agent to launch it
+            if name == researcher.AGENT_SLUG and rel(path) in ("kit/template/CLAUDE.md", "kit/template/desks/CLAUDE.desk.md", "kit/template/agents/desk-chief.md", "kit/template/agents/hokma.md",
+                                              "kit/template/agents/hugo.md", "kit/template/agents/iris.md", "kit/template/agents/risk.md", "kit/template/agents/signals.md"):
+                continue          # 1.2.2: they name the agent to launch it; 1.2.5: every agent of a desk hands the request to him
             assert name not in content, (rel(path), name)
     composer = prompt_rules.PromptComposer()
     from datetime import datetime, timezone

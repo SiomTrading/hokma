@@ -34,7 +34,7 @@ What the installer copies into the owner's fund folder, plus the skills the agen
 - **fetch:** downloaded by the installer on the owner's computer from its official source,
   resolved through the Hokma skills registry. Never shipped in the kit.
 
-The full list is in `skills-manifest.json`: 82 bundle, 11 fetch.
+The full list is in `skills-manifest.json`: 83 bundle, 10 fetch.
 
 ## Hokma MCP tools the agents call
 

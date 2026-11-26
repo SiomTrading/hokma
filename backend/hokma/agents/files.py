@@ -28,6 +28,11 @@ TIER_MODEL = {"fast": "haiku", "balanced": "sonnet", "deep": "opus"}
 MODEL_TIER = {model: tier for tier, model in TIER_MODEL.items()}
 MODELS = tuple(MODEL_TIER)
 
+# The three agents of the strategy creator (Ian, Sam and Ben) serve the main chat and every desk, and work like Diego, Joel and Vera: the registered copy always carries these
+# tools, whatever an older or edited source file says (1.2.5). Their own bank tools stay as the source lists them.
+CREATOR_AGENTS = ("strategy-researcher", "strategy-coder", "strategy-reviewer")
+CREATOR_TOOLS = ("Read", "Write", "Edit", "Agent")
+
 MAX_NAME = 60
 MAX_DESCRIPTION = 500
 MAX_INSTRUCTIONS = 8000
@@ -109,6 +114,18 @@ def frontmatter_value(text: str, key: str) -> str | None:
         if match and match.group(1) == key and not line.startswith((" ", "\t")):
             return line.split(":", 1)[1].strip().strip("'\"")
     return None
+
+
+def ensure_creator_tools(slug: str, text: str) -> str:
+    """The text of Ian, Sam or Ben with Read, Write, Edit and Agent in its `tools:` line (added when missing, the rest untouched); any other agent is returned as it is."""
+    if slug not in CREATOR_AGENTS:
+        return text
+    current = frontmatter_value(text, "tools")
+    if current is None:
+        return text                                              # no tools line: the agent inherits every tool
+    names = [name.strip() for name in current.split(",") if name.strip()]
+    missing = [tool for tool in CREATOR_TOOLS if tool not in names]
+    return set_frontmatter_value(text, "tools", ", ".join([*names, *missing])) if missing else text
 
 
 def clean_tools(value: object) -> str:
@@ -210,6 +227,7 @@ class AgentFiles:
             text = self._read(f"{LOADED_DIR}/{slug}.md") or self._read(f"{OFF_DIR}/{slug}.md")
             if text is None:
                 return False
+        text = ensure_creator_tools(slug, text)
         if model is not None:
             tier = MODEL_TIER[model]
             if frontmatter_value(text, "model") != model or frontmatter_value(text, "hokma-tier") != tier:

@@ -120,21 +120,32 @@ def source_ingest(u, c, a: dict) -> str:
 
 
 @TOOLSET.tool("bank_create", "Save a strategy in the bank from the extraction sheet of a source: its five components, each field with the passage ids it comes from or marked as "
-              "proposed with its reason. Every cited passage must belong to the source. A rule the factory does not have goes to needs_new_rule and the version has no spec. When "
+              "proposed with its reason. An idea that comes alone, with no source, needs only title and idea: Hokma saves the idea as a source of the owner and the card is born as an idea with every field not specified. Every cited passage must belong to the source. A rule the factory does not have goes to needs_new_rule and the version has no spec. When "
               "everything maps, give the saved spec (strategy_id and spec_version) and it must use the alpha and parts of the sheet. With bank_id it saves the next version.", {
-    "title": _s("Name of the strategy, 1 to 160 characters."), "source_id": _i("The source the sheet comes from."),
+    "title": _s("Name of the strategy, 1 to 160 characters."), "source_id": _i("The source the sheet comes from (left out when the strategy comes from an idea alone)."),
+    "idea": _s("The idea of the owner in his words, when there is no source: it is saved as a source and no extraction is needed."),
     "extraction": _o("The sheet: schema, summary, line, instruments, timeframe, signal_logic, entry, exit, sizing, risk_controls, execution and needs_new_rule."),
     "line": _s("RF, DT, SWC, SWO or LP; if left out, the one of the sheet.", enum=list(LINES)),
     "strategy_id": _s("The saved spec that stands for the sheet (with spec_version)."), "spec_version": _i("Version of that spec."),
     "bank_id": _i("Save a next version of this strategy of the bank."), "derived_from": _i("The version this one comes from (default: the last one).")},
-              ["title", "source_id", "extraction"], writes=True)
+              ["title"], writes=True)
 @_guarded
 def bank_create(u, c, a: dict) -> str:
     from hokma.factory import bank
+    from hokma.sources import ingest
 
-    if len(json.dumps(a["extraction"], default=str).encode("utf-8")) > MAX_EXTRACTION_BYTES:
+    source_id, extraction = a.get("source_id"), a.get("extraction")
+    if source_id is None:                                  # an idea alone is its own source and its sheet has nothing specified yet
+        idea = a.get("idea")
+        if not isinstance(idea, str) or not idea.strip():
+            raise ToolError("bad_input", "give the source_id of a saved source, or the idea in text when there is no source")
+        source_id = ingest.ingest_text(idea, kind="text", reference=None, rights="own", caller=_caller(c)).id
+        extraction = extraction if extraction is not None else bank.idea_sheet(idea)
+    elif extraction is None:
+        raise ToolError("bad_input", "a source needs its extraction sheet")
+    if len(json.dumps(extraction, default=str).encode("utf-8")) > MAX_EXTRACTION_BYTES:
         raise ToolError("bad_input", f"extraction is at most {MAX_EXTRACTION_BYTES // 1024} KB")
-    made = bank.create(title=a["title"], source_id=a["source_id"], extraction=a["extraction"], line=a.get("line"), strategy_id=a.get("strategy_id"),
+    made = bank.create(title=a["title"], source_id=source_id, extraction=extraction, line=a.get("line"), strategy_id=a.get("strategy_id"),
                        spec_version=a.get("spec_version"), bank_id=a.get("bank_id"), derived_from=a.get("derived_from"), caller=_caller(c), origin=own_desk(c))
     from hokma.factory import user_rules
 

@@ -18,6 +18,10 @@
    "digest": "eb18fa1fcb5c7fce4beb01fc91be4957ae68a6c69d914d85cc0c9bc9c3cac3c9",
    "version": "1.0.0"
   },
+  "backend-quality": {
+   "digest": "06e7ddf8c11b39838a8da850545bcc86fca78e6c5a1a3813501263e158d462de",
+   "version": "1.0.0"
+  },
   "backtest-audit": {
    "digest": "3ed83bba6b04112bf7c8923f9febcb87945b624d8f0e50a301d79c067e4f5564",
    "version": "1.0.0"
@@ -46,8 +50,20 @@
    "digest": "243d221afbd0edd3732ca6a08fa1b1892a5f29371a1434698df24a9c4d75ad06",
    "version": "1.0.0"
   },
+  "doc-writing": {
+   "digest": "6bea497646d1dfc5e80533f5c959542377f36f549d4867e73325586afeaeb983",
+   "version": "1.0.0"
+  },
+  "done-check": {
+   "digest": "1329a0f5c22091f7273495b7661d4b007f40e9b0b92f68297f2bcc486dccabef",
+   "version": "1.0.0"
+  },
   "feature-engineering": {
    "digest": "ae0c1563ef6877af08a8d61d6c8275fb43db805a0fdaa5fb2fdbff650f99fadb",
+   "version": "1.0.0"
+  },
+  "idea-gate": {
+   "digest": "43286f352bddb0d16d47a8390a4c2da8e2caf023216fe18f6d804293cf3d934b",
    "version": "1.0.0"
   },
   "paper-search": {
@@ -56,6 +72,10 @@
   },
   "performance-attribution": {
    "digest": "8fef3aa57c8bbb2e90e646a1dcd542c9f105b92fc64a5f98c7f65c9fe9b091ed",
+   "version": "1.0.0"
+  },
+  "plan-writing": {
+   "digest": "438daeb63521b6547a34e7c000439e8663f8a00bcbda038ece638f3e9c5eb971",
    "version": "1.0.0"
   },
   "research-loop": {
@@ -82,6 +102,18 @@
    "digest": "7eee859c9a56e5275d6d99583ae3275ca2d8fbab185044ebe560ca2456b33bdb",
    "version": "1.0.0"
   },
+  "spec-four-phases": {
+   "digest": "b05ddb8dbe2b04dd1bbe9b004d55680d2d74bc30bc5f015b300cae8d2012119b",
+   "version": "1.0.0"
+  },
+  "spec-method": {
+   "digest": "b8841f27f829c14018855877432d08809cdc8331c496d2a238e6be5c0dfcc46d",
+   "version": "1.0.0"
+  },
+  "spec-templates": {
+   "digest": "15e726abf15ed54477b84585ea73135ffa85f222be0583caec6eb9c6b942fa5f",
+   "version": "1.0.0"
+  },
   "spreadsheet-export": {
    "digest": "7038ccd24577b165c8d48f3d290ad4b5d4512f4c49971936cc2078b7abf2b22c",
    "version": "1.0.0"
@@ -103,7 +135,11 @@
    "version": "1.0.0"
   },
   "strategy-requirement": {
-   "digest": "545335b4c21c49bc78182e8590854dd1b8b1dea8089d9c2e6a6eab322cf8d439",
+   "digest": "b1ba6109f97cb6c9e3dbba4487be60b77539e973d47aa15959a142807800e623",
+   "version": "1.0.0"
+  },
+  "tdd-coach": {
+   "digest": "2af805f0a8ac6ac9c973a8a0b3a1c5e2995424c8753a6cef5e7ae9b8673eec53",
    "version": "1.0.0"
   },
   "test-first-strategy": {

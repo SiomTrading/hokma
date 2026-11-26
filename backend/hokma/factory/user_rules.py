@@ -297,7 +297,7 @@ def save_code(*, rule_id: int, caller: str, dry_run: bool = False, origin: tuple
         next_number = int(s.scalar("SELECT COALESCE(MAX(version), 0) FROM user_rule_versions WHERE rule_id = :r", {"r": int(rule["id"])})) + 1
     bank_ref = int(rule["bank_id"])
     if brief is None or spec_file(bank_ref, bank_slug) is None:
-        raise UserRuleError("blocked", "no spec: the numbered spec.md (service/strategies/{NNN}-{slug}/spec.md) is written first, and without it no code is saved")
+        raise UserRuleError("blocked", "no spec: the numbered spec.md (service/strategies/STR-{NNN}-{slug}/spec.md) is written first, and without it no code is saved")
     if rejected >= MAX_REJECTIONS:
         raise UserRuleError("blocked", f"the reviewer rejected this strategy {rejected} times: stop and tell the owner why")
     slug = rule["slug"]

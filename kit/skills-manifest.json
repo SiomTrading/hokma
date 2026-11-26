@@ -103,7 +103,7 @@
     {"id": "pdf-reading", "agents": ["iris"], "method": "fetch"},
     {"id": "word-reading", "agents": ["iris"], "method": "fetch"},
     {"id": "deep-investigation", "agents": ["joel", "hugo", "iris", "strategy-coder"], "method": "fetch"},
-    {"id": "idea-gate", "agents": ["diego", "strategy-researcher"], "method": "fetch"},
+    {"id": "idea-gate", "agents": ["diego", "strategy-researcher"], "method": "bundle"},
     {"id": "security-officer-scan", "agents": ["joel", "vera", "strategy-coder", "strategy-reviewer"], "method": "fetch"},
     {"id": "post-release-watch", "agents": ["axel"], "method": "fetch"}
   ]
