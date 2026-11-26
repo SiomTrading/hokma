@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { DragEvent, KeyboardEvent } from "react";
 import { cx } from "@/design";
 import { useI18n } from "@/i18n";
@@ -18,6 +19,23 @@ interface Props {
   blocked?: Partial<Record<DeskTab, string>>;
 }
 
+/** Where the "+ Add" menu sits: fixed in the window, under its button, so no ancestor with overflow or its own stacking context can cut it. */
+interface MenuBox {
+  top: number;
+  left: number;
+  maxHeight: number;
+}
+
+const MENU_WIDTH = 260;
+const MENU_MARGIN = 8;
+
+function menuBox(anchor: HTMLElement): MenuBox {
+  const rect = anchor.getBoundingClientRect();
+  const left = Math.max(MENU_MARGIN, Math.min(rect.left, window.innerWidth - MENU_WIDTH - MENU_MARGIN));
+  const top = rect.bottom + 6;
+  return { top, left, maxHeight: Math.max(120, window.innerHeight - top - MENU_MARGIN) };
+}
+
 /**
  * The tabs of a desk (SPEC-025, delivery 3): every tab moves by dragging it, or with Ctrl+Shift+Arrow Left or Right when it has the focus
  * (the move is announced once, "Rules, position 3 of 6"). The panels that can leave have an "x"; "+ Add" lists the ones that are missing.
@@ -28,6 +46,9 @@ export function PanelTabs({ order, tab, tabKey, onTab, onOrder, onAdd, onRemove,
   const [over, setOver] = useState<{ id: DeskTab; before: boolean } | null>(null);
   const [note, setNote] = useState("");
   const [menu, setMenu] = useState(false);
+  const [box, setBox] = useState<MenuBox | null>(null);
+  const addButton = useRef<HTMLButtonElement | null>(null);
+  const menuList = useRef<HTMLUListElement | null>(null);
   /** The tab that was moved by key: its button is rebuilt in the new place, so it gets the focus back there. */
   const refocus = useRef<DeskTab | null>(null);
   const missing = missingPanels(order);
@@ -42,6 +63,20 @@ export function PanelTabs({ order, tab, tabKey, onTab, onOrder, onAdd, onRemove,
   useEffect(() => {
     if (missing.length === 0) setMenu(false);
   }, [missing.length]);
+
+  useLayoutEffect(() => {
+    if (!menu) return;
+    const place = () => {
+      if (addButton.current) setBox(menuBox(addButton.current));
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [menu]);
 
   const onKey = (id: DeskTab, event: KeyboardEvent<HTMLButtonElement>) => {
     if (!(event.ctrlKey && event.shiftKey) || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
@@ -124,32 +159,39 @@ export function PanelTabs({ order, tab, tabKey, onTab, onOrder, onAdd, onRemove,
             if (event.key === "Escape") setMenu(false);
           }}
           onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMenu(false);
+            const next = event.relatedTarget as Node | null;
+            if (!event.currentTarget.contains(next) && !menuList.current?.contains(next ?? null)) setMenu(false);
           }}
         >
-          <button type="button" className="ext-tab" aria-haspopup="true" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+          <button ref={addButton} type="button" className="ext-tab" aria-haspopup="true" aria-expanded={menu} onClick={() => {
+              if (!menu && addButton.current) setBox(menuBox(addButton.current));
+              setMenu(!menu);
+            }}>
             {t("desks.panels.add")}
           </button>
-          {menu ? (
-            <ul className="desk-tab-menu" aria-label={t("desks.panels.addLabel")}>
-              {missing.map((id) => (
-                <li key={id}>
-                  <button
-                    type="button"
-                    disabled={blocked[id] !== undefined}
-                    aria-disabled={blocked[id] !== undefined}
-                    onClick={() => {
-                      setMenu(false);
-                      onAdd(id);
-                    }}
-                  >
-                    <b>{name(id)}</b>
-                    <span>{blocked[id] ?? t(`desks.panel.desc.${id}`)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          {menu && box
+            ? createPortal(
+                <ul ref={menuList} className="desk-tab-menu" style={{ top: box.top, left: box.left, maxHeight: box.maxHeight }} aria-label={t("desks.panels.addLabel")}>
+                  {missing.map((id) => (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        disabled={blocked[id] !== undefined}
+                        aria-disabled={blocked[id] !== undefined}
+                        onClick={() => {
+                          setMenu(false);
+                          onAdd(id);
+                        }}
+                      >
+                        <b>{name(id)}</b>
+                        <span>{blocked[id] ?? t(`desks.panel.desc.${id}`)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>,
+                addButton.current?.closest(".hk") ?? document.body,
+              )
+            : null}
         </div>
       ) : null}
     </div>

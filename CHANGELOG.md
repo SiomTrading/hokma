@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed: The "+ Add" menu of the desk bar is now drawn above everything and can be clicked: the bar clipped it, so no panel could be added. It opens under its button at any window size, closes with Escape or when the focus leaves it, and adding Company works again.
+- Fixed: The Project section of the side panel now takes only its own room and scrolls inside it, so with several projects its list, tree and drop zone no longer cover Agents in this session, In the background and Results. On a short window the desk terminal keeps its list of assets clear of the quote: the list is taller and the account line of the desk bar takes less height.
+
 ## 1.1.0
 
 - New: The chat engine tells which agent did each step: subagents and their steps travel as their own events, and the saved answer keeps them, so the right panel can show them.
