@@ -95,13 +95,14 @@ def handle(message: dict, data: str, roots: list[str], protect: list[str]) -> di
         from hokma.kit import hokma_tools
 
         name = params.get("name") if isinstance(params, dict) else None
+        sent, identity = hokma_tools.split_identity(params.get("arguments") if isinstance(params, dict) else None)    # who calls: the hook's stamp, never an argument
         if name in hokma_tools.TOOLS:
-            text, is_error = hokma_tools.call(name, params.get("arguments") or {})
+            text, is_error = hokma_tools.call(name, sent or {}, hokma_tools.caller_for(identity))
             return {"jsonrpc": "2.0", "id": ident, "result": {"content": [{"type": "text", "text": text}],
                                                               "isError": is_error}}
         if name != TOOL["name"]:
             return {"jsonrpc": "2.0", "id": ident, "error": {"code": -32602, "message": "unknown tool"}}
-        arguments_in = params.get("arguments")
+        arguments_in = sent
         text, is_error = call_trash_move(arguments_in if isinstance(arguments_in, dict) else {}, data, roots, protect)
         return {"jsonrpc": "2.0", "id": ident, "result": {"content": [{"type": "text", "text": text}],
                                                           "isError": is_error}}

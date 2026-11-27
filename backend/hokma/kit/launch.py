@@ -62,13 +62,16 @@ HOKMA_SERVER = "hokma"
 def hokma_server() -> dict:
     """Hokma's own MCP server (the trash tool). Started like the guard hooks: by absolute path, isolated interpreter.
     The engine sets HOKMA_WORK_ROOT and HOKMA_CONVERSATION_ID on the `claude` process; the environment expansion of
-    the MCP config hands them to the server, and an empty or unexpanded value is ignored there."""
+    the MCP config hands them to the server, and an empty or unexpanded value is ignored there.
+    HOKMA_IDENTITY_HOOK=1 tells the server that the PreToolUse hook of kit/identity_hook.py stamps on each call which agent makes it (the agents launched
+    with the Agent tool share this one process, so HOKMA_AGENT alone would make all of them the agent of the session). Only this launch sets it."""
     args = ["-I", str(TRASH_MCP), "--data", str(hokma_data_dir()), "--workdir", str(hokma_home())]
     for p in protected_paths():
         args += ["--protect", str(p)]
     return {"type": "stdio", "command": sys.executable, "args": args,
             "env": {"HOKMA_WORK_ROOT": "${HOKMA_WORK_ROOT:-}", "HOKMA_CONVERSATION_ID": "${HOKMA_CONVERSATION_ID:-}",
-                    "HOKMA_TASK_ID": "${HOKMA_TASK_ID:-}", "HOKMA_AGENT": "${HOKMA_AGENT:-}"}}
+                    "HOKMA_TASK_ID": "${HOKMA_TASK_ID:-}", "HOKMA_AGENT": "${HOKMA_AGENT:-}",
+                    "HOKMA_IDENTITY_HOOK": "1"}}
 
 
 def write_mcp_config() -> str:

@@ -65,6 +65,15 @@
             "command": "{{HARDBLOCK_COMMAND}}"
           }
         ]
+      },
+      {
+        "matcher": "mcp__hokma__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{IDENTITY_COMMAND}}"
+          }
+        ]
       }
     ]
   }

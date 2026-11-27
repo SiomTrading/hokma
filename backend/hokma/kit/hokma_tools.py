@@ -3,7 +3,9 @@ extension requests, agents and bugs.
 
 Every tool calls the same repositories the panel's API uses, so the rules of state (transitions, atomic claims,
 heartbeats, who may do what) are the ones the owner sees. Who is calling comes from the environment Hokma sets when it
-launches the engine (HOKMA_AGENT, HOKMA_TASK_ID, HOKMA_CONVERSATION_ID); the agent does not choose it.
+launches the engine (HOKMA_AGENT, HOKMA_TASK_ID, HOKMA_CONVERSATION_ID); the agent does not choose it. The agents launched with the Agent
+tool share the server of the session, so on Claude Code the identity of each call comes stamped by the PreToolUse hook
+kit/identity_hook.py in the field IDENTITY_FIELD of the arguments (see `caller_for`); the model cannot write it, the hook overwrites it.
 
 What only the owner does is not here: approving decisions, changing the permission mode, emptying or restoring the
 trash, restoring points. `decision_propose` leaves the decision pending for the owner.
@@ -59,8 +61,12 @@ def _id(desc: str = "") -> dict[str, Any]:
     return {"type": ["integer", "string"], "description": desc}
 
 
+IDENTITY_FIELD = "_hokma_agent"                 # the field the hook stamps on every call (a copy lives in kit/identity_hook.py, which runs with the standard library only)
+IDENTITY_TRUST_ENV = "HOKMA_IDENTITY_HOOK"       # "1" in the environment of the server only when Hokma launched it for Claude Code, where the hook is registered
+
+
 class Caller:
-    """Who is calling, from the environment of the engine process."""
+    """Who is calling, from the environment of the engine process (or from the hook, see `caller_for`)."""
 
     def __init__(self, env: dict[str, str] | None = None) -> None:
         env = os.environ if env is None else env
@@ -77,6 +83,37 @@ class Caller:
     @property
     def slug(self) -> str:
         return self.agent or "agent"
+
+
+def split_identity(arguments: Any) -> tuple[Any, str | None]:
+    """The arguments without the identity field, and what the field said (None when it was not there). The field is always taken off: it is not an argument of any tool."""
+    if not isinstance(arguments, dict) or IDENTITY_FIELD not in arguments:
+        return arguments, None
+    rest = {k: v for k, v in arguments.items() if k != IDENTITY_FIELD}
+    said = arguments[IDENTITY_FIELD]
+    return rest, said if isinstance(said, str) else ""
+
+
+def caller_for(identity: str | None, env: dict[str, str] | None = None) -> Caller:
+    """The caller of one call. The environment says who the session is; the identity stamped by the hook says which agent of the session makes THIS call.
+
+    It counts only when the server was launched for Claude Code (HOKMA_IDENTITY_HOOK=1: the hook rewrites every call, so the model's own value never survives) and when it
+    names an agent Hokma knows. Anything else (no field, an engine without the hook, a built-in helper such as general-purpose) leaves the caller of the environment."""
+    source = os.environ if env is None else env
+    caller = Caller(source)
+    slug = identity.strip() if isinstance(identity, str) else ""
+    if source.get(IDENTITY_TRUST_ENV) != "1" or not slug or slug == caller.agent:
+        return caller
+    from hokma.db import current_version, get_database
+
+    try:
+        if current_version() != 0:
+            with get_database().read() as u:
+                if u.agents.find(slug) is not None:
+                    caller.agent = slug
+    except Exception:                                   # noqa: BLE001  an unreadable base leaves the caller of the environment
+        pass
+    return caller
 
 
 def _dump(value: Any) -> str:

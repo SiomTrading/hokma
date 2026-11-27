@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.7
+
+- Fixed: Ian, Sam and Ben launched from the main chat now act under their own name in every Hokma tool. Before, all of them shared the identity of the chat, so Sam could not claim his task ("only the assigned agent can claim it") and the author and the reviewer of a version were the same name. A hook stamps which agent makes each call to Hokma (tasks, journal, strategy creator, guards) and the model cannot write or change that stamp.
+- Fixed: The journal no longer fails with "FOREIGN KEY constraint failed" when the main chat writes in it: the entry is saved with no agent and the name of the caller stays in its references.
+
 ## 1.2.6
 
 - Changed: The temporality is chosen in each run and any interval works (2m, 7m, 45m, 4h, 1d, 1w): the strategy has none and the line only decides the session. A length the provider does not serve is built from the finest base that divides it, like the charts. If the data does not reach, the run says "not enough data in {temporality}" with the base, the provider and the bars; it never refuses to build it. The tools list no fixed set of bars.

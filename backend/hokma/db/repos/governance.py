@@ -64,6 +64,12 @@ class JournalRepo(Repo):
             refs: Any = None) -> JournalEntry:
         if agent_slug is None and actor.kind == "agent":
             agent_slug = actor.name
+        if agent_slug is not None and self.s.scalar("SELECT 1 FROM agents WHERE slug = :s", {"s": agent_slug}) is None:
+            # The name of the caller is not an agent of the base (the main chat has no HOKMA_AGENT and calls itself "agent"; a helper has its own name): the column
+            # references agents(slug), so the entry would die with FOREIGN KEY constraint failed. It is saved with no agent and the name stays in refs (task 3429).
+            if refs is None or isinstance(refs, dict):
+                refs = {**(refs or {}), "caller": agent_slug}
+            agent_slug = None
         new_id = self.s.insert("journal_entries", {
             "kind": kind, "outcome": outcome, "agent_slug": agent_slug, "actor_kind": actor.kind, "task_id": task_id,
             "project_id": project_id, "title": (title or "").strip(), "body": body, "refs": dumps_json(refs),
