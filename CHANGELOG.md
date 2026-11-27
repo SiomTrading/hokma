@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.10
+
+- Fixed: A backtest or an optimization of an exact future (`FUT:NQ:2026-12`) asks the market source for that contract (`/NQZ26`) and no longer answers unknown_symbol. A continuous root (`CONT:NQ`) rolls the contracts the provider gives; when the provider has no expired contracts and only the front one is left, the run uses the continuous series of the provider (`NQ=F`) as one single stretch and says so in its warnings ("serie continua del proveedor, sin ajuste de roll"). It never fails silently: a no_data error names the symbol asked, the symbol sent to the source, the bar, the source and the contracts tried.
+- Fixed: An ETF (`ETF:QQQ`) with the fee table schwab no longer fails every trial with "no rule for 'etf'": schwab.json carries the etf rule, and in any table an ETF without a rule of its own pays the equity rule of the same table.
+- Fixed: When trials of an optimization fail, the reason is kept and reported (`failed_reason` in the warnings). If every trial fails, backtest_optimize answers with an error that carries the exact cause instead of "done" with an empty result.
+
 ## 1.2.9
 
 - Changed: The agents are free with the base, as in ARIA. A task or a bug can be moved to any state, given to another agent and closed by any agent: the base no longer keeps a table of allowed moves, the open parents, the review path, the reviewer different from the implementer, the counters that only fall when a task closes, a bug verified by someone else, or the fixing task of a bug. A claim works from any state and the task becomes the claimer's; it only fails when someone is working on it right now. A task can be born in any state, a bug goes from open to fixed with no task, and a strategy of the bank moves between idea, draft and not_working with no reason asked (a closed one is reopened). Nobody checks who creates, assigns or closes. New tools: task_update (any state, any agent, reword) and project_update.

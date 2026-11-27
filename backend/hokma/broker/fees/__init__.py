@@ -47,6 +47,11 @@ class FeeTable:
     rules: Mapping[str, FeeRule]
     swap: SwapRates | None = None
 
+    def rule_of(self, asset_type: str) -> FeeRule | None:
+        """The rule of an asset type. An ETF without a rule of its own pays the equity rule of the same table (at the brokers an ETF trades as a share)."""
+        rule = self.rules.get(asset_type)
+        return self.rules.get("equity") if rule is None and asset_type == "etf" else rule
+
 
 def _rule(raw: Mapping[str, object]) -> FeeRule:
     kind = raw.get("kind")
@@ -83,7 +88,7 @@ def tables() -> tuple[str, ...]:
 def fee(table: FeeTable, asset_type: str, *, qty: Decimal, price: Decimal, multiplier: Decimal = Decimal(1)) -> Decimal:
     """The commission of ONE side of an order of `qty` units at `price`. A contract of a future or an option pays per contract whatever
     the multiplier is. Zero quantity pays nothing."""
-    rule = table.rules.get(asset_type)
+    rule = table.rule_of(asset_type)
     if rule is None:
         raise ValidationError(f"fee table {table.broker!r} has no rule for {asset_type!r}")
     notional = float(abs(qty) * price * multiplier)

@@ -31,7 +31,7 @@ class FeeSpec:
 
     @property
     def rule(self) -> fees.FeeRule:
-        return self.table.rules[self.asset_type]
+        return self.table.rule_of(self.asset_type)
 
     def engine_rate(self) -> Decimal | None:
         """The rate per contract when the engine can charge it alone (a plain per contract rule, no minimum, no cap); otherwise None
@@ -46,7 +46,7 @@ def fee_model(model: CostModel, asset_type: str = "future") -> FeeSpec:
         table = fees.load(model.fee_table)
     except Exception as exc:
         raise SpecError(f"fee table {model.fee_table!r} cannot be loaded: {exc}") from exc
-    if asset_type not in table.rules:
+    if table.rule_of(asset_type) is None:
         raise SpecError(f"fee table {model.fee_table!r} has no rule for {asset_type!r}")
     return FeeSpec(table, asset_type)
 

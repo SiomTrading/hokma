@@ -265,6 +265,15 @@ class Trial:
 Score = Callable[[Mapping[str, Any]], "Evaluation | float | None"]
 
 
+def failure_reasons(trials: Sequence[Trial]) -> list[tuple[str, int]]:
+    """The reasons of the failed trials with how many times each happened, the most frequent first (a tie keeps the order of the search)."""
+    counts: dict[str, int] = {}
+    for trial in trials:
+        if trial.status == "failed":
+            counts[trial.error or "unknown"] = counts.get(trial.error or "unknown", 0) + 1
+    return sorted(counts.items(), key=lambda item: -item[1])
+
+
 class _Book:
     """The trials of one stage of a search: each new point is scored once, recorded in the ledger, and a repeat is answered from the cache."""
 
@@ -478,6 +487,8 @@ def search(spec: BacktestSpec, space: ParamSpace, *, method: Literal["grid", "tp
     failed = sum(t.status == "failed" for t in trials)
     if failed:
         warnings.append(f"failed_trials:{failed}")
+        reason, times = failure_reasons(trials)[0]
+        warnings.append(f"failed_reason:{reason} (x{times})")
     edge = () if best is None else edge_of_space(space, best.params)
     warnings += [f"edge_of_space:{name}" for name in edge]
     if best is None:

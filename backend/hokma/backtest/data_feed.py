@@ -57,9 +57,17 @@ def data_hash(frame: pd.DataFrame) -> str:
 
 
 def market_symbol(symbol: str) -> str:
-    """The symbol the market source understands: a share or an ETF canonical id (`EQ:AAPL`, `ETF:SPY`) is asked as its ticker. Any other id goes as it is
-    (futures need a source that serves contracts; the market source answers unknown_symbol and the run says so)."""
+    """The symbol the market source understands: a share or an ETF canonical id (`EQ:AAPL`, `ETF:SPY`) is asked as its ticker, and an exact future
+    (`FUT:NQ:2026-12`) as the key of the broker for that contract (`/NQZ26`, `hokma.contracts.symbols`). Any other id goes as it is
+    (the market source answers unknown_symbol and the run says so)."""
     kind, _, rest = symbol.partition(":")
+    if kind == "FUT" and rest:
+        from hokma.contracts import symbols as contract_symbols
+
+        try:
+            return contract_symbols.to_provider(symbol, "schwab")
+        except Exception:                                   # noqa: BLE001 - an id that cannot be written for the provider goes as it is
+            return symbol
     return rest if kind in ("EQ", "ETF") and rest and ":" not in rest else symbol
 
 
@@ -80,7 +88,7 @@ def _checked(symbol: str, interval: str, *, start: datetime, end: datetime, as_o
         raise DataFeedError("invalid_ohlc", f"{quality['excluded_rows']} bars with a bad {', '.join(quality.get('latest_excluded_fields') or ())} "
                             f"were excluded by the data module", quality.get("latest_excluded_record_at"))
     if not result.ok:
-        raise DataFeedError(result.status.lower(), result.reason)
+        raise DataFeedError(result.status.lower(), f"{result.reason} (asked {symbol} as {market_symbol(symbol)}, {interval} bars, source {result.source})")
     frame = result.value
     if len(frame) * (len(frame.columns) + 1) > limits.MAX_INPUT_CELLS:
         raise BadInput("the bars of the request are above the limit of cells")

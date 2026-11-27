@@ -363,7 +363,7 @@ def _result(**a: Any) -> dict[str, Any]:
 
 def _optimize(**a: Any) -> dict[str, Any]:
     from hokma import backtest
-    from hokma.backtest.optimize import METHODS, OBJECTIVES
+    from hokma.backtest.optimize import METHODS, OBJECTIVES, failure_reasons
     from hokma.quant import limits
 
     spec, space = build_spec(a), build_space(a["space"])
@@ -378,6 +378,9 @@ def _optimize(**a: Any) -> dict[str, Any]:
     with _slot():
         found = backtest.optimize(spec, space, method=method, n_trials=trials, objective=objective, presweep=presweep, services=services())
     scored = sorted((t for t in found.trials if t.objective is not None), key=lambda t: -t.objective)
+    if found.trials and not scored:                      # every trial failed: say why, never an empty "done"
+        reasons = failure_reasons(found.trials)
+        raise ToolError("bad_input", f"all {len(found.trials)} trials failed: {reasons[0][0]}" + (f" (and {len(reasons) - 1} other reasons)" if len(reasons) > 1 else ""))
     return {"run_id": found.run_id, "status": "done", "strategy_id": found.strategy_id, "method": found.method, "objective": found.objective,
             "best": None if found.best is None else found.best.to_dict(), "n_trials": found.n_trials, "trials_run": len(found.trials),
             "failed_trials": sum(t.status == "failed" for t in found.trials), "cache_hits": found.cache_hits, "edge_of_space": list(found.edge_of_space),

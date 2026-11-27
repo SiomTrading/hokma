@@ -21,6 +21,8 @@ def classify(symbol: str, kind: str | None = None) -> str | None:
         return "forex"
     if FUTURE.match(symbol):
         return "future"
+    if parse_schwab_future(symbol) is not None:
+        return "future"                                              # an exact contract written for Schwab (/NQZ26): only Schwab serves it
     if symbol.startswith("^"):
         return None
     if kind in KIND_CLASS:
@@ -39,6 +41,8 @@ def to_provider(provider_id: str, symbol: str, asset_class: str | None, today: d
         return symbol.replace("-", ".") if asset_class == "equity" and EQUITY.match(symbol) else None
     if provider_id == "schwab":
         # Class shares are written with a slash ("BRK/B"); the REF gives no example, T0 confirms it with a real answer.
+        if asset_class == "future" and parse_schwab_future(symbol) is not None:
+            return symbol
         if asset_class == "future" and FUTURE.match(symbol):
             return "/" + FUTURE.match(symbol).group(1)               # the root (guide 7.10); an exact contract is `/NQZ26` (`schwab_future`)
         return symbol.replace("-", "/") if asset_class == "equity" and EQUITY.match(symbol) else None

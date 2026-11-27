@@ -158,7 +158,7 @@ def test_the_default_source_builds_the_continuous_series_through_the_data_feed_a
     plan = spec(day, start=day[0].ts, end=day[-1].ts)
     data = runner.default_source(fetch=fetch)(NQ, plan)
     direct = data_feed.load("p|FUT:NQ:2025-12", "1m", start=plan.start, end=plan.end, as_of=plan.as_of, fetch=fetch)
-    assert asked[:3] == ["FUT:NQ:2025-09", "FUT:NQ:2025-12", "FUT:NQ:2026-03"] and "continuous_adjusted:difference" in data.warnings
+    assert asked[:3] == ["FUT:NQ:2025-09", "FUT:NQ:2025-12", "FUT:NQ:2026-03"] and any(w.startswith("single_contract:FUT:NQ:2025-12") for w in data.warnings)      # one contract and no continuous series of the provider: no roll
     assert len(data.bars) == len(direct.frame) and data.bars[0].ts == day[0].ts
     # decided at the close of bar 2 and filled at the open of bar 3 plus a tick; closed at the open of bar 10 less a tick
     result = runner.run(plan, strategy=Fixed(enter_at=3, exit_at=10), fetch=fetch, db=db, curve_dir=tmp_path)

@@ -131,6 +131,8 @@ def _continuous(root: str, spec: BacktestSpec, fetch: Callable[..., Any] | None,
 
     first, last = spec.start.date() - timedelta(days=120), spec.end.date() + timedelta(days=120)
     chain: list[ContractBars] = []
+    asked = [f"FUT:{root}:{m.year:04d}-{m.month:02d}" for m in expiry.listed_months(root, first, last)]
+    first_contract, last_contract = (asked[0], asked[-1]) if asked else ("none", "none")
     short: DataFeedError | None = None                       # the notice of a contract whose bars did not reach: it is what the owner reads if no contract has enough
     for month in expiry.listed_months(root, first, last):
         contract = f"FUT:{root}:{month.year:04d}-{month.month:02d}"
@@ -142,12 +144,21 @@ def _continuous(root: str, spec: BacktestSpec, fetch: Callable[..., Any] | None,
                 continue
             raise
         chain.append(ContractBars(contract, loaded.frame))
-    if not chain:
+    if len(chain) >= 2:
+        series = continuous.build(chain, RollRule.by_volume(), Adjustment.DIFFERENCE)
+        return series.frame[["open", "high", "low", "close", "volume"]], ("continuous_adjusted:difference",)
+    # The provider does not give the expired contracts: with no chain to roll, the continuous series of the provider is one single stretch.
+    provider_symbol = f"{root}=F"
+    try:
+        loaded = data_feed.load(provider_symbol, spec.bar, start=spec.start, end=spec.end, as_of=spec.as_of, fetch=fetch, catalog=catalog)
+    except DataFeedError as exc:
+        if chain:                                            # the one contract the provider has is the series, with no roll
+            return chain[0].frame[["open", "high", "low", "close", "volume"]], (f"single_contract:{chain[0].contract_id} (solo hay un contrato, sin ajuste de roll)",)
         if short is not None:
             raise short
-        raise DataFeedError("no_data", f"no contract of {root} has bars between {spec.start.date()} and {spec.end.date()}")
-    series = continuous.build(chain, RollRule.by_volume(), Adjustment.DIFFERENCE)
-    return series.frame[["open", "high", "low", "close", "volume"]], ("continuous_adjusted:difference",)
+        raise DataFeedError("no_data", f"no contract of {root} has bars between {spec.start.date()} and {spec.end.date()} ({spec.bar} bars): "
+                            f"the contracts asked were {first_contract}..{last_contract} and the continuous series {provider_symbol} failed too: {exc.detail}") from exc
+    return loaded.frame[["open", "high", "low", "close", "volume"]], (f"continuous_provider_series:{provider_symbol} (serie continua del proveedor, sin ajuste de roll)",)
 
 
 def default_source(*, fetch: Callable[..., Any] | None = None, catalog: Catalog | None = None) -> Source:

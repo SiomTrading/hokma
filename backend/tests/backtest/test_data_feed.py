@@ -189,5 +189,5 @@ def test_a_request_above_the_cell_limit_is_refused(monkeypatch):
 
 def test_a_share_or_etf_canonical_id_is_asked_to_the_market_source_as_its_ticker():
     assert data_feed.market_symbol("ETF:SPY") == "SPY" and data_feed.market_symbol("EQ:AAPL") == "AAPL"
-    assert data_feed.market_symbol("FUT:NQ:2026-12") == "FUT:NQ:2026-12" and data_feed.market_symbol("CONT:NQ") == "CONT:NQ"
+    assert data_feed.market_symbol("FUT:NQ:2026-12") == "/NQZ26" and data_feed.market_symbol("CONT:NQ") == "CONT:NQ"
     assert data_feed.market_symbol("ETF:") == "ETF:" and data_feed.market_symbol("SPY") == "SPY"
