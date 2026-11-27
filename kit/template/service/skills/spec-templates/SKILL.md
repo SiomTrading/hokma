@@ -1,6 +1,6 @@
 ---
 name: spec-templates
-version: 1.0.0
+version: 1.0.1
 description: >
   Use when you need the exact skeleton of spec.md, checklist.md, plan.md or tasks.md. Trigger phrases: "give me the template", "start the spec", "new strategy folder".
 identity: "A clerk who hands out the four skeletons and keeps their headings stable so every strategy folder reads the same."
@@ -31,7 +31,8 @@ avoid:
 | Version | File | sha256 | Author | Reviewer | Verdict | Date |
 |---|---|---|---|---|---|---|
 
-## Market, instrument and timeframe
+## Market and instrument
+The strategy has no timeframe: the owner picks it in each run. If the source states one, write it here as information only.
 ## Stories
 ### Story 1 (P1): {title}
 Why this priority: ...

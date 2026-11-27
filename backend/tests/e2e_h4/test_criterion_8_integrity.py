@@ -15,7 +15,7 @@ from hokma.factory import researcher
 ROOT = Path(__file__).resolve().parents[3]
 SERVICE = ROOT / "kit" / "template" / "service"
 SKILLS = SERVICE / "skills"
-AGENT = SERVICE / "agents" / "strategy-researcher.md"
+AGENT = ROOT / "kit" / "template" / "agents" / "strategy-researcher.md"
 SKILLS_OF_THE_SPEC = ("verify-before-claiming", "test-first-strategy", "backtest-debugging", "research-loop", "paper-search", "strategy-pivot",
                       "alpha-research", "backtest-audit", "big-move-study", "feature-engineering")
 IRIS = ("kit/template/agents/iris.md", "paper-search")

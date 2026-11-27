@@ -20,8 +20,8 @@ LAUNCHERS = ("kit/template/CLAUDE.md", "kit/template/desks/CLAUDE.desk.md", "kit
              "kit/template/agents/hugo.md", "kit/template/agents/iris.md", "kit/template/agents/risk.md", "kit/template/agents/signals.md")      # 1.2.2: they name the agents to launch them; 1.2.5: so do the agents of a desk
 SERVICE = ROOT / "kit" / "template" / "service"
 SKILLS = SERVICE / "skills"
-AGENT = SERVICE / "agents" / "strategy-researcher.md"
-CLERK = SERVICE / "agents" / "back-office-clerk.md"
+AGENT = ROOT / "kit" / "template" / "agents" / "strategy-researcher.md"
+CLERK = ROOT / "kit" / "template" / "agents" / "back-office-clerk.md"
 NEW = ("verify-before-claiming", "test-first-strategy", "backtest-debugging", "research-loop", "paper-search", "strategy-pivot", "source-to-strategy", "strategy-requirement")
 EARLIER = ("alpha-research", "backtest-audit", "big-move-study", "feature-engineering")
 IAN_NAMES = NEW + EARLIER
@@ -52,7 +52,8 @@ def test_each_skill_of_ian_loads_in_english_without_origin_TA_41(name):
 def test_the_manifest_is_current_for_every_skill_of_the_package_TA_41():
     manifest = skill_format.read_manifest(SKILLS)
     assert set(IAN_NAMES) <= set(manifest["skills"]) and skill_format.verify_manifest(SKILLS) == []
-    assert all(manifest["skills"][n]["version"] == "1.0.0" for n in IAN_NAMES)
+    revised = {"backtest-debugging", "source-to-strategy", "strategy-requirement", "feature-engineering"}            # 1.2.6: the temporality is not part of a strategy, so their text changed
+    assert all(manifest["skills"][n]["version"] == ("1.0.1" if n in revised else "1.0.0") for n in IAN_NAMES)
 
 
 def test_the_agent_file_is_english_passes_the_rules_and_has_no_engine_name():

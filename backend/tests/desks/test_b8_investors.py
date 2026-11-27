@@ -67,7 +67,7 @@ def by_name(signal: Signal) -> dict:
 
 
 def file_text(slug: str) -> str:
-    return (KIT / "agents" / f"{slug}.md").read_text(encoding="utf-8")
+    return (KIT.parent / "agents" / f"{slug}.md").read_text(encoding="utf-8")
 
 
 def prompt_of(code: str, line: str = "SWO") -> str:
@@ -79,7 +79,7 @@ def check_agent_file(code: str, *, must_say: tuple[str, ...]) -> None:
     """The file of a profile: English, no origin, in the format of the seat files, declares its lines and skills, injected in its prompt
     and only on desks of its line, and it names its method as inspired and never as a decision of a person."""
     seat = SEATS[code]
-    path = KIT / "agents" / f"{seat.slug}.md"
+    path = KIT.parent / "agents" / f"{seat.slug}.md"
     text = path.read_text(encoding="utf-8")
     meta, body = split_frontmatter(text, str(path))
     assert meta["name"] == meta["slug"] == seat.slug and meta["display_name"] == seat.name and meta["role"] == "specialist"

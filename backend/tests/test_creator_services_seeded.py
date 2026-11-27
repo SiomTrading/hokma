@@ -1,4 +1,4 @@
-"""Ian, Sam and Ben (1.2.1) are agents of the fund from the first start and after an update: they are registered from the service folder of the kit,
+"""Ian, Sam and Ben (1.2.1) are agents of the fund from the first start and after an update: they are registered from the agents folder of the kit,
 start on, take the chat of the owner and work for every desk without joining its team."""
 import json
 import shutil
@@ -43,6 +43,9 @@ def test_an_installation_that_was_on_1_2_0_gets_them_on_the_next_start(env):
         for slug in CREATOR_SERVICES:
             u.session.execute("DELETE FROM agents WHERE slug = :s", {"s": slug})
             (target / f"{slug}.md").unlink(missing_ok=True)
+    from hokma.kit.sync import sync_kit                     # the update puts the missing files of the kit back, then the seeds register them
+
+    sync_kit(app_root() / "kit" / "template", version="1.2.6")
     with get_database().write() as u:
         seed_agents(u.session)
     AgentService().reconcile()

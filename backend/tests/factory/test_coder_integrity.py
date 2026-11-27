@@ -47,7 +47,7 @@ def skills_are_clean(names, agent_path):
 
 
 def skills_reach_no_one_else(names, own_agent):
-    others = [p for p in (ROOT / "kit" / "template").rglob("*") if p.is_file() and SKILLS not in p.parents and p != own_agent and p.relative_to(ROOT / "kit" / "template").parts[0] != "docs"]
+    others = [p for p in (ROOT / "kit" / "template").rglob("*") if p.is_file() and SKILLS not in p.parents and p != own_agent and not p.name.startswith("sam-") and p.relative_to(ROOT / "kit" / "template").parts[0] != "docs"]
     for path in others:
         content = path.read_text(encoding="utf-8", errors="ignore")
         for name in names:
@@ -60,7 +60,7 @@ def skills_reach_no_one_else(names, own_agent):
                 assert name not in prompt, (role, line, name)
     assert pr.prompt_integrity_problems() == []
 
-AGENT = SERVICE / "agents" / "strategy-coder.md"
+AGENT = ROOT / "kit" / "template" / "agents" / "strategy-coder.md"
 NAMES = ("strategy-code-contract", "code-test-first", "code-root-cause", "code-done-check", "review-reply")
 
 
@@ -75,7 +75,7 @@ def test_the_frontmatter_has_exactly_the_tools_of_the_spec_and_nothing_that_move
     assert (meta["model"], meta["hokma-tier"]) == (coder.DEFAULT_MODEL, coder.DEFAULT_TIER) == ("opus", "deep")
     tools = [t.strip() for t in meta["tools"].split(",")]
     assert tools == [*coder.ENGINE_TOOLS, *(coder.MCP_PREFIX + t for t in coder.TOOLS)]
-    assert tools[:12] == ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "mcp__hokma__strategy_code_get", "mcp__hokma__strategy_code_list", "mcp__hokma__strategy_code_save", "mcp__hokma__bank_get", "mcp__hokma__factory_describe", "mcp__hokma__library_list"][:12]
+    assert tools[:12] == ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "mcp__hokma__strategy_code_get", "mcp__hokma__strategy_code_list", "mcp__hokma__strategy_code_save", "mcp__hokma__bank_get", "mcp__hokma__bank_list", "mcp__hokma__factory_describe", "mcp__hokma__library_list"][:12]
     assert NEW_TOOLS <= set(tools) and not any(re.search(r"approve|review_approve|request_changes", t) for t in tools)
     assert not any(re.search(FORBIDDEN_TOOLS, t) for t in tools if t not in NEW_TOOLS) and "strategy_code_verdict" not in " ".join(tools)
 

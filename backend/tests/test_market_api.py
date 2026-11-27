@@ -95,7 +95,8 @@ def test_unknown_symbol_is_404_with_a_translated_message(client):
 def test_bad_symbol_and_bad_timeframe_are_rejected_before_any_call(client, fetcher):
     bad = client.get("/api/market/candles?symbol=a;b&tf=5m", headers=AUTH)
     assert bad.status_code == 400 and bad.json()["detail"]["code"] == "bad_symbol"
-    assert client.get("/api/market/candles?symbol=AAPL&tf=2m", headers=AUTH).status_code == 422
+    assert client.get("/api/market/candles?symbol=AAPL&tf=2x", headers=AUTH).status_code == 400
+    assert client.get("/api/market/candles?symbol=AAPL&tf=1M", headers=AUTH).status_code == 400            # months are not a bar
     assert fetcher.calls == []
 
 

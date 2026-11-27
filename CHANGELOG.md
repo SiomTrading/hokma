@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.6
+
+- Changed: The temporality is chosen in each run and any interval works (2m, 7m, 45m, 4h, 1d, 1w): the strategy has none and the line only decides the session. A length the provider does not serve is built from the finest base that divides it, like the charts. If the data does not reach, the run says "not enough data in {temporality}" with the base, the provider and the bars; it never refuses to build it. The tools list no fixed set of bars.
+- Changed: One agent per seat of a desk, in agents/ with the others (21 files). A desk no longer copies them: its model, its switch, its conversations, tasks, routines and budget are its own rows. The desks of 1.2.5 move to the shared agents at the next start, and an agent file the owner changed is left as it was.
+- New: Sam has his three sub-agents (sam-dev-python, sam-dev-frontend, sam-mcp-builder), like Joel. Sam, Ian and the skills use the folder service/strategies/STR-{NNN}-{slug}/, and the skills Sam cites are the ones the kit carries.
+- Fixed: strategy_brief_write no longer fails with a slug error on a card whose title is long or starts with a number: the rule slug is derived from the card. The error names the slug it refused.
+- Fixed: bank_get shows why an approved version does not load, and the optimization says when it could not write its summary.
+- Changed: Ian, Sam, Ben and Anna (the back office clerk) live in the agents folder of the kit and in the folder Hokma\agents of the owner, like every other agent: one source, no copy to keep in step. The special copy from the service folder is gone.
+- Fixed: An update leaves the copy of Ian, Sam, Ben and Anna in agents with the text of the kit (Read, Write, Edit and Agent included) even when the owner has an older version. The model the owner chose in the panel stays. The old service agents folder of the owner is no longer read; Hokma does not touch what is in it.
+
 ## 1.2.5
 
 - New: Asking for a strategy from any chat (the main chat or the chat of a desk, with any agent) hands the request to Ian first, whether it comes with a video, a PDF, a link or only an idea. Any agent of a desk that has no way to launch an agent creates a task assigned to Ian; the main chat launches him. Ian writes the requirement and then launches Sam and Ben.

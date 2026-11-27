@@ -21,7 +21,7 @@ _spec.loader.exec_module(repo_rules)
 
 MODULES = {"A01": market, "A02": sentiment, "A04": news, "A06": fundamentals, "A07": options}
 NEW_SKILLS = ("filing-events", "thesis-tracker", "financial-ratios-dcf", "volatility-premium")
-MY_FILES = [f"kit/template/desk/agents/{SEATS[c].slug}.md" for c in MODULES] + [f"kit/template/desk/skills/{s}/SKILL.md" for s in NEW_SKILLS]
+MY_FILES = [f"kit/template/agents/{SEATS[c].slug}.md" for c in MODULES] + [f"kit/template/desk/skills/{s}/SKILL.md" for s in NEW_SKILLS]
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +70,7 @@ def test_a_line_that_the_file_does_not_carry_is_refused_so_no_skill_of_another_l
 def test_a_file_edited_to_lose_the_swo_line_is_refused_TA_41(tmp_path):
     root = tmp_path / "desk"
     (root / "agents").mkdir(parents=True)
-    text = (KIT / "agents" / "market-analyst.md").read_text(encoding="utf-8").replace("lines: [SWC, SWO, LP]", "lines: [SWC, LP]")
+    text = (KIT.parent / "agents" / "market-analyst.md").read_text(encoding="utf-8").replace("lines: [SWC, SWO, LP]", "lines: [SWC, LP]")
     (root / "agents" / "market-analyst.md").write_text(text, encoding="utf-8")
     with pytest.raises(kit.AnalystKitError):
         market.system_prompt(line="SWO", desk_id=1, as_of=AS_OF, kit_root=root)
@@ -80,7 +80,7 @@ def test_a_skill_that_the_file_names_but_the_kit_lacks_is_refused_TA_41(tmp_path
     root = tmp_path / "desk"
     (root / "agents").mkdir(parents=True)
     (root / "skills").mkdir()
-    (root / "agents" / "market-analyst.md").write_text((KIT / "agents" / "market-analyst.md").read_text(encoding="utf-8"), encoding="utf-8")
+    (root / "agents" / "market-analyst.md").write_text((KIT.parent / "agents" / "market-analyst.md").read_text(encoding="utf-8"), encoding="utf-8")
     with pytest.raises(kit.AnalystKitError):
         kit.load_seat_file("A01", root)
 

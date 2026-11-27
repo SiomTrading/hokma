@@ -4,7 +4,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from hokma.agents.files import AgentFileError, frontmatter_value, set_frontmatter_value
 from hokma.core.config import hokma_home
 from hokma.db.backend import Session
 from hokma.db.errors import DbError
@@ -98,42 +97,12 @@ def creator_services() -> tuple[str, ...]:
     return CREATOR_SERVICES
 
 
-def _service_agents(kit_dir: Path, installed_dir: Path) -> dict[str, dict[str, str]]:
-    """Ian, Sam and Ben (the strategy creator) live in `kit/template/service/agents/`, next to the other services, and not in
-    `agents/`. They are agents of the fund all the same: the file is copied into the working folder's `agents/` (where every agent file
-    lives) and they are read from there like any kit agent. Since 1.2.5 the copy of these three is renewed from the kit whenever it differs (an
-    older copy kept the narrow tools of 1.2.1 for ever): only the model the owner chose in the panel is kept."""
-    service_dir = kit_dir.parent / "service" / "agents"
-    found = {s: m for s, m in _read_agents(service_dir).items() if s in creator_services()} if service_dir.is_dir() else {}
-    for slug, meta in found.items() if installed_dir.is_dir() else ():                # no `agents/` yet: the kit itself is the source
-        target = installed_dir / meta["file"]
-        if target.is_symlink():
-            continue
-        try:
-            wanted = _substitute((service_dir / meta["file"]).read_text(encoding="utf-8"))
-            if target.exists():
-                installed = target.read_text(encoding="utf-8")
-                for key in ("model", "hokma-tier"):                 # the tier the owner picked in the panel stays
-                    kept = frontmatter_value(installed, key)
-                    if kept and frontmatter_value(wanted, key) != kept:
-                        wanted = set_frontmatter_value(wanted, key, kept)
-                if installed == wanted:
-                    continue
-            target.write_text(wanted, encoding="utf-8")
-        except (OSError, UnicodeDecodeError, AgentFileError):
-            pass                                                  # not written: it is read from the kit below and retried at the next start
-    return found
-
-
 def seed_agents(session: Session, *, workdir_agents: Path | None = None, kit_dir: Path | None = None) -> int:
     """Insert or refresh the agents of the kit. Returns how many rows were added or turned off."""
     kit_dir = kit_dir if kit_dir is not None else kit_agents_dir()
     installed_dir = workdir_agents if workdir_agents is not None else hokma_home() / "agents"
     kit = _read_agents(kit_dir) if kit_dir.is_dir() else {}
-    services = _service_agents(kit_dir, installed_dir)
-    kit = {**kit, **services} if (kit or services) else kit
     source = _read_agents(installed_dir) if installed_dir.is_dir() else kit
-    source = {**source, **{s: m for s, m in services.items() if s not in source}}
     repo = AgentsRepo(session)
     changed = 0
     for slug, meta in source.items():
@@ -187,5 +156,8 @@ def seed_broker(session: Session) -> bool:
 
 def run_seeds(session: Session) -> None:
     seed_agents(session)
+    from hokma.db.team_merge import merge_seat_agents
+
+    merge_seat_agents(session)                            # the desks of 1.2.5 and before had a copy of each seat agent: they use the shared one now (task 3427)
     seed_profile(session)
     seed_broker(session)

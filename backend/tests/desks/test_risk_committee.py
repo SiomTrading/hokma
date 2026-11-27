@@ -345,7 +345,7 @@ def test_the_contract_of_each_line_names_the_limits_it_needs_TA_51():
     assert set(risk.CONTRACT_FIELDS) == set(LINES)
     assert "funding.daily_loss_usd" in risk.CONTRACT_FIELDS["DT"] and "max_margin_pct" in risk.CONTRACT_FIELDS["SWC"]
     assert "max_premium_usd" in risk.CONTRACT_FIELDS["SWO"] and "max_weight_pct" in risk.CONTRACT_FIELDS["LP"]
-    arbiter = (KIT / "agents" / "risk-arbiter.md").read_text(encoding="utf-8")
+    arbiter = (KIT.parent / "agents" / "risk-arbiter.md").read_text(encoding="utf-8")
     assert "contract of limits" in arbiter and "never raise a limit" in arbiter
 
 
@@ -540,7 +540,7 @@ def test_the_process_review_belongs_to_the_lines_of_its_skill_only_CTS_026(order
 # ---- the kit: prompts, skills, lines (TA-10 to TA-12, ECT-032, ECT-033, SKL-006, CTS-026) ----------------------------------
 
 def test_the_kit_files_of_the_committee_pass_the_repo_rules_and_hold_no_em_dash_TA_41():
-    paths = [f"kit/template/desk/{p}" for p in RISK_FILES]
+    paths = [f"kit/template/{p}" if p.startswith("agents/") else f"kit/template/desk/{p}" for p in RISK_FILES]
     assert repo_rules.check(ROOT, paths) == []
     for p in paths:
         text = (ROOT / p).read_text(encoding="utf-8")
@@ -629,7 +629,7 @@ def test_the_agent_files_are_english_name_no_real_investor_and_declare_what_crea
                                ("risk-arbiter", "Reed", ["tail-risk-hedging", "liquidity-risk", "assumption-stress-test", "trade-process-review"])):
         from hokma.desks.core.skills import split_frontmatter
 
-        text = (KIT / "agents" / f"{slug}.md").read_text(encoding="utf-8")
+        text = (KIT.parent / "agents" / f"{slug}.md").read_text(encoding="utf-8")
         meta, body = split_frontmatter(text, slug)
         assert meta["display_name"] == name and meta["slug"] == slug and meta["skills"] == skills
         assert "SWO" in meta["lines"] and set(meta["lines"]) <= set(LINES)

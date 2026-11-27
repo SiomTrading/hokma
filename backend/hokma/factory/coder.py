@@ -10,5 +10,5 @@ AGENT_SLUG = "strategy-coder"
 DEFAULT_MODEL = "opus"
 DEFAULT_TIER = "deep"
 ENGINE_TOOLS: tuple[str, ...] = ("Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent")
-TOOLS: tuple[str, ...] = ("strategy_code_get", "strategy_code_list", "strategy_code_save", "bank_get", "factory_describe", "library_list",
+TOOLS: tuple[str, ...] = ("strategy_code_get", "strategy_code_list", "strategy_code_save", "bank_get", "bank_list", "factory_describe", "library_list",
          "task_show", "task_list", "task_claim", "task_heartbeat", "task_complete", "task_block", "task_comment", "task_request_review", "task_create", "task_link", "task_unblock", "project_show", "journal_write", "journal_search", "ips_read")

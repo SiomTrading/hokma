@@ -31,7 +31,7 @@ from hokma.backtest.engine import EngineUnavailable, Expiry, RunOutput
 from hokma.backtest.fills import Decision, against, limit_fill, stop_first, stop_price, target_price
 from hokma.backtest.guards_bridge import SimAccount, SimPosition
 from hokma.backtest.results import BacktestResult, BarRange, EquityCurve, Fill
-from hokma.backtest.spec import BacktestSpec, SpecError, sequence_same_bar
+from hokma.backtest.spec import BacktestSpec, SpecError, sequence_same_bar, span_ns as bar_span_ns
 from hokma.backtest.ticks import Bar
 from hokma.contracts import history, identity
 from hokma.contracts.identity import ContractSheet, NoContract
@@ -49,7 +49,6 @@ from hokma.quant.errors import BadInput
 
 ZERO = Decimal(0)
 STAGES = ("data", "signal", "size", "fill", "result")
-SPAN_NS = {"1m": 60 * 10**9, "5m": 300 * 10**9, "15m": 900 * 10**9, "1h": 3600 * 10**9, "1d": 86_400 * 10**9, "1w": 604_800 * 10**9}
 CONTINUOUS = "CONT:"
 PERIODS_PER_YEAR = 252                      # the statistics read the daily equity returns of the curve
 _SYMBOL = re.compile(r"[^A-Z0-9]")
@@ -132,16 +131,20 @@ def _continuous(root: str, spec: BacktestSpec, fetch: Callable[..., Any] | None,
 
     first, last = spec.start.date() - timedelta(days=120), spec.end.date() + timedelta(days=120)
     chain: list[ContractBars] = []
+    short: DataFeedError | None = None                       # the notice of a contract whose bars did not reach: it is what the owner reads if no contract has enough
     for month in expiry.listed_months(root, first, last):
         contract = f"FUT:{root}:{month.year:04d}-{month.month:02d}"
         try:
             loaded = data_feed.load(contract, spec.bar, start=spec.start, end=spec.end, as_of=spec.as_of, fetch=fetch, catalog=catalog)
         except DataFeedError as exc:
-            if exc.code == "no_data":
+            if exc.code in ("no_data", "insufficient_data"):
+                short = exc if exc.code == "insufficient_data" else short
                 continue
             raise
         chain.append(ContractBars(contract, loaded.frame))
     if not chain:
+        if short is not None:
+            raise short
         raise DataFeedError("no_data", f"no contract of {root} has bars between {spec.start.date()} and {spec.end.date()}")
     series = continuous.build(chain, RollRule.by_volume(), Adjustment.DIFFERENCE)
     return series.frame[["open", "high", "low", "close", "volume"]], ("continuous_adjusted:difference",)
@@ -324,7 +327,7 @@ class StrategyDriver:
         self.entry_meta: dict[int, list[tuple[str | None, dict[str, Any]]]] = {}
         self.warnings: list[str] = []
         self._strategy = strategy
-        self._span = span_ns or SPAN_NS[spec.bar]
+        self._span = span_ns or bar_span_ns(spec.bar)
         self._pending: list[Decision] = []
         self._live_limits: list[tuple[Decision, int]] = []             # limit entries still waiting for a bar to cross them, with the bars they have left
         self._levels: tuple[Decimal | None, Decimal | None] = (None, None)
@@ -590,7 +593,7 @@ def run_with(spec: BacktestSpec, strategy: Any, bars: Sequence[Bar], *, expiry_r
     """One engine run of a strategy that has the attributes of `StrategyDriver` (`decide`, `tick_size`, `multiplier`, `symbol`,
     `protective_orders`, `asset_type`): the one place that the optimization and the runner share to start the engine."""
     return engine.run(spec, bars, strategy.decide, tick_size=strategy.tick_size, multiplier=strategy.multiplier, symbol=strategy.symbol,
-                      protective_orders=strategy.protective_orders, asset_type=strategy.asset_type, span_ns=SPAN_NS[spec.bar],
+                      protective_orders=strategy.protective_orders, asset_type=strategy.asset_type, span_ns=bar_span_ns(spec.bar),
                       expiry_rule=expiry_rule, latency_ms=latency_ms, root=root)
 
 
@@ -739,7 +742,7 @@ def run(spec: BacktestSpec, *, strategy: Any = None, registry: Registry | None =
         floor = None if desk_limits is None or desk_limits.get("capital_floor_usd") is None else Decimal(str(desk_limits["capital_floor_usd"]))
         status, extra = "done", ()
         try:
-            blown = stop_on_blowup(out, spec, data.bars, floor=floor, symbol=driver.symbol, multiplier=driver.multiplier, span_ns=SPAN_NS[spec.bar],
+            blown = stop_on_blowup(out, spec, data.bars, floor=floor, symbol=driver.symbol, multiplier=driver.multiplier, span_ns=bar_span_ns(spec.bar),
                                    asset_type=driver.asset_type)
             if blown is not None:
                 out, status = blown.output, "account_blown"

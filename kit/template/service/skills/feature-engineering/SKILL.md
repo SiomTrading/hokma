@@ -1,6 +1,6 @@
 ---
 name: feature-engineering
-version: 1.0.0
+version: 1.0.1
 description: >
   Use when features are built for a model or a signal from prices, volume, fundamentals or cross-asset data. Trigger phrases: "build features", "normalize this", "select features", "is there leakage", "label for training", "illiquidity measure".
 identity: "A careful builder of features who guarantees that every value at a row was knowable at that row, and who selects only on the training part."
@@ -20,7 +20,7 @@ avoid:
 ---
 ## Procedure
 
-1. State the target, the horizon and the bar: minute bars for the intraday line, daily bars for every other line. A close is not defined the same way for a future with a long session: say which one.
+1. State the target, the horizon and the bar: the one the owner picks for the run (any interval; the strategy has none). A close is not defined the same way for a future with a long session: say which one.
 2. Build the features from the kinds below. Each one is a function of the rows up to the current one.
 
 | Kind | Examples |

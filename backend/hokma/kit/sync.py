@@ -10,6 +10,9 @@ installed, so a later update can tell "the student changed this file" from "the 
                                                      next to it as <name>.hokma-new and reported
 - kit file unchanged between versions             -> nothing happens, even if the student edited it
 - file the student deleted                        -> not brought back
+- the four agents of the strategy creator and the back office (RENEWED, agents/<slug>.md) -> always the kit text,
+                                                     whatever the copy of an older version says; only the model and
+                                                     the tier the owner chose in the panel stay (never a .hokma-new)
 
 Markdown files carry the owner and fund markers: they are filled from `<data>/owner.json` (defaults "the owner"
 and "the fund") BEFORE the hash is computed, so changing a name is just another kit change.
@@ -38,6 +41,10 @@ from hokma.kit import owner as owner_names
 from hokma.kit import safefs
 
 USER_OWNED = {".hokma/extensions.json"}
+# Ian, Sam, Ben and Anna live in agents/ like every other agent. Until 1.2.5 they were kept in the agents folder of the service files and copied into agents/ by the
+# seeds, so the copy of an older version has no baseline and narrower tools: from 1.2.6 it is renewed here from the kit.
+RENEWED = frozenset(f"agents/{slug}.md" for slug in ("strategy-researcher", "strategy-coder", "strategy-reviewer", "back-office-clerk"))
+KEPT_FROM_COPY = ("model", "hokma-tier")
 SIDE_SUFFIX = ".hokma-new"
 MARKER = re.compile(r"\{\{(owner_name|fund_name)\}\}")
 
@@ -82,6 +89,21 @@ def render(data: bytes, rel: str, values: dict[str, str]) -> bytes:
     return MARKER.sub(lambda m: values[m.group(1)], data.decode("utf-8")).encode("utf-8")
 
 
+def _keep_owner_tier(kit_text: bytes, installed: bytes) -> bytes:
+    """The kit text of a renewed agent with the model and tier the owner chose in the panel (the ones in the installed copy)."""
+    from hokma.agents.files import AgentFileError, frontmatter_value, set_frontmatter_value
+
+    try:
+        text, old = kit_text.decode("utf-8"), installed.decode("utf-8")
+        for key in KEPT_FROM_COPY:
+            kept = frontmatter_value(old, key)
+            if kept and frontmatter_value(text, key) != kept:
+                text = set_frontmatter_value(text, key, kept)
+        return text.encode("utf-8")
+    except (UnicodeDecodeError, ValueError, AgentFileError):
+        return kit_text
+
+
 def sync_kit(template: Path, *, version: str, workdir: Path | None = None,
              values: dict[str, str] | None = None) -> KitReport:
     workdir = workdir or hokma_home()
@@ -113,6 +135,14 @@ def sync_kit(template: Path, *, version: str, workdir: Path | None = None,
                 continue
 
             cur_hash = _sha(current)
+            if rel in RENEWED:
+                data = _keep_owner_tier(data, current)
+                new_hash = _sha(data)
+                if cur_hash != new_hash:
+                    safefs.write_atomic(workdir, rel, data, mode)
+                    report.updated.append(rel)
+                new_baseline[rel] = _sha(render(src.read_bytes(), rel, values))
+                continue
             if cur_hash == new_hash or base_hash == new_hash:
                 new_baseline[rel] = new_hash              # nothing new in the kit for this file
             elif base_hash is not None and cur_hash == base_hash:

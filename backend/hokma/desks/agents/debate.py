@@ -37,7 +37,7 @@ from hokma.desks.core.state import (
     DebateState, Message, clip, new_debate, opponent_or_opening, record_round,
 )
 from hokma.desks.core.tools import ToolCatalog, Toolbox
-from hokma.desks.plantel import SEATS
+from hokma.desks.plantel import SEATS, seat_file
 from hokma.kit.integrity import app_root
 from hokma.llm.jsonx import LLMParseError, extract_json
 
@@ -258,7 +258,7 @@ def seat_prompt(code: str, *, line: str, desk_id: int, as_of: datetime, kit_root
         raise PromptScopeError(f"line must be one of {LINES}")
     seat = SEATS[code]
     root = kit_root if kit_root is not None else default_kit_root()
-    text = _read_kit_file(root / "agents" / f"{seat.slug}.md")
+    text = _read_kit_file(seat_file(root, seat.slug))
     try:
         meta, body = split_frontmatter(text, seat.kit_file)
     except SkillError as exc:

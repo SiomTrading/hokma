@@ -300,7 +300,7 @@ def test_CTS_037_the_reaction_test_is_a_context_by_significance_and_never_a_sign
 
 def test_AH_33_the_agent_file_of_drew_declares_swo_and_its_five_skills_and_scopes_the_prompt_to_its_line():
     seat = SEATS["A23"]
-    path = KIT / "agents" / f"{seat.slug}.md"
+    path = KIT.parent / "agents" / f"{seat.slug}.md"
     text = path.read_text(encoding="utf-8")
     meta, body = split_frontmatter(text, str(path))
     assert meta["lines"] == ["SWO"] and meta["skills"] == ["pead-screen", "earnings-reaction-score", "episodic-pivot", "news-reaction-failure",

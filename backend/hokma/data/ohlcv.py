@@ -54,8 +54,9 @@ def market_fetcher(symbol: str, interval: str) -> RawBars:
             for c in series.candles]
     frame = pd.DataFrame(rows, columns=["time", *COLUMNS]).set_index("time") if rows else pd.DataFrame(columns=COLUMNS)
     received = datetime.fromtimestamp(series.fetched_at, tz=sentinels.timezone.utc) if series.fetched_at else utcnow()
-    return RawBars(frame, received, stale=bool(series.stale), meta={"market_source": series.source,
-                                                                     "last_trade_at": series.last_trade_at})
+    return RawBars(frame, received, stale=bool(series.stale), meta={"market_source": series.source, "last_trade_at": series.last_trade_at,
+                                                                     "session": {"kind": series.kind, "timezone": series.timezone, "utc_offset_seconds": series.utc_offset_seconds,
+                                                                                 "clock_aligned": bool(series.clock_aligned)}})
 
 
 DEFAULT_SERVICE = BarService({MARKET_PROVIDER: market_fetcher})

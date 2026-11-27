@@ -15,7 +15,7 @@ from hokma.desks.core.signal import LINES
 ROOT = Path(__file__).resolve().parents[3]
 SERVICE = ROOT / "kit" / "template" / "service"
 SKILLS = SERVICE / "skills"
-AGENT = SERVICE / "agents" / "back-office-clerk.md"
+AGENT = ROOT / "kit" / "template" / "agents" / "back-office-clerk.md"
 NAMES = ("account-reconciliation", "break-trace", "roll-forward", "accrual-schedule", "account-report", "setup-practice", "weekly-digest",
          "performance-attribution", "statement-pdf", "spreadsheet-export")
 IAN_NAMES = ("alpha-research", "backtest-audit", "big-move-study", "feature-engineering", "verify-before-claiming", "test-first-strategy",
@@ -73,6 +73,6 @@ def test_no_desk_role_prompt_holds_a_skill_of_the_clerk_or_the_clerk_itself():
 
 def test_no_desk_agent_or_desk_rule_names_them_either():
     desk_files = [*(ROOT / "kit" / "template" / "desk").rglob("*"), *(ROOT / "kit" / "template" / "agents").glob("*.md"), ROOT / "kit" / "template" / "desks" / "CLAUDE.desk.md"]
-    for path in (p for p in desk_files if p.is_file()):
+    for path in (p for p in desk_files if p.is_file() and p != AGENT):          # the clerk file itself is in agents/ since 1.2.6
         body = path.read_text(encoding="utf-8")
         assert not any(name in body for name in (*NAMES, "back-office-clerk")), path

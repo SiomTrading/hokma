@@ -595,9 +595,10 @@ def grant_toolbox(desk_id: int, *, handlers: Mapping[str, Callable[..., Any]] | 
 
     def schedule_body(expr: str, instruction: str) -> Any:
         from hokma.broker.service import Who
+        from hokma.desks.swo.create import desk_agent_slug
         from hokma.scheduler import service as scheduler
 
-        return scheduler.schedule_desk_run(desk_id, expr=str(expr), instruction=str(instruction), who=Who(agent=f"{seat.slug}-{desk_id}"), db=db)
+        return scheduler.schedule_desk_run(desk_id, expr=str(expr), instruction=str(instruction), who=Who(agent=desk_agent_slug(seat, desk_id, db)), db=db)
 
     bodies: dict[str, tuple[Callable[..., Any], str, dict[str, Any], list[str], bool]] = {
         "book_pnl": (pnl_body, "Realized profit and loss of your desk between two dates, with commissions taken out, by symbol.",

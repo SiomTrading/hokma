@@ -127,7 +127,7 @@ def source_ingest(u, c, a: dict) -> str:
     "extraction": _o("The sheet: schema, summary, line, instruments, timeframe, signal_logic, entry, exit, sizing, risk_controls, execution and needs_new_rule."),
     "line": _s("RF, DT, SWC, SWO or LP; if left out, the one of the sheet.", enum=list(LINES)),
     "strategy_id": _s("The saved spec that stands for the sheet (with spec_version)."), "spec_version": _i("Version of that spec."),
-    "bank_id": _i("Save a next version of this strategy of the bank."), "derived_from": _i("The version this one comes from (default: the last one).")},
+    "bank_id": _i("Save a next version of the strategy of the bank (its bank id: STR-{NNN} is that number with three digits)."), "derived_from": _i("The version this one comes from (default: the last one).")},
               ["title"], writes=True)
 @_guarded
 def bank_create(u, c, a: dict) -> str:
@@ -178,7 +178,7 @@ def bank_list(u, c, a: dict) -> str:
 
 @TOOLSET.tool("bank_get", "Read one strategy of the bank, by bank_id or slug, with a version (the last by default): its extraction sheet, the rules still pending, where it comes from "
               "(reference and locators; the text of a source only when it is the owner's own), its versions and the events of its state, and its creator side: folder, spec, files, code and verdicts. Reading only.", {
-    "bank_id": _i("The strategy."), "slug": _s("Or its slug."), "version": _i("A version (default: the last).")})
+    "bank_id": _i("The strategy of the bank (its bank id: STR-{NNN} is that number with three digits)."), "slug": _s("Or its slug."), "version": _i("A version (default: the last).")})
 @_guarded
 def bank_get(u, c, a: dict) -> str:
     from hokma.factory import bank
@@ -196,7 +196,7 @@ def bank_get(u, c, a: dict) -> str:
 
 @TOOLSET.tool("bank_set_status", "Change the state of a strategy of the bank: idea, draft or not_working. Closing as not_working needs the reason, 20 to 4000 characters. The states of "
               "the test, of the ready strategy and of the live one are not available yet.", {
-    "bank_id": _i("The strategy."), "status": _s("The new state.", enum=list(STATUSES)), "reason": _s("Why, 20 to 4000 characters; needed for not_working.")},
+    "bank_id": _i("The strategy of the bank (its bank id: STR-{NNN} is that number with three digits)."), "status": _s("The new state.", enum=list(STATUSES)), "reason": _s("Why, 20 to 4000 characters; needed for not_working.")},
               ["bank_id", "status"], writes=True)
 @_guarded
 def bank_set_status(u, c, a: dict) -> str:

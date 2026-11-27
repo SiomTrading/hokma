@@ -20,11 +20,11 @@ FINDING = {"type": "object", "description": "severity (blocker, major, minor or 
 
 
 @TOOLSET.tool("strategy_brief_write", "Register in the bank the spec of a strategy that will be programmed. The requirement itself is the numbered spec.md (spec-four-phases): write service/strategies/STR-{NNN}-{slug}/spec.md "
-              "with Write first, then call this with bank_id, slug and title the first time (the strategy rule is created with its folder) or rule_id for the next version. The brief is only its summary; the "
+              "with Write first, then call this with bank_id and title the first time (the strategy rule is created with its folder) or rule_id for the next version. The brief is only its summary; the "
               "path of the spec is found and kept. Without that spec.md no code is saved.", {
-    "bank_id": _i("The strategy of the bank that needs code (first requirement)."), "slug": _s("Lower case letters, digits and underscores, 2 to 40 characters (first requirement)."),
+    "bank_id": _i("The strategy of the bank (its bank id: STR-{NNN} is that number with three digits) that needs code (first requirement)."), "slug": _s("Not needed and ignored: the slug of the rule comes from the card of the bank, and the folder stays STR-{NNN}-{slug of the card}."),
     "title": _s("Name of the strategy, 1 to 160 characters (first requirement)."), "rule_id": _i("The rule of an earlier requirement, to write its next version."),
-    "brief": _o("summary (the spec in one or two sentences) and optionally quote (the locator of the source, never its text), market and timeframe.")}, ["brief"], writes=True)
+    "brief": _o("summary (the spec in one or two sentences) and optionally quote (the locator of the source, never its text), market and timeframe (the timeframe is informative: the strategy has none, the owner picks it in each run).")}, ["brief"], writes=True)
 @_guarded
 def strategy_brief_write(u, c, a: dict) -> str:
     from hokma.factory import user_rules
@@ -38,7 +38,7 @@ def strategy_brief_write(u, c, a: dict) -> str:
               "future and of repetition run in a process apart. Green: the code is saved as a draft of the next version with its hash and its requirement. Red: nothing is saved and the answer "
               "is the output of the checks. With dry_run true the checks run and nothing is saved, even when green: use it to see the tests fail first and pass later. Without a current "
               "requirement the answer is blocked. The reviewer rejected it three times: blocked.", {
-    "rule_id": _i("The strategy rule."), "bank_id": _i("Or the strategy of the bank (its rule is found)."), "version": _i("The version written in versions/v{N}/ (default: the next one)."),
+    "rule_id": _i("The strategy rule."), "bank_id": _i("Or the strategy of the bank (its bank id: STR-{NNN} is that number with three digits); its rule is found."), "version": _i("The version written in versions/v{N}/ (default: the next one)."),
     "dry_run": _b("true: run the checks on the folder and store nothing.")}, [], writes=True)
 @_guarded
 def strategy_code_save(u, c, a: dict) -> str:
@@ -66,7 +66,7 @@ def strategy_code_verdict(u, c, a: dict) -> str:
 
 @TOOLSET.tool("strategy_code_list", "List the strategies written as code with their stage (draft, failed, generated, owner_reviewed, rejected or retired), their registry id and where they were created "
               "(hokma or a desk). Reading only.", {
-    "bank_id": _i("Only the strategies of this bank strategy."), "stage": _s("Only this stage.", enum=list(STAGES)),
+    "bank_id": _i("Only the strategies of the strategy of the bank (its bank id: STR-{NNN} is that number with three digits)."), "stage": _s("Only this stage.", enum=list(STAGES)),
     "origin": _s("hokma: created in the main chat; desk: created in a desk.", enum=["hokma", "desk"]), "limit": _i("Rows, 1 to 200 (default 50).")})
 @_guarded
 def strategy_code_list(u, c, a: dict) -> str:
@@ -78,8 +78,8 @@ def strategy_code_list(u, c, a: dict) -> str:
 @TOOLSET.tool("strategy_code_get", "Read a strategy written as code, with or without code yet: its folder, its numbered spec, its files, its current requirement, its code and its test file, the output of its checks, the verdicts, the version of the bank and the "
               "spec that stand for it, and where it was created. Give rule_version_id, registry_id or rule_id (the last version). With rerun true the checks run again on the saved copy "
               "and the answer carries their fresh output: this is how the reviewer runs the tests.", {
-    "rule_version_id": _i("A version."), "registry_id": _s("Or its registry id, like u_inside_bar_v1."), "rule_id": _i("Or the rule, for its last version."),
-    "bank_id": _i("Or the strategy of the bank: its rule, even when it has no code yet."), "slug": _s("Or its slug."),
+    "rule_version_id": _i("A version."), "registry_id": _s("Or its registry id, like u_str001_v1."), "rule_id": _i("Or the rule, for its last version."),
+    "bank_id": _i("Or the strategy of the bank (its bank id: STR-{NNN} is that number with three digits): its rule, even when it has no code yet."), "slug": _s("Or its slug."),
     "rerun": _b("true: run the checks again on the saved copy.")})
 @_guarded
 def strategy_code_get(u, c, a: dict) -> str:

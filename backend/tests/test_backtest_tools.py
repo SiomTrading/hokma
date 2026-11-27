@@ -52,12 +52,14 @@ def test_the_extra_codes_are_stable_and_the_ones_of_h1_are_kept():
     assert isinstance(backtest_tools.ClassifiedError("forbidden_fill", "x"), ToolError)
 
 
-def test_a_forbidden_fill_and_a_bar_that_does_not_belong_to_the_line_are_classified(db):
+def test_a_forbidden_fill_and_a_bar_that_is_not_an_interval_are_classified(db):
     series = bars(60)
     for fill in ({"trade_on_close": True}, {"model": "best_price"}, {"stop_first": False}, {"gap_fills_at_open": False}, {"next_open_ticks": 0}):
         assert failed("backtest_run", run_args(series, fill=fill, slippage_ticks=1))["error_code"] == "forbidden_fill", fill
-    daily = failed("backtest_run", run_args(series, bar="1d"))
-    assert daily["error_code"] == "bar_not_allowed_for_line" and "1m" in daily["message"]
+    not_a_bar = failed("backtest_run", run_args(series, bar="nonsense"))
+    assert not_a_bar["error_code"] == "bad_input" and "time interval" in not_a_bar["message"]
+    run_schema = {d["name"]: d for d in hokma_tools.definitions()}["backtest_run"]["inputSchema"]["properties"]["bar"]
+    assert "enum" not in run_schema                                          # the bar is any time interval: the tool lists none
     assert failed("backtest_run", run_args(series, fill={"unknown": 1}))["error_code"] == "bad_input"
     assert failed("backtest_run", run_args(series, fill={"next_open_ticks": "1"}))["error_code"] == "bad_input"
 
@@ -66,7 +68,7 @@ def test_ids_and_values_only_no_free_path_and_no_free_pattern(db):
     series = bars(60)
     for bad in ({"instruments": ["../../etc/passwd"]}, {"instruments": ["a b"]}, {"instruments": []}, {"fee_table": "/etc/passwd"}, {"fee_table": "../schwab"},
                 {"fee_table": "nope"}, {"params": {"fast": {"x": 1}}}, {"params": {"Bad-Name": 1}}, {"strategy_id": "x\x00y"}, {"capital_usd": -5}, {"capital_usd": True},
-                {"start": "yesterday-ish"}, {"seed": -1}, {"slippage_ticks": 1000}, {"bar": "2m"}, {"impact": "x"}, {"session": "ALL"}):
+                {"start": "yesterday-ish"}, {"seed": -1}, {"slippage_ticks": 1000}, {"bar": "7x"}, {"bar": "1M"}, {"impact": "x"}, {"session": "ALL"}):
         answer, is_error = call("backtest_run", run_args(series, **bad))
         assert is_error, bad
         if isinstance(answer, dict):

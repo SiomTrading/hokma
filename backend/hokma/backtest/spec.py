@@ -14,9 +14,9 @@ from typing import Any, Literal, Sequence
 from hokma.contracts.identity import ContractSheet
 from hokma.desks.core.hashing import content_hash
 from hokma.desks.core.signal import Line
+from hokma.data.timeframe import IntervalError, parse_bar
 
-BARS = ("1m", "5m", "15m", "1h", "1d", "1w")
-Bar = Literal["1m", "5m", "15m", "1h", "1d", "1w"]
+Bar = str                          # any time interval of the chart ("7m", "1h", "1d"): the strategy has none, the owner picks it for each run
 
 
 class SpecError(ValueError):
@@ -27,20 +27,6 @@ class SpecError(ValueError):
 
 class ForbiddenFill(SpecError):
     code = "forbidden_fill"
-
-
-class BarNotAllowed(SpecError):
-    code = "bar_not_allowed_for_line"
-
-
-# P-14: the time scale of each line. DT runs on intraday bars; every other line on daily or weekly bars.
-ALLOWED_BARS: dict[str, tuple[str, ...]] = {
-    "DT": ("1m", "5m", "15m", "1h"),
-    "SWC": ("1d", "1w"),
-    "SWO": ("1d", "1w"),
-    "LP": ("1d", "1w"),
-    "RF": ("1d", "1w"),
-}
 
 
 @dataclass(frozen=True)
@@ -119,19 +105,29 @@ class BacktestSpec:
         return content_hash(self.canonical())
 
 
+def bar_seconds(bar: str) -> int:
+    """Length of the bar in seconds (a day or a week count their nominal length). Any time interval of the chart is valid; the line does not limit it:
+    the line decides the session, the owner decides the temporality of each run. Whether the data reaches is checked when the bars are loaded."""
+    try:
+        return parse_bar(bar).seconds
+    except IntervalError:
+        raise SpecError(f"unknown bar size {bar!r}: use a time interval such as 2m, 7m, 1h, 4h, 1d or 1w") from None
+
+
+def span_ns(bar: str) -> int:
+    """The duration of one bar in nanoseconds, from its interval."""
+    return bar_seconds(bar) * 10**9
+
+
 def validate_bar(bar: str, line: str) -> None:
-    """P-14: BarNotAllowed (`bar_not_allowed_for_line`) when the bar size does not belong to the line."""
-    if bar not in BARS:
-        raise SpecError(f"unknown bar size {bar!r}")
-    allowed = ALLOWED_BARS.get(line)
-    if allowed is None:
+    """The bar is a time interval and the line is one of the five. Nothing else is asked of the pair."""
+    bar_seconds(bar)
+    if line not in ("DT", "SWC", "SWO", "LP", "RF"):
         raise SpecError(f"unknown line {line!r}")
-    if bar not in allowed:
-        raise BarNotAllowed(f"a {line} backtest runs on {', '.join(allowed)} bars, not {bar}")
 
 
 def validate(spec: "BacktestSpec") -> None:
-    """The checks of a spec that do not need data: bar per line (P-14), hedging (B-10) and fractional size (B-34)."""
+    """The checks of a spec that do not need data: the bar is a time interval, hedging (B-10) and fractional size (B-34)."""
     validate_bar(spec.bar, spec.line)
     if spec.oms not in ("netting", "hedging"):
         raise SpecError("oms is netting or hedging")

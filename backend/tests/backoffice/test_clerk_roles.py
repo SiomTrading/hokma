@@ -8,7 +8,7 @@ from hokma.backoffice import clerk_roles as roles
 from hokma.backoffice.clerk_roles import RoleViolation
 
 ROOT = Path(__file__).resolve().parents[3]
-AGENT = ROOT / "kit" / "template" / "service" / "agents" / "back-office-clerk.md"
+AGENT = ROOT / "kit" / "template" / "agents" / "back-office-clerk.md"
 
 
 def access(role):

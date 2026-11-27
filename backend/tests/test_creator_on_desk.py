@@ -24,7 +24,7 @@ def test_the_chief_gives_a_task_to_each_service_and_each_takes_it_without_being_
     desk = make_desk(desks_db)
     with desks_db.write() as u:
         for slug in SERVICES:
-            u.agents.upsert_kit(slug, slug.title(), f"{slug} agent", "deep", f"service/agents/{slug}.md")
+            u.agents.upsert_kit(slug, slug.title(), f"{slug} agent", "deep", f"agents/{slug}.md")
             u.agents.set_status(slug, "active")
     for slug in SERVICES:
         made, is_error = run("task_create", {"title": f"strategy work by {slug}", "project_id": desk["project_id"], "assigned_agent": slug}, "desk-chief")
@@ -39,7 +39,7 @@ def test_what_the_services_create_from_a_desk_says_the_desk_and_the_main_chat_sa
     desk = make_desk(desks_db)
     with desks_db.write() as u:
         for slug in SERVICES:
-            u.agents.upsert_kit(slug, slug.title(), f"{slug} agent", "deep", f"service/agents/{slug}.md")
+            u.agents.upsert_kit(slug, slug.title(), f"{slug} agent", "deep", f"agents/{slug}.md")
             u.agents.set_status(slug, "active")
         task = u.tasks.create("Requirement", actor=Actor.system(), project_id=desk["project_id"], assigned_agent="strategy-researcher", status="ready").id
     from code_support import make_bank

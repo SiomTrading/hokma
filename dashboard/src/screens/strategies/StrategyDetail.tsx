@@ -10,7 +10,7 @@ import { locators, ruleLines } from "./rules";
 
 /** What the owner sends to the chat to optimize a strategy of the bank: the chat launches backtest_optimize with it. */
 export function optimizeText(detail: Pick<BankDetail, "bank_id"> & { version: { version: number } }): string {
-  return `Run backtest_optimize for the strategy of the bank with bank_id ${detail.bank_id} (version ${detail.version.version}) and tell me the verdict when it ends.`;
+  return `Optimize the strategy of the bank with bank_id ${detail.bank_id} (version ${detail.version.version}) with backtest_optimize. The strategy has no timeframe: first ask me for the temporality (any interval, for example 2m, 7m, 1h or 1d), the instrument and the dates of the run, and when I answer launch it and tell me the verdict when it ends.`;
 }
 
 export function StrategyDetail({ bankId, onBack }: { bankId: number; onBack: () => void }) {

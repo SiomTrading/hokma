@@ -167,6 +167,7 @@ def test_TA_09_the_prompt_follows_the_language_of_the_owner_and_each_desk_has_it
 def test_TA_09_a_piece_of_another_line_never_enters_the_prompt_of_a_swo_desk(tmp_path):
     root = tmp_path / "repo"
     shutil.copytree(KIT, root / "kit" / "template" / "desk")
+    shutil.copytree(KIT.parent / "agents", root / "kit" / "template" / "agents")
     path = root / "kit" / "template" / "desk" / "trader-pieces" / "sizing.md"
     path.write_text("---\nname: sizing\nlines: [DT]\nsummary: dt only\n---\nDT ONLY SIZING TEXT\n", encoding="utf-8")
     with pytest.raises(TraderError) as exc:
@@ -192,7 +193,7 @@ def test_TA_09_the_pieces_and_the_agent_file_are_english_without_origin_or_em_da
     spec = importlib.util.spec_from_file_location("check_repo_rules", ROOT / "scripts" / "check_repo_rules.py")
     rules = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rules)
-    files = ["kit/template/desk/agents/trader.md", *(p.relative_to(ROOT).as_posix() for p in sorted((KIT / "trader-pieces").glob("*.md"))),
+    files = ["kit/template/agents/trader.md", *(p.relative_to(ROOT).as_posix() for p in sorted((KIT / "trader-pieces").glob("*.md"))),
              "backend/hokma/desks/agents/trader.py", "backend/hokma/desks/swo/schema.py", "backend/hokma/desks/trading/sizing.py",
              "backend/hokma/desks/trading/exits.py", "backend/hokma/desks/trading/budget.py"]
     assert len(files) == 11 and rules.check(ROOT, files) == []
@@ -207,7 +208,7 @@ def test_TA_09_the_agent_file_is_the_one_the_desk_creation_expects():
     from hokma.desks.core.skills import split_frontmatter
     from hokma.desks.swo import create
 
-    meta, body = split_frontmatter((KIT / "agents" / "trader.md").read_text(encoding="utf-8"))
+    meta, body = split_frontmatter((KIT.parent / "agents" / "trader.md").read_text(encoding="utf-8"))
     seat = SEATS["A11"]
     assert (meta["name"], meta["slug"], meta["display_name"]) == (seat.slug, seat.slug, seat.name) and "SWO" in meta["lines"]
     assert set(meta["lines"]) == set(seat.lines) and meta["skills"] == [] and "You never write a size" in body or "never writes a size" in body

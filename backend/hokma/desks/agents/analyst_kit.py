@@ -31,7 +31,7 @@ from hokma.desks.core.skills import Skill, SkillError, parse_skill, split_frontm
 from hokma.desks.core.state import Message, ToolCall
 from hokma.desks.core.tools import ToolCatalog, ToolFailure, ToolSpec, Toolbox
 from hokma.desks.core.tool_audit import ToolAuditLog
-from hokma.desks.plantel import SEATS, AnalystReport, Seat
+from hokma.desks.plantel import SEATS, AnalystReport, Seat, seat_file
 from hokma.kit.integrity import app_root
 
 MAX_FILE_BYTES = 200_000
@@ -87,7 +87,7 @@ def load_seat_file(code: str, kit_root: Path | None = None) -> SeatFile:
     seat = SEATS[code]
     root = kit_root or default_kit_root()
     try:
-        meta, body = split_frontmatter(_read(root / "agents" / f"{seat.slug}.md"), seat.kit_file)
+        meta, body = split_frontmatter(_read(seat_file(root, seat.slug)), seat.kit_file)
     except SkillError as exc:
         raise AnalystKitError(str(exc)) from exc
     lines = meta.get("lines")

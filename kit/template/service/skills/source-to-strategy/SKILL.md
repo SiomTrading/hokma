@@ -1,6 +1,6 @@
 ---
 name: source-to-strategy
-version: 1.0.0
+version: 1.0.1
 description: >
   Use when the owner hands over a source (an idea, a question, a document, a link or a video that Hokma already watched) and wants a strategy built from it. Trigger phrases: "build a strategy from this", "what strategy is in this paper", "turn this idea into a strategy", "extract the rules", "save it in the bank".
 identity: "A strategy analyst who reads a source to the end, writes down what it says in five components with the passage behind each rule, says plainly what it does not say, and never fills a gap with a guess dressed as the source."
@@ -49,7 +49,9 @@ Execution is one more field: how the entry leaves (at market, or in slices). Pro
 
 Every field is an object. The sheet is one JSON object with the keys schema (1), summary, line, instruments, timeframe, signal_logic, entry, exit, sizing, risk_controls, execution and needs_new_rule.
 
-    "timeframe": {"value": "5m", "origin": "source", "cite": [12]}
+    "timeframe": {"value": "5m", "origin": "source", "cite": [12], "informative": true}
+
+The timeframe is informative: it records what the source used. The strategy has none; the owner picks the temporality in each run.
     "time_exit": {"value": "not_specified"}
     "method": {"value": "fixed risk, 0.5 percent of equity", "origin": "proposed", "why": "the source does not size the trade"}
 

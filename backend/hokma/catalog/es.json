@@ -439,6 +439,7 @@
   "status.source.invalid": "Ese repositorio trae un archivo de plugins que Hokma no entiende.",
   "status.source.neither": "El repositorio {repo} no es un marketplace ni un plugin: no tiene .claude-plugin/marketplace.json ni .claude-plugin/plugin.json.",
   "learn.api.unknown_topic": "Ese tema de la guía no existe.",
+  "backtest.insufficient_data": "No hay datos suficientes en {timeframe}: base {base}, proveedor {provider}, {bars} velas. {detail}",
   "market.error.unknown_symbol": "No se encontró ese símbolo. Revisa el ticker e inténtalo de nuevo.",
   "market.error.rate_limited": "Demasiadas consultas a la fuente de datos de mercado. Espera un minuto e inténtalo de nuevo.",
   "market.error.network": "No se pudo llegar a la fuente de datos de mercado. Revisa tu conexión e inténtalo de nuevo.",

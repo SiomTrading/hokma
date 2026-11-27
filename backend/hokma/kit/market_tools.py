@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Any
 
 from hokma.market.errors import MarketError
-from hokma.market.models import TIMEFRAMES
+from hokma.market.intervals import IntervalError, parse_time
 from hokma.market.service import build_chart
 from hokma.market.yahoo import valid_symbol
 
@@ -89,8 +89,10 @@ def candles(symbol: Any, interval: Any = "5m", limit: Any = DEFAULT_CANDLES,
     """The newest `limit` bars the chart would draw, oldest first. `t` is the start of the bar in epoch seconds UTC."""
     symbol = _symbol(symbol)
     interval = "5m" if interval is None else interval
-    if interval not in TIMEFRAMES:
-        raise ValueError(f"interval must be one of {', '.join(TIMEFRAMES)}")
+    try:
+        interval = parse_time(interval).canonical
+    except IntervalError:
+        raise ValueError("interval is a time interval such as 1m, 7m, 1h, 4h, 1D or 1W") from None
     limit = DEFAULT_CANDLES if limit is None else limit
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_CANDLES:
         raise ValueError(f"limit must be a whole number from 1 to {MAX_CANDLES}")

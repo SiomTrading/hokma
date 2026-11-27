@@ -234,7 +234,7 @@ def symbols(q: str = Query(default="", max_length=40), asset_class: str = Query(
 
 
 @router.get("/candles", response_model=ChartOut, summary="Recent candles for a symbol")
-def candles(symbol: str = Query(max_length=20), tf: Literal["1m", "5m", "15m", "1h", "1D"] = "5m",
+def candles(symbol: str = Query(max_length=20), tf: str = Query("5m", max_length=12),
             x_hokma_token: str = Header(default=""), token: str = Query(default="")) -> ChartOut:
     _guard(x_hokma_token, token)
     if not valid_symbol(symbol):

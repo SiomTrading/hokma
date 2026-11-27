@@ -47,7 +47,7 @@ def test_a_traditional_desk_has_20_agents_20_seats_and_the_profile_autonomy_and_
         row = by_slug[desk_agent_slug(seat, desk_id)]
         assert row["role"] == seat.desk_role and row["model"] == seat.default_model and row["active"] == 1
     assert [a["role"] for a in agents].count("chief") == 1
-    assert by_slug[f"desk-manager-{desk_id}"]["role"] == "chief"
+    assert by_slug["desk-manager"]["role"] == "chief"
     profile = rows(db, "SELECT line, variant FROM desk_profile WHERE desk_id = :d", d=desk_id)
     assert [(p["line"], p["variant"]) for p in profile] == [("SWO", "traditional")]
     auto = rows(db, "SELECT level, rules_json, approved_by FROM desk_autonomy WHERE desk_id = :d", d=desk_id)
@@ -141,39 +141,38 @@ def test_a_seat_file_that_is_not_for_a_swo_desk_or_has_a_bad_skill_is_refused(wo
     assert err.value.code == "agent_missing" and rows(db, "SELECT count(*) AS n FROM desks")[0]["n"] == 0
 
 
-def test_the_team_copies_the_agent_and_skill_files_into_the_folder_of_the_desk(world):
+def test_the_team_copies_the_skill_files_but_not_the_agents_into_the_folder_of_the_desk(world):
     db, kit = world
     out = create_swo_desk("Team", 10_000, kit_root=kit, db=db)
     with db.read() as u:
         folder = Path(u.projects.get(out["project_id"]).path)
     team = folder / "team"
-    assert sorted(p.name for p in (team / "agents").glob("*.md")) == sorted(f"{s.slug}.md" for s in seats_for("SWO", None))
+    assert not (team / "agents").exists()                                       # the agent of a seat is one file in agents/, never a copy per desk
     assert sorted(p.parent.name for p in (team / "skills").glob("*/SKILL.md")) == ["chain-reading", "quality-checks"]
-    adam = agent_files.frontmatter_value((team / "agents" / "market-analyst.md").read_text(encoding="utf-8"), "name")
-    assert adam == f"market-analyst-{out['id']}"
     assert (folder / "CLAUDE.md").is_file() and "Ana" in (folder / "CLAUDE.md").read_text(encoding="utf-8")
-    source = (hokma_home() / "agents" / f"market-analyst-{out['id']}.md").read_text(encoding="utf-8")
-    assert agent_files.frontmatter_value(source, "slug") == f"market-analyst-{out['id']}"
-    assert agent_files.frontmatter_value(source, "display_name") == "Adam"
+    source = (hokma_home() / "agents" / "market-analyst.md").read_text(encoding="utf-8")
+    assert agent_files.frontmatter_value(source, "slug") == "market-analyst" and agent_files.frontmatter_value(source, "display_name") == "Adam"
+    assert not list((hokma_home() / "agents").glob("*-[0-9]*.md"))               # no agent is named after the desk
 
 
-def test_each_desk_has_its_own_team_and_a_skill_only_reaches_the_seats_that_declare_it(world):
+def test_two_desks_share_one_agent_per_seat_and_keep_their_own_state(world):
     db, kit = world
     seeded = agent_count(db)
     first = create_swo_desk("One", 10_000, kit_root=kit, db=db)
     second = create_swo_desk("Two", 10_000, kit_root=kit, db=db)
     slugs = lambda d: {r["agent_slug"] for r in rows(db, "SELECT agent_slug FROM desk_seats WHERE desk_id = :d", d=d)}  # noqa: E731
-    assert slugs(first["id"]).isdisjoint(slugs(second["id"]))
-    assert agent_count(db) == seeded + 40
+    assert slugs(first["id"]) == slugs(second["id"]) == {s.slug for s in seats_for("SWO", None)}
+    assert agent_count(db) == seeded                                            # the seats are agents of the kit, already registered: a desk adds none
+    service.set_agent(first["id"], "market-analyst", model="opus", db=db)
+    service.set_agent(first["id"], "trader", active=False, db=db)
+    state = lambda d, slug: rows(db, "SELECT model, active FROM desk_agents WHERE desk_id = :d AND agent_slug = :a", d=d, a=slug)[0]  # noqa: E731
+    assert (state(first["id"], "market-analyst")["model"], state(first["id"], "trader")["active"]) == ("opus", 0)
+    assert (state(second["id"], "market-analyst")["model"], state(second["id"], "trader")["active"]) == ("sonnet", 1)      # the other desk is untouched
     declared = {name for seat, names in {"A07": ["chain-reading"], "A16": ["quality-checks"], "A06": ["quality-checks"]}.items() for name in names}
     with db.read() as u:
         folders = [Path(u.projects.get(d["project_id"]).path) for d in (first, second)]
     for folder in folders:
-        on_disk = {p.parent.name for p in (folder / "team" / "skills").glob("*/SKILL.md")}
-        assert on_disk == declared
-        for agent_file in (folder / "team" / "agents").glob("*.md"):
-            text = agent_file.read_text(encoding="utf-8")
-            assert "SWO" in text.split("---")[1]
+        assert {p.parent.name for p in (folder / "team" / "skills").glob("*/SKILL.md")} == declared
 
 
 def test_a_failure_in_the_middle_removes_what_this_call_wrote(world, monkeypatch):

@@ -1,6 +1,6 @@
 ---
 name: strategy-requirement
-version: 1.0.0
+version: 1.0.1
 description: >
   Use when the owner said yes to building a strategy as code, before the coder writes anything. Trigger phrases: "build it", "write the requirement", "program this strategy".
 identity: "An analyst who turns what a source says into a requirement that the coder can program and the reviewer can check, with cases that need no interpretation."
@@ -24,7 +24,7 @@ The requirement is the file spec.md in the folder of the strategy, service/strat
 
 - summary: one or two sentences.
 - quote: the locator of the passage (a time or a page).
-- market and timeframe: for example NQ and 5m.
+- market: for example NQ. The strategy has no timeframe: the owner chooses it in each run (any interval, 2m, 7m, 1h...). If the source states one, put it in the summary as information ("the source uses 5m"), never as a condition of the strategy.
 - inputs: bar fields and indicators, for example high, low, close, atr.
 - params: name, type, value, min, max, origin (source or proposed).
 - behavior: statements with given, when and then.

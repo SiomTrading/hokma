@@ -1,6 +1,6 @@
 ---
 name: backtest-debugging
-version: 1.0.0
+version: 1.0.1
 description: >
   Use when a backtest fails, stops early, returns no trades or gives a result that cannot be true. Trigger phrases: "the run failed", "no trades", "the Sharpe is huge", "the result makes no sense", "account blown", "engine error".
 identity: "A methodical investigator who finds the root cause before changing anything and stops after three failed attempts."
@@ -27,7 +27,8 @@ Find the root cause before you change anything. A change made without knowing th
 | Stage | Typical failure | Where to look |
 |---|---|---|
 | data | no bars for the range, a gap, a contract without a sheet | `data_bars` for the same symbol and dates |
-| spec | a bar size not allowed for the line, dates out of order | the message of the spec error |
+| spec | a bar that is not a time interval, dates out of order | the message of the spec error; any interval (2m, 7m, 1h, 1d...) is valid on every line |
+| data | "not enough data in {timeframe}" | it names the base used, the provider and the bars it got: the provider does not reach that far back in that base; shorten the range or use another temporality |
 | strategy | the strategy raised, emitted something other than an order intent, read a bar that is not closed yet | the error text of the run |
 | fills | an order rejected by margin or by the guards of the line | the `rejected` counts of the result |
 | result | statistics that cannot be computed on zero trades | the warnings of the result |

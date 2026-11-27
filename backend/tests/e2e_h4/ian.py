@@ -13,7 +13,7 @@ from hokma.factory import researcher
 from hokma.llm.jsonx import extract_json
 from hokma.llm.protocol import LLMReply
 
-AGENT_FILE = Path(__file__).resolve().parents[3] / "kit" / "template" / "service" / "agents" / "strategy-researcher.md"
+AGENT_FILE = Path(__file__).resolve().parents[3] / "kit" / "template" / "agents" / "strategy-researcher.md"
 
 
 def offered_tools() -> tuple[str, ...]:

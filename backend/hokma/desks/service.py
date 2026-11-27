@@ -249,9 +249,12 @@ def list_agents(desk_id: int, db: Database | None = None) -> list[dict[str, Any]
         out = []
         for row in u.desks.list_agents(desk_id):
             view = _agent_view(row, names)
+            former = f"{row.agent_slug}-{desk_id}"                      # the copy this seat had on the desk before 1.2.6: its history stays under that slug
             activity = u.desks.recent_activity(desk.project_id, row.agent_slug, 3)
+            if len(activity) < 3:
+                activity = (activity + u.desks.recent_activity(desk.project_id, former, 3))[:3]
             view["status"] = "off" if not row.active else ("working" if row.agent_slug in working else "idle")
-            view["tokens_week"] = tokens.get(row.agent_slug, 0)
+            view["tokens_week"] = tokens.get(row.agent_slug, 0) + tokens.get(former, 0)
             view["last_action"] = activity[0] if activity else None
             view["activity"] = activity
             out.append(view)

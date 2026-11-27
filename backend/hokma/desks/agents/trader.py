@@ -31,7 +31,7 @@ from hokma.desks.core.prompts import Piece, PromptComposer, kit_dir
 from hokma.desks.core.signal import LINES
 from hokma.desks.core.skills import SkillError, split_frontmatter
 from hokma.desks.core.tools import ToolCatalog, ToolFailure, ToolSpec, Toolbox
-from hokma.desks.plantel import SEATS, TraderPlan
+from hokma.desks.plantel import SEATS, TraderPlan, seat_file
 from hokma.desks.swo.schema import (CREDIT_STRUCTURES, DEBIT_STRUCTURES, SHARES_PER_OPTION, STRUCTURES, SWOProposal,
                                     derive_structure)
 from hokma.desks.trading import budget as budget_module
@@ -139,7 +139,7 @@ def load_pieces(line: str, *, root: Path | None = None) -> list[TraderPiece]:
 
 def load_persona(*, root: Path | None = None) -> str:
     """The body of the agent file of Isaac: his identity and what he does not do."""
-    path = kit_dir("agents", f"{SEAT.slug}.md", root=root)
+    path = seat_file(kit_dir(root=root), SEAT.slug)
     try:
         _meta, body = split_frontmatter(path.read_text(encoding="utf-8"), path.name)
     except (SkillError, OSError, UnicodeDecodeError) as exc:

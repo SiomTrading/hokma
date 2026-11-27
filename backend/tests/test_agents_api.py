@@ -9,9 +9,13 @@ from hokma.agents.service import AgentService
 from hokma.i18n import t
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths in assertions")
+from hokma.desks.plantel import SEATS  # noqa: E402
+
+SEAT_KIT = {s.slug for s in SEATS.values()}      # the 21 agents of the seats of a desk: one file each in agents/, off until a desk brings them in (1.2.6)
+SAM_SUB = {"sam-dev-python", "sam-dev-frontend", "sam-mcp-builder"}        # Sam's three sub-agents, like Joel's: kit files in agents/, on from the start (1.2.6)
 DESK_KIT = {"desk-chief", "signals", "risk", "bull-case", "bear-case", "judge"}
 KIT = {"axel", "diego", "hokma", "hugo", "iris", "joel", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder",
-       "vera", "strategy-researcher", "strategy-coder", "strategy-reviewer"} | DESK_KIT
+       "vera", "strategy-researcher", "strategy-coder", "strategy-reviewer", "back-office-clerk"} | DESK_KIT | SAM_SUB | SEAT_KIT
 CREATOR = {"strategy-researcher", "strategy-coder", "strategy-reviewer"}        # Ian, Sam and Ben: registered and on from the start (1.2.1)
 
 
@@ -35,11 +39,14 @@ def test_kit_agents_are_listed_and_the_first_state_is_given_once(client, work):
     assert data["orchestrator"]["slug"] == "hokma" and data["orchestrator"]["active"]
     # base kit and Joel's sub-agents on; the rest of the specialists wait for their release
     assert {s for s, a in by_slug(data).items() if a["active"]} == {
-        "hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"} | CREATOR
-    assert data["active"] == 10
-    assert client.get("/api/agents/summary").json() == {"active": 10, "total": 19}
-    assert work.loaded() == {"hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"} | CREATOR
-    assert work.parked() == {"axel", "hugo", "iris"} | DESK_KIT   # the desk agents wait until a desk brings them in
+        "hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"} | CREATOR | SAM_SUB
+    assert data["active"] == 13
+    assert client.get("/api/agents/summary").json() == {"active": 13, "total": 44}
+    assert work.loaded() == {"hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"} | CREATOR | SAM_SUB
+    for slug in SAM_SUB:                                                          # the copy that Claude Code loads carries the tools of the kit file, Write included
+        text = (work.home / ".claude" / "agents" / f"{slug}.md").read_text()
+        assert f"name: {slug}" in text and "tools: Read, Write, Edit" in text and "reports_to: strategy-coder" in text
+    assert work.parked() == {"axel", "hugo", "iris", "back-office-clerk"} | DESK_KIT | SEAT_KIT   # Anna waits for the owner (1.2.6: she is registered like the rest); the desk agents wait until a desk brings them in
 
 
 def test_the_owner_choice_survives_a_restart(client, work):
@@ -105,7 +112,7 @@ def test_create_my_first_agent(client, work, db):
         assert row.is_custom and row.status == "active" and row.file_path == "agents/analista-de-graficos.md"
     # it is what /agente completes from and accepts
     listed = client.get("/api/agents").json()
-    assert "analista-de-graficos" in by_slug(listed) and listed["total"] == 20
+    assert "analista-de-graficos" in by_slug(listed) and listed["total"] == 45
     assert client.post("/api/agents", json=body).json()["detail"]["code"] == "agent_exists"
     # a restart keeps it custom and on
     AgentService().reconcile()

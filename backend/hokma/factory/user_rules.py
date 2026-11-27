@@ -65,7 +65,6 @@ TEST_FILE = "test_strategy.py"
 SEVERITIES = ("blocker", "major", "minor", "nit")
 SIZER_KINDS = ("fixed_contracts", "fixed_risk", "vol_target")
 BAR_FIELDS = ("open", "high", "low", "close", "volume")
-TIMEFRAME = re.compile(r"^\d{1,3}[mhd]$")
 PREMIUM_WORDS = re.compile(r"\b(?:sell(?:ing)? (?:a )?(?:premium|options?|puts?|calls?)|covered calls?|cash[- ]secured|short (?:strangle|straddle)|iron condor|credit spread|"
                            r"vender prima|venta de prima)\b", re.I)
 MAX_TEXT = 1000
@@ -131,8 +130,22 @@ def require_role(caller: Any, allowed: str, what: str) -> str:
 
 def _slug(value: Any) -> str:
     if not isinstance(value, str) or not SLUG.match(value):
-        raise UserRuleError("bad_input", "slug is lower case letters, digits and underscores, 2 to 40 characters, starting with a letter")
+        raise UserRuleError("bad_input", f"slug {str(value)[:80]!r} is not valid: lower case letters, digits and underscores, 2 to 40 characters, starting with a letter")
     return value
+
+
+def rule_slug(bank_slug: str, bank_id: int) -> str:
+    """The slug of the rule of a strategy of the bank, derived from the slug of the card (which may be up to 80 characters and start with a digit): underscores,
+    a letter first, at most 40 characters, no trailing underscore. When the card slug had to be cut, the bank id closes it so two long titles never collide."""
+    base = re.sub(r"[^a-z0-9_]+", "_", bank_slug.replace("-", "_").lower()).strip("_") or "strategy"
+    if not base[0].isalpha():
+        base = "s_" + base
+    if len(base) < 2:
+        base += "_s"
+    if len(base) > 40:
+        tail = f"_{int(bank_id)}"
+        base = base[:40 - len(tail)].rstrip("_") + tail
+    return _slug(base)
 
 
 def _text(value: Any, name: str, low: int = 1, high: int = MAX_TEXT) -> str:
@@ -163,7 +176,7 @@ def validate_brief(brief: Any) -> dict[str, Any]:
     if "summary" not in brief:
         raise UserRuleError("bad_input", "brief needs summary")
     out: dict[str, Any] = {"summary": _text(brief["summary"], "summary", 10, 1000)}
-    for key, high in (("quote", 300), ("market", 40), ("timeframe", 10)):
+    for key, high in (("quote", 300), ("market", 40), ("timeframe", 10)):          # all three optional; the timeframe is informative (what the source used), the run picks its own
         if key in brief:
             out[key] = _text(brief[key], key, 1, high)
     return out
@@ -186,8 +199,8 @@ def write_brief(*, brief: Any, caller: str, bank_id: int | None = None, slug: st
                 raise UserRuleError("no_data", f"there is no strategy rule {rule_id}")
             bank_ref = int(rule["bank_id"])
         else:
-            if bank_id is None or slug is None or title is None:
-                raise UserRuleError("bad_input", "the first requirement needs bank_id, slug and title")
+            if bank_id is None or title is None:
+                raise UserRuleError("bad_input", "the first requirement needs bank_id and title")
             bank_ref = _whole(bank_id, "bank_id")
             rule = None
         bank = s.one("SELECT id, status, slug FROM strategy_bank WHERE id = :i", {"i": bank_ref})
@@ -199,7 +212,7 @@ def write_brief(*, brief: Any, caller: str, bank_id: int | None = None, slug: st
         if last is None:
             raise UserRuleError("no_data", "the strategy of the bank has no version to answer")
         if rule is None:
-            name = _slug(bank["slug"].replace("-", "_"))                     # the rule carries the slug of the card: the folder is STR-{NNN}-{slug}
+            name = rule_slug(bank["slug"], bank_ref)                          # derived from the slug of the card (the `slug` argument is not used); the folder stays STR-{NNN}-{slug of the card}
             if s.one("SELECT 1 AS x FROM user_rules WHERE slug = :s", {"s": name}) is not None:
                 raise UserRuleError("bad_input", f"there is already a rule named {name}: give rule_id to write its next requirement")
             rule_id = s.insert("user_rules", {"slug": name, "kind": "strategy", "title": _text(title, "title", 1, 160), "bank_id": bank_ref, "component": "strategy",
@@ -918,8 +931,9 @@ def database_exists() -> bool:
 
 
 def add_user_rules(registry: Registry, *, db: Database | None = None, stages: Sequence[str] = APPROVED) -> int:
-    """Register the generated strategies that may be used. One that does not pass its checks is left out and the registry says nothing of it. The registry of the
-    desks (live) passes only owner_reviewed: a strategy the owner did not approve is not in it."""
+    """Register the generated strategies that may be used. One that does not pass its checks is left out of the registry and the reason is kept in `LOAD_PROBLEMS`,
+    which `bank_get` shows as `load_problem` of that version: an approved version that does not load is never silent. The registry of the desks (live) passes only
+    owner_reviewed: a strategy the owner did not approve is not in it."""
     if db is None and not database_exists():
         return 0
     try:
@@ -932,10 +946,13 @@ def add_user_rules(registry: Registry, *, db: Database | None = None, stages: Se
     for row in rows:
         try:
             cls = load_class(row["registry_id"], db=db)
+            registry.add(Entry(row["registry_id"], "strategy", cls, row["line"], f"Generated strategy: {row['title']}"[:300], cls.SCHEMA.defaults(), f"user:{row['registry_id']}"))
             LOAD_PROBLEMS.pop(row["registry_id"], None)
         except UserRuleError as exc:
             LOAD_PROBLEMS[row["registry_id"]] = str(exc)                 # it is not loaded and it says why: bank_get shows it
             continue
-        registry.add(Entry(row["registry_id"], "strategy", cls, row["line"], f"Generated strategy: {row['title']}"[:300], cls.SCHEMA.defaults(), f"user:{row['registry_id']}"))
+        except Exception as exc:                                         # noqa: BLE001  (a class that breaks when it is read or added is one more reason, not a failure of every other strategy)
+            LOAD_PROBLEMS[row["registry_id"]] = f"{row['registry_id']} does not register: {type(exc).__name__}: {str(exc)[:300]}"
+            continue
         added += 1
     return added

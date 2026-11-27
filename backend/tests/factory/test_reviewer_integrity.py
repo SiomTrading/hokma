@@ -60,7 +60,7 @@ def skills_reach_no_one_else(names, own_agent):
                 assert name not in prompt, (role, line, name)
     assert pr.prompt_integrity_problems() == []
 
-AGENT = SERVICE / "agents" / "strategy-reviewer.md"
+AGENT = ROOT / "kit" / "template" / "agents" / "strategy-reviewer.md"
 NAMES = ("strategy-code-review", "review-evidence")
 
 

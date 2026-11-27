@@ -82,10 +82,10 @@ def test_TA_13_create_swo_desk_works_against_the_real_kit(owner, variant, drew):
     folder = Path(desk["folder"]) if desk.get("folder") else None
     with owner.read() as u:
         agents = u.session.query("SELECT agent_slug FROM desk_seats WHERE desk_id = :d", {"d": desk["id"]})
-    assert len(agents) == len(desk["seats"]) and f"desk-manager-{desk['id']}" in {a["agent_slug"] for a in agents}
+    assert len(agents) == len(desk["seats"]) and "desk-manager" in {a["agent_slug"] for a in agents}
     if folder is not None:
         team = folder / "team"
-        assert (team / "agents" / "desk-manager.md").is_file() and (team / "skills" / "morning-note" / "SKILL.md").is_file()
+        assert not (team / "agents").exists() and (team / "skills" / "morning-note" / "SKILL.md").is_file()      # one agent file per seat, in agents/: none in the desk
 
 
 @pytest.mark.parametrize("name, variant", [("swo-traditional.yaml", "traditional"), ("swo-pead.yaml", "pead")])

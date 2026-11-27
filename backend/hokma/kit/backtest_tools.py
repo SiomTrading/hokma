@@ -3,7 +3,7 @@
 routine; the code decides from the evidence of a backtest and nothing the caller passes opens the switch) and `premium_switch_state` (read only).
 
 Every tool validates its sizes with `hokma.quant.limits` before it does anything, takes ids and values and never a path or a pattern, and answers with
-a classified error (`no_data`, `unavailable`, `stale`, `bad_input`, `blocked` plus `forbidden_fill`, `bar_not_allowed_for_line`, `missing_tests`,
+a classified error (`no_data`, `unavailable`, `stale`, `bad_input`, `blocked` plus `forbidden_fill`, `missing_tests`,
 `attempt_budget_spent` and `evaluator_changed`). What decides a run is derived from real state: the line of a strategy is the one of its saved spec, the
 cut in time of a run is its end, the trial count of a deflated Sharpe ratio is the ledger. No tool here sends an order or reaches a broker or a
 connector: the service only runs history (spec 4.7); the two premium tools name a desk only to measure or read its switch, and the test of the scan reads this file with the same rules as `backtest/`.
@@ -26,7 +26,7 @@ from typing import Any
 from hokma.kit.tool_registry import CODES, ToolError, ToolSet
 
 TOOLSET = ToolSet()
-EXTRA_CODES = ("forbidden_fill", "bar_not_allowed_for_line", "missing_tests", "attempt_budget_spent", "evaluator_changed")
+EXTRA_CODES = ("forbidden_fill", "missing_tests", "attempt_budget_spent", "evaluator_changed")
 MAX_RANGE_DAYS = 3_660              # ten years of calendar days in one run
 MAX_PARAMS = 32
 MAX_TRADES = 500
@@ -39,7 +39,7 @@ _PARAM_NAME = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 _CODE_PREFIX = re.compile(r"^([a-z][a-z_]*):")
 _PREFIX_CLASS = {"no_run": "no_data", "no_walk_forward": "no_data", "data_changed": "stale", "ledger_missing": "unavailable",
                  "cluster_unavailable": "unavailable", "budget_too_small": "bad_input"}
-_STAGE_CLASS = {"no_data": "no_data", "no_bars": "no_data"}
+_STAGE_CLASS = {"no_data": "no_data", "no_bars": "no_data", "insufficient_data": "no_data"}
 
 
 class ClassifiedError(ToolError):
@@ -86,7 +86,7 @@ def classify(exc: Exception) -> ToolError | None:
     """The classified error of an exception of the service, or None when it is not one of the known failures (it is then a bug and propagates)."""
     from hokma.backtest import _lib
     from hokma.backtest.runner import StageError
-    from hokma.backtest.spec import BarNotAllowed, ForbiddenFill
+    from hokma.backtest.spec import ForbiddenFill
     from hokma.factory import researcher
     from hokma.quant.errors import BadInput
 
@@ -94,8 +94,6 @@ def classify(exc: Exception) -> ToolError | None:
         return exc
     if isinstance(exc, ForbiddenFill):
         return ClassifiedError("forbidden_fill", str(exc)[:400], ["Use the next open plus one tick or more, stop first, gap at the open"])
-    if isinstance(exc, BarNotAllowed):
-        return ClassifiedError("bar_not_allowed_for_line", str(exc)[:400])
     if isinstance(exc, (researcher.MissingTests, researcher.AttemptBudgetSpent, researcher.EvaluatorChanged)):
         return ClassifiedError(exc.code, str(exc)[:400])
     if isinstance(exc, researcher.ToolNotAllowed):
@@ -216,7 +214,7 @@ def _line_of(strategy_id: str, version: int, asked: Any) -> str:
 def build_spec(a: Mapping[str, Any]):
     """The `BacktestSpec` of the arguments. The cut in time is the end of the run, the line comes from the saved spec and the fill rules are checked
     by `FillRules` itself."""
-    from hokma.backtest.spec import BARS, CostModel, BacktestSpec
+    from hokma.backtest.spec import CostModel, BacktestSpec, SpecError, bar_seconds
     from hokma.broker import fees
     from hokma.quant import limits
 
@@ -230,8 +228,10 @@ def build_spec(a: Mapping[str, Any]):
     start, end = _when(a["start"], "start"), _when(a["end"], "end")
     if end - start > timedelta(days=MAX_RANGE_DAYS):
         raise ToolError("bad_input", f"a run covers at most {MAX_RANGE_DAYS} days")
-    if a["bar"] not in BARS:
-        raise ToolError("bad_input", f"bar is one of {', '.join(BARS)}")
+    try:
+        bar_seconds(a["bar"])
+    except (SpecError, TypeError, AttributeError) as exc:
+        raise ToolError("bad_input", str(exc)[:300] if isinstance(exc, SpecError) else "bar is a time interval such as 2m, 7m, 1h, 4h, 1d or 1w") from None
     if a["fee_table"] not in fees.tables():
         raise ToolError("bad_input", f"fee_table is one of {', '.join(fees.tables())}")
     ticks = _whole(a.get("slippage_ticks", 1), "slippage_ticks", 0, 100)
@@ -510,11 +510,11 @@ def loop_score(objective: str = "sharpe", *, services_of: Callable[[], Any] | No
 # ------------------------------------------------------------------------------------------------------------------------- the tools
 RUN_PROPS: dict[str, Any] = {
     "strategy_id": _s("Id of the strategy (the one of its saved spec, or of the registry). Not needed with bank_id."), "version": _i("Version of the saved spec; 1 for a registry strategy. Not needed with bank_id."),
-    "bank_id": _i("Instead of strategy_id and version: the strategy of the bank, run with the id and the saved spec of its last version."),
+    "bank_id": _i("Instead of strategy_id and version: the strategy of the bank (its bank id: STR-{NNN} is that number with three digits), run with the id and the saved spec of its last version."),
     "code": _s("Or the code of the strategy, like STR-001 (its bank id): the last approved version."),
     "line": _s("Only for a strategy with no saved spec: DT, SWC, SWO, LP or RF. A saved spec fixes it."),
     "instruments": {"type": "array", "items": {"type": "string"}, "description": "Canonical contract ids, for example CONT:NQ."},
-    "bar": _s("Bar size; the line decides which are allowed.", enum=["1m", "5m", "15m", "1h", "1d", "1w"]),
+    "bar": _s("Temporality of this run, any time interval: 1m, 2m, 7m, 45m, 1h, 4h, 1d, 1w... The strategy has none; the owner picks it for each run, and the bars are built from the finest base the provider has. If the data does not reach, the answer says it with the base and the provider."),
     "start": _s("ISO date of the first bar."), "end": _s("ISO date of the end; nothing after it is read."), "capital_usd": {"type": ["number", "string"], "description": "Starting capital in USD."},
     "fee_table": _s("Commission table of a broker, the one the simulated broker reads, for example schwab."),
     "slippage_ticks": _i("Ticks against on every fill (default 1); equal to fill.next_open_ticks."),
@@ -559,13 +559,21 @@ def backtest_result(u, c, a: dict) -> str:
 @safe
 def backtest_optimize(u, c, a: dict) -> str:
     out = _call(c, "backtest_optimize", a)
-    _leave_summary(a, out)
+    note = _leave_summary(a, out)
+    if note:
+        try:
+            data = json.loads(out)
+            if isinstance(data, dict):
+                return _dump({**data, **note})
+        except ValueError:
+            pass
     return out
 
 
-def _leave_summary(a: dict, out: str) -> None:
+def _leave_summary(a: dict, out: str) -> dict[str, str] | None:
     """An optimization of a strategy of the creator leaves its summary in the folder of the strategy: results/OPT-{n}-{date}.md with the run id and the numbers. The verdict of the
-    optimizer is bound to the same strategy by its id (u_str{NNN}_v{N}) and version. A problem here never changes the answer of the tool."""
+    optimizer is bound to the same strategy by its id (u_str{NNN}_v{N}) and version. A problem here never changes the optimization, but it is not silent: the answer of the tool gets `summary_file` when the summary was written and
+    `summary_note` with the reason when it was not (the caller can then write it by hand)."""
     try:
         from datetime import datetime, timezone
 
@@ -575,13 +583,13 @@ def _leave_summary(a: dict, out: str) -> None:
         if bank_id is None and a.get("code") is not None:
             bank_id = int(str(a["code"]).split("-")[1])
         if bank_id is None:
-            return
+            return None                                                   # not a strategy of the creator: no folder, no summary, nothing to say
         data = json.loads(out)
         with services().database().read() as u:
             bank = u.session.one("SELECT slug FROM strategy_bank WHERE id = :b", {"b": int(bank_id)})
         folder = None if bank is None else user_rules.strategy_folder(int(bank_id), bank["slug"])
         if folder is None:
-            return
+            return {"summary_note": f"the summary OPT was not written: the bank id {int(bank_id)} has no strategy folder"}
         results = folder / "results"
         results.mkdir(exist_ok=True)
         number = len(list(results.glob("OPT-*.md"))) + 1
@@ -589,9 +597,15 @@ def _leave_summary(a: dict, out: str) -> None:
         lines = [f"# OPT-{number}: optimization of {user_rules.code_of(int(bank_id))}", "", f"- Code: {user_rules.code_of(int(bank_id))}", f"- Bank id: {int(bank_id)}", f"- Date: {stamp}",
                  f"- Strategy id: {data.get('strategy_id')}", f"- Run id: {data.get('run_id')}", f"- Status: {data.get('status')}", f"- Method: {a.get('method')}, objective {a.get('objective')}, trials {data.get('n_trials')}",
                  f"- Best: {json.dumps(data.get('best'), default=str)}", "- Verdict: not given yet; optimizer_verdict on this strategy id and version writes it, bound to the bank id and the version", ""]
-        (results / f"OPT-{number}-{stamp}.md").write_text("\n".join(lines), encoding="utf-8")
-    except Exception:                                                     # noqa: BLE001
-        pass
+        target = results / f"OPT-{number}-{stamp}.md"
+        target.write_text("\n".join(lines), encoding="utf-8")
+        try:
+            shown = user_rules.rel_folder(target)
+        except ValueError:                                                # the strategies folder is outside the home: the full path
+            shown = str(target)
+        return {"summary_file": shown}
+    except Exception as exc:                                              # noqa: BLE001
+        return {"summary_note": f"the summary OPT was not written: {type(exc).__name__}: {str(exc)[:200]}"}
 
 
 @TOOLSET.tool("backtest_walkforward", "Walk forward (rolling or anchored) or combinatorial purged validation of the points of a space: every window picks its point on its "

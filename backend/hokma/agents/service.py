@@ -61,6 +61,13 @@ class ReconcileReport:
     problems: dict[str, str] = field(default_factory=dict)
 
 
+
+def _retired(agent) -> bool:
+    """An agent of the owner with no file: the copy of a desk that moved to the shared agent of its seat (task 3427). It stays in the table because the journal and the
+    approvals point at it, and it is not listed."""
+    return bool(agent.is_custom and not agent.file_path)
+
+
 class AgentService:
     def __init__(self, db: Database | None = None, files: fl.AgentFiles | None = None) -> None:
         self._db = db
@@ -89,8 +96,8 @@ class AgentService:
         except Exception:
             log.exception("agents folder not synced")
         with self.db.read() as u:
-            agents = u.agents.list()
-            active, total = u.agents.count("active"), u.agents.count()
+            agents = [a for a in u.agents.list() if not _retired(a)]
+        active, total = sum(1 for a in agents if a.status == "active"), len(agents)
         items = [self._item(a) for a in agents]
         orchestrator = next((i for i in items if i["is_orchestrator"]), None)
         rest = [i for i in items if i is not orchestrator]
@@ -99,7 +106,8 @@ class AgentService:
 
     def summary(self) -> dict[str, int]:
         with self.db.read() as u:
-            return {"active": u.agents.count("active"), "total": u.agents.count()}
+            agents = [a for a in u.agents.list() if not _retired(a)]
+        return {"active": sum(1 for a in agents if a.status == "active"), "total": len(agents)}
 
     def _get(self, slug: str):
         with self.db.read() as u:

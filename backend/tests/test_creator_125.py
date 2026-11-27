@@ -1,5 +1,5 @@
-"""1.2.5: the tramo of Ian in the strategy creator. The spec has one road (service/strategies/STR-{NNN}-{slug}/spec.md), an idea with no source makes its card and its folder,
-the copy of Ian, Sam and Ben that Claude Code loads always carries Read, Write, Edit and Agent (also when the source file is old, narrow or edited), and the main chat and the agents
+"""1.2.5 and 1.2.6: the tramo of Ian in the strategy creator. The spec has one road (service/strategies/STR-{NNN}-{slug}/spec.md), an idea with no source makes its card and its folder,
+the four agents of the creator (Ian, Sam, Ben and Anna) live in agents/ like any other (1.2.6), the copy of Ian, Sam and Ben carries Read, Write, Edit and Agent (an old copy is renewed by the update), and the main chat and the agents
 of a desk hand a strategy request to Ian."""
 import json
 import re
@@ -47,7 +47,7 @@ def test_the_text_of_the_tool_and_the_messages_name_the_folder_of_the_strategy_a
     assert "service/strategies/{NNN}-{slug}" not in source and "service/strategies/STR-{NNN}-{slug}/spec.md" in source
     skill = (TEMPLATE / "service" / "skills" / "strategy-requirement" / "SKILL.md").read_text(encoding="utf-8")
     assert "lives only in the base" not in skill and "service/strategies/STR-{NNN}-{slug}/spec.md" in skill
-    ian = (TEMPLATE / "service" / "agents" / "strategy-researcher.md").read_text(encoding="utf-8")
+    ian = (TEMPLATE / "agents" / "strategy-researcher.md").read_text(encoding="utf-8")
     assert "projects/{strategy}" not in ian and "service/strategies/STR-{NNN}-{slug}/adr/ADR-" in ian and "/sprints/week-{n}.md" in ian
 
 
@@ -87,66 +87,90 @@ def test_without_a_source_or_an_idea_bank_create_says_what_is_missing(db):
     assert source_tools.TOOLSET.tools["bank_create"][2] == ["title"]
 
 
-# ---------------------------------------------------------------------------------------------------- 6. the registered copy
-def test_the_registered_copy_of_ian_sam_and_ben_carries_the_normal_tools_after_seeding(env):
-    _install_kit_agents()
+# ---------------------------------------------------------------------------------------------------- 6. the registered copy (1.2.6: the four live in agents/, one source)
+SEEDED_FROM_KIT = (*CREATORS, "back-office-clerk")
+
+
+def _sync(version="1.2.6"):
+    from hokma.kit.sync import sync_kit
+
+    return sync_kit(TEMPLATE, version=version)
+
+
+def test_the_four_agents_are_in_the_agents_folder_of_the_kit_and_not_in_service_agents():
+    for slug in SEEDED_FROM_KIT:
+        assert (TEMPLATE / "agents" / f"{slug}.md").is_file(), slug
+    assert not (TEMPLATE / "service" / "agents").exists()
+    for slug in CREATORS:                                                          # the guarantee is the kit text itself
+        assert NEEDED <= tools_of((TEMPLATE / "agents" / f"{slug}.md").read_text(encoding="utf-8")), slug
+
+
+def test_the_four_are_seeded_like_any_agent_of_the_kit_and_the_creators_start_on(env):
+    _sync()
     migrate()
     AgentService().reconcile()
+    with get_database().read() as u:
+        agents = {a.slug: a for a in u.agents.list()}
+    for slug in SEEDED_FROM_KIT:
+        assert slug in agents and agents[slug].file_path == f"agents/{slug}.md" and not agents[slug].is_custom, slug
+        assert (hokma_home() / "agents" / f"{slug}.md").is_file(), slug
+    assert all(agents[slug].status == "active" for slug in CREATORS)
     for slug in CREATORS:
         loaded = (hokma_home() / ".claude" / "agents" / f"{slug}.md").read_text(encoding="utf-8")
         assert NEEDED <= tools_of(loaded), slug
 
 
-def test_an_old_copy_with_only_the_tools_of_the_bank_is_renewed_on_the_next_start(env):
+def test_an_old_copy_in_agents_is_renewed_by_the_update_and_the_model_of_the_owner_stays(env):
     target = _install_kit_agents()
     migrate()
     AgentService().reconcile()
-    kit = app_root() / "kit" / "template" / "service" / "agents"
     for slug in CREATORS:                                                          # what 1.2.1 left in the working folder and in the loaded copy
-        old = fl.set_frontmatter_value((kit / f"{slug}.md").read_text(encoding="utf-8"), "tools", BANK_ONLY)
-        (target / f"{slug}.md").write_text(old, encoding="utf-8")
+        old = fl.set_frontmatter_value((TEMPLATE / "agents" / f"{slug}.md").read_text(encoding="utf-8"), "tools", BANK_ONLY)
+        (target / f"{slug}.md").write_text(old + "\nEdited by hand.\n", encoding="utf-8")
         (hokma_home() / ".claude" / "agents" / f"{slug}.md").write_text(old, encoding="utf-8")
+    AgentService().set_model("strategy-researcher", "sonnet")                      # the owner picked the tier in the panel
+    report = _sync()
+    for slug in CREATORS:
+        assert f"agents/{slug}.md" in report.updated and f"agents/{slug}.md" not in report.conflicts, slug
+        assert not (target / f"{slug}.md.hokma-new").exists(), slug
+        text = (target / f"{slug}.md").read_text(encoding="utf-8")
+        assert NEEDED <= tools_of(text) and "Edited by hand" not in text, slug
+        assert tools_of(text) == tools_of((TEMPLATE / "agents" / f"{slug}.md").read_text(encoding="utf-8")), slug
+    assert parse_frontmatter((target / "strategy-researcher.md").read_text(encoding="utf-8"))["model"] == "sonnet"
+    assert parse_frontmatter((target / "strategy-coder.md").read_text(encoding="utf-8"))["model"] == "opus"
     with get_database().write() as u:
         seed_agents(u.session)
-    AgentService().reconcile()
-    for slug in CREATORS:
-        for path in (target / f"{slug}.md", hokma_home() / ".claude" / "agents" / f"{slug}.md"):
-            assert NEEDED <= tools_of(path.read_text(encoding="utf-8")), path
-
-
-def test_a_source_file_that_was_edited_or_narrowed_still_gives_a_registered_copy_with_the_tools(env, monkeypatch):
-    """The kit of the student is a git folder whose agent files can be edited: the registered copy is repaired from whatever the source says."""
-    target = _install_kit_agents()
-    migrate()
-    for slug in CREATORS:                                                          # the working copy edited by hand and narrowed, no kit renewal can fix it before apply
-        text = (target / f"{slug}.md").read_text(encoding="utf-8")
-        (target / f"{slug}.md").write_text(fl.set_frontmatter_value(text, "tools", "Grep, Glob, " + BANK_ONLY) + "\nEdited by hand.\n", encoding="utf-8")
-    monkeypatch.setattr("hokma.db.seeds._service_agents", lambda kit_dir, installed_dir: {})          # even with no renewal from the kit
     AgentService().reconcile()
     for slug in CREATORS:
         loaded = (hokma_home() / ".claude" / "agents" / f"{slug}.md").read_text(encoding="utf-8")
-        assert NEEDED <= tools_of(loaded) and "Grep" in tools_of(loaded) and "mcp__hokma__bank_create" in tools_of(loaded), slug
+        assert NEEDED <= tools_of(loaded), slug
+    assert parse_frontmatter((hokma_home() / ".claude" / "agents" / "strategy-researcher.md").read_text(encoding="utf-8"))["model"] == "sonnet"
+    again = _sync()
+    assert not any(f"agents/{slug}.md" in again.updated + again.conflicts for slug in SEEDED_FROM_KIT)          # nothing left to renew
 
 
-def test_the_model_the_owner_chose_for_ian_survives_the_renewal(env):
-    _install_kit_agents()
+def test_the_old_service_agents_folder_of_the_owner_is_left_alone(env):
+    old = hokma_home() / "service" / "agents"
+    old.mkdir(parents=True, exist_ok=True)
+    (old / "strategy-coder.md").write_text("---\nname: strategy-coder\n---\nmine\n", encoding="utf-8")
+    report = _sync()
+    assert (old / "strategy-coder.md").read_text(encoding="utf-8").endswith("mine\n")
+    assert not any(path.startswith("service/" + "agents/") for path in report.added + report.updated + report.conflicts)
     migrate()
-    AgentService().reconcile()
-    AgentService().set_model("strategy-researcher", "sonnet")
-    with get_database().write() as u:
-        seed_agents(u.session)
-    AgentService().reconcile()
-    loaded = (hokma_home() / ".claude" / "agents" / "strategy-researcher.md").read_text(encoding="utf-8")
-    assert parse_frontmatter(loaded)["model"] == "sonnet" and NEEDED <= tools_of(loaded)
+    with get_database().read() as u:
+        assert all(a.file_path == f"agents/{a.slug}.md" for a in u.agents.list())          # nothing is read from there
 
 
-def test_ensure_creator_tools_touches_only_the_three_and_only_when_a_tool_is_missing():
-    text = "---\nname: x\ntools: Grep, mcp__hokma__bank_get\n---\nbody\n"
-    assert fl.ensure_creator_tools("joel", text) == text
-    fixed = fl.ensure_creator_tools("strategy-coder", text)
-    assert tools_of(fixed) == {"Grep", "mcp__hokma__bank_get", *NEEDED} and fixed.endswith("body\n")
-    assert fl.ensure_creator_tools("strategy-coder", fixed) == fixed
-    assert set(fl.CREATOR_AGENTS) == set(hokma_tools.CREATOR_SERVICES) == set(CREATORS)
+def test_no_file_of_the_kit_or_the_code_names_service_agents():
+    needle = "service" + "/agents"
+    hits = []
+    for base in (ROOT / "kit", ROOT / "backend" / "hokma", ROOT / "cli", ROOT / "scripts"):
+        for path in base.rglob("*"):
+            if path.is_file() and path.suffix in {".md", ".py", ".json", ".yaml", ".yml", ".txt"} and "__pycache__" not in path.parts:
+                text = path.read_text(encoding="utf-8", errors="ignore").replace("\\", "/")
+                if needle in text:
+                    hits.append(str(path.relative_to(ROOT)))
+    assert hits == []
 
 
 # ---------------------------------------------------------------------------------------------------- 2 and 3. who hands a request to Ian
@@ -171,11 +195,11 @@ def test_every_agent_of_a_desk_hands_the_request_to_ian_with_a_task_and_the_desk
 
 
 def test_ian_has_one_road_to_sam_and_ben_and_writes_the_spec_himself():
-    text = " ".join((TEMPLATE / "service" / "agents" / "strategy-researcher.md").read_text(encoding="utf-8").split())
+    text = " ".join((TEMPLATE / "agents" / "strategy-researcher.md").read_text(encoding="utf-8").split())
     assert "Ian does not dispatch" not in text and "does not dispatch Ben" not in text
     assert "Ian launches Sam and then Ben with the `Agent` tool" in text and "Ian writes spec.md himself" in text
     assert "If `Agent` is not available" not in text
-    for name in ("agents/hokma.md", "service/agents/strategy-coder.md", "service/agents/strategy-reviewer.md"):
+    for name in ("agents/hokma.md", "agents/strategy-coder.md", "agents/strategy-reviewer.md"):
         assert not re.search(r"Ian (does not|never) (write|create)[^.]*spec", (TEMPLATE / name).read_text(encoding="utf-8")), name
 
 

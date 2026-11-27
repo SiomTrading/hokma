@@ -4,21 +4,22 @@ One call makes the whole desk or nothing: the project and the desk row (template
 `desk_seats` row per seat of the plantel, the line profile, the autonomy level 1, the typed mandate, the folder, the
 agent files and the skills of the team. What this call wrote on disk is removed if any step fails.
 
-One team per desk (decision 1088): every seat gets its own agent, named after the seat and the desk
-(`market-analyst-12`), so two desks never share an agent, its model or its files. The agent file and the skills of the
-team come from the kit; a skill enters a seat only because the file of that seat declares it, and a seat file that does not
-carry the SWO line is refused, so a skill of another line never reaches the prompt of a SWO agent.
+One agent per seat for every desk (task 3427, replacing the per desk copies of decision 1088): the file of a seat is the one of the kit,
+in `agents/`, and it is not copied for the desk. What belongs to the desk is state, and it lives in rows keyed by the desk: the model and the switch of the seat
+(`desk_agents`, `desk_seats`), its conversations, tasks, routines and journal (all of them carry the project of the desk), and the budget. The desk of a session
+comes from its project, never from the name of the agent, and every desk tool refuses a desk that is not the one of the session, so a desk never acts on another.
+The skills of the team come from the kit; a skill enters a seat only because the file of that seat declares it, and a seat file that does not carry the SWO line is
+refused, so a skill of another line never reaches the prompt of a SWO agent.
 """
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from hokma.agents import files as agent_files
-from hokma.db import Database, DbError
+from hokma.db import Database, DbError, get_database
 from hokma.db.repos.projects import slugify
 from hokma.db.timeutil import utcnow
 from hokma.desks import service
@@ -26,7 +27,7 @@ from hokma.desks.agents.manager import Mandate, analyst_plan, load_mandate, pars
 from hokma.desks.core.skills import SkillError, parse_skill, split_frontmatter
 from hokma.desks.core.spec_loader import SpecError
 from hokma.desks.errors import DeskError
-from hokma.desks.plantel import SWO_VARIANTS, Seat, seats_for
+from hokma.desks.plantel import SWO_VARIANTS, Seat, seat_file, seats_for
 from hokma.docs import diskfolders
 from hokma.i18n import t
 from hokma.kit import safefs
@@ -43,7 +44,7 @@ _SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def default_kit_root() -> Path:
-    """The desk part of the kit in this install."""
+    """The desk part of the kit in this install (the agents of the seats are in `agents/` beside it: `plantel.seat_file`)."""
     return app_root() / "kit" / "template" / "desk"
 
 
@@ -65,7 +66,7 @@ def _read_kit_file(path: Path) -> str:
 
 
 def _load_member(seat: Seat, kit_root: Path) -> _Member:
-    text = _read_kit_file(kit_root / "agents" / f"{seat.slug}.md")
+    text = _read_kit_file(seat_file(kit_root, seat.slug))
     try:
         meta, _ = split_frontmatter(text, seat.kit_file)
     except SkillError as exc:
@@ -91,18 +92,26 @@ def _load_member(seat: Seat, kit_root: Path) -> _Member:
     return _Member(seat, text, tuple(skills))
 
 
-def desk_agent_slug(seat: Seat, desk_id: int) -> str:
-    """The agent of a seat in one desk. Unique per desk, so no two desks share an agent."""
-    return f"{seat.slug}-{desk_id}"
+def desk_agent_slug(seat: Seat, desk_id: int, db: Database | None = None) -> str:
+    """The agent of a seat on a desk: the agent of the kit, the same on every desk (`seat.slug`). A desk that kept its own copy of a seat agent, because the
+    owner had changed its file (`team_merge` leaves those alone), says so in `desk_seats`, and that slug is the one returned."""
+    try:
+        with (db or get_database()).read() as u:
+            row = u.session.one("SELECT agent_slug FROM desk_seats WHERE desk_id = :d AND seat_code = :c", {"d": desk_id, "c": seat.code})
+    except Exception:                                                        # noqa: BLE001  (no database yet: the agent of the kit)
+        row = None
+    return str(row["agent_slug"]) if row else seat.slug
 
 
-def _agent_text(member: _Member, slug: str) -> str:
+def _ensure_agent(u: Any, files: agent_files.AgentFiles, member: _Member) -> None:
+    """The agent of a seat is registered once, with the kit file as its source. It is already there on an install that synced the kit; the file is written here
+    only when it is missing, so a file the owner edited is never replaced."""
     seat = member.seat
-    text = member.text
-    for key, value in (("name", slug), ("slug", slug), ("display_name", seat.name), ("model", seat.default_model),
-                       ("hokma-tier", agent_files.MODEL_TIER[seat.default_model])):
-        text = agent_files.set_frontmatter_value(text, key, value)
-    return text
+    rel = f"agents/{seat.slug}.md"
+    description = agent_files.frontmatter_value(member.text, "description") or f"{seat.name}, seat {seat.code}"
+    u.agents.upsert_kit(seat.slug, seat.name, description[:500], agent_files.MODEL_TIER[seat.default_model], rel, is_custom=False)
+    if files.read_source(seat.slug, rel) is None:
+        files.write_source(seat.slug, rel, member.text)
 
 
 def _mandate(variant: str, mandate: Mandate | Mapping[str, Any] | None, kit_root: Path) -> Mandate:
@@ -150,7 +159,6 @@ def create_swo_desk(name: str, capital: Any = None, *, account: Any = None, vari
     mandate_text = chosen.summary()
 
     files = agent_files.AgentFiles()
-    sources: list[str] = []
     with projects._LOCK:
         projects_root = projects.projects_root(database)
         slug = projects._unique_slug(database, projects_root, slugify(clean_name))
@@ -176,22 +184,13 @@ def create_swo_desk(name: str, capital: Any = None, *, account: Any = None, vari
                                                        "approved_by": "owner" if owner_approved else None, "updated_at": now})
                 for member in members:
                     seat = member.seat
-                    agent_slug = desk_agent_slug(seat, desk.id)
-                    text = _agent_text(member, agent_slug)
-                    rel = f"agents/{agent_slug}.md"
-                    description = agent_files.frontmatter_value(text, "description") or f"{seat.name}, seat {seat.code}"
-                    u.agents.upsert_kit(agent_slug, seat.name, description[:500], agent_files.MODEL_TIER[seat.default_model],
-                                        rel, is_custom=True)
-                    files.write_source(agent_slug, rel, text)
-                    sources.append(agent_slug)
-                    u.desks.add_agent(desk.id, agent_slug, seat.desk_role, seat.default_model)
-                    u.session.insert_row("desk_seats", {"desk_id": desk.id, "seat_code": seat.code, "agent_slug": agent_slug,
+                    _ensure_agent(u, files, member)
+                    u.desks.add_agent(desk.id, seat.slug, seat.desk_role, seat.default_model)
+                    u.session.insert_row("desk_seats", {"desk_id": desk.id, "seat_code": seat.code, "agent_slug": seat.slug,
                                                         "line": LINE, "variant": variant, "active": 1, "added_at": now})
-                    safefs.write_atomic(folder, f"{TEAM_DIR}/agents/{seat.slug}.md", text.encode("utf-8"))
-                    written += [TEAM_DIR, f"{TEAM_DIR}/agents", f"{TEAM_DIR}/agents/{seat.slug}.md"]
                     for skill_name, body in member.skills:
                         safefs.write_atomic(folder, f"{TEAM_DIR}/skills/{skill_name}/SKILL.md", body.encode("utf-8"))
-                        written += [f"{TEAM_DIR}/skills", f"{TEAM_DIR}/skills/{skill_name}", f"{TEAM_DIR}/skills/{skill_name}/SKILL.md"]
+                        written += [TEAM_DIR, f"{TEAM_DIR}/skills", f"{TEAM_DIR}/skills/{skill_name}", f"{TEAM_DIR}/skills/{skill_name}/SKILL.md"]
                 u.desks.replace_assets(desk.id, clean_assets)
                 given = service.connections_for_new_desk(u, desk.id)
                 for sub in projects.SUBFOLDERS:
@@ -201,30 +200,25 @@ def create_swo_desk(name: str, capital: Any = None, *, account: Any = None, vari
                 safefs.write_atomic(folder, service.CLAUDE_FILE, claude.encode("utf-8"))
                 written.append(service.CLAUDE_FILE)
         except (DbError, OSError, agent_files.AgentFileError, safefs.UnsafePath) as exc:
-            _undo(folder, written, files, sources)
+            _undo(folder, written)
             raise DeskError("db_failed" if isinstance(exc, DbError) else "folder_failed", 500) from exc
         except BaseException:
-            _undo(folder, written, files, sources)
+            _undo(folder, written)
             raise
-    service._switch_on([desk_agent_slug(m.seat, desk.id) for m in members], database)
+    service._switch_on([m.seat.slug for m in members], database)
     git = gitops.init_repo(folder, t("projects.git.created"))
     diskfolders.ensure_own_folder(project.id, database)
     out = service.get_desk(desk.id, database)
     out["git"] = {"ok": git.ok, "reason": git.reason}
     out["connections"] = service.connections_report(given)
     out["line"], out["variant"] = LINE, variant
-    out["seats"] = [{"seat_code": m.seat.code, "name": m.seat.name, "agent_slug": desk_agent_slug(m.seat, desk.id)} for m in members]
+    out["seats"] = [{"seat_code": m.seat.code, "name": m.seat.name, "agent_slug": m.seat.slug} for m in members]
     out["analysts"] = [step.key for step in plan if step.enabled]
     return out
 
 
-def _undo(folder: Path, written: list[str], files: agent_files.AgentFiles, sources: list[str]) -> None:
-    """Remove only what this call put on disk: the registered agent files, then the folder files deepest first."""
-    for agent_slug in sources:
-        try:
-            os.unlink(files.root / "agents" / f"{agent_slug}.md")
-        except OSError:
-            pass
+def _undo(folder: Path, written: list[str]) -> None:
+    """Remove only what this call put on disk in the folder of the desk, deepest first. The agents of the seats are shared and are not this call's to remove."""
     seen: list[str] = []
     for rel in written:
         if rel not in seen:

@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from hokma.backtest.spec import (BacktestSpec, BarNotAllowed, CostModel, FillRules, ForbiddenFill, SpecError, round_qty,
+from hokma.backtest.spec import (BacktestSpec, CostModel, FillRules, ForbiddenFill, SpecError, round_qty,
                                  sequence_same_bar, validate_bar)
 from hokma.contracts.identity import ContractSheet
 
@@ -22,14 +22,18 @@ def sheet(asset_type="future") -> ContractSheet:
     return ContractSheet("X:1", asset_type, "NQ", None, Decimal("20"), Decimal("0.25"), Decimal("5"), None, None, None, "USD", "t", T0)
 
 
-def test_a_bar_that_does_not_belong_to_the_line_fails_and_daily_swo_passes():           # P-14
-    with pytest.raises(BarNotAllowed) as caught:
-        make("LP", "1m")
-    assert caught.value.code == "bar_not_allowed_for_line"
-    assert make("SWO", "1d").bar == "1d"
-    validate_bar("1m", "DT")
-    with pytest.raises(BarNotAllowed):
-        validate_bar("1d", "DT")
+def test_any_time_interval_is_a_valid_bar_on_any_line_and_only_a_non_interval_fails():   # the line decides the session, never the bar
+    for line in ("DT", "SWC", "SWO", "LP", "RF"):
+        for bar in ("1m", "2m", "7m", "45m", "4h", "1d", "1w"):
+            assert make(line, bar).bar == bar
+    validate_bar("1d", "DT")
+    for bad in ("", "x", "1M", "0m", "r:10t", "10r"):
+        with pytest.raises(SpecError):
+            validate_bar(bad, "DT")
+    with pytest.raises(SpecError):
+        validate_bar("1m", "XX")
+    from hokma.backtest.spec import bar_seconds
+    assert (bar_seconds("7m"), bar_seconds("1h"), bar_seconds("1d"), bar_seconds("1w")) == (420, 3600, 86400, 604800)
 
 
 def test_hedging_is_only_for_swc_and_netting_is_the_default():                           # B-10, N-19

@@ -1365,7 +1365,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
                        "of the bar (epoch seconds UTC). Fails with a clear reason when the market connection does not "
                        "have the asset.", {
         "symbol": _s("Market symbol, e.g. NQ=F, AAPL, BTC-USD."),
-        "interval": _s("1m, 5m (default), 15m, 1h or 1D.", enum=["1m", "5m", "15m", "1h", "1D"]),
+        "interval": _s("Any time interval of the chart: 1m, 5m (default), 7m, 15m, 1h, 4h, 1D, 1W..."),
         "limit": _i("How many of the newest bars, 1 to 300 (default 60).")}, ["symbol"], market_candles, False),
     "options_chain": ("Option chain of one US stock or ETF, read only, from Schwab when it is connected and first in Options, "
                       "otherwise from the Alpaca Trading key saved in Connections: strike, "

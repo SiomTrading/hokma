@@ -42,7 +42,7 @@ from hokma.desks.core.signal import LINES
 from hokma.desks.core.skills import Skill, SkillError, parse_skill, split_frontmatter
 from hokma.desks.core.state import DebateState, Message, ToolCall, new_debate, record_round
 from hokma.desks.core.tools import ToolCatalog, ToolFailure, ToolSpec, Toolbox
-from hokma.desks.plantel import SEATS, Evidence, RiskArgument, RiskPoint, RiskVerdict, Seat
+from hokma.desks.plantel import SEATS, Evidence, RiskArgument, RiskPoint, RiskVerdict, Seat, seat_file
 from hokma.exec.money import ZERO, dec_or_none
 from hokma.llm.jsonx import LLMParseError, extract_json
 from hokma.quant import registry
@@ -640,7 +640,7 @@ def load_seat_file(seat_code: str, line: str, *, kit_root: Path | None = None,
     if line not in LINES:
         raise RiskError("bad_line", f"line must be one of {', '.join(LINES)}")
     root = kit_root or default_kit_root()
-    path = root / "agents" / f"{seat.slug}.md"
+    path = seat_file(root, seat.slug)
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 200_000:
             raise RiskError("agent_missing", f"the agent file of {seat.name} is not installed")

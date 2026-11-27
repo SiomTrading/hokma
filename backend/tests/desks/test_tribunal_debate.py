@@ -108,8 +108,8 @@ def test_TA_06_jonah_does_not_decide_or_size():
 
 
 def test_TA_06_the_bull_file_is_english_written_for_four_lines_and_has_a_variant_per_line():
-    text = (KIT / "agents" / "bull-advocate.md").read_text()
-    assert repo_rules.check(ROOT, [rel(KIT, "agents", "bull-advocate.md")]) == []
+    text = (KIT.parent / "agents" / "bull-advocate.md").read_text()
+    assert repo_rules.check(ROOT, [rel(KIT.parent, "agents", "bull-advocate.md")]) == []
     for line in ("DT", "SWC", "SWO", "LP"):
         assert f"### Line {line}" in text
     assert "an operation that has no backtest" in prompt("A08", "SWO") and "bot in front of its backtest" not in prompt("A08", "SWO")
@@ -159,7 +159,7 @@ def test_TA_07_simon_has_no_tools_and_every_number_needs_a_source():
 
 
 def test_TA_07_the_bear_file_is_english_and_scoped_by_line():
-    assert repo_rules.check(ROOT, [rel(KIT, "agents", "bear-advocate.md")]) == []
+    assert repo_rules.check(ROOT, [rel(KIT.parent, "agents", "bear-advocate.md")]) == []
     assert "richness of the volatility you would pay" in prompt("A09", "SWO")
     assert "richness of the volatility you would pay" not in prompt("A09", "LP")
     assert "durability of the advantage" in prompt("A09", "LP")
@@ -324,7 +324,7 @@ def test_HFC_008_the_skill_exists_in_english_and_reaches_amos_only_and_amos_has_
 
 @pytest.mark.parametrize("code", ["A08", "A09", "A10"])
 def test_TA_06_TA_07_TA_08_the_prompts_are_english_have_no_origin_and_no_execution_words(code):
-    files = [rel(KIT, "agents", f"{SEATS[code].slug}.md")]
+    files = [rel(KIT.parent, "agents", f"{SEATS[code].slug}.md")]
     assert repo_rules.check(ROOT, files) == []
     for line in ("DT", "SWC", "SWO", "LP"):
         text = prompt(code, line)

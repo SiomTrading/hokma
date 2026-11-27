@@ -10,6 +10,7 @@ each seat (`code_module`) builds its prompt and parses its answer on top of thes
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
@@ -17,7 +18,7 @@ from hokma.db.repos.desks import MODELS, ROLES
 from hokma.desks.agents.debate_output import BearOutput, BullOutput
 from hokma.desks.core.signal import LINES, Line, Signal
 
-KIT_AGENTS_DIR = "kit/template/desk/agents"
+KIT_AGENTS_DIR = "kit/template/agents"       # one file per seat, in the main agents folder of the kit: what a desk adds is state (model, on or off, tasks), never a copy
 CODE_PACKAGE = "backend/hokma/desks/agents"
 SWO_VARIANTS = ("traditional", "pead")
 PEAD_SEAT = "A23"
@@ -132,6 +133,13 @@ class Seat:
     def kit_file(self) -> str:
         """Path of the seat agent file in the kit, relative to the repository root."""
         return f"{KIT_AGENTS_DIR}/{self.slug}.md"
+
+
+def seat_file(root: Path, slug: str) -> Path:
+    """The kit file of the agent of a seat. `root` is the desk part of the kit (`kit/template/desk`): the agent is in `agents/` beside it, the one folder where
+    every agent of the kit lives. A kit of a test may carry its own `agents/` inside `root`, and that one wins."""
+    own = root / "agents" / f"{slug}.md"
+    return own if own.is_file() else root.parent / "agents" / f"{slug}.md"
 
 
 def _seat(code: str, name: str, slug: str, role: str, lines: str, tools: tuple[str, ...], output: type, model: Model,

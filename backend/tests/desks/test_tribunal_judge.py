@@ -105,7 +105,7 @@ def test_TA_34_the_judge_runs_with_no_tool_and_the_prompt_carries_the_phrase():
     assert model.calls[0]["tools"] == ()
     assert jg.NO_EXTERNAL_TOOLS in model.calls[0]["system"]
     assert jg.NO_EXTERNAL_TOOLS.startswith("Use only the evidence in this prompt")
-    assert "Use only the evidence in this prompt" in (KIT / "agents" / "desk-judge.md").read_text()
+    assert "Use only the evidence in this prompt" in (KIT.parent / "agents" / "desk-judge.md").read_text()
 
 
 def test_TA_34_asking_for_a_tool_in_the_judgment_fails():
@@ -148,8 +148,8 @@ def test_TA_39_every_line_uses_its_scale_and_review_is_the_same_in_all():
 # ---- TA-18 reaches the judge as the cap; TA-40 anti-bias ------------------------------------------------------------------------------
 
 def test_TA_40_the_anti_bias_section_of_the_swo_variant_weighs_evidence_and_catalysts_and_forbids_hold_by_conflict_and_order_bias():
-    text = (KIT / "agents" / "desk-judge.md").read_text()
-    assert "## Anti-bias" in text and repo_rules.check(ROOT, [rel(KIT / "agents" / "desk-judge.md")]) == []
+    text = (KIT.parent / "agents" / "desk-judge.md").read_text()
+    assert "## Anti-bias" in text and repo_rules.check(ROOT, [rel(KIT.parent / "agents" / "desk-judge.md")]) == []
     prompt = amos_prompt("SWO")
     assert "A conflict between the two sides is not a reason to pick the middle" in prompt
     assert "The order in which the two arguments appear carries no weight" in prompt
@@ -217,7 +217,7 @@ def test_AH_13_an_engine_that_always_answers_75_without_the_justification_of_the
 # ---- AS-001 realistic expectations -----------------------------------------------------------------------------------------------------
 
 def test_AS_001_the_realistic_expectation_is_a_rule_of_the_judge_with_its_medium_confidence_and_the_citation_lives_only_in_the_notices():
-    path = KIT / "agents" / "desk-judge.md"
+    path = KIT.parent / "agents" / "desk-judge.md"
     text = path.read_text()
     section = text.split("## Realistic expectations")[1].split("## ")[0]
     assert "0.37" in section and "48 percent" in section and "medium confidence" in section and "prior, not as a threshold" in section
@@ -443,7 +443,7 @@ def test_KR_011_with_costs_and_portfolio_the_candle_signal_is_judged_and_other_s
 
 
 def test_KR_011_the_rule_is_written_in_the_judge_file_in_english_and_injected_in_amos_prompt():
-    path = KIT / "agents" / "desk-judge.md"
+    path = KIT.parent / "agents" / "desk-judge.md"
     assert "## Cost and portfolio check" in path.read_text() and repo_rules.check(ROOT, [rel(path)]) == []
     prompt = amos_prompt("SWO")
     assert "candles or from price context is not accepted until it has passed through costs and through the portfolio" in prompt
@@ -487,7 +487,7 @@ def test_TA_41_the_three_seat_files_and_five_skills_exist_with_the_front_matter_
     expected = {"bull-advocate": [], "bear-advocate": ["devils-advocate"],
                 "desk-judge": ["debate-moderator", "strategy-review-rubric", "overfitting-checks", "double-review"]}
     for slug, skills in expected.items():
-        meta, body = split_frontmatter((KIT / "agents" / f"{slug}.md").read_text(), slug)
+        meta, body = split_frontmatter((KIT.parent / "agents" / f"{slug}.md").read_text(), slug)
         assert meta["slug"] == slug and meta["lines"] == ["DT", "SWC", "SWO", "LP"] and meta["skills"] == skills
         assert "SWO" in meta["lines"] and body.strip()
         for name in skills:
