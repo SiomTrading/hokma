@@ -163,14 +163,6 @@ TASK_KEYS = ("id", "title", "status", "priority", "project_id", "assigned_agent"
 
 # --------------------------------------------------------------------------- tasks
 
-def _owns_running(u, c: Caller, a: dict) -> None:
-    """A change to a task that is running needs the agent that claimed it, or its claim token."""
-    task = u.tasks.get(a["task_id"])
-    if task.status == "running" and task.claimed_by != c.slug and not (
-            a.get("claim_token") and a["claim_token"] == task.claim_token):
-        raise LookupError(f"task {task.id} is running under {task.claimed_by}; only that agent can change it")
-
-
 def task_show(u, c: Caller, a: dict) -> str:
     detail = u.tasks.detail(a["task_id"])
     return _dump({"task": detail.task.to_dict(), "parents": [p.id for p in detail.parents],
@@ -193,25 +185,24 @@ def task_list(u, c: Caller, a: dict) -> str:
 CREATOR_SERVICES = ("strategy-researcher", "strategy-coder", "strategy-reviewer")      # the services of the strategy creator serve every desk (SPEC-031 A2)
 
 
-def _desk_member_check(u, project_id: int | None, agent: str | None, what: str) -> None:
-    """On a desk project, only an agent that is active on that desk's team may hold or take its tasks. The services of the strategy creator are the one exception:
-    they work for any desk without being on its team."""
-    if agent in CREATOR_SERVICES:
-        return
-    desk = u.desks.by_project(project_id) if project_id is not None else None
-    if desk is None:
-        return
-    member = u.desks.find_agent(desk.id, agent) if agent else None
-    if member is None or not member.active:
-        raise LookupError(f"{what}: agent {agent or '(none)'!r} is not an active member of desk {desk.name!r}")
-
-
 def task_create(u, c: Caller, a: dict) -> str:
-    if a.get("assigned_agent"):
-        _desk_member_check(u, a.get("project_id"), a["assigned_agent"], "cannot assign this task")
+    """1.2.9: a task can be born in any state but running, assigned to any agent. Nobody checks the role of who creates or assigns it."""
     task = u.tasks.create(a["title"], actor=c.actor, body=a.get("body"), project_id=a.get("project_id"),
                           status=a.get("status", "ready"), priority=int(a.get("priority", 0)),
                           assigned_agent=a.get("assigned_agent"), parents=a.get("parents") or ())
+    return _dump(_row(task, *TASK_KEYS))
+
+
+def task_update(u, c: Caller, a: dict) -> str:
+    """Change any field of a task and move it to any state (1.2.9). Running comes from task_claim. What it cannot do: close a task that needs the approval of the owner, or take that approval off."""
+    fields = {k: a[k] for k in ("title", "body", "priority", "assigned_agent", "project_id") if k in a}
+    task = u.tasks.get(a["task_id"])
+    if fields:
+        task = u.tasks.update(a["task_id"], actor=c.actor, **fields)
+    if a.get("status"):
+        task = u.tasks.move(a["task_id"], a["status"], actor=c.actor, reason=a.get("note"))
+    if a.get("note"):
+        u.task_comments.add(a["task_id"], a["note"], actor=c.actor)
     return _dump(_row(task, *TASK_KEYS))
 
 
@@ -222,32 +213,26 @@ def task_link(u, c: Caller, a: dict) -> str:
 
 
 def task_claim(u, c: Caller, a: dict) -> str:
+    """Take a task in any state (1.2.9): the claim only fails when someone is working on it right now. The task becomes the claimer's."""
     from hokma.desks import service as desks
 
     task = u.tasks.get(a["task_id"])
-    on_desk = task.project_id is not None and u.desks.by_project(task.project_id) is not None
-    if task.assigned_agent != c.slug and (task.assigned_agent or on_desk):
-        raise LookupError(f"task {task.id} is assigned to {task.assigned_agent or 'nobody'}; only the assigned agent can claim it")
-    _desk_member_check(u, task.project_id, c.slug, f"task {task.id} cannot be claimed")
-    # On a desk the run is recorded with the model of the desk, so its tokens and its model are the desk's.
-    model = desks.model_in(u, task.project_id, c.slug)
+    model = desks.model_in(u, task.project_id, c.slug)          # on a desk the run is recorded with the model of the desk, so its tokens and its model are the desk's
     return _dump(_row(u.tasks.claim(a["task_id"], c.slug, actor=c.actor, run_model=model), *TASK_KEYS))
 
 
 def task_heartbeat(u, c: Caller, a: dict) -> str:
-    _owns_running(u, c, a)
     u.tasks.heartbeat(a["task_id"], claim_token=a.get("claim_token"))
     return _dump({"ok": True})
 
 
 def task_complete(u, c: Caller, a: dict) -> str:
-    _owns_running(u, c, a)
+    """Close a task with a summary from any state (1.2.9). It waits for the owner only when the task needs his approval (real money)."""
     return _dump(_row(u.tasks.complete(a["task_id"], a["summary"], actor=c.actor, metadata=a.get("metadata")),
                       *TASK_KEYS))
 
 
 def task_request_review(u, c: Caller, a: dict) -> str:
-    _owns_running(u, c, a)
     return _dump(_row(u.tasks.request_review(a["task_id"], a["summary"], actor=c.actor, metadata=a.get("metadata")),
                       *TASK_KEYS))
 
@@ -261,7 +246,6 @@ def task_request_changes(u, c: Caller, a: dict) -> str:
 
 
 def task_block(u, c: Caller, a: dict) -> str:
-    _owns_running(u, c, a)
     return _dump(_row(u.tasks.block(a["task_id"], a["kind"], a["reason"], actor=c.actor), *TASK_KEYS))
 
 
@@ -274,7 +258,6 @@ def task_comment(u, c: Caller, a: dict) -> str:
 
 
 def task_archive(u, c: Caller, a: dict) -> str:
-    _owns_running(u, c, a)
     return _dump(_row(u.tasks.archive(a["task_id"], actor=c.actor, reason=a.get("reason")), *TASK_KEYS))
 
 
@@ -295,6 +278,12 @@ def project_show(u, c: Caller, a: dict) -> str:
     project = u.projects.get(a["project_id"])
     open_tasks = u.tasks.list(project_id=project.id, limit=20)
     return _dump({"project": project.to_dict(), "recent_tasks": [_row(t, *TASK_KEYS) for t in open_tasks]})
+
+
+def project_update(u, c: Caller, a: dict) -> str:
+    """1.2.9: any agent renames, describes or moves a project to any of its states. The folder is not an argument: it stays where Hokma made it."""
+    fields = {k: a[k] for k in ("name", "description", "kind", "status") if k in a}
+    return _dump(_row(u.projects.update(a["project_id"], **fields), *PROJECT_KEYS))
 
 
 def project_create(u, c: Caller, a: dict) -> str:
@@ -1392,16 +1381,22 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
     "task_list": ("List tasks. Filters are optional.", {
         "assigned_agent": _s(), "status": _s(), "project_id": _i(), "updated_since": _s("ISO timestamp."),
         "order": _s("newest (default) or oldest.", enum=["newest", "oldest"]), "limit": _i()}, [], task_list, False),
-    "task_create": ("Create a task.", {
+    "task_create": ("Create a task. It can be born in any state but running and be given to any agent: nobody checks who creates or assigns.", {
         "title": _s("1 to 200 characters."), "body": _s(), "project_id": _i(), "priority": _i("-2 to 2."),
-        "assigned_agent": _s(), "status": _s(enum=["triage", "todo", "ready"]), "parents": _ints("Parent task ids.")},
+        "assigned_agent": _s(), "status": _s(enum=["triage", "todo", "ready", "blocked", "review", "done", "failed", "archived"]), "parents": _ints("Parent task ids.")},
                     ["title"], task_create, True),
+    "task_update": ("Change a task as you see fit: move it to any state (triage, todo, ready, blocked, review, awaiting_approval, done, failed, archived), give it to another agent, "
+                    "reword it, change its priority or project, and leave a note. No state is required before and nobody checks who does it. Running comes from task_claim. "
+                    "What stays: a task that needs the approval of the owner (real money) is closed only with it, and nobody takes that approval off.", {
+        **TASK_ID, "status": _s(enum=["triage", "todo", "ready", "blocked", "review", "awaiting_approval", "done", "failed", "archived"]), "assigned_agent": _s(),
+        "title": _s("1 to 200 characters."), "body": _s(), "priority": _i("-2 to 2."), "project_id": _i(), "note": _s("Why; it is kept as a comment.")},
+                    ["task_id"], task_update, True),
     "task_link": ("Make a task depend on another.", {"parent_id": _i(), "child_id": _i()}, ["parent_id", "child_id"],
                   task_link, True),
-    "task_claim": ("Take a ready task. Only one caller can: a second claim fails.", TASK_ID, ["task_id"], task_claim, True),
+    "task_claim": ("Take a task in any state; it becomes yours. It fails only when someone is working on it right now.", TASK_ID, ["task_id"], task_claim, True),
     "task_heartbeat": ("Tell Hokma you are still working on a task you claimed.", {
         **TASK_ID, "claim_token": _s()}, ["task_id"], task_heartbeat, True),
-    "task_complete": ("Finish a task with a summary.", {**TASK_ID, "claim_token": _s(), "summary": _s(), "metadata": _o()},
+    "task_complete": ("Close a task with a summary, from any state. It waits for the owner only when the task needs his approval.", {**TASK_ID, "claim_token": _s(), "summary": _s(), "metadata": _o()},
                       ["task_id", "summary"], task_complete, True),
     "task_request_review": ("Send a task to review.", {**TASK_ID, "claim_token": _s(), "summary": _s(), "metadata": _o()},
                             ["task_id", "summary"], task_request_review, True),
@@ -1417,6 +1412,9 @@ TOOLS: dict[str, tuple[str, dict[str, Any], list[str], Handler, bool]] = {
     "task_reopen": ("Reopen a task.", {**TASK_ID, "reason": _s()}, ["task_id"], task_reopen, True),
     "project_list": ("List projects.", {"status": _s(), "kind": _s()}, [], project_list, False),
     "project_show": ("Show one project and its recent tasks.", {"project_id": _i()}, ["project_id"], project_show, False),
+    "project_update": ("Rename or describe a project, or move it to any state (idea, active, paused, done, cancelled). Nobody checks who does it.", {
+        "project_id": _i(), "name": _s(), "description": _s(), "kind": _s(enum=["ips", "wealth", "strategy", "research", "robot", "other"]),
+        "status": _s(enum=["idea", "active", "paused", "done", "cancelled"])}, ["project_id"], project_update, True),
     "project_create": ("Create a project. Hokma makes its folder.", {"name": _s(), "kind": _s(
         enum=["ips", "wealth", "strategy", "research", "robot", "other"])}, ["name"], project_create, False),
     "desk_list": ("List the money desks that are not archived (id, name, status). Read only.", {}, [], desk_list,

@@ -28,10 +28,10 @@ def catalog(lang: str, key: str) -> str:
 MODULE_BLOCKED = [
     "python -Im hokma.desks", "python -Im hokma.kit.hokma_tools", "python -um hokma.db", "python -mhokma.db",
     'python -m"hokma.db"', "python -m 'hokma.db'", 'python -m "hokma.db"', 'python -Im"hokma.db"', 'python -m"hokma"',
-    "python -m hokma", "python -m hokma.doctor", "python -m hokma doctor.x", "python -Im hokma.broker", "python -mhokma.schwab",
+    "python -m hokma", "python -m hokma.core.config", "python -m hokma doctor.x", "python -Im hokma.broker", "python -mhokma.schwab",
 ]
 MODULE_FREE = ["python -m hokma doctor", "python -Im hokma doctor", "python -mhokma doctor", 'python -m"hokma" doctor',
-               "python -m hokma doctor --verbose", "python -mjson.tool", 'python -m"json.tool"', "python -m hokma_extras"]
+               "python -m hokma doctor --verbose", "python -m hokma.doctor", "python -m hokma.factory.rule_check x", "python -mjson.tool", 'python -m"json.tool"', "python -m hokma_extras"]
 
 
 @pytest.mark.parametrize("command", MODULE_BLOCKED)
@@ -80,7 +80,7 @@ def test_dynamic_code_is_the_same_block_with_its_own_reason(box, bctx, command):
 @pytest.mark.parametrize("command", NAMES_HOKMA)
 def test_naming_hokma_keeps_the_real_money_text(box, command):
     block = hardblock.evaluate({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(box.work)}, box.ctx())
-    assert block is not None and (block.rule, block.reason) == ("real_money", ""), command
+    assert block is not None and (block.rule, block.reason) == ("real_money", "hokma_money"), command          # 1.2.9: its own text, so the agent knows which module is the one that touches money
 
 
 @pytest.mark.parametrize("lang", ["en", "es"])
@@ -105,9 +105,9 @@ def test_dynamic_code_texts_differ_by_language_and_name_the_way_out():
 
 def test_a_plain_real_money_block_keeps_its_own_text(box):
     done = box.run_hook({"tool_name": "Bash", "tool_input": {"command": "python -Im hokma.broker"}, "cwd": str(box.work)})
-    assert catalog("en", "hardblock.hint.real_money") in done.stderr
+    assert catalog("en", "hardblock.hint.hokma_money") in done.stderr and "real money, keys or the server" in done.stderr
     log = json.loads((box.data / "guard" / "blocks.jsonl").read_text().splitlines()[-1])
-    assert "reason" not in log
+    assert log["reason"] == "hokma_money"
 
 
 # ------------------------------------------------------------------------------------------------ c) documentation URLs

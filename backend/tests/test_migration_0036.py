@@ -65,7 +65,7 @@ def test_the_older_tables_are_byte_identical_after_the_new_migration(env, tmp_pa
         return {n: s for n, s in c.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table'")}
 
     before, after = tables(db_old), tables(db_new)
-    assert {n: s for n, s in after.items() if n in before} == before
+    assert {n: s for n, s in after.items() if n in before and n != "bugs"} == {n: s for n, s in before.items() if n != "bugs"}          # 0039 rebuilds bugs on purpose (no check of the fixing task)
     assert set(after) - set(before) - set(transfer.USER_RULE_TABLES) - set(transfer.RULE_BRIEF_TABLES) == set(transfer.BANK_TABLES)      # 0037 and 0038 add their own tables on top
 
 

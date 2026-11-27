@@ -136,8 +136,10 @@ def rpc(seated, name, args, who=None, *, forged=None, proof=True):
 def test_sam_claims_his_assigned_task_when_the_session_is_the_main_chat(seated):
     with seated.write() as u:
         task = u.tasks.create("Code of STR-001", actor=Actor.system(), assigned_agent=CODER, status="ready").id
-    refused, is_error = rpc(seated, "task_claim", {"task_id": task})                      # no file: the agent of the session (hokma) takes the call, the bug of 1.2.6
-    assert is_error and "only the assigned agent can claim it" in refused
+    first, is_error = rpc(seated, "task_claim", {"task_id": task})                      # no file: the agent of the session (hokma) takes the call, the bug of 1.2.6
+    assert not is_error and first["claimed_by"] == "hokma"                              # 1.2.9: anyone can claim, so the identity is read from who ends up holding the task
+    with seated.write() as u:
+        task = u.tasks.create("Code of STR-001b", actor=Actor.system(), assigned_agent=CODER, status="ready").id
     taken, is_error = rpc(seated, "task_claim", {"task_id": task}, CODER)
     assert not is_error and taken["claimed_by"] == CODER and taken["status"] == "running", taken
     with seated.read() as u:
@@ -191,8 +193,8 @@ def test_a_forged_field_without_proof_is_ignored_even_when_the_stamp_is_lost(sea
     assert not is_error and done["status"] == "generated", done
     with seated.write() as u:
         task = u.tasks.create("Code of STR-003", actor=Actor.system(), assigned_agent=REVIEWER, status="ready").id
-    refused, is_error = rpc(seated, "task_claim", {"task_id": task}, forged=REVIEWER)
-    assert is_error and "only the assigned agent can claim it" in refused
+    held, is_error = rpc(seated, "task_claim", {"task_id": task}, forged=REVIEWER)
+    assert not is_error and held["claimed_by"] == CODER                          # the session is Sam: the forged name did not make Ben the holder
 
 
 def test_a_file_that_is_not_of_this_call_or_was_already_used_gives_nothing(seated):
@@ -200,11 +202,13 @@ def test_a_file_that_is_not_of_this_call_or_was_already_used_gives_nothing(seate
         task = u.tasks.create("Code of STR-004", actor=Actor.system(), assigned_agent=CODER, status="ready").id
     identity_hook.record({"tool_input": {}, "agent_type": CODER, "tool_use_id": "toolu_other"}, str(seated.data))
     refused, is_error = rpc(seated, "task_claim", {"task_id": task})                      # the call has its own id: the file of another call does not apply
-    assert is_error
+    assert not is_error and refused["claimed_by"] == "hokma"
+    with seated.write() as u:
+        task = u.tasks.create("Code of STR-004b", actor=Actor.system(), assigned_agent=CODER, status="ready").id
     # the same file, with the id it was left for, works once and is deleted
     message = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "task_claim", "arguments": {"task_id": task}, "_meta": {hokma_tools.CALL_ID_KEY: "toolu_other"}}}
     first = handle(message, str(seated.data), ["w"], [str(seated.data)])["result"]
-    assert not first["isError"]
+    assert not first["isError"] and json.loads(first["content"][0]["text"])["claimed_by"] == CODER
     assert left(seated.data, "toolu_other") is None
     assert hokma_tools.claimed_agent(str(seated.data), "toolu_other") is None
     for odd in (None, "", "../x", "a/b", "x" * 200):
@@ -215,8 +219,8 @@ def test_an_engine_without_the_hook_ignores_the_files_and_the_field(seated, monk
     with seated.write() as u:
         task = u.tasks.create("Code of STR-005", actor=Actor.system(), assigned_agent=CODER, status="ready").id
     monkeypatch.delenv("HOKMA_IDENTITY_HOOK")
-    refused, is_error = rpc(seated, "task_claim", {"task_id": task}, CODER, forged=CODER)
-    assert is_error and "only the assigned agent can claim it" in refused
+    held, is_error = rpc(seated, "task_claim", {"task_id": task}, CODER, forged=CODER)
+    assert not is_error and held["claimed_by"] == "hokma"                          # no hook: the session decides
 
 
 def test_only_an_active_agent_of_the_kit_can_act_under_its_own_name(seated):
@@ -227,8 +231,10 @@ def test_only_an_active_agent_of_the_kit_can_act_under_its_own_name(seated):
         u.agents.set_status(REVIEWER, "off")
     cases = ("made-in-chat", REVIEWER, "general-purpose", "nobody", "../x", "")        # custom, off, a built-in helper, an invention, a path, empty
     for name in cases:
-        refused, is_error = rpc(seated, "task_claim", {"task_id": task}, name)
-        assert is_error and "only the assigned agent can claim it" in refused, name
+        with seated.write() as u:
+            task = u.tasks.create("Code of STR-006", actor=Actor.system(), status="ready").id
+        held, is_error = rpc(seated, "task_claim", {"task_id": task}, name)
+        assert not is_error and held["claimed_by"] == "hokma", name                      # none of them becomes the holder: the session does
     with seated.write() as u:
         u.agents.set_status(REVIEWER, "active")
     again, is_error = rpc(seated, "journal_write", {"kind": "note", "title": "x"}, REVIEWER)

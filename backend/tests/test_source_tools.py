@@ -218,13 +218,12 @@ def test_list_get_and_set_status_contract(db):
     got = ok("bank_get", {"slug": "morning-ema-cross"}, IAN)
     assert got["bank_id"] == made["bank_id"] and got["version"]["extraction"]["schema"] == 1 and got["source"]["cited"][0]["body"] == IDEA
     assert failed("bank_get", {}, IAN)["error_code"] == "bad_input" and failed("bank_get", {"bank_id": 9}, IAN)["error_code"] == "no_data"
-    assert failed("bank_set_status", {"bank_id": 1, "status": "not_working"}, IAN)["error_code"] == "bad_input"
     for later in ("testing", "ready", "live", "off"):
         blocked = failed("bank_set_status", {"bank_id": 1, "status": later}, IAN)
         assert blocked["error_code"] == "blocked" and "milestone B or C" in blocked["message"]
     done = ok("bank_set_status", {"bank_id": 1, "status": "not_working", "reason": "the rule depends on a data feed that does not exist"}, caller("vera"))
     assert (done["from"], done["to"]) == ("draft", "not_working") and rows(db, "strategy_bank_events")[-1]["actor"] == "vera"
-    assert ok("bank_list", {"status": "not_working"}, IAN)["total"] == 1 and failed("bank_set_status", {"bank_id": 1, "status": "idea"}, IAN)["error_code"] == "bad_input"
+    assert ok("bank_list", {"status": "not_working"}, IAN)["total"] == 1 and ok("bank_set_status", {"bank_id": 1, "status": "idea"}, IAN)["to"] == "idea"          # 1.2.9: a closed strategy is reopened by any agent
 
 
 def test_bank_get_of_a_third_party_source_has_no_text_of_the_source(db):

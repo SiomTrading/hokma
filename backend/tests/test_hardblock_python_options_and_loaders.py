@@ -50,7 +50,7 @@ MODULE_FORMS = [
     "py -3 -Im hokma.broker", "py -3.12 -Im hokma.broker", "py -3.12-64 -m hokma.broker", "py -V:3.12 -Im hokma.broker",
     "pythonw -Im hokma.broker", "pythonw.exe -m hokma.broker", "/usr/bin/python3 -Im hokma.broker",
     "/usr/local/bin/python3.12 -IBm hokma.connections", "C:\\Python312\\python.exe -Im hokma.broker", "sudo python -Im hokma.broker",
-    "env PYTHONSAFEPATH=1 python -Im hokma.broker", "python -Im hokma", "python -Im hokma.doctor", "python -Im runpy hokma.broker",
+    "env PYTHONSAFEPATH=1 python -Im hokma.broker", "python -Im hokma", "python -Im hokma.core.config", "python -Im runpy hokma.broker",
 ]
 CODE_FORMS = [
     "python -Ic '{c}'", "python -IBc '{c}'", "python -Bc '{c}'", "python -uc '{c}'", "python -Sc '{c}'", "python -OOc '{c}'",
@@ -106,7 +106,8 @@ FREE_PYTHON = [
     "python -uc 'print(2)'", "python -Xdev -c 'print(3)'", "python -Wdefault -c 'import sys'", "python3.12 -Im json.tool",
     "py -3 -m pip list", "py -3.12 -Ic 'print(1)'", "py -V:Company/3.12 -c 'print(1)'", "pythonw -Ic 'print(1)'",
     "/usr/bin/python3 -Im pip --version", "python -V", "python --version", "python -I app.py", "python -- app.py",
-    "python -Ic 'import hokma_extras'", "python -Im hokma_extras", "python -Ic 'import schwab'",
+    "python -Ic 'import hokma_extras'", "python -Im hokma_extras", "python -Ic 'import schwab'", "python -Im hokma.doctor", "python -Im hokma.factory.rule_check x",
+    "python -Ic 'import hokma.factory.strategy'",
 ]
 
 
@@ -118,9 +119,6 @@ def test_legitimate_python_command_lines_still_pass(box, command):
 # ----------------------------------------------------------------------------------- 2: sys.path by subscript
 
 PATH_SUBSCRIPT_BLOCKED = [
-    f"import sys\nsys.path[0] = '{PKG}'\n",
-    f"import sys\nsys.path[:] = ['{PKG}'] + sys.path\n",
-    f"import sys\nsys.path[1:1] = ['{PKG}']\n",
     "import sys\nsys.path[0:0] = ['/data/runtime/a/venv/lib/python3.12/site-packages']\n",
     "import sys, os\nsys.path[0] = os.path.join(base, 'runtime', 'a', 'venv')\n",
     "import sys\nsys.path[:] = [venv_site] + sys.path\n",
@@ -138,7 +136,7 @@ def test_sys_path_set_by_subscript_to_hokma_folders_is_real_money(box, body):
 
 
 @pytest.mark.parametrize("body", [
-    "import sys\nsys.path[0] = 'src'\n", "import sys\nsys.path[:] = ['lib'] + sys.path\n",
+    "import sys\nsys.path[0] = 'src'\n", "import sys\nsys.path[:] = ['lib'] + sys.path\n", f"import sys\nsys.path[0] = '{PKG}'\n", f"import sys\nsys.path[1:1] = ['{PKG}']\n",          # 1.2.9: the folder of the package is free to put on the path
     "import sys, os\nsys.path[0] = os.path.dirname(__file__)\n", "import sys\nsys.path.insert(0, 'src')\n",
     "import sys\nprint(sys.path[0])\nx = sys.path[1] == 'a'\n"])
 def test_a_student_own_path_changes_stay_free(box, body):
@@ -151,7 +149,7 @@ CHDIR_BLOCKED = [
     "import os\nos.chdir(target)\n", "import os\nos.chdir(os.environ['HOME'] + '/x')\n",
     "import os\nos.chdir(os.path.join(a, b))\n", "import os\nos.chdir(sys.argv[1])\n", "from os import chdir\nchdir(p)\n",
     "import contextlib\nwith contextlib.chdir(p):\n    pass\n", "import os\nos.fchdir(fd)\n",
-    f"import os\nos.chdir('{PKG}')\n", "import os\nos.chdir('/data/runtime/a/venv')\n", "import os\nos.chdir('backend/hokma/')\n",
+    f"import os\nos.chdir('{PKG}')\n", "import os\nos.chdir('/data/runtime/a/venv')\n",
     "import os\nos.chdir('x/site-packages')\n", "import os\nos.chdir(os.path.join(os.path.dirname(__file__), 'x'))\n",
 ]
 

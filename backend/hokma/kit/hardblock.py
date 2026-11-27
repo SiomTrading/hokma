@@ -403,24 +403,25 @@ def check_text_markers(text: str, ctx: Ctx, *, reading: bool = False) -> None:
 # An agent never imports the order code of Hokma (`hokma.broker`, `hokma.schwab`, `hokma.connections`: they hold the
 # Schwab session and send real orders) and never runs the interpreter of Hokma's own runtime (`<data>/runtime/<x>/venv`):
 # it has them installed, so a script of the agent could place an order with the owner's keys. Both are `real_money`.
-_HOKMA_MODS = r"(?:broker|schwab|connections)"
+# 1.2.9: the lock names what touches real money, keys, the guard or the server, not the whole package. Everything else (hokma.factory, hokma.backtest, hokma.quant, hokma.data, rule_check...)
+# can be imported and run: the strategy of an agent needs it. The runtime lock (core/processguard.py) keeps refusing these same packages in any process that is not Hokma.
+HOKMA_MONEY_MODULES = ("broker", "schwab", "connections", "exec", "desks", "contracts", "backoffice", "lessons", "econ_calendar", "permissions", "kit", "core", "mail", "telegram",
+                       "github_connect", "backup", "update", "setup", "scheduler", "rpc", "status")
+_HOKMA_MODS = r"(?:" + "|".join(HOKMA_MONEY_MODULES) + r")"
+_HOKMA_MODS_DB = r"(?:db|" + "|".join(HOKMA_MONEY_MODULES) + r")"            # the database module is named by import only: `hokma.db` as a text is the file of the base
+HOKMA_MONEY_REASON = "hokma_money"
 _HOKMA_DOT = r"\s*(?:\.|[/\\]+)\s*"                    # `hokma.broker`, `hokma/broker`, `hokma\\broker` (a path or a string)
 HOKMA_MODULE_RE = re.compile(
     r"(?<![\w])hokma" + _HOKMA_DOT + _HOKMA_MODS + r"(?![\w])"            # import, -m, path, importlib, __import__
-    r"|\bfrom\s+hokma\s+import\s+(?:\([^)]*?\b" + _HOKMA_MODS + r"\b|[^\n;(]*?\b" + _HOKMA_MODS + r"\b)"
-    r"|[\"']hokma[\"']\s*[,/)]\s*(?:[\w.()\s]*[,/]\s*)?[\"']" + _HOKMA_MODS + r"[\"']",   # join("hokma", "broker"), Path("hokma") / "broker"
+    r"|(?<![\w.])(?:import|from)(?:\s|\\)+hokma\.db(?![\w])"                       # the module of the database; the file hokma.db is judged by names_hokma_database
+    r"|\bfrom\s+hokma\s+import\s+(?:\([^)]*?\b" + _HOKMA_MODS_DB + r"\b|[^\n;(]*?\b" + _HOKMA_MODS_DB + r"\b)"
+    r"|[\"']hokma[\"']\s*[,/)]\s*(?:[\w.()\s]*[,/]\s*)?[\"']" + _HOKMA_MODS_DB + r"[\"']",   # join("hokma", "broker"), Path("hokma") / "broker"
     re.I)
-_HOKMA_IMPORT_STMT = re.compile(
-    r"(?<![\w.])import(?:\s|\\)+(?:[\w.]+(?:\s+as\s+\w+)?\s*,\s*)*hokma\b(?![\w-])"
-    r"(?=\s*(?:$|[;.,)\"'\x60\\#]|as\b))"                                       # `import hokma`, never the words "import hokma module"
-    r"|(?<![\w.])from(?:\s|\\)+hokma\b(?:\.[\w.]+)?(?:\s|\\)+import\b", re.I | re.M)
 _DYN_NAMES = (r"(?:import_module|__import__|run_module|run_path|find_spec|find_loader|load_module|load_source|load_dynamic|"
               r"resolve_name|get_loader|get_importer|"
               r"spec_from_file_location|spec_from_loader|SourceFileLoader|SourcelessFileLoader|ExtensionFileLoader)")
 # A dynamic import that names hokma in its arguments, in any text (a command, a script, an MCP argument).
-_HOKMA_DYN_CALL = re.compile(_DYN_NAMES + r"\s*\([^)\n]{0,300}?hokma", re.I)
-# Kept for callers that look for the three order-code words next to an import of the package.
-_HOKMA_IMPORTED = _HOKMA_IMPORT_STMT
+_HOKMA_DYN_CALL = re.compile(_DYN_NAMES + r"\s*\([^)\n]{0,300}?hokma" + _HOKMA_DOT + _HOKMA_MODS + r"(?![\w])", re.I)
 _HOKMA_MOD_WORD = re.compile(r"\b" + _HOKMA_MODS + r"\b", re.I)
 # A file inside `bin` or `Scripts` of a runtime venv of the data folder (the folder itself may be listed).
 HOKMA_VENV_TEXT_RE = re.compile(r"(?:^|[/\s\"'=:;(])runtime/+[^/\s\"']+/+venv/+(?:bin|scripts)/+[^/\s\"']")
@@ -436,8 +437,13 @@ def names_hokma_module(text: str) -> bool:
     `hokma.broker`, `hokma.schwab`, `hokma.connections` (any submodule counts: the agent has no reason to import Hokma
     at all). Third-party code with a similar name (`import schwab`, `import hokma_extras`) is not this. The one thing that
     stays free is `python -m hokma doctor` (see `run_interpreter`: it is not an import in the agent's own process)."""
-    return bool(HOKMA_MODULE_RE.search(text) or _HOKMA_IMPORT_STMT.search(text) or _HOKMA_DYN_CALL.search(text)
-                or _PROCESSGUARD.search(text))
+    return bool(HOKMA_MODULE_RE.search(text) or _HOKMA_DYN_CALL.search(text) or _PROCESSGUARD.search(text))
+
+
+def money_module_named(text: str) -> str:
+    """What the block shows when the text names a module of money, keys, the guard or the server: the module as written."""
+    found = HOKMA_MODULE_RE.search(text) or _HOKMA_DYN_CALL.search(text)
+    return re.sub(r"\s+", "", found.group(0))[:80] if found else "processguard"
 
 
 # --- the package folder and the runtime folder: the agent must not put them on its import path, nor run python from them
@@ -462,7 +468,7 @@ _LIT = r"""(?:[rR]?"[^"\\\n]*"|[rR]?'[^'\\\n]*')"""          # a plain string li
 _PATH_INJECT = re.compile(r"sys\s*\.\s*path\s*(?:\.\s*(?:insert|append|extend|__setitem__|__iadd__|__setslice__)\s*\(|\+=|=(?!=)|"
                           r"\[[^\]\n]*\]\s*\+?=(?!=))|\bPYTHONPATH\b|"             # sys.path[0] = x, sys.path[:] = x, sys.path[1:1] = x
                           r"\baddsitedir\b|\bsite\s*\.\s*main\b|\.pth\b", re.I)
-_PATH_TARGET = re.compile(r"site-packages|dist-packages|[/\\]runtime[/\\][^/\\\s\"']+[/\\]venv|(?<![\w-])hokma[/\\]", re.I)
+_PATH_TARGET = re.compile(r"site-packages|dist-packages|[/\\]runtime[/\\][^/\\\s\"']+[/\\]venv", re.I)
 _PATH_FUZZY = re.compile(r"venv|runtime|hokma|site-|packages|backend|lib[/\\]python|\.local|appdata|share", re.I)
 _QUOTED = re.compile(r"\"([^\"\n]{1,300})\"|'([^'\n]{1,300})'")
 
@@ -479,7 +485,7 @@ def names_hokma_path_injection(text: str, ctx: "Ctx", here: str | None = None) -
     venv's `site-packages`, at the folder of the `hokma` package or at Hokma's runtime. A path the text builds at run time is
     judged by what else the text says (a venv, a runtime, a package folder). A student's own `sys.path.insert(0, 'src')` is free."""
     here = here or ctx.cwd
-    roots = package_roots(ctx)
+    roots = [r for r in package_roots(ctx) if norm_text(r).rstrip("/").endswith("/runtime")]      # 1.2.9: the folder of the package is no longer a target; the runtime with its keys' libraries is
     for m in _PATH_INJECT.finditer(text):
         seg = text[m.start(): m.start() + 400].split("\n", 1)[0]
         whole = m.group(0).lower().endswith(".pth")
@@ -774,6 +780,14 @@ def in_hokma_venv(word: str, ctx: Ctx, here: str) -> bool:
     return any(re.match(re.escape(r) + r"/(?:[^/]+/)*(?:bin|scripts)/+python[\d.]*(?:\.exe)?$", s) for r in pkg for s in seen)
 
 
+def runtime_python_is_free(word: str, words: list) -> bool:
+    """1.2.9: the interpreter of the runtime may run what an agent writes (its tests, rule_check, a backtest): the lock of the modules and the one of the process (core/processguard.py) judge
+    what it imports. What stays refused is using it to change the runtime: pip, ensurepip, venv, and any other file of its folder (pip, activate...)."""
+    if not re.match(r"python[\d.]*(?:\.exe)?$", base_name(word.strip(_QUOTES)), re.I):
+        return False
+    return not any(a.text.strip(_QUOTES).lower() in ("pip", "pip3", "ensurepip", "venv", "-mpip", "-mensurepip") for a in words[1:])
+
+
 def python_runs_from_hokma(here: str, ctx: Ctx) -> bool:
     """Python started with the package folder, the runtime or one of their folders as the current one: the current
     folder is on its import path, so `import hokma` would work from there."""
@@ -786,7 +800,7 @@ def check_hokma_code(text: str, ctx: Ctx, here: str | None = None, python: bool 
     or a piece of code built at run time is refused too."""
     for candidate in (text, expand(text, ctx)):
         if names_hokma_module(candidate):
-            raise Block("real_money", "hokma package")
+            raise Block("real_money", money_module_named(candidate), HOKMA_MONEY_REASON)
         if names_hokma_path_injection(candidate, ctx, here):
             raise Block("real_money", "hokma import path")
         if names_hokma_database(candidate, ctx):
@@ -795,7 +809,7 @@ def check_hokma_code(text: str, ctx: Ctx, here: str | None = None, python: bool 
             why = python_block_reason(candidate, ctx, here)
             if why:
                 raise python_block(why)
-    if names_hokma_venv(text, ctx):
+    if names_hokma_venv(text, ctx) and re.search(r"(?<![/\\\w.])(?:pip3?|ensurepip|venv)(?![/\\\w])|[/\\](?:pip3?|activate)(?![\w])", text, re.I):      # python of the runtime is free; changing the runtime is not
         raise Block("real_money", "hokma runtime interpreter")
 
 
@@ -1651,7 +1665,7 @@ def scan_words(name: str, words: list[Word], cmd: Cmd, run: Run) -> None:
     ctx = run.ctx
     for w in words:                                          # the broker modules and the runtime interpreter: before anything else
         check_hokma_code(w.text, ctx, here=run.here)
-        if in_hokma_venv(w.text, ctx, run.here):
+        if in_hokma_venv(w.text, ctx, run.here) and not runtime_python_is_free(w.text, words):
             raise Block("real_money", "hokma runtime interpreter")
     args = [w for w in words[1:]]
     if name in ("echo", "printf", "write-output", "write-host", "write-error", "write-warning"):
@@ -2208,7 +2222,9 @@ def check_python_module(module_args: list[str]) -> None:
         check_hokma_cli(module_args[1:], "python -m " + module_args[0])
     if module_args and re.match(r"(?:[\w.]*\.)?(?:engine_main|trash_mcp)$|hokma_cli[./\\:](?!main$)", module_args[0], re.I):
         raise Block("real_money", short("python -m " + module_args[0]))
-    if any(re.match(r"hokma(?:[./\\:]|$)", x, re.I) for x in module_args) and not (
+    if any(re.match(r"hokma\s*[./\\:]\s*(?:db|" + _HOKMA_MODS + r")(?![\w])", x, re.I) for x in module_args):
+        raise Block("real_money", short("python -m " + " ".join(module_args[:2])), HOKMA_MONEY_REASON)
+    if any(re.fullmatch(r"hokma", x, re.I) for x in module_args) and not (
             module_args[:2] and [x.lower() for x in module_args[:2]] == ["hokma", "doctor"]):
         raise Block("real_money", "python -m hokma")
 
@@ -2563,6 +2579,7 @@ MESSAGES = {
     "real_money": lambda x: (t("hardblock.real_money", target=x), t("hardblock.hint.real_money")),
     # Same block as real_money (the rule stays `real_money` in the log, in guard_events and in the verdict), another text.
     "dynamic_code": lambda x: (t("hardblock.dynamic_code", target=x), t("hardblock.hint.dynamic_code")),
+    HOKMA_MONEY_REASON: lambda x: (t("hardblock.hokma_money", target=x), t("hardblock.hint.hokma_money")),
 }
 
 

@@ -58,9 +58,10 @@ def test_fresh_database_has_the_22_tables_plus_onboarding_and_is_healthy(env):
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
     assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     triggers = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
-    assert {"trg_tasks_guard", "trg_tasks_transition", "trg_tasks_touch", "trg_tasks_event_ins", "trg_bugs_transition",
+    assert {"trg_tasks_guard", "trg_tasks_transition", "trg_tasks_touch", "trg_tasks_event_ins", "trg_bugs_touch",
             "trg_approvals_no_upd", "trg_journal_no_del", "trg_events_no_upd", "trg_guard_no_del",
             "trg_comments_no_upd"} <= triggers
+    assert "trg_bugs_transition" not in triggers          # 1.2.9: the base no longer decides who moves a bug or from where
     assert con.execute("SELECT count(*) FROM status_transitions WHERE entity = 'bug'").fetchone()[0] == 9
 
 

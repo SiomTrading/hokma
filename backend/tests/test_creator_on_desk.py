@@ -32,7 +32,7 @@ def test_the_chief_gives_a_task_to_each_service_and_each_takes_it_without_being_
         taken, is_error = run("task_claim", {"task_id": made["id"]}, slug)
         assert not is_error and taken["claimed_by"] == slug, taken
     text, is_error = run("task_create", {"title": "x", "project_id": desk["project_id"], "assigned_agent": "joel"}, "desk-chief")
-    assert is_error and "not an active member" in text                       # nobody else outside the team gains access
+    assert not is_error and text["assigned_agent"] == "joel"                 # 1.2.9: nobody checks who a task is given to
 
 
 def test_what_the_services_create_from_a_desk_says_the_desk_and_the_main_chat_says_hokma(desks_db):

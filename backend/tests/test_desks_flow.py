@@ -220,14 +220,14 @@ def _outsider(db):
         u.agents.set_status("iris", "active")
 
 
-def test_a_refused_claim_of_an_outside_agent_turns_nobody_on(world):
+def test_a_claim_of_an_outside_agent_turns_nobody_on(world):
     _, db, _ = world
     desk = make_desk(db, "Mesa A")
     task = new_task(db, desk["project_id"])
     _outsider(db)
     _all_off(db)
     message, err = claim(task, agent="iris")
-    assert err and "only the assigned agent" in message
+    assert not err and message["claimed_by"] == "iris"          # 1.2.9: any agent may claim; being outside the desk changes nothing about who is on
     assert set(_status(db).values()) == {"off"}
 
 

@@ -10,7 +10,8 @@ from hokma.db.repos.approvals import ApprovalsRepo
 from hokma.db.repos.base import UNSET, Repo, flag, given, require_in
 from hokma.db.timeutil import to_db_time, utc_in, utcnow
 
-CREATE_STATUSES = ("triage", "todo", "ready")
+CREATE_STATUSES = ("triage", "todo", "ready", "blocked", "review", "done", "failed", "archived")      # 1.2.9: a task can be born in any state but running (that one needs a claim) and awaiting_approval (that one is asked for)
+ANY_STATUS = ("triage", "todo", "ready", "blocked", "review", "awaiting_approval", "done", "failed", "archived")      # where an agent can move a task; running comes from a claim
 TERMINAL = ("done", "failed", "archived")
 RUN_OUTCOMES = ("running", "completed", "review_requested", "approved_by_reviewer", "changes_requested", "blocked",
                 "failure", "timed_out", "crashed", "released")
@@ -241,10 +242,11 @@ class TasksRepo(Repo):
         review, approval = bool(review), bool(approval)
         if touches_real_money:
             approval = True
-        if review and not reviewer:
-            raise ValidationError("a reviewer is required when review is on")
-        if reviewer and reviewer == assigned_agent:
-            raise ValidationError("the reviewer must be a different agent from the implementer")
+        if review and not reviewer:                    # nobody to review it: the base keeps a review only with a reviewer, so the task is born without one
+            review = False
+        block_kind, block_reason = "needs_input", f"created blocked by {actor.name}"      # the base keeps a blocked task only with its kind and its reason
+        if approval and status == "done":              # the owner closes what needs his approval: it is born waiting for it
+            status = "awaiting_approval"
         parents = list(dict.fromkeys(parents))
         open_parent = False
         for parent_id in parents:
@@ -262,6 +264,9 @@ class TasksRepo(Repo):
             "created_by_kind": _created_by_kind(actor), "created_by": actor.name,
             "changed_by_kind": actor.kind, "changed_by": actor.name, "run_at": run_time,
             "max_runtime_seconds": max_runtime_seconds, "max_attempts": max_attempts,
+            "block_kind": block_kind if status == "blocked" else None, "block_reason": block_reason if status == "blocked" else None,
+            "completed_at": utcnow() if status in TERMINAL else None,
+            "result_summary": f"created as done by {actor.name}" if status == "done" else None,
             "created_at": utcnow(), "updated_at": utcnow()})
         for parent_id in parents:
             self.s.insert_row("task_links", {"parent_id": parent_id, "child_id": new_id})
@@ -287,8 +292,6 @@ class TasksRepo(Repo):
         for key in ("requires_review", "requires_approval"):
             if key in values:
                 values[key] = flag(values[key])
-        if values.get("requires_review") and not values.get("reviewer_agent", current.reviewer_agent):
-            raise ValidationError("a reviewer is required when review is on")
         if not values:
             return current
         values.update(changed_by_kind=actor.kind, changed_by=actor.name)
@@ -332,6 +335,24 @@ class TasksRepo(Repo):
         if changed == 0:
             raise Conflict(f"task {id} changed while it was being updated")
         return self.get(id)
+
+    def move(self, id: int, to_status: str, *, actor: Actor, reason: str | None = None) -> Task:
+        """1.2.9: an agent moves a task to any state. Running is the exception because it comes from a claim (a running task with no claim would be lost to the dispatcher). What stays: a task that needs the
+        approval of the owner is not closed by an agent (the trigger of the base says so), and an agent cannot lower that approval."""
+        require_in("status", to_status, ANY_STATUS)
+        task = self.get(id)
+        was_running = task.status == "running"
+        fields: dict[str, Any] = {}
+        if to_status == "blocked":                      # the base keeps a blocked task only with its kind and its reason
+            fields.update(block_kind=task.block_kind or "needs_input", block_reason=(reason or task.block_reason or f"moved by {actor.name}")[:500])
+        if to_status == "done" and not task.result_summary:      # and a done one only with a summary
+            fields["result_summary"] = (reason or f"closed by {actor.name}")[:4000]
+        result = self.transition(id, to_status, actor=actor, reason=reason, **fields)
+        if was_running:
+            done = to_status in ("done", "review", "awaiting_approval")
+            self._close_run(id, "completed" if done else "released", summary=(reason or f"moved to {to_status}") if done else None,
+                            error=None if done else (reason or f"moved to {to_status}")[:2000])
+        return result
 
     # ---------------------------------------------------------------- dispatcher
     def promote_due(self, now: Any = None) -> list[int]:
@@ -380,13 +401,13 @@ class TasksRepo(Repo):
         changed = self.s.execute(
             "UPDATE tasks SET status = 'running', claim_token = :token, claimed_by = :agent, claimed_at = :now, "
             "claim_expires_at = :expires, heartbeat_at = :now, attempts = attempts + 1, "
-            "implementer_agent = COALESCE(implementer_agent, :agent), changed_by_kind = :kind, changed_by = :actor, "
-            "change_reason = NULL, block_kind = NULL, block_reason = NULL "
-            "WHERE id = :id AND status = 'ready' AND claim_token IS NULL",
+            "implementer_agent = CASE WHEN reviewer_agent = :agent THEN implementer_agent ELSE COALESCE(implementer_agent, :agent) END, assigned_agent = :agent, completed_at = NULL, "
+            "changed_by_kind = :kind, changed_by = :actor, change_reason = NULL, block_kind = NULL, block_reason = NULL "
+            "WHERE id = :id AND claim_token IS NULL",
             {"token": secrets.token_hex(16), "agent": agent, "now": utcnow(), "expires": utc_in(ttl),
              "kind": actor.kind, "actor": actor.name, "id": id})
         if changed == 0:
-            raise Conflict(f"task {id} is not ready or was taken by someone else")
+            raise Conflict(f"task {id} is already being worked on by {current.claimed_by or 'someone else'}")      # 1.2.9: any state can be claimed; only a task that someone is working on right now cannot
         if run_model:
             TaskRunsRepo(self.s).start(id, agent, role="implement", model=run_model)
         return self.get(id)
@@ -431,6 +452,7 @@ class TasksRepo(Repo):
             raise ValidationError("a summary is required to complete a task")
         _limit_text("summary", text, 4000)
         meta = _limit_text("metadata", dumps_json(metadata), 16000)
+        # 1.2.9: it closes from any state. A review only happens when the task was configured with one (the owner's choice, or the one who created it); whoever wants to skip it moves the task with task_update
         if task.requires_review:
             target, outcome = "review", "review_requested"
         elif task.requires_approval:
@@ -455,8 +477,6 @@ class TasksRepo(Repo):
 
     def review_approve(self, id: int, *, actor: Actor, note: str | None = None) -> Task:
         task = self.get(id)
-        if task.status != "review":
-            raise RuleViolation(f"task {id} is not in review")
         if actor.kind == "human" and task.requires_approval:       # the owner's own review is the approval
             ApprovalsRepo(self.s).record("task", id, "approved", decided_by=actor.name, note=note)
             target = "done"
@@ -472,8 +492,6 @@ class TasksRepo(Repo):
         if not (reason or "").strip():
             raise ValidationError("a reason is required to request changes")
         task = self.get(id)
-        if task.status != "review":
-            raise RuleViolation(f"task {id} is not in review")
         TaskCommentsRepo(self.s).add(id, reason, actor=actor)
         self._close_run(id, "changes_requested", summary=reason[:4000])
         if task.review_cycles >= task.review_limit:

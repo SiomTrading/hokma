@@ -548,6 +548,8 @@
   "hardblock.outside_workdir": "Hokma bloqueó esto: escribir fuera de la carpeta de trabajo y de las carpetas de Hokma, o tocar discos ({target}).",
   "hardblock.secrets": "Hokma bloqueó esto: leer llaves y credenciales guardadas ({target}).",
   "hardblock.real_money": "Hokma bloqueó esto: enviar órdenes con dinero real ({target}).",
+  "hardblock.hokma_money": "Hokma bloqueó esto: este código nombra un módulo de dinero real, claves o del servidor ({target}).",
+  "hardblock.hint.hokma_money": "Los demás módulos de Hokma se pueden importar y correr (hokma.factory, hokma.backtest, hokma.quant, rule_check, los tests de tu estrategia). El bróker, las órdenes, las cuentas, las claves, la base de datos y el servidor no: las órdenes salen solo por las herramientas de órdenes y tu trabajo va por las herramientas de tareas, banco y estrategia.",
   "hardblock.dynamic_code": "Hokma bloqueó esto: el agente no puede ejecutar código armado en tiempo de ejecución ({target}).",
   "hardblock.hint.dynamic_code": "Usa un import literal (import json, no un nombre armado por partes) y código simple, sin exec/eval/compile de una cadena armada. Si el script de verdad lo necesita, pide al dueño que lo corra él mismo.",
   "hardblock.hint.delete": "No borres. Mueve lo que ya no sirve a la papelera de Hokma con la herramienta trash_move; el dueño puede restaurarlo.",

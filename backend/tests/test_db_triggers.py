@@ -2,7 +2,7 @@
 import pytest
 from dbsupport import HUMAN, SYSTEM, agent, db, env  # noqa: F401  (fixtures)
 
-from hokma.db import Actor, IntegrityViolation, RuleViolation
+from hokma.db import Actor, IntegrityViolation, RuleViolation, ValidationError
 
 
 def new_task(u, title="t", **kw):
@@ -27,31 +27,28 @@ def test_agent_closes_a_task_without_review_and_it_passes(db):
         assert done.status == "done" and done.completed_at and done.result_summary == "all good"
 
 
-def test_agent_cannot_close_a_task_that_has_review_configured(db):
+def test_an_agent_closes_a_task_that_has_review_configured_with_no_review(db):
     with db.write() as u:
         t = run_to_running(u, new_task(u, requires_review=True, reviewer_agent="vera"))
-        with pytest.raises(RuleViolation):
-            force(u, t.id, "status = 'done', result_summary = 'x', completed_at = '2026-01-01 00:00:00', "
-                           "claim_token = NULL, changed_by_kind = 'agent', changed_by = 'joel'")
+        closed = u.tasks.move(t.id, "done", actor=agent("joel"), reason="not worth a review")          # 1.2.9: the review is a path, not a lock
+        assert closed.status == "done" and closed.result_summary == "not worth a review" and u.task_runs.current(t.id) is None
 
 
-def test_reviewer_equal_to_implementer_fails(db):
+def test_any_agent_can_give_the_review_and_the_implementer_too(db):
     with db.write() as u:
         t = new_task(u, requires_review=True, reviewer_agent="vera")
         t = run_to_running(u, t)
         u.tasks.request_review(t.id, "ready for review", actor=agent("joel"))
-        with pytest.raises(RuleViolation):
-            u.tasks.review_approve(t.id, actor=agent("joel"))        # the implementer is not the reviewer
-        with pytest.raises(RuleViolation):
-            u.tasks.review_approve(t.id, actor=agent("iris"))        # nor is any other agent
-        assert u.tasks.review_approve(t.id, actor=agent("vera")).status == "done"
+        assert u.tasks.review_approve(t.id, actor=agent("joel")).status == "done"          # 1.2.9: nobody checks who gives the review
+        again = u.tasks.move(t.id, "review", actor=agent("iris"))
+        assert u.tasks.review_approve(again.id, actor=agent("iris")).status == "done"
 
 
-def test_the_check_refuses_a_reviewer_equal_to_the_implementer_at_claim_time(db):
+def test_the_reviewer_can_claim_the_task_and_does_not_become_its_implementer(db):
     with db.write() as u:
         t = new_task(u, requires_review=True, reviewer_agent="vera", assigned_agent="iris")
-        with pytest.raises(IntegrityViolation):
-            u.tasks.claim(t.id, "vera")
+        claimed = u.tasks.claim(t.id, "vera")
+        assert claimed.status == "running" and claimed.claimed_by == "vera" and claimed.implementer_agent is None and claimed.assigned_agent == "vera"
 
 
 def test_real_money_task_cannot_be_closed_by_an_agent(db):
@@ -95,18 +92,17 @@ def test_an_old_approval_does_not_count_for_a_new_wait(db):
                            "changed_by = 'owner'")
 
 
-def test_agent_cannot_lower_requires_approval_review_or_the_money_lock(db):
+def test_agent_cannot_lower_requires_approval_or_the_money_lock_but_can_lower_review(db):
     with db.write() as u:
         t = new_task(u, touches_real_money=True, requires_review=True, reviewer_agent="vera")
-        for sql in ("requires_approval = 0", "requires_review = 0", "touches_real_money = 0"):
+        for sql in ("requires_approval = 0", "touches_real_money = 0"):
             with pytest.raises((RuleViolation, IntegrityViolation)):
                 force(u, t.id, f"{sql}, changed_by_kind = 'agent', changed_by = 'joel'")
         plain = new_task(u, requires_approval=True)
         with pytest.raises(RuleViolation):
             force(u, plain.id, "requires_approval = 0, changed_by_kind = 'agent', changed_by = 'joel'")
         assert u.tasks.update(plain.id, actor=HUMAN, requires_approval=False).requires_approval is False
-        with pytest.raises(RuleViolation):
-            u.tasks.update(t.id, actor=agent("joel"), requires_review=False)
+        assert u.tasks.update(t.id, actor=agent("joel"), requires_review=False).requires_review is False          # the review is a path: an agent may take it off
 
 
 def test_repo_update_by_an_agent_can_raise_but_not_lower(db):
@@ -118,28 +114,21 @@ def test_repo_update_by_an_agent_can_raise_but_not_lower(db):
             u.tasks.update(t.id, actor=agent("joel"), requires_approval=False)
 
 
-def test_unfinished_parent_blocks_ready_and_running(db):
+def test_unfinished_parent_does_not_block_a_move_or_a_claim(db):
     with db.write() as u:
         parent = new_task(u, "parent")
         child = new_task(u, "child", parents=[parent.id])
         assert child.status == "todo"
-        with pytest.raises(RuleViolation):
-            u.tasks.transition(child.id, "ready", actor=HUMAN)
-        with pytest.raises(RuleViolation):
-            force(u, child.id, "status = 'running', claim_token = 'x', claimed_at = '2026-01-01 00:00:00', "
-                               "changed_by_kind = 'agent', changed_by = 'joel'")
+        assert u.tasks.transition(child.id, "ready", actor=HUMAN).status == "ready"
+        assert u.tasks.claim(child.id, "joel").status == "running"          # 1.2.9: the dispatcher still waits for the parents; an agent that takes the task does not
 
 
-def test_counters_cannot_go_down_unless_the_task_is_closed(db):
+def test_counters_are_data_not_a_lock(db):
     with db.write() as u:
         t = run_to_running(u, new_task(u))
         force(u, t.id, "block_count = 1, review_cycles = 1")
-        with pytest.raises(RuleViolation):
-            force(u, t.id, "block_count = 0")
-        with pytest.raises(RuleViolation):
-            force(u, t.id, "review_cycles = 0")
-        done = u.tasks.complete(t.id, "ok", actor=agent("joel"))
-        assert done.block_count == 0 and done.review_cycles == 0     # closing resets them
+        force(u, t.id, "block_count = 0, review_cycles = 0")
+        assert u.tasks.complete(t.id, "ok", actor=agent("joel")).block_count == 0
 
 
 @pytest.mark.parametrize("table,sets", [
@@ -165,15 +154,18 @@ def test_approvals_only_accept_a_human(db):
                               "channel) VALUES ('task', 1, 'approved', 'agent', 'joel', 'cli')")
 
 
-def test_transition_table_rejects_what_it_does_not_list(db):
+def test_an_agent_moves_a_task_to_any_state_and_the_history_records_it(db):
     with db.write() as u:
         t = new_task(u)
-        for target in ("done", "review", "awaiting_approval", "failed"):
-            with pytest.raises(RuleViolation):
-                u.tasks.transition(t.id, target, actor=agent("joel"))
-        with pytest.raises(RuleViolation):                           # ready -> todo is for the system only
-            u.tasks.transition(t.id, "todo", actor=agent("joel"))
-        assert u.tasks.transition(t.id, "todo", actor=SYSTEM).status == "todo"
+        for target in ("done", "review", "failed", "triage", "todo", "blocked", "archived", "ready"):
+            assert u.tasks.move(t.id, target, actor=agent("joel"), reason="because").status == target
+        assert [e.to_status for e in u.task_events.list(t.id)][-3:] == ["blocked", "archived", "ready"]
+        with pytest.raises(ValidationError):
+            u.tasks.move(t.id, "running", actor=agent("joel"))          # running comes from a claim
+        money = new_task(u, touches_real_money=True)
+        with pytest.raises(RuleViolation):                               # the lock that stays: an agent does not close what needs the owner
+            u.tasks.move(money.id, "done", actor=agent("joel"))
+        assert u.tasks.move(money.id, "awaiting_approval", actor=agent("joel")).status == "awaiting_approval"
 
 
 def test_task_history_is_written_by_the_triggers(db):
@@ -186,6 +178,8 @@ def test_task_history_is_written_by_the_triggers(db):
 
 
 # ---------------------------------------------------------------------------------------------- bugs
+
+
 def fixed_bug(u, fixer: Actor):
     task = new_task(u)
     bug = u.bugs.create("it breaks", actor=HUMAN, severity="high")
@@ -193,12 +187,10 @@ def fixed_bug(u, fixer: Actor):
     return u.bugs.transition(bug.id, "fixed", actor=fixer, fixed_by_task_id=task.id)
 
 
-def test_a_bug_is_verified_by_someone_other_than_who_fixed_it(db):
+def test_a_bug_can_be_verified_by_who_fixed_it(db):
     with db.write() as u:
         bug = fixed_bug(u, agent("joel"))
-        with pytest.raises(RuleViolation):
-            u.bugs.transition(bug.id, "verified", actor=agent("joel"))
-        verified = u.bugs.transition(bug.id, "verified", actor=agent("vera"))
+        verified = u.bugs.transition(bug.id, "verified", actor=agent("joel"))          # 1.2.9: no one checks who verifies
         assert verified.status == "verified"
         closed = u.bugs.transition(bug.id, "closed", actor=HUMAN)
         assert closed.closed_at is not None
@@ -215,17 +207,15 @@ def test_allowed_bug_paths(db, path, final):
         assert bug.status == final
 
 
-@pytest.mark.parametrize("target", ["fixed", "verified", "closed"])
-def test_forbidden_bug_transitions(db, target):
+@pytest.mark.parametrize("target", ["fixed", "verified", "closed", "in_progress", "wont_fix"])
+def test_a_bug_goes_from_open_to_any_state_with_no_task(db, target):
     with db.write() as u:
         bug = u.bugs.create("b", actor=HUMAN)
-        with pytest.raises((RuleViolation, IntegrityViolation)):
-            u.bugs.transition(bug.id, target, actor=HUMAN)
+        assert u.bugs.transition(bug.id, target, actor=agent("hokma")).status == target          # the case of 1.2.8: an agent closing bugs #1 to #5 from open
 
 
-def test_fixed_needs_the_task_that_fixed_it(db):
+def test_fixed_can_name_the_task_that_fixed_it_but_does_not_need_it(db):
     with db.write() as u:
         bug = u.bugs.create("b", actor=HUMAN)
-        u.bugs.transition(bug.id, "in_progress", actor=HUMAN)
-        with pytest.raises(IntegrityViolation):
-            u.bugs.transition(bug.id, "fixed", actor=HUMAN)
+        task = new_task(u)
+        assert u.bugs.transition(bug.id, "fixed", actor=HUMAN, fixed_by_task_id=task.id).fixed_by_task_id == task.id

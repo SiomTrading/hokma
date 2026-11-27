@@ -63,6 +63,8 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                     "source_ingest", "bank_create", "bank_list", "bank_get", "bank_set_status",
                     # SPEC-031 (A2): the strategy as code
                     "strategy_brief_write", "strategy_code_save", "strategy_code_verdict", "strategy_code_list", "strategy_code_get",
+                    # 1.2.9: free agents with the base and the one-call creator
+                    "task_update", "project_update",
                     # SPEC-019 (H3): the SWO desk
                     "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_status", "desk_cycle_learn", "desk_signals", "lessons_propose",
                     # SPEC-028 (delivery 4): the analysis of an asset
@@ -79,7 +81,7 @@ def test_tasks_create_claim_once_complete_and_comment(db):
     claimed, err = run("task_claim", {"task_id": tid})
     assert not err and claimed["status"] == "running" and claimed["claimed_by"] == "joel"
     again, err = run("task_claim", {"task_id": tid}, agent="vera")
-    assert err and "only the assigned agent" in again                    # another agent cannot claim it
+    assert err and "already being worked on by joel" in again           # 1.2.9: any agent may claim, but not a task that someone is working on right now
     again, err = run("task_claim", {"task_id": tid}, agent="joel")
     assert err and "Conflict" in again                                   # a second claim fails
     assert not run("task_heartbeat", {"task_id": tid})[1]
@@ -235,19 +237,20 @@ def test_ips_read_refuses_a_project_folder_outside_the_workdir(profiled, env, tm
     assert err and "outside the working folder" in text
 
 
-def test_only_the_claiming_agent_changes_a_running_task(db):
+def test_any_agent_changes_a_running_task(db):
     tid = run("task_create", {"title": "Mine"}, agent="joel")[0]["id"]
     token = run("task_claim", {"task_id": tid}, agent="joel")[0]
     assert token["claimed_by"] == "joel"
-    for name, args in (("task_heartbeat", {}), ("task_complete", {"summary": "x"}), ("task_block", {"kind": "transient", "reason": "r"}),
-                       ("task_archive", {}), ("task_request_review", {"summary": "x"})):
-        text, err = run(name, {"task_id": tid, **args}, agent="vera")
-        assert err and "only that agent" in text, name
-    assert not run("task_heartbeat", {"task_id": tid}, agent="joel")[1]
-    with db.read() as u:
-        real = u.tasks.get(tid).claim_token
-    assert not run("task_heartbeat", {"task_id": tid, "claim_token": real}, agent="vera")[1]
+    assert not run("task_heartbeat", {"task_id": tid}, agent="vera")[1]          # 1.2.9: nobody checks who changes a task
     assert not run("task_comment", {"task_id": tid, "body": "a note"}, agent="vera")[1]
+    blocked, err = run("task_block", {"task_id": tid, "kind": "transient", "reason": "r"}, agent="vera")
+    assert not err and blocked["status"] == "blocked"
+    back, err = run("task_update", {"task_id": tid, "status": "ready", "assigned_agent": "vera", "note": "mine now"}, agent="vera")
+    assert not err and back["status"] == "ready" and back["assigned_agent"] == "vera"
+    again = run("task_claim", {"task_id": tid}, agent="vera")[0]
+    done, err = run("task_complete", {"task_id": tid, "summary": "x"}, agent="joel")
+    assert not err and done["status"] == "done" and again["claimed_by"] == "vera"
+
 
 
 
@@ -878,27 +881,23 @@ def _desk_task(db, desk, agent):
                               assigned_agent=agent, status="ready").id
 
 
-def test_an_agent_outside_the_desk_cannot_claim_its_task(two_desks, db):
+def test_an_agent_outside_the_desk_can_claim_its_task(two_desks, db):
     first, second = two_desks
     with db.read() as u:
         outsider = next(a.agent_slug for a in u.desks.list_agents(first["id"])
                         if u.desks.find_agent(second["id"], a.agent_slug) is None)
     tid = _desk_task(db, second, "desk-chief")
-    text, err = run("task_claim", {"task_id": tid}, agent=outsider)
-    assert err and "LookupError" in text
-    with db.read() as u:
-        assert u.tasks.get(tid).claimed_by is None and u.tasks.get(tid).status == "ready"
+    taken, err = run("task_claim", {"task_id": tid}, agent=outsider)
+    assert not err and taken["claimed_by"] == outsider and taken["assigned_agent"] == outsider          # 1.2.9: no role check on a claim
 
 
-def test_a_desk_agent_that_is_not_the_assignee_cannot_claim(two_desks, db):
+def test_a_desk_agent_that_is_not_the_assignee_can_claim(two_desks, db):
     first, _ = two_desks
     tid = _desk_task(db, first, "desk-chief")
     with db.read() as u:
         other = next(a.agent_slug for a in u.desks.list_agents(first["id"]) if a.agent_slug != "desk-chief")
-    text, err = run("task_claim", {"task_id": tid}, agent=other)
-    assert err and "only the assigned agent" in text
-    with db.read() as u:
-        assert u.tasks.get(tid).claimed_by is None
+    taken, err = run("task_claim", {"task_id": tid}, agent=other)
+    assert not err and taken["claimed_by"] == other
 
 
 def test_the_assigned_desk_agent_claims_its_task(two_desks, db):
@@ -908,10 +907,10 @@ def test_the_assigned_desk_agent_claims_its_task(two_desks, db):
     assert not err and taken["claimed_by"] == "desk-chief" and taken["status"] == "running"
 
 
-def test_a_desk_task_cannot_be_assigned_to_an_agent_outside_the_desk(two_desks, db):
+def test_a_desk_task_can_be_assigned_to_an_agent_outside_the_desk(two_desks, db):
     first, second = two_desks
     with db.read() as u:
         outsider = next(a.agent_slug for a in u.desks.list_agents(first["id"])
                         if u.desks.find_agent(second["id"], a.agent_slug) is None)
     text, err = run("task_create", {"title": "x", "project_id": second["project_id"], "assigned_agent": outsider})
-    assert err and "not an active member" in text
+    assert not err and text["assigned_agent"] == outsider

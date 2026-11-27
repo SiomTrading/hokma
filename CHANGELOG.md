@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.9
+
+- Changed: The agents are free with the base, as in ARIA. A task or a bug can be moved to any state, given to another agent and closed by any agent: the base no longer keeps a table of allowed moves, the open parents, the review path, the reviewer different from the implementer, the counters that only fall when a task closes, a bug verified by someone else, or the fixing task of a bug. A claim works from any state and the task becomes the claimer's; it only fails when someone is working on it right now. A task can be born in any state, a bug goes from open to fixed with no task, and a strategy of the bank moves between idea, draft and not_working with no reason asked (a closed one is reopened). Nobody checks who creates, assigns or closes. New tools: task_update (any state, any agent, reword) and project_update.
+- Changed: What stays locked is real money and integrity: a task that needs the approval of the owner (real money) is closed only with it and no agent takes that approval or the real-money lock off; the append-only tables; orders, accounts, keys and the guard; the order of the creator (no code without spec.md, nobody gives the verdict on his own code).
+- Fixed: The lock of real money no longer refuses the whole package hokma. A strategy can run its tests, rule_check and a backtest, and import hokma.factory, hokma.backtest or hokma.quant, with the interpreter of the runtime too. The modules that touch real money, keys, the guard or the server (broker, schwab, connections, exec, db, desks, kit, core...), pip in the runtime and the database keep being refused, with a text of their own that names the module.
+
 ## 1.2.8
 
 - Fixed: the agent that makes each call to Hokma can no longer be forged. In 1.2.7 the identity travelled inside the arguments of the call; if that stamp was ever lost the server would have believed what the model wrote. Now the hook leaves a file per call that only it can write and the server finds it with the id that Claude Code gives to the call; a call without that file acts as the agent of the session, never as the name in the arguments.

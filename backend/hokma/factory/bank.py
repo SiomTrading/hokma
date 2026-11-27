@@ -26,7 +26,6 @@ from hokma.sources.ingest import SourceError
 STATUSES = ("idea", "draft", "testing", "ready", "not_working", "live", "off")
 A1_STATUSES = ("idea", "draft", "not_working")
 LATER = ("testing", "ready", "live", "off")
-TRANSITIONS = frozenset({("idea", "draft"), ("idea", "not_working"), ("draft", "not_working"), ("draft", "idea")})
 MAX_TITLE = 160
 MAX_SLUG = 80
 SLUG_TRIES = 5
@@ -362,19 +361,15 @@ def set_status(bank_id: int, status: str, *, reason: str | None = None, actor: s
         raise BankError("bad_input", f"status is one of {', '.join(A1_STATUSES)}")
     if reason is not None and (not isinstance(reason, str) or len(reason) > REASON_RANGE[1]):
         raise BankError("bad_input", f"reason is text of at most {REASON_RANGE[1]} characters")
-    if status == "not_working" and (reason is None or not REASON_RANGE[0] <= len(reason.strip()) <= REASON_RANGE[1]):
-        raise BankError("bad_input", f"closing a strategy as not working needs its reason, {REASON_RANGE[0]} to {REASON_RANGE[1]} characters")
+    if status == "not_working" and (reason is None or len(reason.strip()) < REASON_RANGE[0]):
+        reason = f"closed by {who}: no reason was given"       # 1.2.9: the reason is not asked for; the base keeps a text of at least 20 characters for a closed strategy
     with _db(db).write() as u:
         s = u.session
         bank = _bank_row(s, bank_id)
         current = bank["status"]
-        if (current, status) not in TRANSITIONS:
-            if current in LATER:
-                raise BankError("blocked", BLOCKED_LATER)
-            raise BankError("bad_input", f"a strategy in {current} does not go to {status}" + (": it is closed, start a new strategy that derives from it" if current == "not_working" else ""))
-        if status == "draft":
-            last = s.one("SELECT extraction_json FROM strategy_bank_versions WHERE bank_id = :b ORDER BY version DESC LIMIT 1", {"b": bank_id})
-            if last is None or not ext.assess(json.loads(last["extraction_json"])).complete:
-                raise BankError("bad_input", "the extraction is incomplete, so the strategy stays an idea: fill what is missing or propose it, with its reason")
+        if current in LATER:
+            raise BankError("blocked", BLOCKED_LATER)
+        if current == status:
+            return {"bank_id": bank_id, "from": current, "to": status, "event_id": None}
         event = _move(s, bank_id, current, status, reason.strip() if reason else None, who)
     return {"bank_id": bank_id, "from": current, "to": status, "event_id": event}

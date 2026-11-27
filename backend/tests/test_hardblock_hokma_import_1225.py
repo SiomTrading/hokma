@@ -1,6 +1,6 @@
-"""Bug 1225 (SPEC-015 18.7, round 3): an agent never imports the package `hokma` at all, never builds the name of a module
-or a piece of code at run time, never puts Hokma's folders on its import path, never runs python from them and never
-opens Hokma's database. All of it is `real_money`, in the hook and in the permission broker. What does not touch Hokma stays free."""
+"""Bug 1225 (SPEC-015 18.7, round 3), narrowed in 1.2.9 (task 3431): an agent never imports the modules of Hokma that touch real money, keys, the guard or the server (broker, schwab,
+connections, exec, db, desks, kit, core...), never builds the name of a module or a piece of code at run time, never puts the runtime with its libraries on its import path and never
+opens Hokma's database. All of it is `real_money`, in the hook and in the permission broker. The rest of the package (factory, backtest, quant, rule_check) and what does not touch Hokma stay free."""
 import os
 from pathlib import Path
 
@@ -24,10 +24,13 @@ def sp(box) -> str:
 
 # ----------------------------------------------------------------------------------- 1: any import of hokma
 
+FREE_IMPORTS = [
+    "import hokma", "import hokma.market", "import hokma.factory.strategy", "from hokma.factory import orders", "from hokma import market", "import os, hokma", "import hokma as h",
+    "from  hokma  import x", "import  hokma", "import HOKMA", "import hokma; hokma.run()", "from hokma.backtest import spec", "import hokma.quant.metrics",
+]
 IMPORTS = [
-    "import hokma", "import hokma.market", "import hokma.core.config", "from hokma import market", "from hokma.db import paths",
-    "from hokma import (market,\n    desks)", "import os, hokma", "import hokma as h", "import os, sys, hokma.db as d",
-    "from  hokma  import x", "import  hokma", "import HOKMA", "import hokma; hokma.run()", "from hokma.kit import hardblock as hb",
+    "import hokma.core.config", "from hokma.db import paths", "import hokma.broker", "from hokma import exec", "from hokma.schwab import client",
+    "from hokma import (market,\n    desks)", "import os, sys, hokma.db as d", "from hokma.kit import hardblock as hb", "import hokma.connections",
     "__import__('hokma')", "__import__(\"hokma.db\")", "importlib.import_module('hokma')", "import_module('hokma.market')",
     "importlib.import_module('hokma.' + 'market')", "runpy.run_module('hokma')", "importlib.util.find_spec('hokma')",
 ]
@@ -47,6 +50,28 @@ def test_any_import_of_hokma_is_real_money(box, body):
         assert box.bash(command) == "real_money", command
 
 
+@pytest.mark.parametrize("body", FREE_IMPORTS)
+def test_the_free_modules_of_hokma_can_be_imported_and_run(box, body):
+    for command in wrap_python(body):
+        assert box.bash(command) is None, command
+    (box.work / "free.py").write_text(body + "\n")
+    assert box.bash("python free.py") is None
+    assert box.hit("Write", file_path=str(box.work / "free2.py"), content=body + "\n") is None
+
+
+def test_a_strategy_can_run_its_tests_and_the_rule_check_with_the_runtime_interpreter(box):
+    py = f"{box.data}/runtime/a/venv/bin/python"
+    for command in ("python -m pytest -q versions/v1/test_strategy.py", "python -m hokma.factory.rule_check service/strategies/STR-001-x/versions/v1",
+                    f"{py} -m pytest -q", f"{py} -m hokma.factory.rule_check x", "pytest -q", "python -m hokma.backtest.run x"):
+        assert box.bash(command) is None, command
+
+
+def test_the_blocks_of_the_money_modules_have_their_own_text(box):
+    for command in ("python -c 'import hokma.broker'", "python -m hokma.exec", f"{box.data}/runtime/a/venv/bin/python -c 'from hokma.schwab import x'"):
+        done = box.run_hook({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(box.work)})
+        assert done.returncode == 2 and "HOKMA_BLOCKED real_money" in done.stderr and "real money, keys or the server" in done.stderr, command
+
+
 @pytest.mark.parametrize("body", IMPORTS)
 def test_a_script_file_with_any_import_of_hokma_is_refused(box, body):
     (box.work / "tool.py").write_text(body + "\n")
@@ -61,13 +86,15 @@ def test_a_script_file_with_any_import_of_hokma_is_refused(box, body):
 def test_the_owner_doctor_command_stays_free_and_nothing_else_of_hokma_is(box):
     assert box.bash("python -m hokma doctor") is None
     assert box.bash("python3 -m hokma doctor") is None
-    for command in ("python -m hokma", "python -m hokma serve", "python -m hokma.db", "python -m hokma.market",
+    assert box.bash("python -m hokma.market") is None
+    for command in ("python -m hokma", "python -m hokma serve", "python -m hokma.db", "python -m hokma.core.config",
                     "python -m runpy hokma", "python -m pydoc hokma", "python -m hokma.broker"):
         assert box.bash(command) == "real_money", command
 
 
-def test_the_runtime_interpreter_cannot_run_doctor_either(box):
-    assert box.bash(f"{box.data}/runtime/a/venv/bin/python -m hokma doctor") == "real_money"
+def test_the_runtime_interpreter_runs_what_is_free_and_refuses_what_is_not(box):
+    assert box.bash(f"{box.data}/runtime/a/venv/bin/python -m hokma doctor") is None
+    assert box.bash(f"{box.data}/runtime/a/venv/bin/python -m hokma serve") == "real_money"
 
 
 # ----------------------------------------------------------------------------------- 2: the import path
@@ -75,8 +102,7 @@ def test_the_runtime_interpreter_cannot_run_doctor_either(box):
 INJECTIONS = [
     "import sys; sys.path.insert(0, '{sp}')", "import sys; sys.path.append('{sp}')", "import sys; sys.path.extend(['{sp}'])",
     "import sys; sys.path = ['{sp}'] + sys.path", "import site; site.addsitedir('{sp}')",
-    "import sys; sys.path.insert(0, '{pkg}')", "import sys; sys.path.append(\"{pkg}\")",
-    "import sys; sys.path.insert(0, '{data}/runtime/a')", "import sys; sys.path.insert(0, 'hokma/..')",
+    "import sys; sys.path.insert(0, '{data}/runtime/a')",
     "import sys; p = '{sp}'; sys.path.insert(0, p)", "import sys, os; sys.path.insert(0, os.path.join('{data}', 'runtime', 'a', 'venv'))",
     "import sys; sys.path.insert(0, '{sp}'[:-1] + 's')",
 ]
@@ -95,10 +121,9 @@ def test_putting_the_site_packages_or_the_package_folder_on_the_path_is_real_mon
 
 @pytest.mark.parametrize("command", [
     "PYTHONPATH={sp} python -c 'print(1)'", "PYTHONPATH={sp}:. python3 x.py", "export PYTHONPATH={sp}",
-    "env PYTHONPATH={sp} python x.py", "sudo PYTHONPATH={pkg} python x.py", "PYTHONPATH={pkg} python -c 1",
-    "PYTHONPATH='{pkg}' python -c 1", "export PYTHONPATH=\"{data}/runtime/a\"", "bash -c 'PYTHONPATH={sp} python x.py'",
+    "env PYTHONPATH={sp} python x.py", "export PYTHONPATH=\"{data}/runtime/a\"", "bash -c 'PYTHONPATH={sp} python x.py'",
     "PYTHONPATH={sp} pytest", "cd {pkg} && python -c 'print(1)'", "cd {pkg} && python3 x.py",
-    "cd {data}/runtime/a && python x.py", "cd {sp} && python x.py", "{pkg}/venv/bin/python x.py",
+    "cd {data}/runtime/a && python x.py", "cd {sp} && python x.py",
     "python {pkg}/hokma/__main__.py", "python -c \"import os; os.system('PYTHONPATH={sp} python x.py')\"",
     "echo {sp} > $(python -c 'import site;print(site.getsitepackages()[0])')/h.pth",
     "echo {sp} > x.pth", "echo '{pkg}' >> {sp}/extra.pth"])
@@ -121,7 +146,6 @@ def test_the_package_folder_through_a_relative_path_or_a_link_is_real_money(box)
     link = box.work / "pk"
     os.symlink(PKG, link)
     assert box.bash("cd pk && python x.py") == "real_money"
-    assert box.bash("python -c \"import sys; sys.path.insert(0, 'pk')\"") == "real_money"
     assert box.bash("python pk/hokma/__main__.py") == "real_money"
 
 
@@ -216,7 +240,8 @@ def test_plain_python_with_a_literal_import_or_no_dynamic_use_is_free(box, body)
 
 
 def test_the_same_rule_applies_in_powershell(box):
-    assert box.ps("python -c \"import hokma\"") == "real_money"
+    assert box.ps("python -c \"import hokma.broker\"") == "real_money"
+    assert box.ps("python -c \"import hokma.factory.strategy\"") is None
     assert box.ps("python -c \"import importlib; importlib.import_module(n)\"") == "real_money"
     assert box.ps("$env:PYTHONPATH = '" + sp(box) + "'; python x.py") == "real_money"
     assert box.ps("python -c \"print(1)\"") is None
@@ -303,15 +328,15 @@ def test_the_four_cases_are_real_money_in_the_hook_process_and_in_the_broker(box
 
 
 def test_a_plain_import_in_the_broker_and_the_tools(box, bctx):
-    command = 'python -c "import hokma"'
+    command = 'python -c "import hokma.broker"'
     done = box.run_hook({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(box.work)})
     assert done.returncode == 2 and "HOKMA_BLOCKED real_money" in done.stderr
-    for tool, arguments in (("Bash", {"command": command}), ("Write", {"file_path": str(box.work / "x.py"), "content": "import hokma\n"}),
+    for tool, arguments in (("Bash", {"command": command}), ("Write", {"file_path": str(box.work / "x.py"), "content": "import hokma.broker\n"}),
                             ("write_file", {"file_path": str(box.work / "x.py"), "content": "from hokma import db\n"}),
                             ("mcp__other__run", {"code": "importlib.import_module(n)"}),
-                            ("mcp__other__run", {"script": "import hokma"}),
+                            ("mcp__other__run", {"script": "from hokma import exec"}),
                             ("mcp__other__run", {"command": f"sqlite3 {db(box)} .tables"}),
-                            ("web_fetch", {"url": "https://example.com/?c=import hokma"}),
+                            ("web_fetch", {"url": "https://example.com/?c=import hokma.broker"}),
                             ("web_fetch", {"url": "https://example.com/?m=hokma.broker"})):
         verdict = check(tool, arguments, cwd=str(box.work), ctx=bctx)
         assert (verdict.allowed, verdict.rule) == (False, "real_money"), (tool, arguments)

@@ -181,9 +181,6 @@ def test_a_strategy_that_does_not_work_gets_no_new_versions(db):
 
 
 # ---------------------------------------------------------------------------------------------------- states
-ALLOWED = {("idea", "draft"), ("idea", "not_working"), ("draft", "not_working"), ("draft", "idea")}
-
-
 def put_in(db, state):
     """A strategy in the given state: through the front door where there is one."""
     source, pid = idea(db)
@@ -208,14 +205,10 @@ def test_every_transition_of_a_state_that_a1_uses_is_allowed_or_refused_with_its
     call = lambda: bank.set_status(bank_id, goal, reason="a reason that is long enough to count", actor="hokma", db=db)    # noqa: E731
     if goal in bank.LATER:
         fails("blocked", "milestone B or C", call)
-    elif (start, goal) == ("idea", "draft"):
-        fails("bad_input", "incomplete", call)                          # this idea is missing its stop, so it cannot be a draft
-    elif (start, goal) in ALLOWED:
+    else:                                                               # 1.2.9: between idea, draft and not_working any move is allowed, with a sheet that is incomplete too
         done = call()
         assert (done["from"], done["to"]) == (start, goal) and len(rows(db, "strategy_bank_events")) == before + 1
         return
-    else:
-        fails("bad_input", "does not go to", call)
     assert len(rows(db, "strategy_bank_events")) == before and bank.get(bank_id, db=db)["status"] == start
 
 
@@ -226,7 +219,8 @@ def test_an_idea_with_a_complete_sheet_goes_to_draft_and_a_draft_goes_back_to_id
     del worse["timeframe"]
     bank.create(title="t", source_id=source.id, extraction=worse, bank_id=made.bank_id, caller=AGENT, db=db)
     assert bank.get(made.bank_id, db=db)["status"] == "idea"
-    fails("bad_input", "incomplete", lambda: bank.set_status(made.bank_id, "draft", actor="hokma", db=db))
+    assert bank.set_status(made.bank_id, "draft", actor="hokma", db=db)["to"] == "draft"          # 1.2.9: a draft with an incomplete sheet is allowed; the sheet says what is missing
+    bank.set_status(made.bank_id, "idea", actor="hokma", db=db)
     bank.create(title="t", source_id=source.id, extraction=sheet(pid), bank_id=made.bank_id, caller=AGENT, db=db)
     assert bank.get(made.bank_id, db=db)["status"] == "draft"
     done = bank.set_status(made.bank_id, "idea", reason="the owner wants to rewrite the entry", actor="joel", db=db)
@@ -242,10 +236,14 @@ def test_a_strategy_in_a_later_state_cannot_be_moved_or_versioned_here(db, state
     fails("blocked", "milestone B or C", lambda: bank.create(title="t", source_id=source.id, extraction=sheet(pid), bank_id=bank_id, caller=AGENT, db=db))
 
 
-@pytest.mark.parametrize("reason", [None, "", "too short", " " * 30, "x" * 4001])
-def test_closing_as_not_working_needs_the_reason(db, reason):
+def test_closing_as_not_working_with_no_reason_keeps_a_default_one_and_a_reason_too_long_is_refused(db):
+    for reason in (None, "", "too short", " " * 30):
+        _s, _p, made = make(db)
+        bank.set_status(made.bank_id, "not_working", reason=reason, actor="hokma", db=db)          # 1.2.9: the reason is not asked for
+        got = bank.get(made.bank_id, db=db)
+        assert got["status"] == "not_working" and len(got["close_reason"]) >= 20 and "hokma" in got["close_reason"]
     _s, _p, made = make(db)
-    fails("bad_input", "reason", lambda: bank.set_status(made.bank_id, "not_working", reason=reason, actor="hokma", db=db))
+    fails("bad_input", "reason", lambda: bank.set_status(made.bank_id, "not_working", reason="x" * 4001, actor="hokma", db=db))
     assert bank.get(made.bank_id, db=db)["status"] == "draft"
 
 
@@ -255,8 +253,8 @@ def test_the_reason_of_a_close_is_kept_with_the_strategy_and_in_its_event_and_it
     got = bank.get(made.bank_id, db=db)
     assert got["status"] == "not_working" and got["close_reason"] == "the rule depends on a data feed that we do not have"
     assert got["events"][-1] == {"event_id": done["event_id"], "from": "draft", "to": "not_working", "reason": got["close_reason"], "actor": "vera", "at": got["events"][-1]["at"]}
-    for goal in ("idea", "draft", "not_working"):
-        fails("bad_input", "closed", lambda: bank.set_status(made.bank_id, goal, reason="a reason that is long enough", actor="vera", db=db))
+    assert bank.set_status(made.bank_id, "idea", actor="vera", db=db)["to"] == "idea"          # 1.2.9: a closed strategy can be reopened by any agent
+    assert bank.get(made.bank_id, db=db)["close_reason"] is None
 
 
 def test_a_state_and_an_id_that_do_not_exist_are_classified(db):
@@ -292,7 +290,7 @@ def test_two_callers_closing_the_same_strategy_at_once_one_wins(db):
         t.start()
     for t in threads:
         t.join()
-    assert sorted(type(o).__name__ for o in outcome) == ["BankError", "dict"]
+    assert sorted(type(o).__name__ for o in outcome) == ["dict", "dict"]          # 1.2.9: the second one finds it closed already and nothing changes
     assert len([e for e in rows(db, "strategy_bank_events") if e["to_status"] == "not_working"]) == 1
 
 

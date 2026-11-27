@@ -20,8 +20,7 @@ def test_create_validations_and_defaults(db):
         assert t.max_runtime_seconds == 1800 and t.max_attempts == 2 and t.attempts == 0
         assert make(u, actor=SYSTEM).created_by_kind == "scheduler"
         assert make(u, actor=agent("iris")).created_by_kind == "agent"
-        for bad in ({"title": ""}, {"title": "x" * 201}, {"priority": 3}, {"status": "running"}, {"body": "x" * 8001},
-                    {"requires_review": True}, {"requires_review": True, "reviewer_agent": "joel"}):
+        for bad in ({"title": ""}, {"title": "x" * 201}, {"priority": 3}, {"status": "running"}, {"body": "x" * 8001}):
             kw = {"title": "ok", **bad}
             with pytest.raises(ValidationError):
                 u.tasks.create(kw.pop("title"), actor=HUMAN, assigned_agent="joel", **kw)
@@ -30,6 +29,10 @@ def test_create_validations_and_defaults(db):
         with pytest.raises(NotFound):
             make(u, project_id=999)
         assert make(u, status="triage").status == "triage"
+        assert make(u, status="done").status == "done" and make(u, status="blocked").status == "blocked"          # 1.2.9: born in any state but running
+        assert make(u, requires_review=True).requires_review is False                                          # a review with nobody to give it is not kept
+        assert make(u, requires_review=True, reviewer_agent="joel").requires_review is True                    # the reviewer may be the same agent
+        assert make(u, status="done", touches_real_money=True).status == "awaiting_approval"                   # what needs the owner is not born closed
 
 
 def test_future_run_at_and_open_parents_park_the_task_in_todo(db):
@@ -83,10 +86,14 @@ def test_claim_is_conditional(db):
         assert run.agent_slug == "joel" and run.outcome == "running" and run.role == "implement"
         with pytest.raises(Conflict):
             u.tasks.claim(t.id, "iris")
+        u.tasks.release(t.id, "freed")
         parent = make(u, "p")
         child = make(u, "c", parents=[parent.id])
-        with pytest.raises(Conflict):
-            u.tasks.claim(child.id, "joel")                          # it is todo, not ready
+        taken = u.tasks.claim(child.id, "joel")                        # 1.2.9: it is todo and has an open parent, and the claim works
+        assert taken.status == "running" and taken.assigned_agent == "joel"
+        for status in ("done", "triage", "blocked", "archived"):
+            other = u.tasks.move(make(u, f"from {status}").id, status, actor=agent("joel"))
+            assert u.tasks.claim(other.id, "iris").status == "running"
 
 
 def test_claim_next_skips_blocked_candidates(db):
@@ -297,8 +304,6 @@ def test_update_edit_rules(db):
         assert u.tasks.update(t.id, actor=HUMAN, assigned_agent=None).assigned_agent is None
         with pytest.raises(ValidationError):
             u.tasks.update(t.id, actor=HUMAN, title=" ")
-        with pytest.raises(ValidationError):
-            u.tasks.update(t.id, actor=HUMAN, requires_review=True)
         assert u.tasks.update(t.id, actor=HUMAN, requires_review=True, reviewer_agent="vera").requires_review
 
 
