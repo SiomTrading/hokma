@@ -97,12 +97,16 @@ def creator_services() -> tuple[str, ...]:
     return CREATOR_SERVICES
 
 
+RETIRED_AGENTS = frozenset({"strategy-researcher", "strategy-coder", "sam-dev-python", "sam-dev-frontend", "sam-mcp-builder"})      # 1.3.0: Ian, Sam and his three helpers. Their files stay on disk, never deleted; they are not agents any more and the base turns them off
+
+
 def seed_agents(session: Session, *, workdir_agents: Path | None = None, kit_dir: Path | None = None) -> int:
     """Insert or refresh the agents of the kit. Returns how many rows were added or turned off."""
     kit_dir = kit_dir if kit_dir is not None else kit_agents_dir()
     installed_dir = workdir_agents if workdir_agents is not None else hokma_home() / "agents"
     kit = _read_agents(kit_dir) if kit_dir.is_dir() else {}
     source = _read_agents(installed_dir) if installed_dir.is_dir() else kit
+    source = {slug: meta for slug, meta in source.items() if slug not in RETIRED_AGENTS}
     repo = AgentsRepo(session)
     changed = 0
     for slug, meta in source.items():

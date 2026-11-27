@@ -132,7 +132,7 @@ def test_ian_launches_a_backtest_and_an_optimization_on_a_strategy_of_the_bank_b
     series = bars(1500)
     point_the_tools_at_the_strategy(monkeypatch, db, series, tmp_path)
     ian = caller(RESEARCHER)
-    assert {"backtest_run", "backtest_optimize", "optimizer_verdict", "optimizer_verdict_get", "audit_thresholds_get", "library_list", "library_request"} <= set(offered_tools())
+    assert {"backtest_run", "backtest_optimize", "optimizer_verdict", "optimizer_verdict_get", "audit_thresholds_get", "library_list"} <= set(offered_tools())
     assert not {"audit_thresholds_set", "audit_thresholds_edit", "optimizer_verdict_edit"} & set(offered_tools())
     base = {k: v for k, v in run_args(series, strategy_id="x", version=1).items() if k not in ("strategy_id", "version")}
     # a strategy with no approved code has no saved spec: nothing to run, and the answer says so

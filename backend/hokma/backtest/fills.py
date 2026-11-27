@@ -63,6 +63,8 @@ class Decision:
     valid_bars: int = 1                    # enter with a limit: the bars the order lives, counted from the one that follows the decision
     new_stop: Decimal | None = None        # modify: the price of the live stop from the next bar on
     new_target: Decimal | None = None      # modify: the price of the live target from the next bar on
+    stop_at: Decimal | None = None         # enter: the stop as an absolute price fixed on the bar of the signal (1.3.0); stop_points stays as its distance from the signal close
+    target_at: Decimal | None = None       # enter: the same for the target
 
     def __post_init__(self) -> None:
         if self.action == "enter" and (self.side not in ("long", "short") or self.qty <= 0):
@@ -79,6 +81,10 @@ class Decision:
             raise SpecError("a target without a stop is not allowed: every protective order set has its stop")
         if any(p is not None and p <= 0 for p in (self.stop_points, self.target_points)):
             raise SpecError("protective distances are above zero")
+        if (self.stop_at is not None or self.target_at is not None) and (self.action != "enter" or self.stop_points is None):
+            raise SpecError("an absolute stop or target belongs to an entry that has its stop distance")
+        if any(p is not None and p <= 0 for p in (self.stop_at, self.target_at)):
+            raise SpecError("absolute protective prices are above zero")
 
     @property
     def protective(self) -> bool:

@@ -23,7 +23,7 @@ waits for the owner. Closing or reducing a position is always allowed.
 
 ## Strategies
 
-When the request is about creating, building or optimizing a strategy from a source or an idea (a video, a PDF, a link or only an idea), launch strategy-researcher (Ian) right away; Ian writes the requirement, then launches strategy-coder (Sam) and strategy-reviewer (Ben). Any agent of this desk that receives the request does the same and does not wait for the chief: no agent here has a dispatch tool, so it creates a task with `task_create`, assigned to strategy-researcher, with the request and the source in its body. Nobody writes the strategy, its spec or its code except Ian, Sam and Ben.
+When the request is about creating, building or optimizing a strategy from a source or an idea (a video, a PDF, a link or only an idea), launch strategy-creator (the Creator) right away; the Creator writes the strategy as text and creates it with two tools, and strategy-reviewer (Ben) reviews its logic before paper or real money. Any agent of this desk that receives the request does the same and does not wait for the chief: no agent here has a dispatch tool, so it creates a task with `task_create`, assigned to strategy-creator, with the request and the source in its body. Nobody writes the strategy, its spec or its code except the Creator and Ben.
 
 How a source is handed over (the same as the main chat):
 

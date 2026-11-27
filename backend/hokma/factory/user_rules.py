@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import types
@@ -57,7 +58,8 @@ from hokma.sources.ingest import SourceError
 SLUG = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 APPROVED = ("generated", "owner_reviewed")
 MAX_REJECTIONS = 3
-RESEARCHER, CODER, REVIEWER = "strategy-researcher", "strategy-coder", "strategy-reviewer"      # the usual agents of each step; any agent may take a step (1.2.2)
+RESEARCHER = CODER = "strategy-creator"      # 1.3.0: one creator writes the requirement and the code
+REVIEWER = "strategy-reviewer"      # the usual agents of each step; any agent may take a step (1.2.2)
 STRATEGY_FOLDER_FILES = frozenset({"strategy.py", "test_strategy.py"})
 CHECK_TIMEOUT = 120
 STRATEGY_FILE = "strategy.py"
@@ -99,13 +101,89 @@ def strategy_folder(bank_id: int, slug: str) -> Path | None:
     """The folder of a strategy in the fund: service/strategies/STR-{NNN}-{slug}/, created with its card in the bank. It holds spec.md, checklist.md, plan.md, tasks.md, adr/, results/ and
     versions/v{N}/strategy.py with versions/v{N}/test_strategy.py. A version that was saved is never written over: the next one is v{N+1}."""
     folder = drafts_dir() / f"{code_of(bank_id)}-{slug}"
-    return folder if folder.is_dir() and not folder.is_symlink() else None
+    try:
+        check_inside(folder, drafts_dir())
+    except UserRuleError:
+        return None
+    return folder if folder.is_dir() else None
+
+
+def _is_junction(path: Path) -> bool:
+    """A junction (Windows) or any reparse point: the folder is not what its name says."""
+    try:
+        if hasattr(os.path, "isjunction") and os.path.isjunction(path):
+            return True
+        return bool(getattr(os.lstat(path), "st_file_attributes", 0) & 0x400)      # FILE_ATTRIBUTE_REPARSE_POINT
+    except OSError:
+        return False
+
+
+def _is_link(path: Path) -> bool:
+    return path.is_symlink() or _is_junction(path)
+
+
+def check_inside(path: Path, root: Path) -> None:
+    """Refuse a path that is, or goes through, a symlink or a junction below `root` (root included), or whose real path leaves `root`. A path that does not exist yet is checked up to what exists."""
+    base = Path(os.path.abspath(root))
+    target = Path(os.path.abspath(path))
+    try:
+        parts = target.relative_to(base).parts
+    except ValueError:
+        raise UserRuleError("blocked", "the folder of the strategy is outside the working folder") from None
+    current = base
+    for part in ("", *parts):
+        current = current / part if part else current
+        if _is_link(current):
+            raise UserRuleError("blocked", f"{current.name} is a link (symlink or junction): the strategy is not written through links")
+    real_root = base.resolve()
+    if os.path.lexists(target) and not target.resolve().is_relative_to(real_root):
+        raise UserRuleError("blocked", "the folder of the strategy leads outside the working folder")
+
+
+def make_folder(path: Path, root: Path, *, new: bool = False) -> Path:
+    """Create `path` (and what is missing above it, below `root`) one level at a time, checking each level. `new`: the last level must not exist yet."""
+    root = Path(os.path.abspath(root))
+    path = Path(os.path.abspath(path))
+    root.mkdir(parents=True, exist_ok=True)
+    check_inside(root, root)
+    rel = path.relative_to(root).parts
+    current = root
+    for i, part in enumerate(rel):
+        current = current / part
+        last = i == len(rel) - 1
+        if os.path.lexists(current):
+            if new and last:
+                raise UserRuleError("blocked", f"{current.name} already exists: a new strategy never takes a folder that was there")
+            check_inside(current, root)
+            if not current.is_dir():
+                raise UserRuleError("blocked", f"{current.name} is not a folder")
+        else:
+            current.mkdir(exist_ok=False)
+            check_inside(current, root)
+    return path
+
+
+def write_text_inside(path: Path, text: str, root: Path) -> None:
+    """Write a file of a strategy: its folder is made and checked level by level, the file is never a link or shared with another name, and where the system has O_NOFOLLOW the open itself refuses a link."""
+    make_folder(path.parent, root)
+    check_inside(path, root)
+    if os.path.lexists(path):
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+            raise UserRuleError("blocked", f"{path.name} is not a plain file of this strategy")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(path, flags, 0o644)
+    except OSError as exc:
+        raise UserRuleError("blocked", f"{path.name} could not be written without following a link ({exc.strerror})") from None
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(text.replace("\r\n", "\n").encode("utf-8"))
 
 
 def spec_file(bank_id: int, slug: str) -> Path | None:
     folder = strategy_folder(bank_id, slug)
     path = None if folder is None else folder / "spec.md"
-    return path if path is not None and path.is_file() and not path.is_symlink() else None
+    return path if path is not None and path.is_file() and not _is_link(path) else None
 
 
 def version_folder(bank_id: int, slug: str, version: int) -> Path:
@@ -394,8 +472,8 @@ def versions_row(bank_id: int, bank_slug: str, version: int, sha: str, *, author
             else:
                 body[mine] = row
             lines[at + 1:end] = body
-        spec.write_text("\n".join(lines), encoding="utf-8")
-    except OSError:
+        write_text_inside(spec, "\n".join(lines), drafts_dir())
+    except (OSError, UserRuleError):
         pass
 
 
@@ -613,6 +691,10 @@ def verdict(*, rule_version_id: int, verdict: str, findings: Any, reviewer: str,
                                      {"r": int(row["rule_id"])}))
     if row["created_by"] == who:
         raise UserRuleError("blocked", "the one that saved a version never gives its verdict")
+    from hokma.factory import pandas_flow
+
+    if pandas_flow.is_pandas(row["manifest_json"]):                              # 1.3.0: Ben judges the logic of a version that the checks already generated; he does not repeat the checks
+        return pandas_flow.ben_verdict(database, row, who, verdict, items)
     if row["status"] != "draft":
         raise UserRuleError("bad_input", f"only a draft gets a verdict: this version is {row['status']}")
     folder = _file_ok(row)
@@ -692,6 +774,10 @@ def owner_decision(*, rule_version_id: int, approve: bool, note: str | None = No
         if row["status"] != "generated":
             raise UserRuleError("bad_input" if row["status"] != "draft" else "blocked", f"only a version that the code reviewer approved is decided by the owner: this one is {row['status']}")
         if approve:
+            from hokma.factory import pandas_flow
+
+            if pandas_flow.is_pandas(row["manifest_json"]) and not pandas_flow.ben_approved(s, int(row["id"]), row["code_sha256"]):
+                raise UserRuleError("blocked", "this strategy only passed the checks of Hokma: the reviewer (Ben) must approve its logic against the spec before you can approve it for paper or real money")
             changed = s.execute("UPDATE user_rule_versions SET status = 'owner_reviewed', reviewed_by = :a, reviewed_at = CURRENT_TIMESTAMP, reviewed_sha256 = code_sha256, review_note = :n "
                                 "WHERE id = :i AND status = 'generated'", {"a": actor, "n": note, "i": int(row["id"])})
             target = "owner_reviewed"
@@ -895,6 +981,10 @@ def load_class(registry_id: str, *, db: Database | None = None) -> type:
         in_fund = None
     if in_fund != row["code_sha256"]:
         raise UserRuleError("blocked", f"{registry_id} does not load: {rel_folder(fund) if fund.is_relative_to(hokma_home()) else fund} is not the file that was saved (its sha256 changed or it is gone)")
+    if json.loads(row["manifest_json"] or "{}").get("flow") == "pandas":                  # 1.3.0: a strategy in pandas; its class asks the loader for the signals
+        from hokma.factory import pandas_flow
+
+        return pandas_flow.load_class(row)
     key = (registry_id, row["code_sha256"])
     if key in _LOADED:
         _file_ok(row)                                                   # a cached class is still only served while its file is intact

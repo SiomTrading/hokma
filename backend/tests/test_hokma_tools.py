@@ -65,6 +65,8 @@ def test_the_server_lists_every_promised_tool_and_nothing_to_approve(db):
                     "strategy_brief_write", "strategy_code_save", "strategy_code_verdict", "strategy_code_list", "strategy_code_get",
                     # 1.2.9: free agents with the base and the one-call creator
                     "task_update", "project_update",
+                    # 1.3.0: the strategy in pandas, with its paperwork done by the code, and what a creation costs
+                    "strategy_dry_run", "strategy_create", "creation_report",
                     # SPEC-019 (H3): the SWO desk
                     "desk_create_swo", "desk_mandate_save", "desk_cycle_run", "desk_cycle_status", "desk_cycle_learn", "desk_signals", "lessons_propose",
                     # SPEC-028 (delivery 4): the analysis of an asset

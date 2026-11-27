@@ -240,6 +240,18 @@ def build_spec(a: Mapping[str, Any]):
                         finalize=a.get("finalize", "mark_to_market"), session=a.get("session"), seed=_whole(a.get("seed", 0), "seed", 0, 2**31 - 1))
 
 
+def _space_of(a: Mapping[str, Any]):
+    """The space of the arguments, or (1.3.0) the PARAMS of a strategy written in pandas when no space is given: its min, max and step are the axes."""
+    if a.get("space") is not None:
+        return build_space(a["space"])
+    from hokma.factory import pandas_flow
+
+    found = pandas_flow.space_for(a["strategy_id"])
+    if found is None:
+        raise ToolError("bad_input", "space is needed: only a strategy written in pandas has its own (its PARAMS)")
+    return found
+
+
 def build_space(raw: Any):
     """The search space of the arguments: axes and constraints as data, never code."""
     from hokma.backtest.optimize import MAX_AXES, Axis, BadSpace, Constraint, ParamSpace
@@ -366,7 +378,7 @@ def _optimize(**a: Any) -> dict[str, Any]:
     from hokma.backtest.optimize import METHODS, OBJECTIVES, failure_reasons
     from hokma.quant import limits
 
-    spec, space = build_spec(a), build_space(a["space"])
+    spec, space = build_spec(a), _space_of(a)
     method, objective = a["method"], a["objective"]
     if method not in METHODS or objective not in OBJECTIVES:
         raise ToolError("bad_input", f"method is one of {', '.join(METHODS)} and objective one of {', '.join(OBJECTIVES)}")
@@ -391,7 +403,7 @@ def _walkforward(**a: Any) -> dict[str, Any]:
     from hokma import backtest
     from hokma.quant import limits
 
-    spec, space = build_spec(a), build_space(a["space"])
+    spec, space = build_spec(a), _space_of(a)
     scheme = a["scheme"]
     train, test = _whole(a["train"], "train"), _whole(a["test"], "test")
     purge, embargo = _whole(a["purge"], "purge", 0), _whole(a["embargo"], "embargo", 0)
@@ -529,7 +541,7 @@ RUN_PROPS: dict[str, Any] = {
                "the stop after the target are forbidden and come back as forbidden_fill."),
 }
 RUN_REQUIRED = ["instruments", "bar", "start", "end", "capital_usd", "fee_table"]
-SPACE = _o("{axes: [{name, kind int|float|choice, low, high, step, choices}], constraints: [{left, op lt|le|gt|ge|ne|eq, right}]}. Data only.")
+SPACE = _o("Optional for a strategy written in pandas: without it the space is its PARAMS (min, max, step). {axes: [{name, kind int|float|choice, low, high, step, choices}], constraints: [{left, op lt|le|gt|ge|ne|eq, right}]}. Data only.")
 
 
 @TOOLSET.tool("backtest_run", "Run a backtest of a strategy over history and save it. The order fills at the next open plus ticks against, the stop first when stop and target "
@@ -558,7 +570,7 @@ def backtest_result(u, c, a: dict) -> str:
               "Every try, failed ones included, is one row of the ledger of trials that the deflated Sharpe ratio counts.", {
     **RUN_PROPS, "space": SPACE, "method": _s("Search method.", enum=["grid", "tpe", "refine"]), "n_trials": _i("Tries; a grid needs at least its number of points."),
     "objective": _s("What to maximize.", enum=["net_pnl", "mtm_pnl", "sharpe"]), "presweep": _b("Rank first with the fast sweep (default true).")},
-              [*RUN_REQUIRED, "space", "method", "n_trials", "objective"], writes=True)
+              [*RUN_REQUIRED, "method", "n_trials", "objective"], writes=True)
 @safe
 def backtest_optimize(u, c, a: dict) -> str:
     out = _call(c, "backtest_optimize", a)
@@ -615,7 +627,7 @@ def _leave_summary(a: dict, out: str) -> dict[str, str] | None:
               "train bars and is measured on its test bars. Sizes are in bars.", {
     **RUN_PROPS, "space": SPACE, "scheme": _s("Validation scheme.", enum=["rolling", "anchored", "cpcv"]), "train": _i("Train window in bars."),
     "test": _i("Test window in bars."), "purge": _i("Bars removed between train and test."), "embargo": _i("Bars removed after the test.")},
-              [*RUN_REQUIRED, "space", "scheme", "train", "test", "purge", "embargo"], writes=True)
+              [*RUN_REQUIRED, "scheme", "train", "test", "purge", "embargo"], writes=True)
 @safe
 def backtest_walkforward(u, c, a: dict) -> str:
     return _call(c, "backtest_walkforward", a)

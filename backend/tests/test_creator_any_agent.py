@@ -1,5 +1,5 @@
 """1.2.2: any agent or chat may start and carry the creator flow (the main session, a desk chief, any subagent). The order rules stay: no code without a requirement, the one that saved the code
-never gives its verdict, no version without an approved verdict, and the hook of the folder lets every agent through. Ian can launch Sam and Ben; the main agent and the desk chief hold the creator tools."""
+never gives its verdict, no version without an approved verdict, and the hook of the folder lets every agent through. the main agent and the desk chief hold the creator tools."""
 import json
 import subprocess
 import sys
@@ -51,16 +51,15 @@ def tools_of(name):
     return {t.strip() for t in parse_frontmatter((ROOT / "kit" / "template" / name).read_text(encoding="utf-8"))["tools"].split(",")}
 
 
-def test_the_main_agent_and_the_desk_chief_hold_the_creator_tools_and_ian_launches_sam_and_ben():
-    creator = {"mcp__hokma__" + t for t in ("source_ingest", "bank_create", "bank_list", "bank_get", "strategy_brief_write", "strategy_code_save", "strategy_code_verdict", "backtest_optimize", "optimizer_verdict")}
+def test_the_main_agent_and_the_desk_chief_hold_the_creator_tools_and_the_creator_and_ben_carry_no_tool_of_the_engine():
+    creator = {"mcp__hokma__" + t for t in ("source_ingest", "bank_create", "bank_list", "bank_get", "strategy_dry_run", "strategy_create", "strategy_code_verdict", "backtest_optimize", "optimizer_verdict")}
     for name in ("agents/hokma.md", "agents/desk-chief.md"):
         assert creator <= tools_of(name), name
-    assert "Agent" not in tools_of("agents/desk-chief.md") and "Agent" in tools_of("agents/hokma.md") and "Agent" in tools_of("agents/strategy-researcher.md")
-    for name in ("agents/strategy-coder.md", "agents/strategy-reviewer.md", "agents/strategy-researcher.md"):
+    assert "Agent" not in tools_of("agents/desk-chief.md") and "Agent" in tools_of("agents/hokma.md")
+    for name in ("agents/strategy-reviewer.md", "agents/strategy-creator.md"):
         assert not {"mcp__hokma__order_place", "mcp__hokma__order_preview", "mcp__hokma__desk_configure"} & tools_of(name), name
-    for name in ("agents/strategy-coder.md", "agents/strategy-reviewer.md", "agents/strategy-researcher.md"):
-        assert {"Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent"} <= tools_of(name), name          # they work like Diego, Joel and Vera: the normal tools of the engine
-    rule = "launch strategy-researcher (Ian) right away; Ian writes the requirement, then launches strategy-coder (Sam) and strategy-reviewer (Ben)"
-    assert "launch strategy-researcher (Ian) right away" in (ROOT / "kit" / "template" / "agents" / "desk-chief.md").read_text(encoding="utf-8")          # the chief has no dispatch tool: it assigns a task to Ian
+        assert not {"Read", "Write", "Edit", "Bash", "Agent"} & tools_of(name), name          # 1.3.0: the spec and the code go inside the call, no file and no path
+    rule = "launch strategy-creator (the Creator) right away"
+    assert rule in (ROOT / "kit" / "template" / "agents" / "desk-chief.md").read_text(encoding="utf-8")          # the chief has no dispatch tool: it assigns a task to the Creator
     for name in ("CLAUDE.md", "desks/CLAUDE.desk.md"):
         assert rule in (ROOT / "kit" / "template" / name).read_text(encoding="utf-8"), name

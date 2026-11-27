@@ -11,7 +11,7 @@ from test_db_migrate import _desk, _desk_project, raw
 from hokma.db import migrate
 from hokma.db.errors import NotFound, ValidationError
 from hokma.db.migrate import MIGRATIONS_DIR, discover
-from hokma.db.transfer import BACKTEST_TABLES, BANK_TABLES, BROKER_TABLES, EXEC_TABLES, LESSON_TABLES, PLANTEL_TABLES, RULE_BRIEF_TABLES, USER_RULE_TABLES, VERDICT_TABLES
+from hokma.db.transfer import BACKTEST_TABLES, BANK_TABLES, BROKER_TABLES, EXEC_TABLES, LESSON_TABLES, CREATION_TABLES, PLANTEL_TABLES, RULE_BRIEF_TABLES, USER_RULE_TABLES, VERDICT_TABLES
 
 NEW_TABLES = ("broker_orders", "broker_external_accounts", "desk_limits")
 FP = "f" * 64
@@ -50,10 +50,11 @@ def test_a_1_0_8_base_migrates_by_adding_three_tables_and_loses_nothing(env):
     con = raw()
     after_sql = _tables_sql(con)
     changed_by_0024 = {"desk_accounts"}                                                 # 0024 replaces it with the links
-    assert {n: s for n, s in after_sql.items() if n in before_sql and n != "desks"} == {n: s for n, s in before_sql.items() if n not in changed_by_0024 | {"desks"}}        # no other table was altered
+    rebuilt_later = {"bugs"}                                                            # 0039 (1.2.9, published) rebuilds bugs without the check on fixed_by_task_id: test_0039_keeps_every_bug_row proves the rows survive
+    assert {n: s for n, s in after_sql.items() if n in before_sql and n not in {"desks"} | rebuilt_later} == {n: s for n, s in before_sql.items() if n not in changed_by_0024 | {"desks"} | rebuilt_later}        # no other table was altered
     squash = lambda sql: re.sub(r"\s+", "", sql)                                        # ADD COLUMN writes its text at the end of the table
     assert squash(after_sql["desks"]) == squash(re.sub(r"(capital\s+INTEGER)\s+NOT NULL", r"\1", before_sql["desks"])).removesuffix(")") + ",layoutTEXT)"          # 0025 takes the NOT NULL off desks.capital, 0026 adds layout
-    assert set(after_sql) - set(before_sql) - {n for n in after_sql if n.startswith("doc_chunks_fts_")} - set(LESSON_TABLES) - set(EXEC_TABLES) - set(PLANTEL_TABLES) - set(BACKTEST_TABLES) - set(VERDICT_TABLES) - set(BANK_TABLES) - set(USER_RULE_TABLES) - set(RULE_BRIEF_TABLES) - {"desk_account_links", "desk_strategy_accounts"} - {"account_rules", "account_day_state", "account_day_events", "rule_mode_migrations", "account_live_session", "desk_day_stops", "account_start_declarations", "notice_grants", "cap_notices"} == set(NEW_TABLES)
+    assert set(after_sql) - set(before_sql) - {n for n in after_sql if n.startswith("doc_chunks_fts_")} - set(LESSON_TABLES) - set(EXEC_TABLES) - set(PLANTEL_TABLES) - set(BACKTEST_TABLES) - set(VERDICT_TABLES) - set(BANK_TABLES) - set(USER_RULE_TABLES) - set(RULE_BRIEF_TABLES) - set(CREATION_TABLES) - {"desk_account_links", "desk_strategy_accounts"} - {"account_rules", "account_day_state", "account_day_events", "rule_mode_migrations", "account_live_session", "desk_day_stops", "account_start_declarations", "notice_grants", "cap_notices"} == set(NEW_TABLES)
     kept = ("projects", "desks", "broker_accounts", "account_ledger")      # what the test filled
     assert {t: [r[:len(before_rows[t][0])] for r in con.execute(f"SELECT * FROM {t} ORDER BY 1")] for t in kept} == {t: before_rows[t] for t in kept}      # desks has one column more (layout, NULL)
     assert con.execute("SELECT layout FROM desks").fetchone() == (None,)
@@ -173,3 +174,28 @@ def _desk_for(u) -> int:
     """A desk through the session, with the same minimal columns the migration tests use."""
     project = u.broker.s.insert("projects", {"slug": "mesa", "name": "mesa", "path": "/p/mesa", "kind": "strategy"})
     return u.broker.s.insert("desks", {"project_id": project, "name": "Mesa", "capital": 1000})
+
+
+def test_0039_keeps_every_bug_row_of_a_base_that_comes_from_before_it(env):
+    """The rebuild of bugs in 0039 (1.2.9): every row, with every column, is the same after it; nothing points at bugs, so no other table can lose rows."""
+    old = env / "old38"
+    old.mkdir()
+    for f in MIGRATIONS_DIR.glob("00*.sql"):
+        if int(f.name[:4]) <= 38:
+            shutil.copy(f, old / f.name)
+    assert migrate(migrations_dir=old, seed=False).version == 38
+    con = raw()
+    pid = _desk_project(con)
+    for title, status, sev in (("a", "open", "low"), ("b", "in_progress", "high"), ("c", "wont_fix", "medium")):
+        closed = "CURRENT_TIMESTAMP" if status == "wont_fix" else "NULL"
+        con.execute(f"INSERT INTO bugs (project_id, title, description, severity, status, found_by_kind, found_by, closed_at) VALUES (?, ?, 'd', ?, ?, 'human', 'cristian', {closed})", (pid, title, sev, status))
+    con.commit()
+    before = con.execute("SELECT * FROM bugs ORDER BY id").fetchall()
+    cols = [c[1] for c in con.execute("PRAGMA table_info(bugs)")]
+    con.close()
+    assert before and migrate().version >= 39
+    con = raw()
+    assert [c[1] for c in con.execute("PRAGMA table_info(bugs)")] == cols
+    assert con.execute("SELECT * FROM bugs ORDER BY id").fetchall() == before
+    assert "fixed_by_task_id IS NOT NULL" not in con.execute("SELECT sql FROM sqlite_master WHERE name = 'bugs'").fetchone()[0]
+    assert con.execute("SELECT count(*) FROM sqlite_master WHERE sql LIKE '%REFERENCES bugs%'").fetchone()[0] == 0

@@ -12,11 +12,11 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths in 
 from hokma.desks.plantel import SEATS  # noqa: E402
 
 SEAT_KIT = {s.slug for s in SEATS.values()}      # the 21 agents of the seats of a desk: one file each in agents/, off until a desk brings them in (1.2.6)
-SAM_SUB = {"sam-dev-python", "sam-dev-frontend", "sam-mcp-builder"}        # Sam's three sub-agents, like Joel's: kit files in agents/, on from the start (1.2.6)
+SAM_SUB: set[str] = set()        # 1.3.0: Sam and his three sub-agents are retired
 DESK_KIT = {"desk-chief", "signals", "risk", "bull-case", "bear-case", "judge"}
 KIT = {"axel", "diego", "hokma", "hugo", "iris", "joel", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder",
-       "vera", "strategy-researcher", "strategy-coder", "strategy-reviewer", "back-office-clerk"} | DESK_KIT | SAM_SUB | SEAT_KIT
-CREATOR = {"strategy-researcher", "strategy-coder", "strategy-reviewer"}        # Ian, Sam and Ben: registered and on from the start (1.2.1)
+       "vera", "strategy-creator", "strategy-reviewer", "back-office-clerk"} | DESK_KIT | SAM_SUB | SEAT_KIT
+CREATOR = {"strategy-creator", "strategy-reviewer"}        # the Creator and Ben: registered and on from the start
 
 
 def by_slug(payload):
@@ -40,8 +40,8 @@ def test_kit_agents_are_listed_and_the_first_state_is_given_once(client, work):
     # base kit and Joel's sub-agents on; the rest of the specialists wait for their release
     assert {s for s, a in by_slug(data).items() if a["active"]} == {
         "hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"} | CREATOR | SAM_SUB
-    assert data["active"] == 13
-    assert client.get("/api/agents/summary").json() == {"active": 13, "total": 44}
+    assert data["active"] == 9
+    assert client.get("/api/agents/summary").json() == {"active": 9, "total": 40}
     assert work.loaded() == {"hokma", "diego", "joel", "vera", "joel-dev-frontend", "joel-dev-python", "joel-mcp-builder"} | CREATOR | SAM_SUB
     for slug in SAM_SUB:                                                          # the copy that Claude Code loads carries the tools of the kit file, Write included
         text = (work.home / ".claude" / "agents" / f"{slug}.md").read_text()
@@ -112,7 +112,7 @@ def test_create_my_first_agent(client, work, db):
         assert row.is_custom and row.status == "active" and row.file_path == "agents/analista-de-graficos.md"
     # it is what /agente completes from and accepts
     listed = client.get("/api/agents").json()
-    assert "analista-de-graficos" in by_slug(listed) and listed["total"] == 45
+    assert "analista-de-graficos" in by_slug(listed) and listed["total"] == 41
     assert client.post("/api/agents", json=body).json()["detail"]["code"] == "agent_exists"
     # a restart keeps it custom and on
     AgentService().reconcile()

@@ -106,7 +106,7 @@ def test_only_the_launch_for_claude_code_tells_the_server_to_trust_the_files(mon
 @pytest.fixture
 def seated(db, env, monkeypatch, tmp_path):
     with db.write() as u:
-        for slug in ("hokma", RESEARCHER, CODER, REVIEWER):
+        for slug in ("hokma", CODER, REVIEWER):
             u.agents.upsert_kit(slug, slug.title(), f"{slug} agent", "deep", f"agents/{slug}.md")
             u.agents.set_status(slug, "active")
     monkeypatch.setenv("HOKMA_IDENTITY_HOOK", "1")
@@ -265,7 +265,7 @@ def test_the_agents_with_authority_are_not_read_from_the_writable_folder(tmp_pat
     assert "EVIL BODY" not in reviewer and "model: opus" in reviewer and "reviewer" in reviewer.lower()        # the instructions are the kit's; the model is the one of the folder
     assert "EVIL BODY" not in (config / "agents" / "desk-judge.md").read_text()
     assert "Body of helper." in (config / "agents" / "helper.md").read_text()                                   # every other agent keeps coming from the folder
-    assert {"strategy-coder", "strategy-reviewer", "strategy-researcher", "desk-chief", "desk-judge", "trader"} <= mirror.protected_agents()
+    assert {"strategy-creator", "strategy-reviewer", "desk-chief", "desk-judge", "trader"} <= mirror.protected_agents()
 
 
 def test_an_agent_with_authority_that_is_off_does_not_come_back_through_the_kit(tmp_path):

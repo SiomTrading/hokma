@@ -10,9 +10,9 @@ from e2e_h4.support import call, caller, failed, ok
 
 from hokma.core.config import hokma_home
 
-CODER = "strategy-coder"
+CODER = "strategy-creator"          # 1.3.0: one Creator writes the requirement and the code
 REVIEWER = "strategy-reviewer"
-RESEARCHER = "strategy-researcher"
+RESEARCHER = "strategy-creator"
 
 BRIEF = {
     "summary": "Buys when the close breaks above the high of an inside bar and sells short when it closes below the low of that bar.",

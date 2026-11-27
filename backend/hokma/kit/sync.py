@@ -10,7 +10,7 @@ installed, so a later update can tell "the student changed this file" from "the 
                                                      next to it as <name>.hokma-new and reported
 - kit file unchanged between versions             -> nothing happens, even if the student edited it
 - file the student deleted                        -> not brought back
-- the four agents of the strategy creator and the back office (RENEWED, agents/<slug>.md) -> always the kit text,
+- the agents of the strategy creator and the back office (RENEWED, agents/<slug>.md) -> always the kit text,
                                                      whatever the copy of an older version says; only the model and
                                                      the tier the owner chose in the panel stay (never a .hokma-new)
 
@@ -41,9 +41,9 @@ from hokma.kit import owner as owner_names
 from hokma.kit import safefs
 
 USER_OWNED = {".hokma/extensions.json"}
-# Ian, Sam, Ben and Anna live in agents/ like every other agent. Until 1.2.5 they were kept in the agents folder of the service files and copied into agents/ by the
+# The Creator, Ben and Anna live in agents/ like every other agent (Ian and Sam were retired in 1.3.0: see seeds.RETIRED_AGENTS). Until 1.2.5 they were kept in the agents folder of the service files and copied into agents/ by the
 # seeds, so the copy of an older version has no baseline and narrower tools: from 1.2.6 it is renewed here from the kit.
-RENEWED = frozenset(f"agents/{slug}.md" for slug in ("strategy-researcher", "strategy-coder", "strategy-reviewer", "back-office-clerk"))
+RENEWED = frozenset(f"agents/{slug}.md" for slug in ("strategy-creator", "strategy-reviewer", "back-office-clerk"))
 KEPT_FROM_COPY = ("model", "hokma-tier")
 SIDE_SUFFIX = ".hokma-new"
 MARKER = re.compile(r"\{\{(owner_name|fund_name)\}\}")

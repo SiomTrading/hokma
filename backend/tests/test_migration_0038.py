@@ -119,7 +119,7 @@ def test_the_tables_of_0037_and_before_only_gain_the_new_columns(env, tmp_path):
     assert changed == set(ORIGIN_TABLES)
     for n in changed:
         assert after[n][:len(before[n])] == before[n]          # nothing moved or changed type: columns were only appended
-    assert set(after) - set(before) == set(NEW_TABLES)
+    assert set(after) - set(before) - set(transfer.CREATION_TABLES) == set(NEW_TABLES)          # 0040 adds its own table on top
 
 
 def test_the_transfer_knows_the_new_tables_in_dependency_order():

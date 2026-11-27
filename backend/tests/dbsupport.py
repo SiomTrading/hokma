@@ -112,7 +112,7 @@ def take_back_the_migrations_after_0033(path):
     """The migrations after 0033 (0034 backtest, 0035 verdict, 0036 bank, 0037 rules, 0038 briefs) have no way back: drop their tables so the rollbacks of 0033 and earlier start at 0033."""
     from hokma.db import transfer
     con = sqlite3.connect(str(path))
-    for table in (*transfer.VERDICT_TABLES, *transfer.BACKTEST_TABLES, *transfer.BANK_TABLES, *transfer.USER_RULE_TABLES, *transfer.RULE_BRIEF_TABLES):
+    for table in (*transfer.VERDICT_TABLES, *transfer.BACKTEST_TABLES, *transfer.BANK_TABLES, *transfer.USER_RULE_TABLES, *transfer.RULE_BRIEF_TABLES, *transfer.CREATION_TABLES):
         con.execute(f"DROP TABLE IF EXISTS {table}")
     con.execute("DELETE FROM schema_version WHERE version > 33")
     con.commit()

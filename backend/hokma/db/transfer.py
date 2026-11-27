@@ -42,6 +42,7 @@ VERDICT_TABLES = ("audit_threshold_sets", "audit_answers", "strategy_verdicts", 
 BANK_TABLES = ("strategy_sources", "strategy_source_passages", "strategy_bank", "strategy_bank_versions", "strategy_bank_events")   # 0036: written by hokma code only (SPEC-030)
 USER_RULE_TABLES = ("user_rules", "user_rule_versions", "user_rule_events", "strategy_spec_rules")   # 0037: written by hokma code only (SPEC-031)
 RULE_BRIEF_TABLES = ("user_rule_briefs", "user_rule_reviews")   # 0038: requirements and verdicts of the code reviewer (SPEC-031 rev 3), written by hokma code only
+CREATION_TABLES = ("creation_metrics",)   # 0040: what a strategy creation costs, written by hokma code only (1.3.0)
 PLANTEL_TABLES = ("desk_seats", "desk_signals", "desk_mandates", "premium_thresholds")   # 0023: desk plantel, signals, mandates, premium switch
 _CREATE_TABLE = re.compile(r"^CREATE TABLE (\w+)\s*\(", re.IGNORECASE)
 _REFERENCE = re.compile(r"^\s*(\w+)\s+.*?REFERENCES\s+(\w+)\s*\(", re.IGNORECASE)
@@ -428,7 +429,7 @@ def provision_roles(target: Backend) -> str:
                 session.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO {role}")
             session.execute(f"REVOKE INSERT, UPDATE, DELETE ON {schema}.status_transitions, {schema}.approvals "
                             f"FROM {AGENT_ROLE}")
-            for desk_table in DESK_TABLES + BROKER_TABLES + LESSON_TABLES + EXEC_TABLES + PLANTEL_TABLES + BACKTEST_TABLES + VERDICT_TABLES + BANK_TABLES + USER_RULE_TABLES + RULE_BRIEF_TABLES:   # the agents read desks through tools, they never write them
+            for desk_table in DESK_TABLES + BROKER_TABLES + LESSON_TABLES + EXEC_TABLES + PLANTEL_TABLES + BACKTEST_TABLES + VERDICT_TABLES + BANK_TABLES + USER_RULE_TABLES + RULE_BRIEF_TABLES + CREATION_TABLES:   # the agents read desks through tools, they never write them
                 if session.table_exists(desk_table):
                     session.execute(f"REVOKE INSERT, UPDATE, DELETE ON {schema}.{desk_table} FROM {AGENT_ROLE}")
             session.commit()

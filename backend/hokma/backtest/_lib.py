@@ -269,8 +269,8 @@ def _strategy_class() -> type:
             limit never pays the ticks against and never fills worse than its price."""
             run = self.run
             side = decision.side
-            stop = None if decision.stop_points is None else stop_price(side, ref, decision.stop_points)
-            target = None if decision.target_points is None else target_price(side, ref, decision.target_points)
+            stop = decision.stop_at if decision.stop_at is not None else (None if decision.stop_points is None else stop_price(side, ref, decision.stop_points))
+            target = decision.target_at if decision.target_at is not None else (None if decision.target_points is None else target_price(side, ref, decision.target_points))
             order = self.order_factory.market(self.iid, OrderSide.BUY if side == "long" else OrderSide.SELL, Quantity.from_str(str(decision.qty)))
             self.meta[order.client_order_id] = ("entry", ref, (stop, target))
             if fixed is not None:

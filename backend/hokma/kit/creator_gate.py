@@ -20,7 +20,7 @@ FILE_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
 CODE_NAMES = ("strategy.py", "test_strategy.py")
 FOLDER = re.compile(r"^(STR-\d{3})-([a-z][a-z0-9_-]{1,59})$")
 VERSION = re.compile(r"^v[1-9][0-9]{0,3}$")
-CODER = "strategy-coder"
+CODER = "strategy-creator"
 
 
 class Denied(Exception):

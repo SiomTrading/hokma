@@ -77,6 +77,12 @@ class Price(_Unit):
 
 
 @dataclass(frozen=True)
+class FixedPrice(Price):
+    """An absolute price level that stays where the strategy put it (1.3.0): the stop or target of a strategy that fixes it on the bar of its signal. A `Price` is measured again from the
+    price where the order fills; a `FixedPrice` is not. The sizer reads its distance from the close of the signal bar, like any `Price`."""
+
+
+@dataclass(frozen=True)
 class Ticks(_Unit):
     """A distance in ticks of the contract."""
 

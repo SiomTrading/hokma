@@ -38,14 +38,7 @@ def test_each_skill_of_the_spec_is_english_without_origin_and_in_the_format(name
     assert rules.check(ROOT, [rel(path)]) == []                                              # no origin names, no Spanish, no engine name
 
 
-def test_the_file_of_ian_is_english_names_no_origin_and_lists_exactly_the_tools_of_the_spec():
-    text = AGENT.read_text(encoding="utf-8")
-    assert text.isascii() and "\u2014" not in text and rules.check(ROOT, [rel(AGENT)]) == []
-    meta = parse_frontmatter(text)
-    assert [t.strip() for t in meta["tools"].split(",")] == [*researcher.ENGINE_TOOLS, *(researcher.MCP_PREFIX + t for t in researcher.TOOLS)]
-    for name in SKILLS_OF_THE_SPEC:
-        assert f"`{name}`" in text, name
-    assert skill_format.verify_manifest(SKILLS) == []
+
 
 
 def test_the_skills_and_the_agent_reach_no_other_agent_no_desk_role_and_no_clerk():

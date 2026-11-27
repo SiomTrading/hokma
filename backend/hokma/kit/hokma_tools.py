@@ -182,7 +182,7 @@ def task_list(u, c: Caller, a: dict) -> str:
     return _dump([_row(r, *TASK_KEYS) for r in rows])
 
 
-CREATOR_SERVICES = ("strategy-researcher", "strategy-coder", "strategy-reviewer")      # the services of the strategy creator serve every desk (SPEC-031 A2)
+CREATOR_SERVICES = ("strategy-creator", "strategy-reviewer")      # the services of the strategy creator serve every desk (SPEC-031 A2)
 
 
 def task_create(u, c: Caller, a: dict) -> str:
@@ -1932,6 +1932,7 @@ from hokma.kit import exec_tools as _exec_tools  # noqa: E402
 from hokma.kit import factory_tools as _factory_tools  # noqa: E402
 from hokma.kit import quant_tools as _quant_tools  # noqa: E402
 from hokma.kit import verdict_tools as _verdict_tools  # noqa: E402
+from hokma.kit import creator_tools as _creator_tools  # noqa: E402
 from hokma.kit import rule_tools as _rule_tools  # noqa: E402
 from hokma.kit import source_tools as _source_tools  # noqa: E402
 
@@ -1955,6 +1956,9 @@ NO_UNIT |= set(_source_tools.TOOLS)
 # Strategy creator (SPEC-031, A2): the strategy as code, from its requirement to the bank. They keep and check code and reach nothing that moves money.
 TOOLS.update(_rule_tools.TOOLS)
 NO_UNIT |= set(_rule_tools.TOOLS)
+# Strategy creator of 1.3.0 (task 3433): the creation in pandas with its paperwork done by the code, and what each creation costs.
+TOOLS.update(_creator_tools.TOOLS)
+NO_UNIT |= set(_creator_tools.TOOLS)
 
 # SWO desk tools (SPEC-019, B13): create the desk, run its cycle, read its state and its signals, propose lessons.
 TOOLS.update(_desk_tools.TOOLS)
@@ -2036,11 +2040,23 @@ def _desk_agents_on(db, name: str, args: dict, c: Caller) -> None:
         pass
 
 
+def _count_call(name: str, caller: Caller | None) -> None:
+    """1.3.0: every call to a tool of Hokma is counted for the measure of a strategy creation (creation_metrics). Measuring never breaks a tool."""
+    try:
+        from hokma.factory import creation_metrics
+
+        who = caller or Caller()
+        creation_metrics.note_call(who.conversation_id, name, who.agent)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 def call(name: str, args: dict, caller: Caller | None = None) -> tuple[str, bool]:
     """(text, is_error)."""
     from hokma.db import DbError, current_version, get_database
     from hokma.projects.errors import ProjectError
 
+    _count_call(name, caller)
     problem = validate(name, args)
     if problem:
         return problem, True

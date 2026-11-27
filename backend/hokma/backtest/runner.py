@@ -39,7 +39,7 @@ from hokma.db import Database, get_database
 from hokma.db.timeutil import to_db_time, utcnow
 from hokma.desks.core import paths
 from hokma.exec.guards import Leg, OrderProposal
-from hokma.factory.orders import BadOrder, BadSize, LoosenStop, OrderIntent, Protection, adjust_protection, intent_quantity, stop_units
+from hokma.factory.orders import BadOrder, BadSize, FixedPrice, LoosenStop, OrderIntent, Protection, adjust_protection, intent_quantity, stop_units
 from hokma.factory.parts import build_composite
 from hokma.factory.registry import Registry
 from hokma.factory.strategy import BadStrategy, InitContext, Position, build_context, check_strategy, compute_indicator
@@ -362,6 +362,12 @@ class StrategyDriver:
         except Exception as exc:
             raise stage_of("signal", exc) from exc
         self._wait = max(init.warmup_bars, 1)
+        prepare = getattr(strategy, "prepare", None)
+        if prepare is not None:                       # 1.3.0: a strategy in pandas computes its signals once over all the bars; they are checked not to look ahead
+            try:
+                prepare(bars, self._span)
+            except Exception as exc:
+                raise stage_of("signal", exc) from exc
 
     # -- the account the strategy and the guards see
     def _apply(self, decision: Decision, bar: Bar, price: Decimal | None = None) -> None:
@@ -386,8 +392,8 @@ class StrategyDriver:
         side = "buy" if decision.side == "long" else "sell"
         ref = bar.open if price is None else price                      # a limit fills at its price, or at the open when the bar gaps through it
         broker.fill(cid, side, decision.qty, ref, bar.ts)
-        stop = None if decision.stop_points is None else stop_price(decision.side, ref, decision.stop_points)    # type: ignore[arg-type]
-        target = None if decision.target_points is None else target_price(decision.side, ref, decision.target_points)  # type: ignore[arg-type]
+        stop = decision.stop_at if decision.stop_at is not None else (None if decision.stop_points is None else stop_price(decision.side, ref, decision.stop_points))    # type: ignore[arg-type]
+        target = decision.target_at if decision.target_at is not None else (None if decision.target_points is None else target_price(decision.side, ref, decision.target_points))  # type: ignore[arg-type]
         self._levels, self._level_side = (stop, target), decision.side
 
     def _sync(self, bar: Bar, side: Any) -> None:
@@ -519,7 +525,8 @@ class StrategyDriver:
             target = None if intent.tp is None else stop_units(intent.tp, entry=ref, sheet=self.sheet)
         except ValueError as exc:
             raise StageError("size", _code(exc), str(exc)[:500]) from exc
-        return Decision("enter", side, qty, stop, target, limit=intent.limit)
+        return Decision("enter", side, qty, stop, target, limit=intent.limit, stop_at=intent.sl.value if isinstance(intent.sl, FixedPrice) else None,
+                        target_at=intent.tp.value if isinstance(intent.tp, FixedPrice) else None)
 
     def _filtered(self, decision: Decision, bar: Bar) -> Decision | None:
         """The filter before an order, only for a run of a desk: the guards of H2 judge the order against the simulated account."""
