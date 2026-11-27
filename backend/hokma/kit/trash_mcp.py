@@ -95,9 +95,9 @@ def handle(message: dict, data: str, roots: list[str], protect: list[str]) -> di
         from hokma.kit import hokma_tools
 
         name = params.get("name") if isinstance(params, dict) else None
-        sent, identity = hokma_tools.split_identity(params.get("arguments") if isinstance(params, dict) else None)    # who calls: the hook's stamp, never an argument
+        sent = hokma_tools.strip_identity(params.get("arguments") if isinstance(params, dict) else None)    # who calls is never an argument (task 3430): it comes from the file of the hook, found with the id of the call
         if name in hokma_tools.TOOLS:
-            text, is_error = hokma_tools.call(name, sent or {}, hokma_tools.caller_for(identity))
+            text, is_error = hokma_tools.call(name, sent or {}, hokma_tools.caller_for(hokma_tools.call_id_of(params), data))
             return {"jsonrpc": "2.0", "id": ident, "result": {"content": [{"type": "text", "text": text}],
                                                               "isError": is_error}}
         if name != TOOL["name"]:

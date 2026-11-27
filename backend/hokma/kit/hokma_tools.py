@@ -4,8 +4,8 @@ extension requests, agents and bugs.
 Every tool calls the same repositories the panel's API uses, so the rules of state (transitions, atomic claims,
 heartbeats, who may do what) are the ones the owner sees. Who is calling comes from the environment Hokma sets when it
 launches the engine (HOKMA_AGENT, HOKMA_TASK_ID, HOKMA_CONVERSATION_ID); the agent does not choose it. The agents launched with the Agent
-tool share the server of the session, so on Claude Code the identity of each call comes stamped by the PreToolUse hook
-kit/identity_hook.py in the field IDENTITY_FIELD of the arguments (see `caller_for`); the model cannot write it, the hook overwrites it.
+tool share the server of the session, so on Claude Code the identity of each call comes from the PreToolUse hook
+kit/identity_hook.py in a file per call that the server reads with the id of the call (see `caller_for`); the model cannot write it.
 
 What only the owner does is not here: approving decisions, changing the permission mode, emptying or restoring the
 trash, restoring points. `decision_propose` leaves the decision pending for the owner.
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -61,8 +62,11 @@ def _id(desc: str = "") -> dict[str, Any]:
     return {"type": ["integer", "string"], "description": desc}
 
 
-IDENTITY_FIELD = "_hokma_agent"                 # the field the hook stamps on every call (a copy lives in kit/identity_hook.py, which runs with the standard library only)
+IDENTITY_FIELD = "_hokma_agent"                 # 1.2.7 stamped the agent in this argument. It is never read now (1.2.8); it is only taken off the arguments, so an old stamp or a model's own value does nothing
 IDENTITY_TRUST_ENV = "HOKMA_IDENTITY_HOOK"       # "1" in the environment of the server only when Hokma launched it for Claude Code, where the hook is registered
+IDENTITY_DIR = ("guard", "identity")             # under the data folder: the files the hook leaves, one per call (a copy of the names lives in kit/identity_hook.py, which runs with the standard library only)
+CALL_ID_KEY = "claudecode/toolUseId"             # where Claude Code puts the id of the call in `params._meta` of an MCP call; the same id comes to the hook as `tool_use_id`
+_CALL_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 class Caller:
@@ -85,31 +89,59 @@ class Caller:
         return self.agent or "agent"
 
 
-def split_identity(arguments: Any) -> tuple[Any, str | None]:
-    """The arguments without the identity field, and what the field said (None when it was not there). The field is always taken off: it is not an argument of any tool."""
+def strip_identity(arguments: Any) -> Any:
+    """The arguments without the old identity field. The field is not an argument of any tool and it is never believed: who calls comes from `caller_for`."""
     if not isinstance(arguments, dict) or IDENTITY_FIELD not in arguments:
-        return arguments, None
-    rest = {k: v for k, v in arguments.items() if k != IDENTITY_FIELD}
-    said = arguments[IDENTITY_FIELD]
-    return rest, said if isinstance(said, str) else ""
+        return arguments
+    return {k: v for k, v in arguments.items() if k != IDENTITY_FIELD}
 
 
-def caller_for(identity: str | None, env: dict[str, str] | None = None) -> Caller:
-    """The caller of one call. The environment says who the session is; the identity stamped by the hook says which agent of the session makes THIS call.
+def call_id_of(params: Any) -> str | None:
+    """The id that Claude Code gave to this call (`params._meta`). The model does not write `_meta`: it is not an argument."""
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    value = meta.get(CALL_ID_KEY) if isinstance(meta, dict) else None
+    return value if isinstance(value, str) and _CALL_ID.match(value) else None
 
-    It counts only when the server was launched for Claude Code (HOKMA_IDENTITY_HOOK=1: the hook rewrites every call, so the model's own value never survives) and when it
-    names an agent Hokma knows. Anything else (no field, an engine without the hook, a built-in helper such as general-purpose) leaves the caller of the environment."""
+
+def claimed_agent(data: str | None, call_id: str | None) -> str | None:
+    """The agent that the hook left for this call (kit/identity_hook.py), or None. The file is read once and deleted."""
+    if not data or not call_id or not _CALL_ID.match(call_id):
+        return None
+    path = os.path.join(data, *IDENTITY_DIR, call_id + ".json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            said = json.load(f).get("agent")
+    except (OSError, ValueError, AttributeError):
+        return None
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return said.strip() if isinstance(said, str) and said.strip() else None
+
+
+def caller_for(call_id: str | None = None, data: str | None = None, env: dict[str, str] | None = None) -> Caller:
+    """The caller of one call. The environment says who the session is; the file the hook left for THIS call (found by the id that Claude Code put in the call) says which agent of the session makes it.
+
+    It counts only when the server was launched for Claude Code (HOKMA_IDENTITY_HOOK=1) and the agent is an ACTIVE agent of the kit (not one created in the chat or by the owner, not one that is off).
+    Everything else (no file, a model that wrote an agent in the arguments, an engine without the hook, a built-in helper such as general-purpose, an unreadable base) is the principal of the session:
+    fail closed, never the name that came in the arguments (task 3430)."""
     source = os.environ if env is None else env
     caller = Caller(source)
-    slug = identity.strip() if isinstance(identity, str) else ""
+    slug = claimed_agent(data, call_id)
     if source.get(IDENTITY_TRUST_ENV) != "1" or not slug or slug == caller.agent:
         return caller
     from hokma.db import current_version, get_database
+    from hokma.kit.mirror import protected_agents
 
+    if slug not in protected_agents():                  # the same set whose instructions the mirror never takes from the writable folder
+        return caller
     try:
         if current_version() != 0:
             with get_database().read() as u:
-                if u.agents.find(slug) is not None:
+                found = u.agents.find(slug)
+                if found is not None and found.status == "active" and not found.is_custom:
                     caller.agent = slug
     except Exception:                                   # noqa: BLE001  an unreadable base leaves the caller of the environment
         pass

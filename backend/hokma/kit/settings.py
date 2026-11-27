@@ -5,7 +5,7 @@ The agent has four locks (real-money orders, secrets, deleting, writing outside 
 there is no sandbox and no `permissions.deny` list here: a sandbox would stop the installers (npm, pip, winget, brew)
 and the plugins' own first-start downloads from writing where they must.
 
-1. PreToolUse hooks, all fail CLOSED (the fourth, `hokma/kit/identity_hook.py`, stamps on every call to the Hokma server which agent makes it, so Ian, Sam and Ben do not act as the session; the third one, `hokma/kit/creator_gate.py`, is the first gate of the strategy creator: without a current requirement nothing is programmed):
+1. PreToolUse hooks, all fail CLOSED (the fourth, `hokma/kit/identity_hook.py`, leaves for every call to the Hokma server a file that says which agent makes it, so Ian, Sam and Ben do not act as the session; the third one, `hokma/kit/creator_gate.py`, is the first gate of the strategy creator: without a current requirement nothing is programmed):
    `hokma/kit/guard.py` resolves real paths for Edit, MultiEdit, Write and NotebookEdit and blocks the files of the
    hooks and the settings registration; `hokma/kit/hardblock.py` (matcher `.*`, every tool) applies the four locks of
    both permission modes. The template pins `"disableAllHooks": false` and Hokma launches `claude` with
@@ -81,9 +81,9 @@ def creator_gate_command() -> str:
 
 
 def identity_command() -> str:
-    """Hook command that stamps on every call of a tool of the Hokma server who is calling (task 3429): same launch as the other hooks (absolute path, `-I`, from the data dir, `|| exit 2`).
-    It reads nothing but its input and the environment; it carries the protected paths only because the guard and `hokma doctor` expect every hook to name them, and it ignores them."""
-    args = " ".join(f"--protect {shlex.quote(str(p))}" for p in protected_paths())
+    """Hook command that leaves, for every call of a tool of the Hokma server, the file that says which agent makes it (tasks 3429 and 3430): same launch as the other hooks (absolute path, `-I`, from the data dir, `|| exit 2`).
+    It writes only under `<data>/guard/identity`; it carries the protected paths because the guard and `hokma doctor` expect every hook to name them, and it ignores them."""
+    args = f"--data {shlex.quote(str(hokma_data_dir()))} " + " ".join(f"--protect {shlex.quote(str(p))}" for p in protected_paths())
     return (f"cd {shlex.quote(str(hokma_data_dir()))} && "
             f"{shlex.quote(sys.executable)} -I {shlex.quote(str(IDENTITY_FILE))} {args} || exit 2")
 

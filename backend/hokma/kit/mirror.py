@@ -6,7 +6,9 @@ a SKILL.md and `--agent <name>` or a dispatch to another agent answered "not fou
 sources (it would load settings the agent can edit). Instead Hokma copies what is in the working folder into the user
 source, which is inside its protected configuration folder (`<config>/skills`, `<config>/agents`), on every launch:
 
-- agents: `.claude/agents/<slug>.md` (the active ones; `agents.off` is not copied);
+- agents: `.claude/agents/<slug>.md` (the active ones; `agents.off` is not copied). The agents that carry authority (the services of the strategy creator and the seats of
+  the desks, `protected_agents`) are not read from there: the folder is writable by the agent, so for them the working folder only says that the agent is on (and its model),
+  and the instructions come from the kit of the app (task 3430);
 - skills: `.claude/skills/<name>/` (SKILL.md and its plain files).
 
 What comes across is the content, not the power: only the frontmatter keys listed in ALLOWED_* survive (and `name` is always the file's own name), so a file
@@ -108,14 +110,51 @@ def _read(root: Path, rel: str, limit: int = MAX_FILE) -> bytes | None:
         return None
 
 
+MODELS = ("haiku", "sonnet", "opus")
+
+
+def protected_agents() -> frozenset[str]:
+    """The agents whose instructions the working folder cannot change, and the only ones that can act under their own name (caller_for): EVERY agent of the kit
+    (each slug with a file in the kit of the app), plus the services of the strategy creator and every seat of a desk, the chief included. Agents the owner creates are not here."""
+    from hokma.desks.plantel import SEATS
+    from hokma.db.seeds import kit_agents_dir
+    from hokma.kit.hokma_tools import CREATOR_SERVICES, DESK_CHIEF
+
+    try:
+        shipped = {p.stem for p in kit_agents_dir().glob("*.md") if _NAME.match(p.stem) and not p.is_symlink() and p.is_file()}
+    except OSError:
+        shipped = set()
+    return frozenset(CREATOR_SERVICES) | {DESK_CHIEF} | {seat.slug for seat in SEATS.values()} | shipped
+
+
+def _kit_text(slug: str, written: str) -> str | None:
+    """The file of a protected agent as the kit of the app has it, with only the model that the working folder carries (the owner chooses the model of an agent). None without a kit file."""
+    from hokma.agents.files import frontmatter_value, set_frontmatter_value
+    from hokma.db.seeds import kit_agents_dir
+
+    path = kit_agents_dir() / f"{slug}.md"
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        text = path.read_text(encoding="utf-8")
+        model = frontmatter_value(written, "model")
+        return set_frontmatter_value(text, "model", model) if model in MODELS else text
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+
+
 def _agents(root: Path) -> dict[str, bytes]:
     out: dict[str, bytes] = {}
+    protected = protected_agents()                        # an error here stops the copy (launch logs it): a protected agent is never read from the writable folder by mistake
     for entry in _scan(root, ".claude/agents"):
         slug = entry.name[:-3]
         if not entry.name.endswith(".md") or not _NAME.match(slug) or not _plain(entry):
             continue
         raw = _read(root, f".claude/agents/{entry.name}")
-        text = _filter_frontmatter(raw.decode("utf-8", errors="replace"), ALLOWED_AGENT, slug) if raw is not None else None
+        decoded = raw.decode("utf-8", errors="replace") if raw is not None else None
+        if decoded is not None and slug in protected:
+            decoded = _kit_text(slug, decoded)           # what the writable folder says about its instructions is not read
+        text = _filter_frontmatter(decoded, ALLOWED_AGENT, slug) if decoded is not None else None
         if text:
             out[slug] = text.encode("utf-8")
     return out

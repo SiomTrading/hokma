@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.8
+
+- Fixed: the agent that makes each call to Hokma can no longer be forged. In 1.2.7 the identity travelled inside the arguments of the call; if that stamp was ever lost the server would have believed what the model wrote. Now the hook leaves a file per call that only it can write and the server finds it with the id that Claude Code gives to the call; a call without that file acts as the agent of the session, never as the name in the arguments.
+- Fixed: only an active agent of the kit can act under its own name (not one created in the chat, not one that is off).
+- Changed: the services of the strategy creator and the seats of the desks take their instructions from the kit of the app; the file of the working folder only tells that the agent is on and its model.
+
 ## 1.2.7
 
 - Fixed: Ian, Sam and Ben launched from the main chat now act under their own name in every Hokma tool. Before, all of them shared the identity of the chat, so Sam could not claim his task ("only the assigned agent can claim it") and the author and the reviewer of a version were the same name. A hook stamps which agent makes each call to Hokma (tasks, journal, strategy creator, guards) and the model cannot write or change that stamp.
