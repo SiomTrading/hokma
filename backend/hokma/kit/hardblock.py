@@ -3,7 +3,8 @@
     real_money   calling a broker outside the order tools of Hokma: order tools of other servers and the hosts and URL shapes of brokers
     secrets      the stores of keys and sign-ins: the keys of brokers and Connections, the tokens and sign-ins of Hokma, the keyring of the
                  system, and the credential files (SSH, cloud, Git, browser profiles)
-    delete       deleting files or folders, including the obfuscated forms (the trash tool is the way)
+    delete       deleting files or folders, including the obfuscated forms (the trash tool is the way). One exception (1.3.3): an agent
+                 may delete the files and folders IT created in this same chat session (see "own files" below)
     hokma_internal  writing, by shell or interpreter, the lock and its hooks and registration, the installed package, the runtime venv (pip and
                  ensurepip included) and the file of the base (hokma.db, -wal, -shm, -journal). Reading all of them is free
 
@@ -35,7 +36,9 @@ verifies at every launch and `hokma doctor` reports, and the settings file that 
 
 Standard library plus `hokma.i18n` and `hokma.kit.guard` only.
 """
+import ast
 import fnmatch
+import glob
 import json
 import ntpath
 import os
@@ -84,6 +87,11 @@ class Ctx:
         self.brokers = brokers if brokers is not None else load_brokers()
         self.cwd = cwd or (self.roots[0] if self.roots else os.getcwd())
         self.conversation_id, self.task_id = conversation_id, task_id
+        self.session = ""                                       # the chat session of the call (see session_of): who owns the files it creates
+        self.pending: set[str] = set()                          # what this call creates, written to the session file only when the call is allowed
+        self._own: dict[str, tuple | None] | None = None        # the entries of the session file (path -> identity), read once
+        self.links: set[str] = set()                            # the links this same call makes (ln, mklink, New-Item SymbolicLink): never deleted through
+        self.gone: set[str] = set()                             # what this call deletes of the list, struck out when the call is allowed
         self.seen: set[str] = set()
         self._vars = self._build_vars()
         host_re = [re.escape(h) for h in self.brokers.get("hosts", [])]
@@ -1004,6 +1012,7 @@ class Run:
         self.ctx, self.cwd, self.strict = ctx, [cwd], strict
         self.reading = False                    # the whole command only reads: Hokma's data folder may be read
         self.source = ""                        # the command line of the call, for the one idiom PowerShell splits up
+        self.pure_delete = False                # the whole call is only deletes (rm, del, Remove-Item, rmdir) chained with ; or &&: the only shape that may delete its own files
 
     @property
     def here(self) -> str:
@@ -1019,11 +1028,31 @@ def analyze_text(text: str, mode: str, run: Run, depth: int, stdin_text: str | N
         if CRED_CODE.search(text):
             raise Block("secrets", short(text))
     prev: Cmd | None = None
-    for cmd in lex(text, mode):
+    cmds = list(lex(text, mode))
+    if depth == 0:
+        run.pure_delete = only_deletes(cmds, mode, run)
+    for cmd in cmds:
         for inner in cmd.subs:
             analyze_text(inner, "bash" if mode == "bash" else mode, run, depth + 1)
         analyze_cmd(cmd, prev if cmd.pipe_in else None, mode, run, depth, stdin_text)
         prev = cmd
+
+
+def only_deletes(cmds: list[Cmd], mode: str, run: Run) -> bool:
+    """True when the call is nothing but delete commands: no other command, no redirection, no pipe, no substitution, no assignment, no wrapper."""
+    found = False
+    for cmd in cmds:
+        if cmd.empty():
+            continue
+        if cmd.redirs or cmd.heredocs or cmd.herestrs or cmd.subs or cmd.pipe_in or cmd.call or not cmd.words:
+            return False
+        if len(significant(cmd.words, mode)) != len(cmd.words):
+            return False
+        w = cmd.words[0]
+        if w.dyn or w.glob or w.quoted or base_name(w.text) not in OWN_DELETE or re.split(r"[\\/]", w.text)[-1] != w.text:
+            return False
+        found = True
+    return found
 
 
 def significant(words: list[Word], mode: str) -> list[Word]:
@@ -1123,6 +1152,7 @@ def check_redirections(cmd: Cmd, words: list[Word], prev: Cmd | None, mode: str,
             continue
         check_write_dest(w.text, ctx, run.here)
         check_integrity_path(w.text, ctx, run.here)             # the hooks, the package, the runtime venv and the file of the base are not written by a redirection
+        note_create(ctx, w.text, run.here)
         if w.text.lower().endswith(PYTHON_FILES):                # a Python file written with a heredoc or an echo is judged like the code it holds
             check_sensitive_import("\n".join([*cmd.heredocs, *cmd.herestrs, " ".join(x.text for x in words[1:])]))
 
@@ -1624,6 +1654,454 @@ def installer_idiom(words: list[Word], cmd: Cmd, prev: Cmd | None, mode: str, so
         is_download(x, mode) for x in cmd.subs)
 
 
+# ------------------------------------------------------------------------------------------------ own files (1.3.3)
+# When the hook allows a call that creates a path that did not exist (Write, Edit, MultiEdit, NotebookEdit, a redirection, tee, touch, cp, mv, mkdir),
+# the real path goes to <data>/guard/created/<session_id>.jsonl. Only this hook writes there (<data>/guard is protected against the agents). The
+# delete rule lets a delete through ONLY when every path it names is in the list of the same session; anything else (an unknown path, a pattern that
+# matches something else, a folder with something inside that is not in the list, a path built at run time) is refused as before. The protected places
+# (data folder, guard, hooks, package, runtime) are refused even when they are in the list.
+CREATED_DIR = "created"
+SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+OWN_DELETE = {"rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "ri"}
+
+
+def session_of(payload: dict, ctx: Ctx) -> str:
+    for cand in (payload.get("session_id"), ctx.conversation_id):
+        if isinstance(cand, str) and SESSION_RE.match(cand):
+            return cand
+    return ""
+
+
+def own_key(path: str) -> str:
+    """The entry itself (a link is not followed): the real path of its folder plus its name."""
+    path = os.path.normpath(path)
+    return _fold(os.path.join(os.path.realpath(os.path.dirname(path)), os.path.basename(path)))
+
+
+def own_map(ctx: Ctx) -> dict:
+    """The paths this session created before this call, each with the identity (st_dev, st_ino) of what was created.
+
+    The identity is taken the first time the hook sees the path on disk (the next call after the one that created it), so a file moved or
+    copied over it later (mv, ln -sf) is another file and is not this session's. A line {"p": path, "x": 1} strikes the path out."""
+    if ctx._own is None:
+        found: dict = {}
+        if ctx.session:
+            fname = os.path.join(ctx.data, "guard", CREATED_DIR, ctx.session + ".jsonl")
+            try:
+                with open(fname, encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            item = json.loads(line)
+                        except ValueError:
+                            continue
+                        if not isinstance(item, dict) or not isinstance(item.get("p"), str):
+                            continue
+                        ident = item.get("i")
+                        if item.get("x"):
+                            found.pop(item["p"], None)
+                        else:
+                            found[item["p"]] = tuple(ident) if isinstance(ident, list) and len(ident) == 2 else None
+            except OSError:
+                pass
+            stamps = ""
+            for key, ident in found.items():
+                if ident is None and os.path.lexists(key):
+                    try:
+                        st = os.lstat(key)
+                    except OSError:
+                        continue
+                    found[key] = (st.st_dev, st.st_ino)
+                    stamps += json.dumps({"p": key, "i": [st.st_dev, st.st_ino]}, ensure_ascii=False) + "\n"
+            if stamps:
+                try:
+                    fd = os.open(fname, os.O_WRONLY | os.O_APPEND)
+                    try:
+                        os.write(fd, stamps.encode("utf-8"))
+                    finally:
+                        os.close(fd)
+                except OSError:
+                    pass
+        ctx._own = found
+    return ctx._own
+
+
+def own_set(ctx: Ctx) -> set[str]:
+    """The paths of the session (see own_map) plus the ones this same call creates."""
+    return set(own_map(ctx)) | ctx.pending
+
+
+def same_entry(key: str, ctx: Ctx) -> bool:
+    """True when what is on disk at key is the very file or folder the session created (same device and inode); a path this same call
+    creates has nothing on disk yet."""
+    if key in ctx.pending:
+        return True
+    ident = own_map(ctx).get(key)
+    if ident is None:
+        return not os.path.lexists(key)
+    try:
+        st = os.lstat(key)
+    except OSError:
+        return True                                             # already gone
+    return (st.st_dev, st.st_ino) == tuple(ident)
+
+
+def note_create(ctx: Ctx, text: str, here: str) -> None:
+    """A call is about to create text. When it does not exist yet, it and every missing folder above it are this session's."""
+    if not ctx.session or not text or text == "-" or is_device(text):
+        return
+    exp = expand(text, ctx)
+    if unresolved(exp) or any(ch in exp for ch in "*?[{}"):
+        return
+    full = clean_path(joined(exp, here))
+    if is_device(full) or (is_win_abs(full) and os.name != "nt"):
+        return
+    chain: list[str] = []
+    cur = full
+    while cur and not os.path.lexists(cur) and len(chain) < 64:
+        chain.append(cur)
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    for item in chain:
+        ctx.pending.add(own_key(item))
+
+
+def commit_created(ctx: Ctx) -> None:
+    """The call was allowed: its new paths join the list of the session. Never fails the call."""
+    if not ctx.session or not (ctx.pending or ctx.gone):
+        return
+    try:
+        folder = os.path.join(ctx.data, "guard", CREATED_DIR)
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        data = "".join(json.dumps({"p": k}, ensure_ascii=False) + "\n" for k in sorted(ctx.pending - ctx.gone)).encode("utf-8")
+        data += "".join(json.dumps({"p": k, "x": 1}, ensure_ascii=False) + "\n" for k in sorted(ctx.gone)).encode("utf-8")
+        fd = os.open(os.path.join(folder, ctx.session + ".jsonl"), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+        if ctx._own is not None:
+            for k in ctx.pending - ctx.gone:
+                ctx._own[k] = None
+            for k in ctx.gone:
+                ctx._own.pop(k, None)
+    except OSError:
+        pass
+    ctx.pending, ctx.gone = set(), set()
+
+
+def own_entry(entry: str, ctx: Ctx, here: str, text: str) -> bool:
+    """True when entry (a real, unprotected path) and everything inside it, if it is a folder, was created by this session."""
+    if integrity_target(text, ctx, here) or SECRET_RE.search(norm_text(entry)):
+        return False
+    if under_any(entry, [ctx.data, *ctx.protect]):
+        return False
+    own = own_set(ctx)
+    key = own_key(entry)
+    if key in ctx.links or "?" in ctx.links:
+        return False                                            # a link made by this same line: nothing is deleted through it
+    if key not in own or not same_entry(key, ctx):
+        return False                                            # not listed, or another file now sits at the path (mv, cp -f, ln -sf over it)
+    if text.rstrip().endswith(("/", "\\")) and os.path.islink(entry):
+        return False                                            # never delete through a link
+    if not os.path.lexists(entry) or os.path.islink(entry) or os.path.isfile(entry):
+        ctx.gone.add(key)
+        return True                                             # a path of the session that is already gone, or one file
+    if not os.path.isdir(entry):
+        return False
+    inside = [key]
+    for top, dirs, files in os.walk(entry, followlinks=False):
+        for name in (*dirs, *files):
+            if os.path.islink(os.path.join(top, name)):
+                return False                                    # a link inside a folder: nothing is deleted with it
+            k = own_key(os.path.join(top, name))
+            if k not in own or not same_entry(k, ctx):
+                return False
+            inside.append(k)
+    ctx.gone.update(inside)
+    return True
+
+
+def own_path(text: str, ctx: Ctx, here: str, mode: str, wildcard: bool = False) -> bool:
+    """True when what text names (a pattern is read against the disk) is only this session's work."""
+    exp = expand(text, ctx)
+    if not text or unresolved(exp) or any(ch in exp for ch in "{}"):
+        return False
+    full = clean_path(joined(exp, here))
+    if is_win_abs(full) and os.name != "nt":
+        return False
+    if any(ch in exp for ch in GLOB_CHARS) and (wildcard or mode == "ps"):
+        found = sorted(glob.glob(glob.escape(os.path.dirname(full)) + os.sep + os.path.basename(full)))
+        return bool(found) and all(own_entry(f, ctx, here, f) for f in found)
+    return own_entry(full, ctx, here, text)
+
+
+_RM_SHORT = set("fFrRvdiI")
+_RM_LONG = {"--force", "--recursive", "--verbose", "--dir", "--interactive", "--interactive=never", "--interactive=always"}
+_PS_FLAGS = {"force", "recurse", "r", "verbose", "whatif", "confirm"}
+_PS_VALUES = {"erroraction", "ea"}
+_PS_PATHS = {"path", "literalpath"}
+
+
+def delete_is_own(name: str, args: list["Word"], mode: str, run: "Run") -> bool:
+    """rm, unlink, del, Remove-Item and their kin, when every path they name is this session's work."""
+    ctx = run.ctx
+    if not ctx.session or not run.pure_delete or name not in OWN_DELETE:
+        return False
+    targets: list = []
+    i, end = 0, False
+    while i < len(args):
+        w = args[i]
+        x = w.text
+        i += 1
+        if end or (not x.startswith("-") and not (mode == "cmd" and re.match(r"^/[A-Za-z]$", x))) or x == "-":
+            targets.append(w)
+        elif x == "--":
+            end = True
+        elif mode == "cmd":
+            if not re.match(r"^/[A-Za-z]$", x) or x[1].lower() not in "sqf":
+                return False
+        elif mode == "ps":
+            key, _, val = x.lstrip("-").partition(":")
+            key = key.lower()
+            if key in _PS_FLAGS:
+                continue
+            if key in _PS_VALUES or key in _PS_PATHS:
+                if not val:
+                    if i >= len(args):
+                        return False
+                    val, i = args[i].text, i + 1
+                if key in _PS_PATHS:
+                    if "," in val:
+                        return False
+                    targets.append(Word(val, False, w.glob, w.quoted))
+                continue
+            return False
+        elif x.startswith("--"):
+            if x not in _RM_LONG:
+                return False
+        elif not set(x[1:]) <= _RM_SHORT:
+            return False
+    if not targets:
+        return False
+    recursive = any(re.match(r"^-[a-zA-Z]*[rR]", w.text) or w.text in ("--recursive", "-Recurse", "/s", "/S") or w.text.lower() in ("-recurse", "-r")
+                    for w in args if w.text.startswith(("-", "/")))
+    for w in targets:
+        if w.dyn or "\0" in w.text or not own_path(w.text, ctx, run.here, mode, w.glob):
+            return False
+        if ctx.links and (recursive or w.text.rstrip().endswith(("/", "\\"))):
+            exp = expand(w.text, ctx)
+            if not os.path.lexists(clean_path(joined(exp, run.here))):
+                return False                                    # a folder that only exists in this line, with a link made in it
+    return True
+
+
+MOVE_NAMES = {"mv", "move", "move-item", "mi"}
+RENAME_NAMES = {"ren", "rename", "rename-item", "rni"}
+PY_MOVE = re.compile(r"""\bos\s*\.\s*(?:replace|rename|renames)\s*\(|\bshutil\s*\.\s*move\s*\(|\bfrom\s+os\s+import\b[^\n]*\b(?:replace|rename|renames)\b|"""
+                     r"""\bfrom\s+shutil\s+import\b[^\n]*\bmove\b""")
+PY_MOVE_LIT = re.compile(r"""\b(?:os\s*\.\s*(?:replace|rename)|shutil\s*\.\s*move)\s*\(\s*('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")\s*,\s*('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")\s*\)""")
+
+
+def listed_target(path: str, ctx: Ctx, here: str, mode: str) -> str | None:
+    """The key of the path when it names something of the session's list (or a path this call creates); None when it does not.
+    "?" when the path cannot be known (built at run time or a pattern) and the session has a list to protect."""
+    exp = expand(path, ctx)
+    if not path or unresolved(exp) or any(ch in exp for ch in "*?[{}"):
+        return "?" if own_set(ctx) else None
+    full = clean_path(joined(exp, here))
+    if is_win_abs(full) and os.name != "nt":
+        return "?" if own_set(ctx) else None
+    key = own_key(full)
+    return key if key in own_set(ctx) else None
+
+
+def source_is_own(path: str, ctx: Ctx, here: str) -> bool:
+    exp = expand(path, ctx)
+    if not path or unresolved(exp) or any(ch in exp for ch in "*?[{}"):
+        return False
+    key = own_key(clean_path(joined(exp, here)))
+    return key in own_set(ctx) and same_entry(key, ctx)
+
+
+def check_replace(pairs: list[tuple[str, str]], ctx: Ctx, here: str, mode: str, shown: str) -> None:
+    """Each pair is (source, destination) of a move or a rename. A destination that is on the session's list may only be replaced by a
+    source that is on the list with the same identity: otherwise the next delete of that path would remove what the agent put there."""
+    for src, dest in pairs:
+        target = listed_target(dest, ctx, here, mode)
+        if target is None:
+            continue
+        if source_is_own(src, ctx, here):
+            continue
+        raise Block("delete", shown)
+
+
+LINK_TYPES = ("symboliclink", "junction", "hardlink")
+
+
+def note_links(name: str, args: list["Word"], mode: str, run: "Run") -> None:
+    """ln, mklink and New-Item -ItemType SymbolicLink|Junction|HardLink: the link name is noted so the same line cannot delete through it."""
+    ctx = run.ctx
+    if not ctx.session:
+        return
+    texts = [w.text for w in args]
+    link = ""
+    if name == "ln":
+        operands = [x for x in texts if not x.startswith("-") or x == "-"]
+        if operands:
+            link = operands[-1] if len(operands) > 1 else os.path.basename(operands[0].rstrip("/\\"))
+    elif name == "mklink":
+        operands = [x for x in texts if not re.match(r"^/[A-Za-z]$", x)]
+        link = operands[0] if operands else ""
+    elif name in ("new-item", "ni"):
+        low = " ".join(x.lower() for x in texts)
+        if not any(t in low for t in LINK_TYPES):
+            return
+        link = "?"
+        for i, x in enumerate(texts):
+            if x.lower().lstrip("-").split(":")[0] in ("path", "name") and i + 1 < len(texts) and ":" not in x:
+                link = texts[i + 1]
+                break
+        else:
+            pos = [x for x in texts if not x.startswith("-")]
+            link = pos[0] if pos else "?"
+    else:
+        return
+    exp = expand(link, ctx)
+    if not link or unresolved(exp) or any(ch in exp for ch in "*?[{}"):
+        ctx.links.add("?")
+        return
+    ctx.links.add(own_key(clean_path(joined(exp, run.here))))
+
+
+def guard_replace(name: str, args: list["Word"], mode: str, run: "Run", shown: str) -> None:
+    """mv, ln -f, Move-Item, ren and their kin whose destination is a path of the session's list (1.3.3, second round)."""
+    ctx = run.ctx
+    if not ctx.session:
+        return
+    if name == "ln":
+        operands = [w for w in args if not w.text.startswith("-") or w.text == "-"]
+        flags = "".join(w.text for w in args if w.text.startswith("-") and not w.text.startswith("--")) + " ".join(
+            w.text for w in args if w.text.startswith("--"))
+        if len(operands) >= 2 and ("f" in flags or "--force" in flags or "--remove-destination" in flags):
+            dest = operands[-1]
+            if dest.dyn or listed_target(dest.text, ctx, run.here, mode) is not None:
+                raise Block("delete", shown)
+        return
+    if name not in MOVE_NAMES and name not in RENAME_NAMES:
+        return
+    pos: list = []
+    named: dict[str, str] = {}
+    target_dir = ""
+    i = 0
+    while i < len(args):
+        x = args[i].text
+        i += 1
+        low = x.lower()
+        if mode == "ps" and x.startswith("-") and len(x) > 1 and not x[1].isdigit():
+            key, _, val = low.lstrip("-").partition(":")
+            if key in ("path", "literalpath", "destination", "newname"):
+                if not val and i < len(args):
+                    val, i = args[i].text, i + 1
+                named["path" if key == "literalpath" else key] = val
+            elif key in ("erroraction", "ea", "filter", "include", "exclude") and not val:
+                i += 1
+            continue
+        if x in ("-t", "--target-directory") and i < len(args):
+            target_dir, i = args[i].text, i + 1
+        elif x.startswith("--target-directory="):
+            target_dir = x.split("=", 1)[1]
+        elif x.startswith("-") and x != "-" and mode != "cmd":
+            continue
+        elif mode == "cmd" and re.match(r"^/[A-Za-z]$", x):
+            continue
+        else:
+            pos.append(x)
+    srcs: list[str] = []
+    dest = ""
+    if name in RENAME_NAMES:
+        src = named.get("path") or (pos[0] if pos else "")
+        new = named.get("newname") or (pos[1] if len(pos) > 1 else "")
+        if src and new:
+            dest = os.path.join(os.path.dirname(src), new)
+            srcs = [src]
+    elif target_dir:
+        srcs, dest = ([*pos] + ([named["path"]] if "path" in named else [])), target_dir
+    else:
+        if "path" in named:
+            srcs = [named["path"]] + ([] if "destination" in named else pos[:-1])
+            dest = named.get("destination") or (pos[-1] if pos else "")
+        elif len(pos) >= 2:
+            srcs, dest = pos[:-1], pos[-1]
+            if "destination" in named:
+                srcs, dest = pos, named["destination"]
+    if not srcs or not dest:
+        return
+    exp = expand(dest, ctx)
+    full = clean_path(joined(exp, run.here)) if not unresolved(exp) else ""
+    pairs: list[tuple[str, str]] = []
+    for src in srcs:
+        into = os.path.join(dest, os.path.basename(src.rstrip("/\\"))) if (target_dir or (full and os.path.isdir(full))) else dest
+        pairs.append((src, into))
+    check_replace(pairs, ctx, run.here, mode, shown)
+
+
+def check_python_replace(code: str, run: "Run") -> None:
+    """os.replace, os.rename and shutil.move: with two literals the same rule as mv; with anything else, refused when the session has a list."""
+    ctx = run.ctx
+    if not ctx.session or not PY_MOVE.search(code):
+        return
+    lits = list(PY_MOVE_LIT.finditer(code))
+    rest = PY_MOVE_LIT.sub(" ", code)
+    if PY_MOVE.search(rest):
+        if own_set(ctx):
+            raise Block("delete", short(PY_MOVE.search(rest).group(0)))
+        return
+    pairs = []
+    for m in lits:
+        try:
+            pairs.append((ast.literal_eval(m.group(1)), ast.literal_eval(m.group(2))))
+        except (ValueError, SyntaxError):
+            raise Block("delete", short(m.group(0)))
+    if re.search(r"chdir", code) and own_set(ctx):
+        raise Block("delete", "chdir")
+    check_replace(pairs, ctx, run.here, "bash", short(code))
+
+
+def note_creates(name: str, args: list["Word"], run: "Run") -> None:
+    """The commands that create a file or a folder: what they create is noted, to be written down when the whole call is allowed."""
+    ctx = run.ctx
+    if not ctx.session:
+        return
+    texts = [w.text for w in args]
+    operands = [w for w in args if not w.text.startswith("-") or w.text == "-"]
+    skip = {"touch": ("-t", "-d", "-r", "--date", "--reference", "--time"), "mkdir": ("-m", "--mode", "-Z", "--context"),
+            "cp": ("-t", "--target-directory"), "mv": ("-t", "--target-directory")}.get(name, ())
+    if any(x in skip or any(x.startswith(s + "=") for s in skip if s.startswith("--")) for x in texts):
+        return
+    if name in ("tee", "touch", "mkdir"):
+        for w in operands:
+            note_create(ctx, w.text, run.here)
+    elif name in ("cp", "mv", "copy", "move") and len(operands) >= 2:
+        *sources, dest = operands
+        if any(w.glob or w.dyn for w in sources) or dest.dyn:
+            return
+        dest_exp = expand(dest.text, ctx)
+        dest_full = clean_path(joined(dest_exp, run.here)) if not unresolved(dest_exp) else ""
+        moves = name in ("mv", "move")
+        own = own_set(ctx) if moves else set()
+        for w in sources:
+            if moves:
+                src_exp = expand(w.text, ctx)
+                if unresolved(src_exp) or own_key(clean_path(joined(src_exp, run.here))) not in own:
+                    continue                                    # a moved file keeps what it was: only the agent's own stays the agent's
+            if dest_full and os.path.isdir(dest_full):
+                note_create(ctx, os.path.join(dest_full, os.path.basename(w.text.rstrip("/\\"))), run.here)
+            elif len(sources) == 1:
+                note_create(ctx, dest.text, run.here)
+
+
 def dispatch(name: str, words: list[Word], args: list[Word], cmd: Cmd, prev: Cmd | None, mode: str, run: Run,
              depth: int, stdin: str | None) -> None:
     ctx = run.ctx
@@ -1644,9 +2122,14 @@ def dispatch(name: str, words: list[Word], args: list[Word], cmd: Cmd, prev: Cmd
         return
 
     if name in DELETE_NAMES:
+        if delete_is_own(name, args, mode, run):
+            return                                              # only what this same chat session created (1.3.3)
         raise Block("delete", shown)
 
+    note_links(name, args, mode, run)
+    guard_replace(name, args, mode, run, shown)
     integrity_writes(name, words, args, run)
+    note_creates(name, args, run)
     if name == "tee" and stdin and stdin != "\0DECODER" and any(x.lower().endswith(PYTHON_FILES) for x in texts):
         check_sensitive_import(stdin)
     if name in ("sqlite3", "sqlite", "litecli", "sqlite-utils"):
@@ -1974,6 +2457,7 @@ def scan_code(kind: str, code: str, run: Run, depth: int) -> None:
     if kind == "py":
         if PY_DELETE.search(code):
             raise Block("delete", short(PY_DELETE.search(code).group(0)))
+        check_python_replace(code, run)
     elif kind == "node":
         if NODE_DELETE.search(code) or (NODE_FS.search(code) and NODE_BARE.search(code)):
             m = NODE_DELETE.search(code) or NODE_BARE.search(code)
@@ -2110,6 +2594,14 @@ def check_file_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
                      *[e.get("new_string") for e in edits if isinstance(e, dict)]):
             if isinstance(text, str):
                 check_sensitive_import(text)
+    if isinstance(path, str):
+        note_create(ctx, path, cwd)
+        if ctx.session and os.path.lexists(path):                # an edit may replace the file: the next call takes its identity again
+            key = own_key(clean_path(joined(expand(path, ctx), cwd)))
+            if key in own_map(ctx):
+                ctx.pending.add(key)
+
+
 def check_read_tool(tool: str, tool_input: dict, ctx: Ctx, cwd: str) -> None:
     """Read, Grep and Glob. Hokma's data folder may be read (plugins, settings, logs) except its secrets; `Glob` only
     lists names, so it may also list a folder that holds secrets."""
@@ -2264,6 +2756,8 @@ def evaluate(payload: dict, ctx: Ctx) -> Block | None:
     cwd = cwd if isinstance(cwd, str) and os.path.isabs(cwd) else ctx.cwd
     ctx.cwd = cwd
     ctx._vars["PWD"] = cwd
+    ctx.session, ctx.pending, ctx.gone, ctx._own, ctx.links = session_of(payload, ctx), set(), set(), None, set()
+    own_map(ctx)                                                # takes the identity of what the session created in earlier calls, before anything can replace it
     try:
         if tool.startswith("mcp__"):
             if ORDER_TOOL.search(tool) and not is_hokma_order_tool(tool, ctx.brokers):
@@ -2278,6 +2772,7 @@ def evaluate(payload: dict, ctx: Ctx) -> Block | None:
             check_url_tool(tool_input.get("url"), ctx)
     except Block as block:
         return block
+    commit_created(ctx)
     return None
 
 

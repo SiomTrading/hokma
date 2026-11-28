@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.3
+
+- Changed: An agent can delete the files and folders it created itself in the same chat session; deleting anything else (what already existed, what another session created, patterns and folders that reach more than that) stays refused.
+
 ## 1.3.2
 
 - Fixed: On Windows, `/dev/null`, `NUL`, `$null` and the other null devices are free destinations of a redirection, and a path written the Git Bash way (`/c/Users/...`, `/tmp/x`) is no longer refused as hokma_internal or as secrets: the comparator no longer fails closed on a path with no drive, and `/c/...` is read as the drive C:. The real stores of keys and the protected files stay blocked.
