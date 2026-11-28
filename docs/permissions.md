@@ -1,18 +1,16 @@
 # Permissions, always-on protections, trash and restore points
 
-Hokma has two permission modes, `ask` and `auto` ("Do everything without asking"). Four locks apply in both, with no
-switch in the app, plus the protection that keeps them on (task 3169; before 0.0.22 there were seven rules). What is
+Hokma has two permission modes, `ask` and `auto` ("Do everything without asking"). Three locks apply in both, with no
+switch in the app (task 3436, 1.3.1: `outside_workdir` and `hokma_internal` left the hook; before 0.0.22 there were seven rules). The hook files and their registration are still protected by `guard.py`, a separate hook for Edit, Write and NotebookEdit. What is
 not listed below is the owner's and the agent's to do: install dependencies (pip, npm, uv, bun), software (Node, npm,
 npx, pip, winget, brew), plugins, skills and MCP servers from the chat, change Hokma's configuration and permission
 settings, Git without limits inside the working folder.
 
 | Rule | What it refuses |
 |---|---|
-| `real_money` | MCP tools named like `place_order` / `submit_order`, and hosts that place real orders (`hardblock_brokers.json`), for the Bash and PowerShell commands and for the URL of `WebFetch`. For an agent there is no exception: `api.alpaca.markets` is refused whatever the method or the path. `read_exceptions` of that file is read by nobody but Hokma's own backend (`market/options.py`), which may make one request to the real Alpaca host: `GET /v2/options/contracts`, to read option contracts and open interest (SPEC-014) |
-| `secrets` | The keys stored for Connections (service `hokma-market`) and the remembered session (service `hokma-session`, read or write), Hokma's database (`database.json`, `hokma.db`), `identity.key`, `codex-home`, `acp-home`, `backups` and the Claude sign-in files in `claude-config` (`.credentials*`, `.claude.json`, `backups`), `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.git-credentials`, `keyring`, `cmdkey /list`, `security find-*-password`, `git credential`, `gh auth token`; the session token header and the owner and session calls of Hokma's API (`X-Hokma-Token`, `X-Hokma-Owner`, `/api/session/owner-nonce`, `resume`, `enter`, ...) and the control channel and lock of the engine; the profile folders of Chrome, Chromium, Edge, Brave, Firefox and Safari (also snap and flatpak) and their `Local Storage`, `Session Storage`, `IndexedDB`, `Local State`, and the cookie stores by name or by search; `/proc/<pid>/mem`, `environ`, `cmdline` of other processes (`/proc/self` stays free). Also a recursive read (`grep -r`, `rg`, `tar`, `cp -r`, `zip`, `find -exec`) over a folder that contains Hokma's data folder. The rest of Hokma's data folder (plugins, settings, logs, tools) is readable |
+| `real_money` | Only a call to a broker outside the order tools of Hokma. MCP tools named like `place_order` / `submit_order`, and hosts that place real orders (`hardblock_brokers.json`), for the Bash and PowerShell commands and for the URL of `WebFetch`. For an agent there is no exception: `api.alpaca.markets` is refused whatever the method or the path. `read_exceptions` of that file is read by nobody but Hokma's own backend (`market/options.py`), which may make one request to the real Alpaca host: `GET /v2/options/contracts`, to read option contracts and open interest (SPEC-014) |
+| `secrets` | Only the real stores of keys, nothing by doubt: a system folder (Windows, Program Files, /usr) or a path built at run time is free. The keys stored for Connections (service `hokma-market`) and the remembered session (service `hokma-session`, read or write), Hokma's connection file (`database.json`), `identity.key`, `codex-home`, `acp-home`, `backups` and the Claude sign-in files in `claude-config` (`.credentials*`, `.claude.json`, `backups`), `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.git-credentials`, `keyring`, `cmdkey /list`, `security find-*-password`, `git credential`, `gh auth token`; the session token header and the owner and session calls of Hokma's API (`X-Hokma-Token`, `X-Hokma-Owner`, `/api/session/owner-nonce`, `resume`, `enter`, ...) and the control channel and lock of the engine; the profile folders of Chrome, Chromium, Edge, Brave, Firefox and Safari (also snap and flatpak) and their `Local Storage`, `Session Storage`, `IndexedDB`, `Local State`, and the cookie stores by name or by search; `/proc/<pid>/mem`, `environ`, `cmdline` of other processes (`/proc/self` stays free). Also a recursive read (`grep -r`, `rg`, `tar`, `cp -r`, `zip`, `find -exec`) over a folder that contains Hokma's data folder. The rest of Hokma's data folder (plugins, settings, logs, tools) is readable |
 | `delete` | Deleting files or folders, including quoted, encoded and wrapped forms (`eval`, `base64 -d \| sh`, `bash -c`, `python -c`, `node -e`, `-EncodedCommand`, scripts of the working folder that call delete APIs). The installer idiom that feeds a shell with a download (`curl url \| sh`, `bash -c "$(curl url)"`, `iex (irm url)`) is allowed: it is how software installers run |
-| `outside_workdir` | Writing outside the working folder and Hokma's data folder (with its `claude-config`, plugins and tools); formatting or touching disks. What a software installer writes on its own (npm, pip, winget, brew) is not seen by the hook and is not refused |
-| `hokma_internal` | Changing the files of the hooks (the `hokma` package they run from, the log folder `<data>/guard`) and the settings files that register them (`settings.json`, `settings.engine.json`). `settings.json` may be edited with Edit or Write as long as the result still registers both hooks (`guard.registration_intact`) |
 
 There is no sandbox and no `permissions.deny` list: a sandbox would stop the installers and the first-start downloads of
 plugins from writing where they must.
@@ -94,7 +92,7 @@ How the confirmation works:
   `owner_confirmation_required`, registers again by itself and retries the call once.
 - A tab that was closed has lost both values and the token with them: that is the cost of keeping nothing at rest in
   the page. The remembered session (next section) gives them back without the page storing anything.
-- The hard-block rule `hokma_internal` also refuses commands that name these calls, so an agent that learns the route
+- The hard-block rule `secrets` also refuses commands that name these calls, so an agent that learns the route
   is stopped before it tries.
 
 ## The remembered session
@@ -200,7 +198,7 @@ enters with the powers of the owner until the next legitimate refresh (10 minute
 moment the lineage is revoked and the `guard_events` row is left. On Windows, Chrome and Edge bind the cookie to the
 application; on macOS the key is in the Keychain, which asks permission for another application. Firefox has no such
 protection. The `secrets` rule refuses commands that read the `hokma-session` service or the cookie files of the
-browsers, and `hokma_internal` refuses commands that name `/api/session/resume`, `/api/session/logout`, `/api/session/challenge`,
+browsers, and it refuses commands that name `/api/session/resume`, `/api/session/logout`, `/api/session/challenge`,
 `/api/session/enter` and `/api/session/handoff-code`; both are
 defense in depth. The structural protection is the cookie that the page cannot read, its rotation and its revocation.
 

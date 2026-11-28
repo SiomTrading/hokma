@@ -18,7 +18,7 @@ def nested(box):
     os.rename(box.data, share / "hokma")
     box.data = share / "hokma"
     box.protect[0] = str(box.data)
-    (box.data / "hokma.db").write_text("sqlite")
+    (box.data / "identity.key").write_text("key")
     (box.data / "claude-config" / ".credentials.json").write_text("{}")
     (box.data / "claude-config" / "projects").mkdir()
     (box.data / "claude-config" / "projects" / "t.jsonl").write_text("{}")
@@ -30,10 +30,10 @@ def nested(box):
 
 def test_cd_then_relative_path(nested):
     h = nested.home
-    assert nested.bash(f"cd {h}/.local/share && cat hokma/hokma.db") == "secrets"
-    assert nested.bash(f"cd {h}/.local/share/hokma && cat hokma.db") == "secrets"
+    assert nested.bash(f"cd {h}/.local/share && cat hokma/identity.key") == "secrets"
+    assert nested.bash(f"cd {h}/.local/share/hokma && cat identity.key") == "secrets"
     assert nested.bash(f"cd {h}/.local/share && cat hokma/claude-config/.credentials.json") in ("secrets", "secrets")
-    assert nested.bash("cat hokma.db", nested.data) == "secrets"
+    assert nested.bash("cat identity.key", nested.data) == "secrets"
     assert nested.bash("cat notes.md") is None
 
 
@@ -60,16 +60,16 @@ def test_the_grep_tool_over_an_ancestor_is_refused(nested):
 
 
 def test_a_link_in_the_working_folder_to_the_data_folder_is_followed(nested):
-    os.symlink(nested.data / "hokma.db", nested.work / "lnk")
+    os.symlink(nested.data / "identity.key", nested.work / "lnk")
     os.symlink(nested.data, nested.work / "dl")
     assert nested.bash("cat lnk") == "secrets"
     assert nested.bash("grep -r x dl") == "secrets"
-    assert nested.bash("cat dl/hokma.db") == "secrets"
+    assert nested.bash("cat dl/identity.key") == "secrets"
     assert nested.bash("cat f") is None
 
 
 @pytest.mark.parametrize("command", [
-    r"type %LOCALAPPDATA%\HOKMA\hokma.db", r"type C:\Users\Ana\AppData\Local\HOKMA\hokma.db",
+    r"type %LOCALAPPDATA%\HOKMA\identity.key", r"type C:\Users\Ana\AppData\Local\HOKMA\identity.key",
     r"type %LOCALAPPDATA%\Hokma\claude-config\.CREDENTIALS.json",
 ])
 def test_windows_paths_in_capitals(nested, command):
@@ -107,14 +107,13 @@ def test_root_options_and_includes_do_not_hide_the_data_folder(nested, template)
 
 
 @pytest.mark.parametrize("template", [
-    "grep -r TOKEN $UNKNOWN", "grep -r TOKEN {h}/{{.local,x}}", "grep -R TOKEN {h} --exclude-dir=hokma",
+    "grep -r TOKEN {h}/{{.local,x}}", "grep -R TOKEN {h} --exclude-dir=hokma",
     "tar chf x.tgz --exclude=hokma {h}",
 ])
-def test_unresolved_braces_and_link_following_fail_closed(nested, template):
+def test_braces_and_link_following_fail_closed(nested, template):
     assert nested.bash(template.format(h=nested.home)) == "secrets"
 
 
-def test_zip_exclusion_and_tilde_forms_fail_closed(nested):
+def test_zip_exclusion_and_the_current_folder_tilde_fail_closed(nested):
     assert nested.bash(f"zip -r a.zip {nested.home} -x '*/hokma/*'") == "secrets"
-    assert nested.bash("grep -r TOKEN ~+") == "secrets"
-    assert nested.bash("grep -r TOKEN ~root") == "secrets"
+    assert nested.bash("grep -r TOKEN ~+", nested.home) == "secrets"        # `~+` is the current folder: here the one that holds the data folder

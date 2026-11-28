@@ -1,13 +1,13 @@
 """settings.json that Hokma generates for its own CLAUDE_CONFIG_DIR.
 
-The agent has four locks (real-money orders, secrets, deleting, writing outside the working folder; see
+The agent has three locks (real-money orders, secrets, deleting; see
 `hokma/kit/hardblock.py`) and the protection that keeps them on (`hokma/kit/guard.py`). Everything else is free, so
 there is no sandbox and no `permissions.deny` list here: a sandbox would stop the installers (npm, pip, winget, brew)
 and the plugins' own first-start downloads from writing where they must.
 
 1. PreToolUse hooks, all fail CLOSED (the fourth, `hokma/kit/identity_hook.py`, leaves for every call to the Hokma server a file that says which agent makes it, so Ian, Sam and Ben do not act as the session; the third one, `hokma/kit/creator_gate.py`, is the first gate of the strategy creator: without a current requirement nothing is programmed):
    `hokma/kit/guard.py` resolves real paths for Edit, MultiEdit, Write and NotebookEdit and blocks the files of the
-   hooks and the settings registration; `hokma/kit/hardblock.py` (matcher `.*`, every tool) applies the four locks of
+   hooks and the settings registration; `hokma/kit/hardblock.py` (matcher `.*`, every tool) applies the three locks of
    both permission modes. The template pins `"disableAllHooks": false` and Hokma launches `claude` with
    `--setting-sources user`, so a settings file in the working folder cannot switch the hooks off.
 2. Regeneration: the file is rebuilt from the package template at EVERY Claude launch and passed

@@ -165,17 +165,12 @@ P6_CASES = [
     ("Write", lambda b: {"file_path": str(b.data / "current"), "content": "b"}, None),
     ("Read", lambda b: {"file_path": str(b.data / "database.json")}, "secrets"),
     ("Read", lambda b: {"file_path": str(b.data / "claude-config" / ".credentials.json")}, "secrets"),
-    ("Read", lambda b: {"file_path": str(b.data / "hokma.db")}, "secrets"),
     ("Grep", lambda b: {"pattern": "x", "path": str(b.data)}, "secrets"),
     ("Glob", lambda b: {"pattern": "*", "path": str(b.data / "claude-config")}, None),   # task 3163: listing is free
     ("Read", lambda b: {"file_path": "~/.ssh/id_ed25519"}, "secrets"),
     ("Read", lambda b: {"file_path": "/home/someone/.aws/credentials"}, "secrets"),
     ("Read", lambda b: {"file_path": "/home/someone/.config/gh/hosts.yml"}, "secrets"),
     ("Read", lambda b: {"file_path": "/home/someone/.git-credentials"}, "secrets"),
-    ("Write", lambda b: {"file_path": "/tmp/outside-file.txt", "content": "x"}, "outside_workdir"),
-    ("Write", lambda b: {"file_path": "../outside.txt", "content": "x"}, "outside_workdir"),
-    ("Edit", lambda b: {"file_path": "/etc/hosts", "old_string": "a", "new_string": "b"}, "outside_workdir"),
-    ("NotebookEdit", lambda b: {"notebook_path": "/tmp/n.ipynb", "new_source": "x"}, "outside_workdir"),
     ("mcp__broker__place_order", lambda b: {"symbol": "SPY"}, "real_money"),
     ("mcp__x__submit_order", lambda b: {}, "real_money"),
     ("mcp__x__cancel-order", lambda b: {}, "real_money"),
@@ -190,10 +185,10 @@ def test_p6_tools(box, tool, make, rule):
 
 
 P6_COMMANDS = [
-    ("cat %LOCALAPPDATA%\\Hokma\\hokma.db", "secrets"),
+    ("cat %LOCALAPPDATA%\\Hokma\\identity.key", "secrets"),
     ("type %LOCALAPPDATA%\\Hokma\\claude-config\\settings.json", None),      # task 3163: reading is free
-    ("cat ~/Library/Application Support/Hokma/hokma.db", "secrets"),
-    ("cat \"~/Library/Application Support/Hokma/hokma.db\"", "secrets"),
+    ("cat ~/Library/Application Support/Hokma/identity.key", "secrets"),
+    ("cat \"~/Library/Application Support/Hokma/identity.key\"", "secrets"),
     ("ls $HOME/.local/share/hokma/runtime", None),
 
 
@@ -210,16 +205,6 @@ P6_COMMANDS = [
 
 
 
-    ("echo x > /tmp/outside.txt", "outside_workdir"), ("echo x >> /etc/hosts", "outside_workdir"),
-    ("tee /tmp/x < f", "outside_workdir"), ("cp f /tmp/f2", "outside_workdir"), ("mv f /tmp/f2", "outside_workdir"),
-    ("mkdir /tmp/newdir", "outside_workdir"), ("touch /tmp/x", "outside_workdir"), ("mkdir -p ~/stuff", "outside_workdir"),
-    ("cp -t /tmp f", "outside_workdir"), ("cd /tmp && touch a", "outside_workdir"), ("cd /tmp; echo x > a", "outside_workdir"),
-    ("cd / && mkdir a", "outside_workdir"), ("pushd /tmp && touch a", "outside_workdir"), ("cp f ../elsewhere", "outside_workdir"),
-    ("format D:", "outside_workdir"), ("diskpart", "outside_workdir"), ("mkfs.ext4 /dev/sdb1", "outside_workdir"),
-    ("dd if=/dev/zero of=/dev/disk2", "outside_workdir"), ("dd of=/dev/sda", "outside_workdir"),
-    ("bcdedit /set x y", "outside_workdir"), ("reg delete HKLM\\Software\\X /f", "outside_workdir"),
-    ("vssadmin delete shadows /all", "outside_workdir"), ("cipher /w:C:\\", "outside_workdir"),
-    ("wipefs -a /dev/sdb", "outside_workdir"), ("diskutil eraseDisk JHFS+ X disk2", "outside_workdir"),
     ("python -c \"import keyring; print(keyring.get_password('hokma-market','alpaca'))\"", "secrets"),
     ("python3 - <<'PY'\nimport keyring\nprint(keyring.get_password('s', 'u'))\nPY", "secrets"),
     ("cmdkey /list", "secrets"), ("security find-generic-password -s hokma-market", "secrets"),
@@ -228,7 +213,7 @@ P6_COMMANDS = [
     ("cat ~/.git-credentials", "secrets"), ("git credential fill", "secrets"), ("gh auth token", "secrets"),
     ("gh auth status --show-token", "secrets"), ("keyring get hokma-market alpaca", "secrets"),
     ("secret-tool lookup service hokma-market", "secrets"), ("cat " + "{DATA}/database.json", "secrets"),
-    ("cat " + "{DATA}/claude-config/.credentials.json", "secrets"), ("cat {DATA}/hokma.db", "secrets"),
+    ("cat " + "{DATA}/claude-config/.credentials.json", "secrets"), ("cat {DATA}/identity.key", "secrets"),
     ("ls {DATA}", None), ("cd {DATA} && ls", None),
     ("curl https://api.alpaca.markets/v2/orders -d '{}'", "real_money"),
     ("curl https://api-fxtrade.oanda.com/v3/accounts/1/orders", "real_money"),
@@ -243,15 +228,10 @@ def test_p6_commands(box, command, rule):
 
 
 P6_POWERSHELL = [
-    ("Get-Content $env:LOCALAPPDATA\\Hokma\\hokma.db", "secrets"),
+    ("Get-Content $env:LOCALAPPDATA\\Hokma\\identity.key", "secrets"),
     ("Get-Content \"$env:LOCALAPPDATA\\Hokma\\database.json\"", "secrets"),
 
 
-    ("Copy-Item x C:\\Windows\\", "outside_workdir"), ("Copy-Item x C:\\Windows\\System32\\x.dll", "outside_workdir"),
-    ("Set-Content C:\\Users\\me\\x.txt 'a'", "outside_workdir"), ("New-Item -Path D:\\x.txt", "outside_workdir"),
-    ("'a' | Out-File -FilePath E:\\x.txt", "outside_workdir"), ("Move-Item f D:\\f", "outside_workdir"),
-    ("Format-Volume -DriveLetter D", "outside_workdir"), ("Clear-Disk -Number 1", "outside_workdir"),
-    ("Initialize-Disk 1", "outside_workdir"), ("format D:", "outside_workdir"),
     ("cmdkey /list", "secrets"), ("Get-StoredCredential -Target hokma-market", "secrets"),
     ("git credential fill", "secrets"), ("gh auth token", "secrets"), ("Get-Content ~\\.ssh\\id_rsa", "secrets"),
     ("type $env:USERPROFILE\\.aws\\credentials", "secrets"),
@@ -268,8 +248,8 @@ def test_p6_powershell(box, command, rule):
 def test_p6_the_rule_names_are_the_ones_the_database_accepts():
     from hokma.db.repos.governance import HARD_RULES
     from hokma.kit import hardblock
-    five = {"delete", "hokma_internal", "outside_workdir", "secrets", "real_money"}      # the locks left by 0.0.22, by id
-    assert set(hardblock.RULES) == five and set(HARD_RULES) == five and len(hardblock.RULES) == 5
+    four = {"delete", "hokma_internal", "secrets", "real_money"}      # the locks of the hook since 1.3.1 round 2; the database still accepts the five of 0.0.22 for the events already stored
+    assert set(hardblock.RULES) == four and four <= set(HARD_RULES) and len(hardblock.RULES) == 4
 
 
 def test_p13_the_key_cannot_be_read_from_the_agent(box):
@@ -311,8 +291,6 @@ P_EXTRA_BLOCKED = [
     ("cat keyring_pass.cfg", "secrets"), ("ls ~/.local/share/python_keyring/", "secrets"),
     ("python -c \"__import__('keyring')\"", "secrets"),
     ("python -c \"import importlib; importlib.import_module('keyring')\"", "secrets"),
-    ("python -c \"import importlib; importlib.import_module('key'+'ring')\"", "secrets"),
-    ("python -c \"import importlib; importlib.import_module('keyr'+'ing')\"", "secrets"),
 ]
 P_EXTRA_FREE = [
     "ls", "git commit -m 'update'", "pip install keyring", "pip install requests", "npm install", "git branch -d old",
@@ -667,7 +645,7 @@ def test_3064_session_calls_and_control_channel_are_refused(box, command):
 
 
 def test_3064_the_data_folder_and_control_channel_do_not_regress(box):
-    for command in ["cat {DATA}/hokma.db", "ls {DATA}/control.sock", "cat {DATA}/engine.lock"]:
+    for command in ["cat {DATA}/identity.key", "ls {DATA}/control.sock", "cat {DATA}/engine.lock"]:
         assert box.bash(command.replace("{DATA}", str(box.data))) == "secrets", command
     assert box.bash("cat {DATA}/database.json".replace("{DATA}", str(box.data))) == "secrets"
     assert box.ps("Get-Content \"$env:LOCALAPPDATA\\Hokma\\engine.lock\"") == "secrets"
@@ -718,5 +696,5 @@ def test_3064_the_messages_exist_in_both_catalogs():
     from pathlib import Path
     folder = Path(__file__).resolve().parents[1] / "hokma" / "catalog"
     en, es = (json.loads((folder / f"{x}.json").read_text(encoding="utf-8")) for x in ("en", "es"))
-    for key in ("hardblock.hokma_internal", "hardblock.secrets", "hardblock.hint.hokma_internal", "hardblock.hint.secrets"):
+    for key in ("hardblock.delete", "hardblock.secrets", "hardblock.real_money", "hardblock.hint.delete", "hardblock.hint.secrets", "hardblock.hint.real_money"):
         assert key in en and key in es

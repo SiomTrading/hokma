@@ -212,7 +212,7 @@ def test_p4_every_variant_of_the_plan_through_the_real_hook_process_keeps_every_
     assert not (control / "f").exists() and not (control / "d").exists()      # without the hook it is gone
 
 
-def test_the_project_folder_set_by_the_engine_is_a_second_working_folder(box, tmp_path):
+def test_where_the_agent_writes_is_not_judged_by_the_hook(box, tmp_path):
     other = tmp_path / "other-project"
     other.mkdir()
     args = [sys.executable, "-I", str(HARDBLOCK_FILE), "--data", str(box.data), "--workdir", str(box.work), "--protect", str(box.hooks)]
@@ -222,6 +222,6 @@ def test_the_project_folder_set_by_the_engine_is_a_second_working_folder(box, tm
         return subprocess.run(args, input=json.dumps(payload(command, cwd=other)), capture_output=True, text=True,
                               cwd=box.data, env=env).returncode
 
-    assert run("echo hi > out.txt", None) == 2                # cwd outside the configured folders
+    assert run("echo hi > out.txt", None) == 0                # cwd outside the configured folders: free since 1.3.1
     assert run("echo hi > out.txt", other) == 0               # the folder the engine launched `claude` in
-    assert run(f"echo hi > {tmp_path}/third.txt", other) == 2
+    assert run(f"echo hi > {tmp_path}/third.txt", other) == 0

@@ -99,9 +99,9 @@ def test_b03_a_new_conversation_names_a_project_that_is_not_the_active_one(world
     assert world.row(conv["conversation_id"]) == {"project_id": int(world.beta), "project_mode": "fixed"}
 
 
-def test_b05_the_working_folder_of_a_general_conversation_is_writable_and_nothing_outside(box):
+def test_b05_the_working_folder_of_a_general_conversation_is_writable_and_so_is_outside(box):
     assert box.hit("Write", file_path=str(box.work / "nota-general.md"), content="x") is None
-    assert box.hit("Write", file_path="/tmp/outside-the-folder.txt", content="x") == "outside_workdir"
+    assert box.hit("Write", file_path="/tmp/outside-the-folder.txt", content="x") is None
 
 
 def test_b06_an_old_conversation_follows_the_active_project(world):

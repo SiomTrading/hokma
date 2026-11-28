@@ -51,8 +51,8 @@ working folder, so anything inside it could be edited by the agent (its own sett
 Defense in depth:
 
 - the installer refuses a data folder inside the working folder (and the reverse);
-- two deterministic PreToolUse hooks that fail closed (`hokma.kit.hardblock` and `hokma.kit.guard`): four locks (real-money
-  orders, keys and credentials, deleting files, writing outside the working folder and Hokma's own folders) and the
+- two deterministic PreToolUse hooks that fail closed (`hokma.kit.hardblock` and `hokma.kit.guard`): three locks (real-money
+  orders, keys and credentials, deleting files) and the
   protection of the hook files and their registration. Everything else is allowed: dependencies, software, plugins,
   skills, MCP servers, Hokma's configuration, Git (see `docs/permissions.md`);
 - the Claude `settings.json` is regenerated from the package template on EVERY launch and passed with

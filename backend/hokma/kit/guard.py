@@ -1,6 +1,6 @@
 """PreToolUse hook: keep the hooks themselves out of the agent's reach.
 
-Hokma has four locks (`hardblock.py`: real-money orders, secrets, deleting, writing outside the working folder).
+Hokma has three locks (`hardblock.py`: real-money orders, secrets, deleting).
 This hook protects what keeps them on: the files of the hooks and their registration in the settings. It blocks
 Edit/MultiEdit/Write/NotebookEdit on the `--protect` paths. A protected settings file may still be edited while the
 result keeps the registration of both hooks (`registration_intact`), so permission and other settings can change.

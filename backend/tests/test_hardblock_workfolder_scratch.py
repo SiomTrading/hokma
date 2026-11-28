@@ -51,7 +51,7 @@ def test_the_check_by_name_lets_the_working_folder_through_even_when_the_identit
     monkeypatch.setattr(hardblock, "under_any", lambda path, roots: True)
     p = paths(box)[0]
     ctx = box.ctx()
-    hardblock.check_real_path(p, ctx, reading=True)
+    hardblock.check_real_path(p, ctx)
     hardblock.check_read_path(p, ctx, str(box.work), content=True)
 
 

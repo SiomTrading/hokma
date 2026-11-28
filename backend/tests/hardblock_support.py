@@ -46,8 +46,10 @@ class Box:
         (self.hooks / "hardblock.py").write_text("# hook\n")
         self.settings = self.data / "claude-config" / "settings.json"
         self.settings.write_text(json.dumps(registered(self.hooks)))
-        self.protect = [str(self.hooks), str(self.settings), str(self.data / "claude-config" / "settings.engine.json"),
-                        str(self.data / "guard"), str(self.data / "bin"), str(self.data / "tools")]
+        self.runtime = self.data / "runtime" / "py312" / "venv" / "bin"        # the runtime venv that runs the hooks
+        self.runtime.mkdir(parents=True)
+        self.protect = [str(self.hooks), str(self.data / "runtime"), str(self.data / "python"), str(self.settings),
+                        str(self.data / "claude-config" / "settings.engine.json"), str(self.data / "guard"), str(self.data / "bin"), str(self.data / "tools")]
 
     def ctx(self, cwd: Path | None = None) -> hardblock.Ctx:
         return hardblock.Ctx(str(self.data), [str(self.work)], self.protect, home=str(self.tmp / "home"),

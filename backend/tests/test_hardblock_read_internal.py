@@ -61,9 +61,8 @@ def test_the_read_tools_are_allowed_on_plugins_settings_and_logs(full):
 HIDDEN = [
     ("cat " + CFG + "/.credentials.json", "secrets"), ("cat " + CFG + "/.claude.json", "secrets"),
     ("cat {DATA}/database.json", "secrets"), ("grep token " + CFG + "/.credentials.json", "secrets"),
-    ("cat {DATA}/hokma.db", "secrets"), ("cat {DATA}/codex-home/auth.json", "secrets"),
+    ("cat {DATA}/codex-home/auth.json", "secrets"),
     ("ls {DATA}/codex-home", "secrets"), ("cat {DATA}/backups/hokma-1.db", "secrets"),
-    ("strings {DATA}/hokma.db", "secrets"),
     # a search that would walk into the credentials
     ("grep -r token {DATA}", "secrets"), ("grep -r token " + CFG, "secrets"),
     ("rg token " + CFG, "secrets"), ("cat " + CFG + "/.c*", "secrets"),
@@ -80,7 +79,7 @@ HIDDEN = [
 
     ("cd {DATA} && cd claude-config && cat .claude.json", "secrets"),
     ("ls " + CFG + "/*/../.c*", "secrets"), ("cat " + CFG + "/pl*/../.claude.json", "secrets"),
-    ("cat ~+/x " + CFG + "/plugins", "secrets"), ("cat ~root/x " + CFG + "/plugins", "secrets"),
+    ("cat ~+/x " + CFG + "/.claude.json", "secrets"),
     ("cat " + CFG + "/plugins/installed_plugins.json," + CFG + "/.claude.json", "secrets"),
     ("cat {DATA}/identity.key", "secrets"), ("ls {DATA}/acp-home", "secrets"),
     ("cat $HOME/.local/share/hokma/identity.key", "secrets"),
@@ -101,7 +100,7 @@ def test_the_read_tools_keep_secrets_hidden(full):
     b = full
     assert b.hit("Read", file_path=str(b.data / "claude-config" / ".credentials.json")) == "secrets"
     assert b.hit("Read", file_path=str(b.data / "database.json")) == "secrets"
-    assert b.hit("Read", file_path=str(b.data / "hokma.db")) == "secrets"
+    assert b.hit("Read", file_path=str(b.data / "identity.key")) == "secrets"
     assert b.hit("Grep", pattern="x", path=str(b.data)) == "secrets"
     assert b.hit("Grep", pattern="x", path=str(b.data / "claude-config")) == "secrets"
     assert b.hit("Read", file_path=str(b.data / "codex-home" / "auth.json")) == "secrets"
@@ -121,7 +120,7 @@ WRITES = [
     "tree -o {DATA}/logs/x {DATA}/logs", "xxd {DATA}/logs/engine.log {DATA}/logs/x",
     "x={DATA}/claude-config; cat $x/.credentials.json", "cat {DATA}/claude-config/plugins/$UNKNOWN/../../.credentials.json",
     "cat $(echo {DATA}/claude-config/.credentials.json)", "grep --file={DATA}/claude-config/.claude.json x {DATA}/logs",
-    "grep --file={DATA}/hokma.db x {DATA}/logs", "grep -fidentity.key x {DATA}", "grep -f{DATA}/identity.key x {DATA}/logs",
+    "grep --file={DATA}/identity.key x {DATA}/logs", "grep -fidentity.key x {DATA}", "grep -f{DATA}/identity.key x {DATA}/logs",
     "grep --file={DATA}/claude-config/../identity.key x {DATA}/logs", "rm {DATA}/claude-config/plugins/installed_plugins.json",
     "rm -rf {DATA}/claude-config/plugins", "echo hi | xargs -I{} cat {DATA}/claude-config/.credentials.json",
 ]

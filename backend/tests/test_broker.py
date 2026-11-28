@@ -33,9 +33,9 @@ def test_hard_rules_on_commands(box, bctx, command, rule):
     assert check("Bash", {"command": command}, cwd=str(box.work), ctx=bctx).rule == rule
 
 
-def test_write_outside_the_work_folder_and_inside_data(box, bctx, tmp_path):
+def test_write_outside_the_work_folder_is_free_and_inside_data_is_the_guard_of_the_hooks(box, bctx, tmp_path):
     out = check("write_file", {"file_path": str(tmp_path / "elsewhere.txt"), "content": "x"}, cwd=str(box.work), ctx=bctx)
-    assert not out.allowed
+    assert out.allowed
     inner = check("Write", {"file_path": str(box.data / "x.txt"), "content": "x"}, cwd=str(box.work), ctx=bctx)
     assert not inner.allowed and inner.rule == "hokma_internal"
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1
+
+- Fixed: The lock refused by doubt and now keeps three rules: `secrets` is only the real stores of keys, `real_money` is only calling a broker outside the order tools of Hokma, `delete` does not change; `outside_workdir` and `hokma_internal` left the hook.
+
 ## 1.3.0
 
 - New: A strategy is now text in pandas: PARAMS (default, min, max, step, type) and generate_signals(df, params). The signal is made at the close of the bar and the order goes at the open of the next one; the stop is a price fixed on the bar of the signal and it stays where the strategy put it (target and limit_price are optional). Hokma gives the table the columns session_id (the Globex session that starts at 18:00 New York) and is_rth (9:30 to 16:00 New York); each strategy chooses where it anchors what is daily. The timeframe is chosen in each run.

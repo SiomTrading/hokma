@@ -28,7 +28,7 @@ class Verdict:
     allowed: bool
     rule: str = ""
     target: str = ""
-    reason: str = ""             # "dynamic_code": the same `real_money` block with its own text
+    reason: str = ""
 
     @property
     def text(self) -> str:
@@ -52,19 +52,11 @@ class BrokerCtx:
                    task_id=self.task_id)
 
 
-def _text_rule(text: str, ctx: Ctx, *, code: bool = False) -> Block | None:
-    """Free text (a URL, MCP arguments): secrets stores, real-money broker hosts, and what reaches Hokma's order code:
-    an import of the package, its modules, its database, its folders on the import path, its runtime interpreter. `code`:
-    the text may carry python (MCP arguments), so a name or code built at run time is refused too."""
+def _text_rule(text: str, ctx: Ctx) -> Block | None:
+    """Free text (a URL, MCP arguments): the stores of keys and the hosts and URL shapes of real-money brokers."""
     low = norm_text(text)
-    try:
-        hardblock.check_hokma_code(text, ctx, python=code)     # SPEC-015 18.7: the same rule as the hook, one function, first
-    except Block as block:
-        return Block(block.rule, short(text), block.reason)
     if hardblock.SECRET_RE.search(low) or hardblock.data_secret_in_text(low, ctx):
         return Block("secrets", short(text))
-    if hardblock.names_hokma_module(norm_text(text)):
-        return Block("real_money", short(text))
     if (ctx.host_re and ctx.host_re.search(low)) or (ctx.url_re and ctx.url_re.search(low)):
         return Block("real_money", short(text))
     return None
@@ -144,7 +136,7 @@ def _evaluate(tool: str, tool_input: dict[str, Any], cwd: str, bctx: BrokerCtx) 
             hit = next((x for x in parts if hardblock.ORDER_TOOL.search(x)), None)
             if hit is not None:
                 block = Block("real_money", short(hit))
-        block = block or _text_rule("\n".join(parts), ctx, code=True)
+        block = block or _text_rule("\n".join(parts), ctx)
     else:
         block = hardblock.evaluate(payload, ctx)
     return Verdict(False, block.rule, block.target, block.reason) if block else ALLOW

@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 CI = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 SMOKE = (ROOT / ".github" / "workflows" / "model-smoke.yml").read_text(encoding="utf-8")
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 
 def job(name: str) -> str:
