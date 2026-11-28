@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2
+
+- Fixed: On Windows, `/dev/null`, `NUL`, `$null` and the other null devices are free destinations of a redirection, and a path written the Git Bash way (`/c/Users/...`, `/tmp/x`) is no longer refused as hokma_internal or as secrets: the comparator no longer fails closed on a path with no drive, and `/c/...` is read as the drive C:. The real stores of keys and the protected files stay blocked.
+
 ## 1.3.1
 
 - Fixed: The lock refused by doubt and now keeps three rules: `secrets` is only the real stores of keys, `real_money` is only calling a broker outside the order tools of Hokma, `delete` does not change; `outside_workdir` and `hokma_internal` left the hook.

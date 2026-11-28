@@ -351,3 +351,83 @@ def test_a_shell_or_an_interpreter_does_not_write_guard_bin_or_tools(box, comman
 def test_reading_guard_bin_and_tools_stays_free(box):
     for command in (f"ls {box.data}/guard", f"cat {box.data}/guard/blocks.jsonl", f"ls {box.data}/bin", f"cat {box.data}/tools/x"):
         assert box.bash(command) is None, command
+
+
+# ---- task 3437, round of Vera: the null devices are free by EXACT name; the same text with a trick is not a device, and Git Bash paths reach the guard
+import ntpath  # noqa: E402
+import os  # noqa: E402
+import types  # noqa: E402
+
+from hokma.kit import guard, hardblock  # noqa: E402
+
+
+def _nt(monkeypatch):
+    def realpath(p, **kw):
+        p = ntpath.normpath(p)
+        return p if ntpath.splitdrive(p)[0] else "C:" + p
+
+    path = types.SimpleNamespace(**{k: getattr(ntpath, k) for k in dir(ntpath) if not k.startswith("__")})
+    path.realpath, path.exists = realpath, (lambda p: False)
+    fake = types.SimpleNamespace(**{k: getattr(os, k) for k in dir(os) if not k.startswith("__")})
+    fake.name, fake.path, fake.sep = "nt", path, "\\"
+    fake.stat = lambda p, *a, **k: (_ for _ in ()).throw(OSError("no file"))
+    monkeypatch.setattr(hardblock, "os", fake)
+    monkeypatch.setattr(guard, "os", fake)
+    monkeypatch.setattr(guard, "CASE_INSENSITIVE", True)
+
+
+DATA_W = "C:\\Users\\a\\AppData\\Local\\hokma"
+WORK_W = "C:\\Users\\a\\Hokma"
+PROTECT_W = [DATA_W + "\\guard", DATA_W + "\\bin", DATA_W + "\\runtime"]
+
+
+def _w(command):
+    ctx = hardblock.Ctx(DATA_W, [WORK_W], PROTECT_W, home="C:\\Users\\a", cwd=WORK_W, brokers={"hosts": [], "url_patterns": []})
+    block = hardblock.evaluate({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": WORK_W}, ctx)
+    return block.rule if block else None
+
+
+@pytest.mark.parametrize("p", ["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/fd/2", "/proc/self/fd/1", "/dev/./null"])
+def test_the_exact_devices_are_devices(p):
+    assert hardblock.is_device(p), p
+
+
+@pytest.mark.parametrize("p", ["/dev/fd/../../x/hokma.db", "/dev/fd/1/../x", "/dev/null/x", "/dev/nullx", "/dev/fd/", "/dev/fd/a", "/proc/self/fd/../x", "/dev/stdout/guard/x"])
+def test_a_device_prefix_with_a_trick_is_no_device(p):
+    assert not hardblock.is_device(p), p
+
+
+def test_a_device_prefix_that_climbs_to_the_base_or_the_guard_is_blocked(box):
+    db = str(box.data / "hokma.db")
+    assert box.bash(f"echo x > /dev/fd/../../..{db}") == "hokma_internal"
+    assert box.bash(f"echo x > /dev/fd/../../..{box.data}/guard/x") == "hokma_internal"
+    assert box.bash(f"echo x > /proc/self/fd/../../..{db}") == "hokma_internal"
+
+
+def test_the_names_of_windows_are_devices_only_on_windows(monkeypatch):
+    assert not hardblock.is_device("NUL") and not hardblock.is_device("C:\\x\\NUL")
+    _nt(monkeypatch)
+    for p in ("NUL", "nul", "CON", "\\\\.\\NUL", "C:\\work\\NUL", DATA_W + "\\guard\\NUL"):
+        assert hardblock.is_device(p), p
+    for p in ("\\\\?\\C:\\Users\\a\\AppData\\Local\\hokma\\guard\\NUL", "//?/C:/x/NUL", "\\\\.\\C:\\x\\NUL"):
+        assert not hardblock.is_device(p), p
+
+
+def test_a_raw_path_to_a_file_called_nul_in_the_guard_is_blocked_on_windows(monkeypatch):
+    _nt(monkeypatch)
+    assert _w("echo x > '\\\\?\\C:\\Users\\a\\AppData\\Local\\hokma\\guard\\NUL'") in ("hokma_internal", "secrets")
+    assert _w("echo x >NUL") is None
+    assert _w("echo x > " + "'" + DATA_W + "\\guard\\NUL'") is None
+
+
+@pytest.mark.parametrize("p", ["/c/Users/a/AppData/Local/hokma/guard/x", "/cygdrive/c/Users/a/AppData/Local/hokma/bin/x", "/C/Users/a/AppData/Local/hokma/runtime/y",
+                               "C:\\Users\\a\\AppData\\Local\\hokma\\guard\\x"])
+def test_the_guard_sees_the_git_bash_spelling_of_a_protected_path(monkeypatch, p):
+    _nt(monkeypatch)
+    assert guard.under_any(p, PROTECT_W), p
+
+
+@pytest.mark.parametrize("p", ["/dev/null", "/tmp/x", "/c/Users/a/Hokma/x", "/d/Users/a/AppData/Local/hokma/guard/x", "/cygdrive/d/x"])
+def test_the_guard_leaves_free_what_is_not_protected(monkeypatch, p):
+    _nt(monkeypatch)
+    assert not guard.under_any(p, PROTECT_W), p

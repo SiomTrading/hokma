@@ -39,6 +39,7 @@ import fnmatch
 import json
 import ntpath
 import os
+import posixpath
 import re
 import sys
 import urllib.parse
@@ -231,7 +232,9 @@ def exception_match(host: str, method: str, path: str, consumer: str, brokers: d
 _VAR = re.compile(r"\$\{?env:([A-Za-z_]\w*)\}?|\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)|%([A-Za-z_]\w*)%", re.I)
 _WIN_ABS = re.compile(r"^[A-Za-z]:[\\/]")
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
-DEVICES = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin", "/dev/tty", "nul", "con", "$null", "nul:"}
+DEVICES = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin", "/dev/tty", "nul", "con", "$null", "nul:", "conout$", "conin$",
+           "//./nul", "//./con", "//?/nul", "//?/con", "//./conout$", "//./conin$"}
+DEVICE_NAMES = {"nul", "nul:", "con", "conout$", "conin$"}
 
 
 def norm_text(s: str) -> str:
@@ -265,7 +268,17 @@ def is_abs(p: str) -> bool:
     return p.startswith("/") or is_win_abs(p)
 
 
+_MSYS_DRIVE = re.compile(r"^(?:/cygdrive)?/([A-Za-z])(?=/|$)")
+
+
+def msys_to_win(p: str) -> str:
+    """Git Bash spells `C:\\Users\\a` as `/c/Users/a` (Cygwin: `/cygdrive/c/...`). On Windows that is the drive C:, not a folder named c on the current drive."""
+    m = _MSYS_DRIVE.match(p) if os.name == "nt" else None
+    return f"{m.group(1).upper()}:/" + p[m.end():].lstrip("/") if m else p
+
+
 def joined(path: str, cwd: str) -> str:
+    path, cwd = msys_to_win(path), msys_to_win(cwd)
     if os.name != "nt" and not is_abs(path):
         path = path.replace("\\", "/")                          # `.\script.ps1` written for PowerShell
     return path if is_abs(path) else (cwd.rstrip("/\\") + ("\\" if is_win_abs(cwd) else "/") + path)
@@ -412,10 +425,10 @@ def in_workfolder_only(candidate: str, ctx: Ctx) -> bool:
 def check_real_path(path: str, ctx: Ctx, *, here: str | None = None) -> None:
     """Resolve a path (relative to the call's folder) and refuse the secret places by identity: both spellings of it (as written and by
     real path), so a link that leads into the stores of keys is judged as the store. A path built at run time cannot be judged and is free."""
-    if unresolved(path) and not path.startswith("~"):
+    if is_device(path) or (unresolved(path) and not path.startswith("~")):
         return
     full = clean_path(joined(expand(path, ctx), here or ctx.cwd))
-    if is_win_abs(full) and os.name != "nt":
+    if is_device(full) or (is_win_abs(full) and os.name != "nt"):
         return                                                  # a Windows path on another system: text markers only
     for candidate in dict.fromkeys((full, os.path.realpath(full))):
         if SECRET_RE.search(norm_text(candidate)) or (
@@ -456,7 +469,7 @@ def check_read_path(path: str, ctx: Ctx, here: str, *, content: bool) -> None:
     if unresolved(text) and not text.startswith("~"):
         return
     full = clean_path(joined(text, here))
-    if is_win_abs(full) and os.name != "nt":
+    if is_device(full) or (is_win_abs(full) and os.name != "nt"):
         return
     cut = min((full.find(c) for c in GLOB_CHARS if c in full), default=-1)
     if cut >= 0:
@@ -477,9 +490,24 @@ def check_path_arg(text: str, ctx: Ctx) -> None:
     check_real_path(text, ctx)
 
 
+_FD_DEVICE = re.compile(r"^/(?:dev|proc/self)/fd/\d+$")
+_RAW_DRIVE = re.compile(r"^//[?.]/[a-z]:")
+POSIX_DEVICES = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin", "/dev/tty"}
+
+
 def is_device(p: str) -> bool:
-    low = p.lower()
-    return low in DEVICES or low.startswith(("/dev/fd/", "/proc/self/fd/"))
+    """A destination that is no file: the null device and the standard streams, by EXACT name after normalising the path (`/dev/null`, `/dev/fd/N`,
+    `$null`). `/dev/fd/../../data/x` normalises to somewhere else and is no device. The names of Windows (`NUL`, `CON`, `\\\\.\\NUL`) count only on Windows
+    (`os.name == 'nt'`), where they are the device in any folder (`C:\\work\\NUL`), and never behind a raw path with a drive (`\\\\?\\C:\\x\\NUL` is a file)."""
+    low = p.strip("\"'").lower().replace("\\", "/")
+    if low == "$null":
+        return True
+    raw_with_drive = bool(_RAW_DRIVE.match(low))
+    if not raw_with_drive:
+        norm = posixpath.normpath(low)
+        if norm in POSIX_DEVICES or _FD_DEVICE.match(norm):
+            return True
+    return os.name == "nt" and not raw_with_drive and low.rsplit("/", 1)[-1] in DEVICE_NAMES
 
 
 def check_write_dest(text: str, ctx: Ctx, cwd: str) -> str | None:
@@ -1234,12 +1262,12 @@ def integrity_target(text: str, ctx: Ctx, here: str) -> bool:
         return False
     exp = expand(text, ctx)
     low = norm_text(exp).rstrip("/")
-    if PROTECT_NAMES_RE.search(low) or DB_FILE_RE.search(low):
+    if (PROTECT_NAMES_RE.search(low) or DB_FILE_RE.search(low)) and not is_device(exp):
         return True
     if unresolved(exp) and not exp.startswith("~"):
         return False                                            # built at run time: cannot be judged here
     full = clean_path(joined(exp, here))
-    if is_win_abs(full) and os.name != "nt":
+    if is_device(full) or (is_win_abs(full) and os.name != "nt"):
         return False
     for cand in dict.fromkeys((full, os.path.realpath(full))):
         norm = norm_text(cand)

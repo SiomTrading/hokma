@@ -74,10 +74,26 @@ def _inside(path: str, roots: list[str]) -> bool:
         except ValueError:
             # commonpath cannot compare. Two different drive letters (C: vs D:) can never nest, so that root
             # does not contain the path. Anything else (mixed absolute and relative, odd types) stays protected.
-            if _different_drives(path, root):
+            if _different_drives(path, root) or _rooted_without_drive(path, root):
                 continue
             return True
     return False
+
+
+def _rooted_without_drive(a: str, b: str) -> bool:
+    """On Windows `normpath('/dev/null')` is `\\dev\\null`: rooted, with no drive, so it cannot be compared with a root that has one (`ValueError`).
+    That spelling is not a place the root can contain: `realpath` gives the same path with the drive it belongs to (`C:\\dev\\null`), and that one is compared
+    (`under_any` always compares both). Failing closed here blocked every path written the POSIX way (`/dev/null`, `/tmp/x`, `/c/Users/...`) in Git Bash."""
+    if not (isinstance(a, str) and isinstance(b, str)):
+        return False
+
+    def rootless(p: str) -> bool:
+        p = p.replace("/", "\\")
+        return p.startswith("\\") and not p.startswith("\\\\") and not ntpath.splitdrive(p)[0]
+
+    def drive(p: str) -> bool:
+        return bool(ntpath.splitdrive(p)[0])
+    return (rootless(a) and drive(b)) or (rootless(b) and drive(a))
 
 
 def _different_drives(a: str, b: str) -> bool:
@@ -131,6 +147,22 @@ def _linked_to_protected(path: str, protect: list[str]) -> bool:
     return False
 
 
+_MSYS_DRIVE = re.compile(r"^(?:/cygdrive)?/([A-Za-z])(?=/|$)")
+_RAW_DRIVE = re.compile(r"^[\\/]{2}[?.][\\/]([A-Za-z]:)")
+
+
+def _msys_to_win(path: str) -> str:
+    """Git Bash spells `C:\\Users\\a\\x` as `/c/Users/a/x` (Cygwin: `/cygdrive/c/...`). On Windows that is drive C:, not a folder called c: `realpath` alone would
+    turn it into `C:\\c\\Users\\a\\x` and miss the protected root. Only on Windows."""
+    if getattr(os, "name", "") != "nt" or not isinstance(path, str):
+        return path
+    raw = _RAW_DRIVE.match(path)                                # a raw path with a drive is the same file as the plain one: ntpath sees another drive, and the comparison would let it through
+    if raw:
+        return path[raw.end(1):]
+    m = _MSYS_DRIVE.match(path)
+    return f"{m.group(1).upper()}:/" + path[m.end():].lstrip("/") if m else path
+
+
 def under_any(path: str, roots: list[str]) -> bool:
     """True if path is inside any root. THE comparator of Hokma (the guard hook and the extension validators
     use this one): realpath on both sides, case-folded names where the file system is case-insensitive, and
@@ -139,7 +171,8 @@ def under_any(path: str, roots: list[str]) -> bool:
     folded = [_fold(r) for r in real_roots]
     ids = [i for i in (_identity(r) for r in real_roots) if i is not None]
     return any(_inside(_fold(c), folded) or _same_identity_as_root(c, ids)
-               for c in {os.path.realpath(path), os.path.normpath(path)})
+               for p in dict.fromkeys((path, _msys_to_win(path)))
+               for c in {os.path.realpath(p), os.path.normpath(p)})
 
 
 
